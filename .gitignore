@@ -1,0 +1,10 @@
+build/
+__pycache__/
+*.pyc
+# Never commit anything from a game install, saves, logs or dumps.
+*.exe
+*.dll
+*.so
+*.log
+*.jsonl
+local/
