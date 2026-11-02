@@ -42,6 +42,17 @@ Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
     if(p.range && (!valid(q.state)||q.byeReason>3)) return Error::Range;
     out=q; return Error::None;
 }
+// Height between two snapshots: blend gentle slopes and steps, snap real discontinuities (ledges, falls, lifts).
+// Live 2026-11-02: the former rule (any change over 5 mm snaps) snapped 25-30 % of samples on outdoor terrain, which a
+// puppet would show as constant jumps. Vertical EXTRApolation stays forbidden (see the end of sampling).
+constexpr double FloorStepMax=1.0;   // metres in one snapshot interval
+constexpr double FloorSpeedMax=8.0;  // vertical metres per second
+bool verticalJump(const Snapshot& a,const Snapshot& z) {
+    double dy=std::abs(a.state.position[1]-z.state.position[1]);
+    if(dy>FloorStepMax) return true;
+    if(z.time<=a.time) return dy>0.005;
+    return dy/(double(z.time-a.time)/1000.)>FloorSpeedMax;
+}
 Render sampling(const std::deque<Snapshot>& b,uint64_t now,uint32_t delay,uint32_t extrap,const Protection& p) {
     Render r; if(b.empty()) return r;
     const auto& latest=b.back();
@@ -51,7 +62,7 @@ Render sampling(const std::deque<Snapshot>& b,uint64_t now,uint32_t delay,uint32
     r.state=b.front().state;
     for(size_t i=1;i<b.size();++i) {
         const auto& a=b[i-1]; const auto& z=b[i];
-        bool jump=(z.state.flags&Teleport)||(a.state.flags&PrivateRoom)||(z.state.flags&PrivateRoom)||distance(a.state,z.state)>8 || (p.floor && std::abs(a.state.position[1]-z.state.position[1])>0.005);
+        bool jump=(z.state.flags&Teleport)||(a.state.flags&PrivateRoom)||(z.state.flags&PrivateRoom)||distance(a.state,z.state)>8 || (p.floor && verticalJump(a,z));
         if(target<z.time) {
             r.snapped=jump;
             if(!jump && target>=a.time && z.time>a.time) {

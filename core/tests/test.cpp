@@ -80,7 +80,12 @@ void sessionTests() {
     { Fixture f; f.receive(f.presence(1,100),100); check(f.receive(f.presence(2,150,1000),150)==Error::Speed,"speed"); }
     { Fixture f; auto p=f.presence(1,100,1000); p.state.flags=Teleport; check(f.receive(p,100)==Error::None,"first_teleport"); p.sequence=2; p.stamp=200; p.state.position[0]=2000; check(f.receive(p,200)==Error::Teleport,"teleport"); p.sequence=3; p.stamp=5100; check(f.receive(p,5100)==Error::None,"teleport_recovery"); }
     { Fixture f; f.receive(f.presence(1,100,0),100); f.receive(f.presence(2,200,1),200); check(std::abs(f.core.render(270).state.position[0]-.5)<.001,"delay"); }
-    { Fixture f; f.receive(f.presence(1,100,0),100); auto p=f.presence(2,200,1); p.state.position[1]=0.25; f.receive(p,200); check(f.core.render(270).state.position[1]==0,"floor"); check(f.core.render(320).state.position[1]==0.25,"floor_boundary"); }
+    // Ledge or fall: 2 m in one 100 ms interval holds the old height, then snaps at the new sample time.
+    { Fixture f; f.receive(f.presence(1,100,0),100); auto p=f.presence(2,200,1); p.state.position[1]=2.0; f.receive(p,200); check(f.core.render(270).state.position[1]==0,"floor"); check(f.core.render(320).state.position[1]==2.0,"floor_boundary"); }
+    // Lift or jump pad: 0.9 m in 100 ms (9 m/s vertical) also snaps.
+    { Fixture f; f.receive(f.presence(1,100,0),100); auto p=f.presence(2,200,1); p.state.position[1]=0.9; f.receive(p,200); auto r=f.core.render(270); check(r.state.position[1]==0&&r.snapped,"floor"); }
+    // Slope: 0.25 m in 100 ms (2.5 m/s) blends; halfway through the interval the height is halfway and nothing snapped.
+    { Fixture f; f.receive(f.presence(1,100,0),100); auto p=f.presence(2,200,1); p.state.position[1]=0.25; f.receive(p,200); auto r=f.core.render(270); check(std::abs(r.state.position[1]-0.125)<0.01&&!r.snapped,"floor_slope"); }
     { Fixture f; auto p=f.presence(1,100); p.state.velocity[0]=10; f.receive(p,100); check(std::abs(f.core.render(1120).state.position[0]-1.5)<.001,"extrapolate"); check(f.core.render(2000).state.position[0]==f.core.render(3000).state.position[0],"freeze"); check(!f.core.render(2000).visible&&f.core.render(800).stale,"stale"); }
     { Fixture f; for(unsigned i=1;i<=100;++i) f.receive(f.presence(i,i*50),i*50); check(f.core.buffered()<=64,"buffer"); }
     { Fixture f; f.provider.blocked=true; f.core.tick(100); unsigned count=0; for(auto& b:f.transport.packets) count+=b[6]==uint8_t(Kind::Presence); check(count==0,"gate"); f.core.frame(100); check(!f.provider.remote.visible,"apply_gate"); }

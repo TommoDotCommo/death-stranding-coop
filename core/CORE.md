@@ -152,9 +152,12 @@ enabled here.
 a configurable 0..1000 ms delay (default 120) and a 150 ms extrapolation cap.
 Between eligible snapshots interpolate position and velocity, shortest-path yaw,
 and cyclic phase for unchanged action. Discrete flags/actions come from the earlier
-sample. Any quantised Y change, private-room boundary, >8 m gap or teleport
-**holds the old pose then snaps at the new sample time**, setting `snapped`.
-There is no vertical blend/extrapolation. Horizontal dead reckoning is bounded at
+sample. Height blends on slopes and steps (at most 1 m per interval and 8 m/s
+vertical); a larger or faster height change (ledge, fall, lift), a private-room
+boundary, a >8 m gap or a teleport **holds the old pose then snaps at the new
+sample time**, setting `snapped`. (Until 2026-11-02 any height change over 5 mm
+snapped: 25-30 % of live samples on outdoor terrain.) There is no vertical
+extrapolation. Horizontal dead reckoning is bounded at
 150 ms then freezes at that endpoint; no velocity integration accumulates across
 frames. Inputs are validated snapshots from the core, not arbitrary game buffers.
 After 500 ms without a pose mark stale; after 1500 ms hide the puppet. Thus a
