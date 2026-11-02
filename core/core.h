@@ -1,0 +1,93 @@
+#pragma once
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <deque>
+#include "build_id.h"
+
+namespace ds {
+constexpr size_t WireSize = 128;
+constexpr uint32_t GameBuild = 13300582;
+using Bytes = std::array<uint8_t,WireSize>;
+enum class Kind : uint8_t { Hello=1, Ack, Presence, Ping, Pong, Bye };
+enum class Role : uint8_t { Host=1, Client=2 };
+enum class Error { None, Length, Magic, Version, Checksum, Reserved, Kind, Role, Build, Session, Nonce, Range, Duplicate, Time, Speed, Teleport, NotConnected };
+const char* reason(Error);
+enum Flag : uint16_t { Sprint=1, Crouch=2, Cargo=4, Vehicle=8, PrivateRoom=16, Teleport=32 };
+struct State {
+    std::array<double,3> position{}, velocity{}; // metres, metres/second; Y is up in this adapter convention
+    double yaw=0, phase=0; // radians [-pi,pi], normalised [0,1]
+    uint16_t flags=0;
+    uint8_t action=0, health=255, stamina=255;
+};
+// Local inputs: reject nonfinite transforms; clamp finite values to the wire envelope.
+bool sanitise(State&);
+struct Packet {
+    Kind kind=Kind::Hello; Role role=Role::Host;
+    uint32_t game=GameBuild; std::array<uint8_t,16> mod=ModBuild;
+    uint64_t session=1, nonce=1, echo=0, stamp=0, t0=0, t1=0, t2=0;
+    uint32_t sequence=0; State state{};
+    uint8_t byeReason=0;
+};
+// Mutants exist only in test builds (-DDS_TESTING).
+struct Protection {
+    bool version=true, range=true, teleport=true, duplicate=true, delay=true, session=true, build=true;
+    bool magic=true, checksum=true, reserved=true, nonce=true, time=true, speed=true;
+    bool length=true, kind=true, role=true, handshake=true, ping=true, clamp=true, finite=true;
+    bool pingRetry=true, pingHistory=true;
+    bool floor=true, extrapolate=true, stale=true, gate=true, timeout=true, buffer=true, rate=true;
+};
+Bytes encode(Packet); // throws invalid_argument for nonfinite state
+Error decode(const uint8_t*, size_t, Packet&);
+#ifdef DS_TESTING
+Error decodeForTest(const uint8_t*, size_t, Packet&, Protection);
+bool sanitiseForTest(State&, Protection);
+#endif
+struct Snapshot { State state; uint64_t time=0; uint32_t sequence=0; };
+struct Render { State state; bool visible=false, stale=true, snapped=false; };
+// Pure frame sampler. No interpolation across teleport, private room, any quantised Y change or >8 m gap.
+Render sample(const std::deque<Snapshot>&, uint64_t now, uint32_t delay=120, uint32_t extrapolate=150);
+struct StateProvider {
+    virtual ~StateProvider()=default;
+    virtual bool readLocal(State&)=0;
+    // Timestamp of the pose returned by readLocal, in the caller clock domain.
+    virtual uint64_t localSampleTime(uint64_t now) const { return now; }
+    virtual bool isInCutsceneOrLoading() const=0;
+    virtual void applyRemote(const Render&)=0;
+};
+// One configured peer only. Adapter must filter source endpoint before invoking receive.
+struct Transport { virtual ~Transport()=default; virtual void send(const Bytes&)=0; };
+struct Config { Role role=Role::Host; uint64_t session=1, nonce=1; uint32_t delayMs=120; };
+uint16_t portForSlot(unsigned slot); // throws if slot outside 0..15
+class Core {
+public:
+    Core(Config, StateProvider&, Transport&);
+#ifdef DS_TESTING
+    void setProtections(Protection p) { protections_=p; }
+#endif
+    void tick(uint64_t now); // caller-supplied monotonic ms; serialize all calls, including receive/frame
+    Error receive(const uint8_t*,size_t,uint64_t now);
+    void frame(uint64_t now);
+    void disconnect(uint64_t now);
+    bool connected() const { return connected_; }
+    Error lastError() const { return error_; }
+    size_t buffered() const { return snapshots_.size(); }
+    uint64_t accepted() const { return accepted_; }
+    double rttMs() const { return rtt_; }
+    double clockOffsetMs() const { return offset_; } // remote minus local
+    Render render(uint64_t now) const;
+private:
+    void send(Kind,uint64_t);
+    void reset(bool rotateNonce);
+    Config config_; StateProvider& provider_; Transport& transport_; Protection protections_;
+    std::deque<Snapshot> snapshots_;
+    std::deque<uint64_t> pendingPings_; // bounded outstanding probes; retries do not invalidate a late pong
+    bool connected_=false, sentHello_=false, haveSequence_=false, haveTeleport_=false, haveSent_=false, clockValid_=false;
+    uint64_t peer_=0, lastReceive_=0, nextHello_=0, nextSend_=0, nextPing_=0, lastTeleport_=0, lastStamp_=0, lastArrival_=0, accepted_=0;
+    uint64_t lastLocalSample_=0;
+    uint32_t outgoing_=0, incoming_=0;
+    double rtt_=-1, offset_=0;
+    State sentState_{};
+    Error error_=Error::None;
+};
+}

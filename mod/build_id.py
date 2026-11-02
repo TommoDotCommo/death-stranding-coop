@@ -1,0 +1,19 @@
+"""Verify the complete production adapter + core source identity (not compiler flags)."""
+from pathlib import Path
+import hashlib
+import sys
+root = Path(__file__).resolve().parent
+names = ['../core/core.h', '../core/core.cpp', '../core/build_id.h',
+         'discovery_options.h', 'discovery.h', 'discovery.cpp', 'discovery_signatures.h', 'timing.h', 'mod.h', 'mod.cpp', 'config.h', 'config.cpp', 'providers.h', 'providers.cpp', 'pose.h', 'pose.cpp', 'signature.h']
+h = hashlib.sha256()
+for name in names:
+    b = (root/name).read_bytes()
+    h.update(name.encode()+b'\0'+len(b).to_bytes(8, 'little')+b)
+identity = h.digest()[:16]
+s = '#pragma once\n#include <array>\nnamespace mod { constexpr std::array<unsigned char,16> WireBuild = {' + ','.join(str(x) for x in identity) + '}; }\n'
+p = root/'identity.h'
+if sys.argv[1:] == ['--write']:
+    p.write_text(s)
+elif not p.exists() or p.read_text() != s:
+    sys.exit('adapter identity stale: review changes, then python3 build_id.py --write')
+print('adapter_build=' + identity.hex())

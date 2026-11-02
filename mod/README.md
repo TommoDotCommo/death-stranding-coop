@@ -1,0 +1,495 @@
+# Design A in-process skeleton (private, game-free milestone)
+
+This implements the adapter, not a playable mod. `mod.dll` exposes the C ABI in
+`mod.h`: `mod_init(absolute_config_path)`, `mod_tick(seconds)`, `mod_shutdown`,
+`mod_status` and `mod_last_error`. Init/shutdown must run outside the Windows
+loader lock. Call tick on one game thread; it reads/applies providers there. A
+cache under a mutex separates that thread from the network worker, which calls Core receive/tick. The game thread samples Core frame at the
+actual apply time under the same mutex. Shutdown joins that worker before freeing sockets,
+providers or the DLL. Call shutdown explicitly before unloading; no detach work,
+file IO or threads are started by a custom DllMain. The Runtime has no static
+destructor; explicit shutdown performs cleanup, and process exit uses OS reclamation. Never unload while a caller
+is inside the API. `mod_last_error` returns a per-calling-thread copy valid until
+its next call. One instance per loaded DLL; double init is an error.
+
+The Winsock transport binds loopback only, nonblocking, with a 64-datagram budget
+per iteration and a bounded 256-entry receive-delay queue. It filters both source
+IP and port, rejects truncated/oversized packets and counts drops. This research
+skeleton only permits numeric `127.0.0.1`; remote machines/authentication are later
+work. Ports are `ds::portForSlot(slot) = 49000 + slot` (0..15), independently for
+local and peer; no port is configured separately. No game slot allocation or
+research gate is enabled. Slot numbers here select **standalone probe ports**.
+Socket, bind, thread and log errors are explicit failures, never dummy success.
+
+`SyntheticProvider` uses a deterministic 6-second horizontal figure eight, with
+analytic velocity, yaw and three animation IDs/phases. All processes on one host
+use the same boot-relative monotonic epoch (QueryPerformanceCounter on Windows). `GameProvider` reads the local player's pose through guarded copies (see "Pose exchange (read-only)"); it never writes game memory and creates no actor.
+There is no game-thread hook. `game_offsets.md` describes the signature seam.
+
+## Config, paths and identity
+
+Place an exclusively copied (never linked) mod in
+`<instance>/redirect-data/mod/mod.dll`, config at `mod.json` beside it:
+
+```json
+{"role":"host","peer":"127.0.0.1","slot":0,"peer_slot":1,
+ "nickname":"porter0","provider":"synthetic","session":8127391,
+ "logging":true,"required":true,"impairment":false,"fault":"none"}
+```
+
+The client swaps role and slots and uses the same freshly generated nonzero
+session. A cryptographic OS nonce is generated independently per process. The
+nickname is local configuration only; protocol 1 has no nickname field. The strict
+flat JSON schema rejects duplicate/unknown keys, invalid numbers/types, trailing
+content, escapes/non-ASCII strings and configs over 4096 bytes. Config strings
+have no path authority. Logging exclusively creates `mod-<pid>.log` beside config;
+that directory must already exist, be private, and under redirect-data when
+loaded by the proxy. Config/log ancestors reject symlinks/reparse points and files
+with multiple links. Logs are flushed, never truncated. Setting logging false
+retains stderr/debug diagnostics. Trusted quiescent instance trees are required;
+concurrent rename/replace races are not supported.
+
+The optional proxy bootstrap is reached on the first D3DCreateBlob/D3DReflect
+call, after the Windows loader returns. All 29 names/ordinals are preserved; the
+other 27 exports stay forwarded. It reads this config; missing config skips with
+an audit record. Malformed config fails closed (exit 125). With required=true,
+missing DLL, missing exports or an init failure (a hash mismatch, a signature scan failure, a socket error) exits 125
+with `REQUIRED mod failed to load/start; provider or hook unavailable`. Optional
+failure is audited. Synthetic mode is for probes only. Game mode cannot claim a
+hook exists. The first compiler call must not be made under a loader lock.
+
+The bootstrap has one narrowly scoped, trusted-library loader exception:
+`redirect-data/mod/mod.dll`, whose CRT startup must perform no mod IO or thread
+creation. Socket/entropy/timer DLLs are preloaded through proxy static imports; C++ and
+winpthread are linked statically into the mod. The mod's IAT is patched before
+mod_init. The general dynamic-module refusal and all file write/reparse/link
+rules remain unchanged. This is not a sandbox for arbitrary third-party DLLs;
+DllMain code precedes IAT patching. Only deploy this reviewed artifact. The
+original private compiler DLL is also loaded from beside the proxy, and patched
+before invoking its export. Driver/native API coverage limits from the redirect
+README still apply. No real-game compatibility or loader-lock proof is claimed.
+
+`identity.h` pins a SHA-256/128 manifest over core and adapter production sources.
+`build_id.py` checks it, never silently updates it. On deliberate source changes,
+review then run `python3 games/death-stranding/mod/build_id.py --write`. The adapter
+puts this complete hash on wire and verifies it before translating to the core's
+unchanged hash. Checksum failures are preserved. Compiler flags are not in this
+source identity: mutant builds deliberately retain identity so only their intended
+protection differs. Never deploy mutants as production.
+
+## Pose exchange (read-only)
+
+Real poses over the existing presence transport. **Read-only: no game writes, no actor, no puppet, no hook, nothing beyond
+127.0.0.1.** `applyRemote` only logs the interpolated remote pose. This is research evidence code: the object lifetime across
+reload/death, vehicles, the slow selection path and the visual cutscene gate are still UNKNOWN (see `game_offsets.md`).
+
+Pieces (all game-free tested with fake memory in `pose_test.cpp`, mutants in `test_pose_mutants.py`):
+
+- `PoseReader` (`pose.h/.cpp`) is built on the discovery `Sampler`: the same hash-gated signature scan, guarded double-read
+  copies and chain recheck, and the same `Sampler::selectPlayer` H1 fast path as the discovery log. It returns
+  `{available, reason, position[3] f64, rotation[9] f32, coherent}` for: manager global -> selection record (index, mode 1,
+  kind 2, null pointer) -> `player = *(manager + 0x48 + 8*index)` -> local-human bytes `player+0x78/0x79 == 01 00` ->
+  `entity = *(player + 0x70)` -> position (3 x float64 at `entity+0xc8`) and rotation (3 x 3 float32 row-major at
+  `entity+0xe0`). `available` is false, with a reason, for: `manager null` (main menu), `manager unreadable`,
+  `slow selection path`, `bad index`, `selection unreadable`, `player null`, `player slot unreadable`, `player unreadable`,
+  `not local human`, `entity null`, `pose unreadable`, `non-finite pose`, `incoherent chain` (a pointer changed during the read).
+  These are guarded copies off the game thread, not typed game calls, and not an atomic snapshot.
+- `GameProvider::readLocal` converts to `ds::State`: `position = (game x, game z, game y)` (the adapter has Y up, the game z up);
+  yaw from the forward row (`rotation[3..5]` = m10, m11, m12, called "row 2" in `game_offsets.md`), `phase = 0`, `flags = 0`.
+  **Yaw convention** (the same as `SyntheticProvider`, which uses `atan2(vx, vz)`): `yaw = atan2(game fx, game fy)`; yaw 0 faces
+  game +y, +90 degrees faces game +x. For a map heading `h = atan2(dy, dx)` this is `yaw = 90 - h`. The core interpolates yaw along
+  the shortest arc, so the convention only needs to be consistent, and it makes yaw agree with the velocity direction. Live numbers:
+  forward (-0.131, -0.991, 0) gives -172.5 degrees; the measured walk heading of -97.3 degrees gives -172.7 degrees (tested within 0.5).
+  Facing straight up or down keeps the previous yaw.
+- Velocity is the finite difference of the last two coherent samples, clamped to 20 m/s. It is zero after a gap over 500 ms or a jump
+  over 5 m; a jump also sets the core's `Teleport` flag (kept until a presence packet carrying it has been sent, because the core
+  drops a fast move without it as impossible motion).
+- `isInCutsceneOrLoading()` is true exactly while `readLocal` is unavailable (menu, loading, death). **The visual cutscene gate is
+  UNKNOWN**: a cutscene with a valid pose is not gated.
+- `self_tick` (bool, default false, **required true with provider "game"**): a thread calls the same tick path as `mod_tick` at a fixed
+  20 Hz (absolute deadlines; a stall costs ticks, they are never replayed in a burst) and is joined at shutdown. This is a stand-in until
+  a game-thread hook exists. With `self_tick`, an external `mod_tick` is a validated no-op. `mod_status` reports `self_tick.ticks`
+  and `pose.available`/`pose.reason`.
+- Startup with provider "game": an unavailable pose at init (the main menu) is normal; presence stays gated until a pose is available.
+  Startup is still refused for real failures: config errors, a missing or wrong executable pin (`discovery_sha256` is mandatory),
+  hash mismatch, signature scan failure, an existing presence log, socket errors, and any non-Windows host library.
+- The presence log `redirect-data/mod/presence-<pid>.jsonl` is created exclusively next to the mod log, flushed per line, at most
+  4 lines a second, bounded by `presence_log_max_mib` (default 8, hard max 32; the discovery `Budget`). Hitting the cap or a write
+  failure stops the log with a message and not the mod. Each line: `t_us` (the monotonic clock all processes on a host share),
+  `local` (`available`; if available adapter-axis `x`, `y` up, `z`, `yaw_deg`, `speed`; otherwise `reason`) and `remote`
+  (`visible`, `stale`, `snapped`; if visible `x`, `y`, `z`, `yaw_deg` of the interpolated render, 120 ms behind real time).
+
+Config for slot 0 (host) and slot 1 (client); ports are `49000 + slot`; use one freshly generated nonzero `session` for both;
+copy `discovery_sha256` from the pinned executable entry in `profile.json`:
+
+```json
+{"role":"host","peer":"127.0.0.1","slot":0,"peer_slot":1,"nickname":"porter0","provider":"game",
+ "session":8127391,"required":true,"self_tick":true,"presence_log_max_mib":8,
+ "discovery_sha256":"9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b"}
+```
+
+```json
+{"role":"client","peer":"127.0.0.1","slot":1,"peer_slot":0,"nickname":"porter1","provider":"game",
+ "session":8127391,"required":true,"self_tick":true,"presence_log_max_mib":8,
+ "discovery_sha256":"9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b"}
+```
+
+Both go to `instance/redirect-data/mod/mod.json` of their slot. `impairment` and `fault` are synthetic-only.
+
+**Live exit test (the verifier).** Start both instances with these configs and load a game in each. The owner walks Sam in slot 0
+(a straight line of at least 20 m, then a turn on the spot) while slot 1 stands still, then the reverse. Slot 1's
+`presence-<pid>.jsonl` must show slot 0's track: for every line with `remote.visible` true, `stale` false and `snapped` false,
+the remote `x`, `y`, `z` must be within 0.5 m and `yaw_deg` within 10 degrees of slot 0's `local` track at `t_us - 120000`
+(interpolate between slot 0's lines; both files use the same clock). Then repeat in the other direction. At the main menu both
+logs show `local.available:false, reason:"manager null"` and no presence is sent. Known limitation to look for: the core treats any
+quantised height change as a jump (`snapped:true`, no interpolation), so walking on a slope will hold the older sample for up to one
+send interval (about 0.2 m at a walk), which still passes the 0.5 m bound but is visible in the log.
+
+Game-free checks: `make -C games/death-stranding/mod pose-test` (PoseReader reasons, conversion, velocity, gate, presence log, schedule
+and 33 mutants), `test_probe.py` (the `game_provider_fake` case: two fake-memory game-provider mods, menu startup, gating, both
+directions of the track, return to the menu). The fake-memory case lives in the test-only `fake.so`; it is not available in
+production libraries and it is **not** a Windows run. `run_mod_probe.py` has no `game-provider-fake` mode: the Windows probe has no
+game memory to read, and the fake image is compiled only into the host test library.
+
+## Reproduce in the sandbox
+
+From the repository root, with the existing compiler installations:
+
+```sh
+make -C games/death-stranding/mod test all
+python3 -B -m unittest discover -s games/death-stranding/tests
+make -C games/death-stranding/core test
+make -C games/death-stranding/redirect test all
+```
+
+The MinGW **posix** compiler variant is required for std::thread/std::mutex:
+`x86_64-w64-mingw32-g++-posix`. The system default win32-thread compiler does not
+provide these C++17 types. No compiler or package is installed by these commands.
+Ignored build/ contains production Windows DLL/probe, two Windows mutants,
+host libraries/probe, and test-only fake-network libraries. No Windows binary is
+executed by `make test`, Python discover or core test. Core test also invokes the
+mod tests. Test-only exports exist only with MOD_FAKE_NETWORK; production has no
+packet-injection/protection-disabling API.
+
+The sandbox denies socket creation, so T0 runs two separately loaded adapters
+with their actual network threads, C API, providers and core over an in-memory
+datagram boundary. It exercises good pairing plus wrong build/protocol/session,
+then requires the build-check mutant to fail the same refusal assertion and the
+interpolation mutant to fail the same position bound. This is adapter/thread
+coverage, not Winsock or endpoint-filter execution evidence. Unit tests cover
+strict config, explicit unknown provider behavior and synthetic signature scans.
+`make -C games/death-stranding/mod test-udp` is an additional host real-UDP test
+for an environment that permits sockets; it is expected to fail in this sandbox.
+
+## Ordered Windows verifier commands (no game required)
+
+Cross-build in WSL, then use **native Windows Python in PowerShell** for the
+probe runner so Popen retains each actual Windows process handle. WSL interop
+process launching is refused by the runner. No command launches Steam or ds.exe.
+Reserve loopback ports 49000/49001 exclusively for these short probes; stop on a
+bind failure, never kill an unrelated process. Instance directories must be
+trusted, private, disposable and outside protected roots. Fresh random probe,
+DLL and config copies are exclusively staged below redirect-data/mod, preserving
+logs; deployed mod files and linked game files are never overwritten.
+
+The commands below assume the verifier sets `$repo` to this checkout's Windows
+path (a drive path or accessible WSL UNC path), and has Python 3 available as
+`py -3`. Build commands run in WSL from repository root; remaining commands run
+in PowerShell. Use fresh evidence names; the native profile helper translates
+only explicit /mnt/<drive> paths to native syntax, including the actual save
+roots. Review its output before continuing.
+
+1. Cross-build in WSL:
+
+   ```sh
+   make -C games/death-stranding/mod all
+   make -C games/death-stranding/redirect all
+   ```
+
+2. In PowerShell, set the checkout path and capture the real save/config baseline
+   (the profile is new evidence outside originals; snapshot reads originals):
+
+> Note: `windows_profile.py`, `snapshot_saves.py` and the Windows runner `run_mod_probe.py` are workstation helpers (test-copy profile and a hash
+> snapshot of the real save folders) kept outside this repository. Use your own equivalent: the point is that the
+> real saves are hashed before and after and must not change.
+
+   ```powershell
+   $repo = (Get-Location).Path # run from the checkout, or set its Windows/UNC path
+   py -3 -B "$repo/mod/windows_profile.py" --output <test dir>/mod-profile.json
+   Get-Content <test dir>/mod-profile.json
+   py -3 -B "$repo/snapshot_saves.py" --profile <test dir>/mod-profile.json --output <test dir>/mod-before.json
+   ```
+
+   Then run the production network path in two separate Windows processes:
+
+   ```sh
+   py -3 -B "$repo/mod/run_mod_probe.py" --profile <test dir>/mod-profile.json --instance0 <test dir>/s0 --instance1 <test dir>/s1 --dll "$repo/mod/build/mod.dll" --exe "$repo/mod/build/mod_probe.exe" --baseline <test dir>/mod-before.json --seconds 5 --repeat 5
+   ```
+
+   Expected exit 0; JSON `ok:true`, `saves_unchanged:true`, five good runs (two process reports per run), plus all three refusal cases.
+   `good_summary` prints min/median/max across both peers and all repeats for
+   p50/p95/p99/max error and RTT. Every repeat must pass, so the maximum p95 and
+   p99 across N=5 must meet the bounds; a median pass cannot hide a bad run. Good case: handshake true, >20 accepted presences,
+   >50 samples, 0<=RTT<250 ms, first valid pong before 1000 ms, p95<0.30 m, p99<0.45 m. Every report includes
+   sent/received/dropped, accepted, wrong_accepted and refusal counters. Refusal
+   cases have handshake false, accepted=0, wrong_accepted=0 on both sides and at
+   least one explicit matching refusal. Only one partner transmits the bad field,
+   so the refusing host need not receive a refusal acknowledgment from client.
+
+3. Repeat with each deliberately broken DLL. **Each command must fail nonzero**:
+
+   ```sh
+   py -3 -B "$repo/mod/run_mod_probe.py" --profile <test dir>/mod-profile.json --instance0 <test dir>/s0 --instance1 <test dir>/s1 --dll "$repo/mod/build/mod-no-build.dll" --exe "$repo/mod/build/mod_probe.exe" --baseline <test dir>/mod-before.json --seconds 5 --repeat 5
+   py -3 -B "$repo/mod/run_mod_probe.py" --profile <test dir>/mod-profile.json --instance0 <test dir>/s0 --instance1 <test dir>/s1 --dll "$repo/mod/build/mod-no-interpolation.dll" --exe "$repo/mod/build/mod_probe.exe" --baseline <test dir>/mod-before.json --seconds 5 --repeat 5
+   ```
+
+   Build mutant must fail `build: refusal assertion failed`; interpolation mutant
+   must fail `good: handshake/error bounds failed`. A crash, bind or loader error
+   is not a killed mutant. Both must reach their named assertion. Synthetic-only
+   impairment adds a deterministic 15..65 ms presence delivery delay in the DLL.
+   Compare the rendered puppet to analytic ground truth at now-120 ms, excluding
+   first-second warmup, with unchanged Y. No interpolation mutant samples at now,
+   causing approximately 1–1.8 m of error on this curve. The bounds below are unchanged. Inspect timing histograms as well as errors.
+
+4. Recompare the original baseline after all processes exit and Steam settles:
+
+   ```sh
+   py -3 -B "$repo/snapshot_saves.py" --profile <test dir>/mod-profile.json --compare <test dir>/mod-before.json --settle-seconds 30
+   ```
+
+   Expected `ok:true` and no immediate/settled changes. 30 seconds is an example,
+   not a proven Cloud interval. The runner compares before and in finally after
+   success, assertion failure, timeout or startup failure. It kills only Popen
+   children it created, using their retained handles on Windows, never names.
+   The runner refuses WSL interop for Windows children rather than guessing their
+   process identities.
+
+## Timing design, diagnosis and regression evidence
+
+The original adapter used `GetTickCount64`, relative `sleep_for(2ms)` in the
+network worker, and relative `sleep_for(10ms)` in the probe. At the default
+Windows timer resolution these can wake on roughly 15.6 ms boundaries; adding
+work before each sleep also accumulates drift. More significantly, the worker
+stamped the last game-thread cached pose with **send time**, hiding its age,
+and the game thread applied a render computed at the previous network wake.
+At this trajectory's maximum speed, two extra 15.6 ms ages can contribute
+0.462 m. The fake transport's host scheduler did not reproduce those ages.
+These are code-level defects; the supplied Windows runs alone cannot tell how
+much each contributed to position error.
+
+Run B's 208 samples prove that RTT **was** measured: the old sample collector
+required `rttMs()>=0`. There is a concrete end-of-run race in `mod_probe` and the
+runner: probes start sequentially; the earlier probe prints status, shuts down,
+and sends BYE while the later one can still be ticking. Core receive(BYE) resets
+RTT to -1, but the adapter's ever-paired flag and sample history survive. This
+explains how a good connection can end with exactly that combination; a timeout
+can also reset RTT. Probe metrics now retain the last valid measured `rtt_ms`,
+while separate `current_rtt_ms` and `connected` report live core state. `handshake`
+continues to mean ever paired. Core BYE/reset semantics are preserved. Error
+samples after first-second warmup no longer depend on a successful ping, so an
+RTT failure cannot silently remove bad samples. First-pong time proves early
+measurement independently of final connection state.
+
+Both DLL and probe now own scoped `timeBeginPeriod(1)` requests, paired with
+`timeEndPeriod(1)` on shutdown and exception paths. No persistent settings change
+is made. QPC is converted by quotient/remainder to microseconds without a
+per-process epoch or multiplication overflow; wire time stays integer milliseconds.
+Absolute 2 ms network and 10 ms probe deadlines skip missed periods rather than
+catching up in bursts or accumulating drift. Probe dt is measured, not assumed.
+Cached local poses carry their **sample** timestamp onto the wire; repeated/stale
+samples are not retransmitted with fabricated new timestamps. Rendering happens
+at actual game-thread apply time. Real game providers remain unavailable stubs.
+
+The first ping is immediate after ACK, then retries every 100 ms until the first
+valid pong; established sessions use 1000 ms. A bounded set of 16 outstanding
+ping timestamps permits delayed pongs after a retry, consumes each timestamp once,
+and preserves nonce/session/checksum/time validation and the 2000 ms RTT envelope.
+Overwriting the single pending timestamp on every fast retry was caught by the
+500-session lossy-link fuzzer during development and fixed. Early RTT is a tested
+loopback requirement, not a guarantee under indefinite packet loss or process
+suspension. The runner asserts the first valid pong is inside the first second.
+
+Always-on `timing` JSON uses allocation-free fixed histograms (microseconds).
+`bucket_upper_us` contains inclusive bounds; the final bucket is overflow.
+Each histogram has count, mean, maximum and bucket counts:
+
+- `network_tick`, `provider_tick`: actual worker and game/probe tick intervals.
+- `presence_send`: presence-only send attempt intervals, excluding control traffic.
+- `sample_age`: age of the cached local pose at send time.
+- `receive_to_apply`: dequeue from UDP to first subsequent game-thread apply,
+  including synthetic impairment. Coalesced accepted packets count as one batch,
+  measured from the earliest unapplied packet. This does not measure time waiting
+  inside the OS socket queue or assert a snapshot has reached its playout time.
+- `delivery_lateness`: pending delivery beyond its scheduled due time, separating
+  scheduler overshoot from the deliberate 15..65 ms impairment.
+
+Clock fields report source, frequency, nominal quantum, minimum observed positive
+microsecond step in 4096 startup reads (0 means none observed), and the 1000 us
+wire quantum. Ping attempt/valid-pong counts and first/last times are milliseconds
+relative to init; -1 means no event. Refusal runs normally have no pings/pongs.
+Histogram totals and early RTT are exercised in the actual adapter tests.
+
+### Why 120 ms delay and the unchanged bounds
+
+The synthetic path is x=10 sin(wt), z=5 sin(2wt), w=2pi/6 s^-1. Maximum speed
+is sqrt(2)*10*w = 14.81 m/s and maximum acceleration is at most
+sqrt(10^2+20^2)*w^2 = 24.52 m/s². The 120 ms playout delay covers a normal
+50 ms send interval plus up to 65 ms injected delivery jitter with 5 ms margin.
+Pose-cache age (normally <=10 ms) can occasionally exhaust that margin; using
+its true timestamp lets the existing bounded dead reckoning cover a small gap
+rather than shifting the whole trajectory. The delay remains 120 ms: increasing
+it would change the measurement target and hide scheduling defects. The core's
+150 ms extrapolation cap, horizontal-only motion, freeze/staleness, teleport,
+floor, speed, reorder, build and session protections remain active.
+
+At a 50 ms sample spacing the linear interpolation curvature error is bounded
+by a*h²/8, about 0.008 m. Residual 1 ms wire quantisation contributes at most
+about 0.015 m of time-position error. The 0.30 m p95 and 0.45 m p99 bounds
+correspond to about 20.3 ms and 30.4 ms of residual timing error at maximum speed,
+well above normal interpolation/quantisation error, but below the old two-wake
+age error. These are engineering acceptance budgets for this loopback impairment,
+not universal guarantees for arbitrary network loss. A 150 ms extrapolation
+can itself incur about a*t²/2 = 0.276 m curvature error; longer outages freeze,
+not extrapolate without limit. No-interpolation instead advances the target by
+120 ms, up to 1.78 m at maximum speed, so it must fail the same oracle.
+
+`make -C games/death-stranding/mod timing-test` runs 100 fixed seeds using a
+fake clock, independent provider/network wakes, random scheduling delays and
+15..65 ms packet delay. Legacy mode reinstates 15.6 ms clock quantisation,
+coarse relative sleeps, send-time stamping and cached rendering; it must fail
+these same bounds. Fixed mode uses QPC-like time, the production deadline
+arithmetic, true sample timestamps and apply-time rendering. Across these seeds
+fixed worst p95/p99 were 0.0313/0.0344 m; legacy worst p95/p99 were
+0.6765/0.7809 m. Dropping the first three pings still yields a valid pong by
+319.5 ms; the old 1000 ms retry mutant fails the first-second oracle at about
+3020 ms. These are host model results, **not** a Windows stability claim.
+The core also tests a delayed pong crossing a retry and rejects its replay;
+the pending-history mutant must fail that assertion. All original safety mutants
+and both adapter mutants remain required. `make core test` and Python discover
+include these timing regressions. The runner collects process/assertion failures,
+emits all cases and diagnostics, checks original saves in finally, then exits
+nonzero if any case or any repeat failed. Mutant failure messages appear on stderr
+and in JSON `failures`; inspect the named oracle rather than any nonzero exit.
+
+## Still unknown
+
+Windows DLL loading, proxy bootstrap and required-mod process exit, Winsock
+startup/binding, two-process scheduling, actual UDP mutant results and native Windows
+cleanup need the verifier. The standalone probe loads mod.dll directly; it does
+not prove proxy policy coverage. Static analysis now identifies six unique signature
+candidates and layout hypotheses in `game_offsets.md`; live object semantics, hook
+address/thread, actor lifetime, patch compatibility, Steam multi-client behavior and
+save redirection in a real game remain unknown. No game was run and no real install,
+save, Steam setting or runtime authorization was changed.
+
+## Read-only live discovery (opt-in, runtime still unproven)
+
+A separate discovery worker is selected only by `discovery:true` and
+`provider:"game"`. This bypasses the GameProvider, presence and networking (and is exclusive with `self_tick`);
+`mod_tick` does no sampling. No game callback, hook, function call, vtable call,
+actor creation, game memory write or presence transmission is installed by this
+component. The proxy's existing bootstrap and redirect IAT hooks are unchanged.
+Init must still occur outside loader lock. Shutdown joins the worker; the caller
+must not unload the DLL without shutdown.
+
+Place the strict flat config at `instance/redirect-data/mod/mod.json` (the
+proxy's reviewed config location). Add these fields to the ordinary instance
+config, retaining role/peer/slot/peer_slot/nickname/session/required:
+
+```json
+{"role":"host","peer":"127.0.0.1","slot":0,"peer_slot":1,
+ "nickname":"discovery","provider":"game","session":123,"required":true,
+ "discovery":true,
+ "discovery_sha256":"9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b",
+ "discovery_hz":10,"discovery_max_mib":32,"discovery_animation_slots":0}
+```
+
+Copy `discovery_sha256` from the pinned executable entry in `profile.json`;
+never re-pin automatically. The worker obtains the host executable's actual path
+with GetModuleFileNameW, opens that file read-only and hashes it with BCrypt
+SHA-256 **before any mapped-image read**. Both the supplied and computed hashes
+must equal the reviewed pin. It scans executable sections of the mapped main PE,
+requires one match per signature across all sections, validates masked RIP
+operands and non-executable mapped-section targets, and requires both manager
+references to agree. `generate_discovery_signatures.py` checks exact parity with
+`find_signatures.py`; there is no historical-RVA fallback.
+
+Every memory copy checks the full span with VirtualQuery and uses
+ReadProcessMemory on this process, checking success and exact length. This is the
+MinGW-compatible kernel-guarded equivalent to SEH around a dereference. A page
+becoming inaccessible after VirtualQuery yields a failed copy, not a C++ load
+through an invalid pointer. Two copies must agree; chains are rechecked after
+sampling. **These checks cannot make an asynchronous snapshot atomic or prove
+object type/lifetime.** An ABA reuse or stable freed allocation may be readable.
+No log alone establishes safe production game reads.
+
+The six signatures supply manager, save-dialog, baggage and sound globals.
+The current evidence does **not** supply the manager-to-Player selection layout,
+WorldNode/controller/animation/vehicle/BB owners, velocity virtual return storage,
+or a cutscene function result. Default discovery logs their regions as null,
+logs manager/global bytes, and does not invent links. To test an independently
+reviewed pointer slot in this pinned module, optional decimal integer fields
+`discovery_player_rva`, `discovery_worldnode_rva`, `discovery_controller_rva`,
+`discovery_animation_rva`, `discovery_vehicle_rva`, `discovery_bb_rva`,
+`discovery_velocity_rva`, and `discovery_angular_velocity_rva` identify **pointer
+slots relative to the module base**, not object addresses or functions. Each
+slot must lie in a non-executable section. The header records the supplied RVAs.
+These are explicit experimental candidates, not validated owner paths. Do not
+supply a guessed RVA. Once a Player candidate exists, +0x70 is followed and the
+H3 flags, both 24-byte position windows, 60-byte transform and velocity object
+slots are recorded. Other reviewed roots expose H6/H8/H10/H12 candidates.
+
+Animation slots default to **zero** because readable pages do not prove valid
+indices. Only set `discovery_animation_slots` after independent metadata bounds
+are established; max 32. Records follow manager+0x58 and `records+0x20+24*i`.
+H13 uses signed count +0x328, capped at 64, array +0x330, entry+0xc; invalid arrays
+are explicit. H11 also follows the speculative Player+0x54d0/+0x50 candidate and logs the
+record +0xc8 value; H14 captures global-object bytes only. No cargo ID semantics or
+sound/visual gate result is claimed. Calling those exports is forbidden here.
+
+Logs are exclusively created as `redirect-data/mod/discovery-PID.jsonl`, compact
+schema-1 JSONL, flushed per record. A header contains actual build hash, base,
+signature matches/targets, candidate root RVAs and limits. Samples have monotonic
+`t_us`, `coherent`, and `regions`: each readable region contains address, raw
+hex, float32/float64/u32 alternatives, and (for >=24 bytes) raw 16+8 and numeric
+float32x4+float64 split interpretations. Non-finite numeric interpretations are
+null; original bits remain in hex. Unreadable regions are null. Incoherent chain
+samples are excluded by the analyser. Default 10 Hz, hard max 20 Hz (no catch-up
+bursts); default 32 MiB, hard max 64 MiB. Hitting a limit or failing identity/
+scan/read setup stops the worker with a loud debugger/stderr message and bounded
+error record; it never falls through to a provider. A stopped worker does not
+prove mod shutdown or game exit. A kill file `instance/discovery.stop` stops
+sampling within one interval plus any in-progress guarded read/flush. Create it
+from the verifier, outside the game; remove it only before a new reviewed run.
+
+```sh
+python3 -B games/death-stranding/mod/analyse_discovery.py /path/to/discovery-PID.jsonl \
+  --actions open-menu walk run jump crouch enter-vehicle cutscene
+```
+
+Pass only actions actually observed. The report covers H1–H14 and lists exact
+missing actions for each hypothesis plus remaining semantic evidence. It decodes
+raw bytes independently, compares scalar candidates, motion, finite differences,
+velocity vector axis permutations, speed, discontinuities, local flag stability,
+rotation orthonormality, transform prefix/final word, move bounds, animation
+variation, BB value/suppression and the narrow save predicate. Units remain
+unknown until a measured 10 m walk. A zero-motion log cannot confirm movement,
+even with action annotations; equal speeds with swapped axes are flagged.
+All semantic verdicts stay unconfirmed: this mode supplies evidence for review,
+not the independent object identity, typed lifetime and action-ground-truth
+proof the hypotheses require. Sound/visual cutscene results stay unavailable.
+Malformed, wrong-build, ambiguous-signature or error-containing logs are refused.
+
+Game-free checks (no Windows execution):
+
+```sh
+make -C games/death-stranding/mod discovery-test test all
+python3 -B -m unittest discover -s games/death-stranding/tests -v
+```
+
+The production sampler is tested against a fake mapped PE and memory reader,
+including null/unmapped/torn reads, identity, zero/duplicate signatures, invalid
+RIP targets, section/address bounds, save-array bounds, chain changes, log/rate
+caps and stop files. Every such guard has an independently failing mutant oracle.
+The analyser has static-log and swapped-axis mutants. These do not establish
+Windows API behavior, filesystem isolation or game compatibility.

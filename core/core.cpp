@@ -1,0 +1,197 @@
+#include "core.h"
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <stdexcept>
+
+namespace ds {
+namespace {
+constexpr double Pi=3.14159265358979323846;
+void put(Bytes& b,size_t at,uint64_t v,size_t n) { for(size_t i=0;i<n;++i) b[at+i]=uint8_t(v>>(8*i)); }
+uint64_t get(const uint8_t* b,size_t at,size_t n) { uint64_t v=0; for(size_t i=0;i<n;++i) v|=uint64_t(b[at+i])<<(8*i); return v; }
+int64_t signedGet(const uint8_t* b,size_t at,size_t n) { uint64_t v=get(b,at,n); return (v & (uint64_t(1)<<(n*8-1))) ? int64_t(v)-int64_t(uint64_t(1)<<(n*8)) : int64_t(v); }
+uint32_t checksum(const uint8_t* b) { uint32_t h=2166136261u; for(size_t i=0;i<WireSize;++i) { h^=(i>=120 && i<124)?0:b[i]; h*=16777619u; } return h; }
+double distance(const State& a,const State& b) { double d=0; for(int i=0;i<3;++i) d+=std::pow(a.position[i]-b.position[i],2); return std::sqrt(d); }
+double speed(const State& a) { double v=0; for(double x:a.velocity) v+=x*x; return std::sqrt(v); }
+bool valid(const State& s) {
+    for(double x:s.position) if(!std::isfinite(x)||std::abs(x)>100000) return false;
+    for(double x:s.velocity) if(!std::isfinite(x)||std::abs(x)>100) return false;
+    return std::isfinite(s.yaw)&&std::abs(s.yaw)<=Pi+1e-9 && std::isfinite(s.phase)&&s.phase>=0&&s.phase<=1 && s.action<=31 && !(s.flags&~uint16_t(63)) && speed(s)<=100.02;
+}
+Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
+    if(!b || (p.length && n!=WireSize)) return Error::Length;
+    if(p.magic && get(b,0,4)!=0x31505344) return Error::Magic;
+    if(p.version && get(b,4,2)!=1) return Error::Version;
+    if(p.length && get(b,8,2)!=WireSize) return Error::Length;
+    if(p.checksum && get(b,120,4)!=checksum(b)) return Error::Checksum;
+    if(p.reserved && (get(b,10,2)||b[95]||get(b,124,4))) return Error::Reserved;
+    if(p.kind && (b[6]<1||b[6]>6)) return Error::Kind;
+    if(p.role && (b[7]<1||b[7]>2)) return Error::Role;
+    Packet q; q.kind=Kind(b[6]); q.role=Role(b[7]); q.game=uint32_t(get(b,12,4));
+    std::copy(b+16,b+32,q.mod.begin());
+    if(p.build && (q.game!=GameBuild||q.mod!=ModBuild)) return Error::Build;
+    q.session=get(b,32,8); q.nonce=get(b,40,8); q.echo=get(b,48,8);
+    if(!q.session||!q.nonce) return Error::Nonce;
+    q.sequence=uint32_t(get(b,56,4)); q.state.flags=uint16_t(get(b,60,2)); q.state.action=b[62]; q.state.phase=b[63]/255.;
+    q.stamp=get(b,64,8);
+    // Limit clocks to 53 bits so integer milliseconds convert exactly to double.
+    q.t0=get(b,96,8); q.t1=get(b,104,8); q.t2=get(b,112,8);
+    if(p.time && (q.stamp>(1ull<<53)||q.t0>(1ull<<53)||q.t1>(1ull<<53)||q.t2>(1ull<<53))) return Error::Time;
+    for(int i=0;i<3;++i) { q.state.position[i]=signedGet(b,72+4*i,4)/100.; q.state.velocity[i]=signedGet(b,84+2*i,2)/100.; }
+    q.state.yaw=signedGet(b,90,2)*Pi/32767.; q.state.health=b[92]; q.state.stamina=b[93]; q.byeReason=b[94];
+    if(p.range && (!valid(q.state)||q.byeReason>3)) return Error::Range;
+    out=q; return Error::None;
+}
+Render sampling(const std::deque<Snapshot>& b,uint64_t now,uint32_t delay,uint32_t extrap,const Protection& p) {
+    Render r; if(b.empty()) return r;
+    const auto& latest=b.back();
+    uint64_t age=now>=latest.time?now-latest.time:0;
+    r.stale=p.stale && age>500; r.visible=(!p.stale||age<=1500) && !(latest.state.flags&PrivateRoom);
+    uint64_t target=now>delay?now-delay:0;
+    r.state=b.front().state;
+    for(size_t i=1;i<b.size();++i) {
+        const auto& a=b[i-1]; const auto& z=b[i];
+        bool jump=(z.state.flags&Teleport)||(a.state.flags&PrivateRoom)||(z.state.flags&PrivateRoom)||distance(a.state,z.state)>8 || (p.floor && std::abs(a.state.position[1]-z.state.position[1])>0.005);
+        if(target<z.time) {
+            r.snapped=jump;
+            if(!jump && target>=a.time && z.time>a.time) {
+                double t=double(target-a.time)/double(z.time-a.time);
+                r.state=a.state;
+                for(int k=0;k<3;++k) { r.state.position[k]+=(z.state.position[k]-a.state.position[k])*t; r.state.velocity[k]+=(z.state.velocity[k]-a.state.velocity[k])*t; }
+                double dy=std::remainder(z.state.yaw-a.state.yaw,2*Pi);
+                r.state.yaw=std::remainder(a.state.yaw+t*dy,2*Pi);
+                if(a.state.action==z.state.action) r.state.phase=std::fmod(a.state.phase+t*std::remainder(z.state.phase-a.state.phase,1.)+1.,1.);
+            }
+            return r;
+        }
+        r.state=z.state; r.snapped=jump;
+    }
+    // Do not invent vertical motion: without collision geometry even a 1 cm Y blend can cross a floor.
+    if(target>latest.time && !(latest.state.flags&(Teleport|PrivateRoom))) {
+        double dt=double(p.extrapolate?std::min<uint64_t>(target-latest.time,extrap):target-latest.time)/1000.;
+        for(int k:{0,2}) r.state.position[k]=std::clamp(r.state.position[k]+r.state.velocity[k]*dt,-100000.,100000.);
+    }
+    return r;
+}
+}
+const char* reason(Error e) {
+    static const char* names[]={"ok","bad length","bad magic","protocol version mismatch","checksum mismatch","reserved bits","unknown kind","role mismatch","game/mod build mismatch","wrong session","nonce mismatch","out of range","duplicate/reordered sequence","invalid timestamp","impossible motion","teleport rate limit","not connected"};
+    return names[static_cast<unsigned>(e)];
+}
+namespace {
+bool sanitiseImpl(State& s,const Protection& p) {
+    for(double x:s.position) if(!std::isfinite(x)) return !p.finite;
+    for(double x:s.velocity) if(!std::isfinite(x)) return !p.finite;
+    if(!std::isfinite(s.yaw)||!std::isfinite(s.phase)) return !p.finite;
+    if(!p.clamp) return true;
+    for(double& x:s.position) x=std::clamp(x,-100000.,100000.);
+    for(double& x:s.velocity) x=std::clamp(x,-100.,100.);
+    double v=speed(s); if(v>100) for(double& x:s.velocity) x*=100/v;
+    s.yaw=std::remainder(s.yaw,2*Pi); s.phase=std::clamp(s.phase,0.,1.); s.flags&=63; s.action=std::min<uint8_t>(s.action,31); return true;
+}
+}
+bool sanitise(State& s) { return sanitiseImpl(s,{}); }
+#ifdef DS_TESTING
+bool sanitiseForTest(State& s,Protection p) { return sanitiseImpl(s,p); }
+#endif
+Bytes encode(Packet q) {
+    if(!sanitise(q.state)) throw std::invalid_argument("nonfinite state");
+    Bytes b{}; put(b,0,0x31505344,4); put(b,4,1,2); b[6]=uint8_t(q.kind); b[7]=uint8_t(q.role); put(b,8,WireSize,2); put(b,12,q.game,4); std::copy(q.mod.begin(),q.mod.end(),b.begin()+16);
+    put(b,32,q.session,8); put(b,40,q.nonce,8); put(b,48,q.echo,8); put(b,56,q.sequence,4); put(b,60,q.state.flags,2); b[62]=q.state.action; b[63]=uint8_t(std::lround(q.state.phase*255)); put(b,64,q.stamp,8);
+    for(int i=0;i<3;++i) { put(b,72+4*i,uint32_t(int32_t(std::lround(q.state.position[i]*100))),4); put(b,84+2*i,uint16_t(int16_t(std::lround(q.state.velocity[i]*100))),2); }
+    put(b,90,uint16_t(int16_t(std::lround(q.state.yaw*32767/Pi))),2); b[92]=q.state.health; b[93]=q.state.stamina; b[94]=q.byeReason;
+    put(b,96,q.t0,8); put(b,104,q.t1,8); put(b,112,q.t2,8); put(b,120,checksum(b.data()),4); return b;
+}
+Error decode(const uint8_t* b,size_t n,Packet& q) { return parse(b,n,q,{}); }
+#ifdef DS_TESTING
+Error decodeForTest(const uint8_t* b,size_t n,Packet& q,Protection p) { return parse(b,n,q,p); }
+#endif
+Render sample(const std::deque<Snapshot>& b,uint64_t now,uint32_t delay,uint32_t extrap) { return sampling(b,now,delay,extrap,{}); }
+uint16_t portForSlot(unsigned slot) { if(slot>=16) throw std::out_of_range("slot must be 0..15"); return uint16_t(49000+slot); }
+Core::Core(Config c,StateProvider& p,Transport& t):config_(c),provider_(p),transport_(t) {
+    if(!c.session||!c.nonce||c.delayMs>1000||(c.role!=Role::Host&&c.role!=Role::Client)) throw std::invalid_argument("invalid config");
+}
+void Core::send(Kind k,uint64_t now) {
+    Packet q; q.kind=k; q.role=config_.role; q.session=config_.session; q.nonce=config_.nonce; q.echo=peer_; q.stamp=now;
+    if(k==Kind::Hello) { q.echo=0; sentHello_=true; }
+    if(k==Kind::Ping) { q.t0=now;
+        if(!protections_.pingHistory)pendingPings_.clear();
+        pendingPings_.push_back(now);
+        while(pendingPings_.size()>16)pendingPings_.pop_front(); }
+    transport_.send(encode(q));
+}
+void Core::reset(bool rotate) {
+    connected_=false; sentHello_=false; peer_=0; snapshots_.clear(); haveSequence_=false; haveTeleport_=false; haveSent_=false; clockValid_=false; pendingPings_.clear(); rtt_=-1; offset_=0;
+    nextHello_=nextSend_=nextPing_=0; outgoing_=0;
+    if(rotate) { if(config_.nonce==std::numeric_limits<uint64_t>::max()) throw std::overflow_error("nonce exhausted"); ++config_.nonce; }
+}
+void Core::tick(uint64_t now) {
+    if(connected_ && protections_.timeout && now-lastReceive_>3000) reset(true);
+    if(!connected_) { if(now>=nextHello_) { send(Kind::Hello,now); nextHello_=now+250; } return; }
+    if(now>=nextPing_) { send(Kind::Ping,now); nextPing_=now+((clockValid_||!protections_.pingRetry)?1000:100); }
+    if(protections_.gate && provider_.isInCutsceneOrLoading()) return;
+    State s; if(!provider_.readLocal(s)||!sanitiseImpl(s,protections_)) return;
+    bool changed=!haveSent_||distance(s,sentState_)>=0.01||std::abs(s.yaw-sentState_.yaw)>=0.01||s.flags!=sentState_.flags||s.action!=sentState_.action||std::abs(s.phase-sentState_.phase)>=1./255.||s.health!=sentState_.health||s.stamina!=sentState_.stamina||s.velocity!=sentState_.velocity;
+    if(protections_.rate && (now<nextSend_ || (!changed && now<lastStamp_+500))) return;
+    auto sampleTime=provider_.localSampleTime(now);
+    if(sampleTime>now || (haveSent_ && sampleTime<=lastLocalSample_)) return;
+    Packet q; q.kind=Kind::Presence; q.role=config_.role; q.session=config_.session; q.nonce=config_.nonce; q.echo=peer_; q.stamp=sampleTime; q.sequence=++outgoing_; q.state=s;
+    transport_.send(encode(q)); sentState_=s; lastLocalSample_=sampleTime; haveSent_=true; lastStamp_=now; nextSend_=now+50;
+}
+Error Core::receive(const uint8_t* b,size_t n,uint64_t now) {
+    Packet q; auto fail=[&](Error e){ error_=e; return e; };
+    Error e=parse(b,n,q,protections_); if(e!=Error::None) return fail(e);
+    if(protections_.role && q.role==config_.role) return fail(Error::Role);
+    if(protections_.session && q.session!=config_.session) return fail(Error::Session);
+    if(q.kind==Kind::Hello) {
+        if(connected_ && q.nonce!=peer_) return fail(Error::Nonce);
+        // HELLO itself never establishes pairing or refreshes liveness.
+        Packet a; a.kind=Kind::Ack; a.role=config_.role; a.session=config_.session; a.nonce=config_.nonce; a.echo=q.nonce; a.stamp=now; transport_.send(encode(a));
+        return fail(Error::None);
+    }
+    if(protections_.nonce && q.echo!=config_.nonce) return fail(Error::Nonce);
+    if(q.kind==Kind::Ack) {
+        if(protections_.handshake && !sentHello_) return fail(Error::NotConnected);
+        if(connected_) return fail(q.nonce==peer_?Error::None:Error::Nonce);
+        peer_=q.nonce; connected_=true; lastReceive_=now; return fail(Error::None);
+    }
+    if(protections_.handshake && !connected_) return fail(Error::NotConnected);
+    if(protections_.nonce && q.nonce!=peer_) return fail(Error::Nonce);
+    if(q.kind==Kind::Bye) { reset(true); return fail(Error::None); }
+    if(q.kind==Kind::Ping) {
+        Packet a=q; a.kind=Kind::Pong; a.role=config_.role; a.nonce=config_.nonce; a.echo=peer_; a.stamp=now; a.t1=now; a.t2=now; transport_.send(encode(a));
+        // PING replay cannot hold a disconnected puppet alive; timeout follows presence/PONG.
+        return fail(Error::None);
+    }
+    if(q.kind==Kind::Pong) {
+        auto pending=std::find(pendingPings_.begin(),pendingPings_.end(),q.t0);
+        if(protections_.ping && (pending==pendingPings_.end()||now<q.t0||q.t2<q.t1||q.t2-q.t1>now-q.t0||now-q.t0>2000)) return fail(Error::Time);
+        if(pending!=pendingPings_.end())pendingPings_.erase(pending);
+        rtt_=double(now-q.t0)-double(q.t2-q.t1);
+        double candidate=((double(q.t1)-double(q.t0))+(double(q.t2)-double(now)))/2.;
+        // Keep the established timeline stable; clock updates cannot reorder buffered snapshots.
+        if(!clockValid_) { offset_=candidate; clockValid_=true; }
+        lastReceive_=now; return fail(Error::None);
+    }
+    uint32_t advance=q.sequence-incoming_;
+    if(protections_.duplicate && haveSequence_ && (advance==0||advance>=0x80000000u)) return fail(Error::Duplicate);
+    double mapped=double(q.stamp)-offset_;
+    uint64_t localTime=clockValid_?uint64_t(std::max(0.,mapped)):now;
+    if(protections_.time && (mapped<0 || (clockValid_ && std::abs(mapped-double(now))>2000) || (haveSequence_ && (q.stamp<=lastArrival_ || localTime<=snapshots_.back().time)))) return fail(Error::Time);
+    bool teleport=(q.state.flags&Teleport)!=0;
+    if(protections_.teleport && teleport && haveTeleport_ && now-lastTeleport_<5000) return fail(Error::Teleport);
+    if(protections_.speed && haveSequence_ && !teleport) {
+        double elapsed=double(q.stamp-lastArrival_)/1000.;
+        if(distance(q.state,snapshots_.back().state)>100*std::min(elapsed,2.)+0.5) return fail(Error::Speed);
+    }
+    // Samples on a new clock mapping are admitted only once they advance the existing timeline.
+    snapshots_.push_back({q.state,localTime,q.sequence});
+    if(protections_.buffer) while(snapshots_.size()>64) snapshots_.pop_front();
+    incoming_=q.sequence; haveSequence_=true; lastArrival_=q.stamp; lastReceive_=now; ++accepted_;
+    if(teleport) { haveTeleport_=true; lastTeleport_=now; }
+    return fail(Error::None);
+}
+Render Core::render(uint64_t now) const { return sampling(snapshots_,now,protections_.delay?config_.delayMs:0,150,protections_); }
+void Core::frame(uint64_t now) { Render r=render(now); if(protections_.gate && provider_.isInCutsceneOrLoading()) r.visible=false; provider_.applyRemote(r); }
+void Core::disconnect(uint64_t now) { if(connected_) send(Kind::Bye,now); reset(true); }
+}

@@ -1,0 +1,154 @@
+#include "../core.h"
+#include "coopfuzz/net.h"
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <vector>
+using namespace ds;
+namespace {
+Protection protection;
+int failures=0;
+void check(bool ok,const char* name) { if(!ok) { std::fprintf(stderr,"FAIL %s\n",name); ++failures; } }
+void patch(Bytes& b,size_t offset,uint64_t value,size_t n) { for(size_t i=0;i<n;++i) b[offset+i]=uint8_t(value>>(i*8)); uint32_t h=2166136261u; for(size_t i=0;i<b.size();++i) { h^=(i>=120&&i<124)?0:b[i]; h*=16777619u; } for(int i=0;i<4;++i) b[120+i]=uint8_t(h>>(8*i)); }
+struct Fake : StateProvider {
+    State local; Render remote; bool blocked=false, readable=true; unsigned applies=0;
+    bool readLocal(State& s) override { s=local; return readable; }
+    bool isInCutsceneOrLoading() const override { return blocked; }
+    void applyRemote(const Render& r) override { remote=r; ++applies; }
+};
+struct Queue : Transport { std::vector<Bytes> packets; void send(const Bytes& b) override { packets.push_back(b); } };
+struct Fixture {
+    Fake provider; Queue transport; Core core;
+    Fixture():core({Role::Host,42,100,120},provider,transport) {
+        core.setProtections(protection); core.tick(0);
+        Packet p; p.role=Role::Client; p.kind=Kind::Ack; p.session=42; p.nonce=200; p.echo=100;
+        auto b=encode(p); check(core.receive(b.data(),b.size(),0)==Error::None,"fixture_handshake"); transport.packets.clear();
+    }
+    Packet presence(uint32_t seq,uint64_t time,double x=0) { Packet p; p.role=Role::Client; p.kind=Kind::Presence; p.session=42; p.nonce=200; p.echo=100; p.sequence=seq; p.stamp=time; p.state.position[0]=x; return p; }
+    Error receive(Packet p,uint64_t now) { auto b=encode(p); return core.receive(b.data(),b.size(),now); }
+};
+void parserTests() {
+    Packet p, q; p.kind=Kind::Presence; p.state.position={-100000,100000,1.23}; p.state.velocity={-50,0,50}; p.state.yaw=-3.141592653589793; p.state.phase=1; p.state.action=31; p.state.flags=63;
+    auto b=encode(p); auto parse=[&](const Bytes& wire){return decodeForTest(wire.data(),wire.size(),q,protection);};
+    check(parse(b)==Error::None&&q.state.position==p.state.position&&q.state.phase==1&&q.state.action==31,"roundtrip_boundaries");
+    check(b[0]=='D'&&b[1]=='S'&&b[2]=='P'&&b[3]=='1'&&b[8]==128,"little_endian_golden");
+    for(size_t i=0;i<WireSize;++i) check(decodeForTest(b.data(),i,q,protection)==Error::Length,"length");
+    check(decode(nullptr,WireSize,q)==Error::Length,"null_buffer");
+    check(decode(b.data(),129,q)==Error::Length,"oversized_length");
+    auto bad=b; patch(bad,0,0,4); check(parse(bad)==Error::Magic,"magic");
+    bad=b; patch(bad,4,2,2); check(parse(bad)==Error::Version,"version");
+    bad=b; patch(bad,8,127,2); check(parse(bad)==Error::Length,"length");
+    bad=b; bad[80]^=4; check(parse(bad)==Error::Checksum,"checksum");
+    for(size_t at:{size_t(10),size_t(95),size_t(124)}) { bad=b; patch(bad,at,1,1); check(parse(bad)==Error::Reserved,"reserved"); }
+    for(int kind=1;kind<=6;++kind) { bad=b; patch(bad,6,kind,1); check(parse(bad)==Error::None,"every_kind"); }
+    for(int kind:{0,7,255}) { bad=b; patch(bad,6,kind,1); check(parse(bad)==Error::Kind,"kind"); }
+    bad=b; patch(bad,7,0,1); check(parse(bad)==Error::Role,"role");
+    for(size_t at:{size_t(12),size_t(16)}) { bad=b; patch(bad,at,0,4); check(parse(bad)==Error::Build,"build"); }
+    bad=b; patch(bad,32,0,8); check(parse(bad)==Error::Nonce,"zero_session");
+    bad=b; patch(bad,40,0,8); check(parse(bad)==Error::Nonce,"zero_nonce");
+    for(size_t at:{size_t(64),size_t(96),size_t(104),size_t(112)}) { bad=b; patch(bad,at,UINT64_MAX,8); check(parse(bad)==Error::Time,"clock_range"); }
+    for(size_t at:{size_t(72),size_t(76),size_t(80)}) { bad=b; patch(bad,at,10000001,4); check(parse(bad)==Error::Range,"range"); }
+    for(size_t at:{size_t(84),size_t(86),size_t(88)}) { bad=b; patch(bad,at,32767,2); check(parse(bad)==Error::Range,"range"); }
+    for(auto field:std::vector<std::pair<size_t,uint64_t>>{{90,32768},{60,64},{62,32},{94,4}}) { bad=b; patch(bad,field.first,field.second,field.first==90||field.first==60?2:1); check(parse(bad)==Error::Range,"range"); }
+    State s; s.position={-1e20,1e20,0}; s.velocity={1e20,-1e20,1e20}; s.yaw=1000; s.phase=10; s.flags=65535; s.action=255;
+    check(sanitiseForTest(s,protection)&&s.position[0]==-100000&&s.position[1]==100000&&s.phase==1&&s.flags==63&&s.action==31,"clamp");
+    check(std::sqrt(s.velocity[0]*s.velocity[0]+s.velocity[1]*s.velocity[1]+s.velocity[2]*s.velocity[2])<=100.00001,"clamp");
+    s.phase=-1; sanitiseForTest(s,protection); check(s.phase==0,"clamp");
+    for(double value:{std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity(),-std::numeric_limits<double>::infinity()}) {
+        for(int field=0;field<8;++field) { State x; if(field<3) x.position[field]=value; else if(field<6) x.velocity[field-3]=value; else if(field==6) x.yaw=value; else x.phase=value; check(!sanitiseForTest(x,protection),"finite"); }
+    }
+    Packet nan; nan.state.yaw=std::nan(""); bool threw=false; try { encode(nan); } catch(const std::invalid_argument&) { threw=true; } check(threw,"nonfinite_encoder");
+    for(unsigned i=0;i<16;++i) check(portForSlot(i)==49000+i,"ports");
+    bool threwSlot=false; try { portForSlot(16); } catch(const std::out_of_range&) { threwSlot=true; } check(threwSlot,"port_range");
+}
+void sessionTests() {
+    { Fixture f;f.core.tick(10);f.core.tick(110);
+      auto p=f.presence(0,30);p.kind=Kind::Pong;p.t0=10;p.t1=p.t2=30;
+      check(f.receive(p,130)==Error::None&&f.core.rttMs()==120,"pingHistory");
+      check(f.receive(p,140)==Error::Time,"ping"); }
+
+    { Fixture f; auto p=f.presence(1,100); ++p.session; check(f.receive(p,100)==Error::Session,"session"); }
+    { Fixture f; auto p=f.presence(1,100); ++p.nonce; check(f.receive(p,100)==Error::Nonce,"nonce"); p.nonce=200; ++p.echo; check(f.receive(p,100)==Error::Nonce,"nonce"); }
+    { Fixture f; check(f.receive(f.presence(1,100),100)==Error::None,"first_presence"); check(f.receive(f.presence(1,200),200)==Error::Duplicate,"duplicate"); check(f.receive(f.presence(0,250),250)==Error::Duplicate,"duplicate"); }
+    { Fixture f; f.receive(f.presence(UINT32_MAX,100),100); check(f.receive(f.presence(0,150),150)==Error::None,"sequence_wrap"); }
+    { Fixture f; f.receive(f.presence(1,100),100); check(f.receive(f.presence(2,100),200)==Error::Time,"time"); }
+    { Fixture f; f.receive(f.presence(1,100),100); check(f.receive(f.presence(2,150,1000),150)==Error::Speed,"speed"); }
+    { Fixture f; auto p=f.presence(1,100,1000); p.state.flags=Teleport; check(f.receive(p,100)==Error::None,"first_teleport"); p.sequence=2; p.stamp=200; p.state.position[0]=2000; check(f.receive(p,200)==Error::Teleport,"teleport"); p.sequence=3; p.stamp=5100; check(f.receive(p,5100)==Error::None,"teleport_recovery"); }
+    { Fixture f; f.receive(f.presence(1,100,0),100); f.receive(f.presence(2,200,1),200); check(std::abs(f.core.render(270).state.position[0]-.5)<.001,"delay"); }
+    { Fixture f; f.receive(f.presence(1,100,0),100); auto p=f.presence(2,200,1); p.state.position[1]=0.25; f.receive(p,200); check(f.core.render(270).state.position[1]==0,"floor"); check(f.core.render(320).state.position[1]==0.25,"floor_boundary"); }
+    { Fixture f; auto p=f.presence(1,100); p.state.velocity[0]=10; f.receive(p,100); check(std::abs(f.core.render(1120).state.position[0]-1.5)<.001,"extrapolate"); check(f.core.render(2000).state.position[0]==f.core.render(3000).state.position[0],"freeze"); check(!f.core.render(2000).visible&&f.core.render(800).stale,"stale"); }
+    { Fixture f; for(unsigned i=1;i<=100;++i) f.receive(f.presence(i,i*50),i*50); check(f.core.buffered()<=64,"buffer"); }
+    { Fixture f; f.provider.blocked=true; f.core.tick(100); unsigned count=0; for(auto& b:f.transport.packets) count+=b[6]==uint8_t(Kind::Presence); check(count==0,"gate"); f.core.frame(100); check(!f.provider.remote.visible,"apply_gate"); }
+    { Fixture f; for(unsigned t=0;t<500;++t) { f.provider.local.position[0]=t*.001; f.core.tick(t); } unsigned count=0; for(auto& b:f.transport.packets) count+=b[6]==uint8_t(Kind::Presence); check(count<=10&&count>=2,"rate"); }
+    { Fixture f; f.core.tick(3001); check(!f.core.connected(),"timeout"); Packet p; p.kind=Kind::Ack; p.role=Role::Client; p.session=42; p.nonce=201; p.echo=101; check(f.receive(p,3100)==Error::None&&f.core.connected(),"reconnect"); check(f.receive(f.presence(1,3200),3200)==Error::Nonce,"old_connection_replay"); }
+    { Fixture f; auto p=f.presence(1,100); p.kind=Kind::Bye; f.receive(p,100); check(!f.core.connected()&&f.core.buffered()==0,"bye"); }
+    { Fixture f; f.core.tick(100); Packet p; p.kind=Kind::Pong; p.role=Role::Client; p.session=42; p.nonce=200; p.echo=100; p.t0=100; p.t1=160; p.t2=170;
+      check(f.receive(p,130)==Error::None&&f.core.rttMs()==20&&f.core.clockOffsetMs()==50,"ping_clock"); check(f.receive(p,140)==Error::Time,"ping"); }
+    { Fixture f; Packet p=f.presence(1,100); p.kind=Kind::Hello; p.nonce=300; check(f.receive(p,100)==Error::Nonce,"hello_cannot_replace_peer"); }
+    { Fake fake; Queue queue; Core c({Role::Host,1,10,120},fake,queue); c.setProtections(protection); Packet p; p.kind=Kind::Presence; p.role=Role::Client; p.nonce=20; p.echo=10; auto b=encode(p); check(c.receive(b.data(),b.size(),0)==Error::NotConnected,"pre_handshake_presence"); p.kind=Kind::Ack; b=encode(p); check(c.receive(b.data(),b.size(),0)==Error::NotConnected,"handshake"); }
+    // Public pure function: teleports are held then snapped, no blend or post-teleport extrapolation.
+    std::deque<Snapshot> b{{State{},100,1},{State{},200,2}}; b[1].state.position[0]=1000; b[1].state.flags=Teleport; b[1].state.velocity[0]=50;
+    check(sample(b,270).state.position[0]==0&&sample(b,320).state.position[0]==1000&&sample(b,800).state.position[0]==1000,"teleport_sampling");
+    b[1].state.flags=PrivateRoom; check(!sample(b,300).visible,"private_room");
+    check(!sample({},10).visible,"empty_buffer");
+}
+struct NetworkTransport : Transport { coopfuzz::LossyLink& link; int from; NetworkTransport(coopfuzz::LossyLink& l,int f):link(l),from(f){} void send(const Bytes& b) override { link.send(from,1-from,{b.begin(),b.end()}); } };
+State trajectory(uint64_t time,int side,uint64_t seed) {
+    State s; double t=time/1000., phase=double(seed%97)*.03+side;
+    // Acceleration < 5 m/s^2, horizontal motion <= 7 m/s, same floor. Stop after 12 seconds.
+    double u=std::min(t,12.); s.position={20*std::sin(.3*u+phase),0,10*std::cos(.4*u+phase)};
+    if(t<12) s.velocity={6*std::cos(.3*u+phase),0,-4*std::sin(.4*u+phase)};
+    s.yaw=std::sin(u); s.phase=std::fmod(u,1.); return s;
+}
+void fuzz() {
+    std::vector<double> errors; double finalMax=0; uint64_t accepted=0, drops=0, duplicates=0;
+    for(uint64_t seed=1;seed<=500;++seed) {
+        coopfuzz::LossyLink link(2,seed); link.setLink({20,150,.10,.05,0});
+        Fake a,b; NetworkTransport at(link,0),bt(link,1); Core ac({Role::Host,seed+100,seed*10+1,120},a,at),bc({Role::Client,seed+100,seed*10+2,120},b,bt);
+        const uint64_t clocks[2]={10000,20000+seed*7};
+        for(uint64_t now=0;now<=16000;now+=10) {
+            // Seeded outage followed by healing exercises timeout/reconnect; no metrics collected in outage/warmup.
+            if(now==6000) link.setConnected(1,false);
+            if(now==9500) link.setConnected(1,true);
+            link.advance(now); int from; coopfuzz::Bytes wire;
+            for(int side=0;side<2;++side) while(link.poll(side,from,wire)) (side?bc:ac).receive(wire.data(),wire.size(),now+clocks[side]);
+            a.local=trajectory(now,0,seed); b.local=trajectory(now,1,seed);
+            ac.tick(now+clocks[0]); bc.tick(now+clocks[1]); ac.frame(now+clocks[0]); bc.frame(now+clocks[1]);
+            if((now>=2500&&now<5900)||(now>=11500&&now<12000)) {
+                for(int side=0;side<2;++side) {
+                    Render r=(side?bc:ac).render(now+clocks[side]); State truth=trajectory(now>120?now-120:0,1-side,seed);
+                    check(r.visible,"fuzz_visible"); double error=0; for(int k=0;k<3;++k) error+=std::pow(r.state.position[k]-truth.position[k],2); errors.push_back(std::sqrt(error));
+                    check(error<4.,"fuzz_convergence_bound_2m");
+                }
+            }
+        }
+        check(ac.connected()&&bc.connected(),"fuzz_reconnected");
+        check(ac.rttMs()>=0&&bc.rttMs()>=0,"fuzz_rtt");
+        check(std::abs(ac.clockOffsetMs()-double(clocks[1]-clocks[0]))<151,"fuzz_clock_offset");
+        for(int side=0;side<2;++side) { auto r=(side?bc:ac).render(16000+clocks[side]); auto truth=trajectory(16000,1-side,seed); double error=0; for(int k=0;k<3;++k) error+=std::pow(r.state.position[k]-truth.position[k],2); finalMax=std::max(finalMax,std::sqrt(error)); check(error<.001,"fuzz_final_convergence"); }
+        accepted+=ac.accepted()+bc.accepted(); drops+=link.stats().lost; duplicates+=link.stats().duplicated;
+        // Mutate arbitrary length and bytes under ASan/UBSan, preserving output on error.
+        coopfuzz::Rng rng(seed*991); for(int i=0;i<300;++i) { Bytes random; for(auto& x:random) x=uint8_t(rng.u32()); Packet p; decode(random.data(),rng.range(0,128),p);
+            auto structured=encode(Packet{}); patch(structured,rng.range(0,119),rng.next(),1); decode(structured.data(),structured.size(),p); }
+    }
+    std::sort(errors.begin(),errors.end()); auto pct=[&](double p){ return errors[size_t(p*(errors.size()-1))]; };
+    std::printf("FUZZ seeds=1..500 sessions=500 samples=%zu loss=10%% duplicate=5%% latency=20..150ms delay=120ms\n",errors.size());
+    std::printf("ERROR metres delayed_truth p50=%.6f p95=%.6f p99=%.6f max=%.6f final_max=%.6f accepted=%llu lost=%llu duplicated=%llu\n",pct(.5),pct(.95),pct(.99),errors.back(),finalMax,(unsigned long long)accepted,(unsigned long long)drops,(unsigned long long)duplicates);
+    check(pct(.99)<.8,"fuzz_p99_bound_0_8m");
+}
+}
+int main(int argc,char** argv) {
+    auto start=std::chrono::steady_clock::now(); std::string mutant=argc>1?argv[1]:"";
+#define MUTATE(name) if(mutant==#name) protection.name=false
+    MUTATE(version); MUTATE(range); MUTATE(teleport); MUTATE(duplicate); MUTATE(delay); MUTATE(session); MUTATE(build);
+    MUTATE(magic); MUTATE(checksum); MUTATE(reserved); MUTATE(nonce); MUTATE(time); MUTATE(speed); MUTATE(floor); MUTATE(extrapolate); MUTATE(stale); MUTATE(gate); MUTATE(timeout); MUTATE(buffer); MUTATE(rate); MUTATE(length); MUTATE(kind); MUTATE(role); MUTATE(handshake); MUTATE(ping); MUTATE(pingHistory); MUTATE(clamp); MUTATE(finite);
+#undef MUTATE
+    parserTests(); sessionTests(); if(mutant.empty()&&failures==0) fuzz();
+    std::printf("%s failures=%d runtime=%.3fs\n",failures?"FAILED":"PASSED",failures,std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());
+    return failures?1:0;
+}
