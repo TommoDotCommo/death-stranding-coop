@@ -404,3 +404,48 @@ The failed test copy was stopped by process identity. Original saves were
 unchanged immediately and after a 30-second settle check; both copies passed
 post-run source verification (archive contents were not rehashed). These checks
 do not make the failed creator call safe.
+
+
+### Player context supplies the missing controller before activation
+
+Static follow-up on the same pinned executable (no new engine calls):
+
+| RVA | Observed behavior |
+|---|---|
+| 2638880 | Player-specific entity assignment. When player+78 is true and +79 false, constructs DSPlayerController then attaches it to the target entity. |
+| 26388e2 / 26388e9 | Loads DSPlayerController metadata 4bb2770, calls generic component construction 22b4fc0 with R8=0 and a generated 16-byte identifier in R9. RDX comes from global 4e14178; its exact type is unknown. |
+| 26388ee–26388f4 | Passes the returned controller as RDX, target entity as RCX, to attachment thunk 2348210 -> 2348220. |
+| 26388ff | Calls base player assignment 23c7e50, which replaces player+70 at 23c7f21. Calling this with the local player would change its controlled entity. |
+| 37447e0 | Player/context creation helper: calls 2380920 to allocate/initialize a 0x1f0-byte creation context, writes player pointer at context+f8, related entity pointer at +98, and creation mode at +94. Calls 237dc10, then 2375ba0 to obtain the result. |
+| 2373720 | Context-driven creation: resource virtual+80 call at 23737aa, owner callback virtual+80 at 2373877 using context+f8, then component activation 234f3e0 at 23738b8, then world-manager virtual+18 at 2373905. |
+
+This independently explains the ordering absent from generic export 2374400:
+the owner callback can attach the required controller **before** activation.
+`PlayerGame_ExportedSwitchPlayerCharacter` 2642cf0 jumps to 262a030, which queues
+a task carrying callback 26398c0. That callback invokes 37447e0 on its player,
+then performs another player assignment. These are player replacement paths,
+not a proven independent-puppet API. Do not call them with the live local player.
+An isolated player context would need construction/registration, input/camera
+exclusion and cleanup contracts; those remain unknown.
+
+The metadata catalog (`find_actor_types.py`) finds these concrete resource leads:
+
+| Type | Metadata RVA | Getter RVA | Vtable candidate RVA | Factory slot +80 RVA |
+|---|---:|---:|---:|---:|
+| HumanoidResource | 4ec16b0 | 3737880 | 3f3bb98 | 2366570 |
+| DSPlayerEntityResource | 4bc92e0 | 2711b90 | 3d7d010 | 2366570 |
+
+DSPlayerEntityResource derives from HumanoidResource, which derives from
+ControlledEntityResource. Both factory slots jump to 2373940, which asks virtual
++68 for the entity type, allocates through 1a8eee0 and copies the transform.
+Virtual +68 on DSPlayerEntityResource resolves through getter 270fd70 and
+pointer slot 4bb59c8 to DSPlayerEntity metadata 4bc6e00. On HumanoidResource,
+getter 3737030 reads slot 4ebf408, whose static value is Humanoid metadata
+4ec1530. Thus the shared factory can allocate different entity classes.
+These are static initialized pointers; the read-only catalog labels the result
+`static_entity_type` rather than claiming a runtime class/lifetime observation.
+Sharing a factory does not mean sharing a spawn contract. HumanoidResource is
+a possible NPC lead, not an approved standalone resource; no live instance has
+yet been identified by the new collector. Its bounded read-only heap inventory
+is available as `read_actor_resources.py`; no production DLL or build identity
+changed in this follow-up.

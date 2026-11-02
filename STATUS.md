@@ -47,3 +47,10 @@ player-controller construction context. Full details are in `mod/game_offsets.md
 
 The test process was stopped by identity, normal read-only configs restored, and
 original saves remained unchanged immediately and after a 30-second settle check.
+
+Static follow-up traced the missing setup: the context-driven creation path calls
+the player owner's entity assignment before activation; that assignment constructs
+and attaches DSPlayerController. It also changes player ownership, so it cannot
+be used on the local player to make an independent puppet. Read-only resource
+discovery now catalogs the separate HumanoidResource class and can search loaded
+private memory for candidate instances. No new native creation attempt has run.

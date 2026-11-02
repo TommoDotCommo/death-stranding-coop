@@ -40,7 +40,8 @@ host: identity build/mod.so build/mod-no-build.so build/mod-no-interpolation.so 
 test: game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so
 	./build/unit
 	python3 -B test_probe.py
-	python3 -B -m unittest -q test_game_thread_api test_probe_puppet
+	python3 -B -m unittest -q test_game_thread_api test_probe_puppet test_actor_resources test_actor_reader_windows
+	python3 -B test_actor_resource_mutants.py
 .PHONY: all identity host test
 
 

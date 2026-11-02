@@ -28,7 +28,14 @@ class ApiTests(unittest.TestCase):
                 discovery_sha256=PIN)))
             self.assertEqual(lib.mod_init(str(config).encode()),1,lib.mod_last_error())
             def status():
-                out=c.create_string_buffer(lib.mod_status(None,0));lib.mod_status(out,len(out));return json.loads(out.value)
+                # Network counters can grow between the size query and copy.
+                cap=lib.mod_status(None,0)
+                for _ in range(8):
+                    out=c.create_string_buffer(cap)
+                    required=lib.mod_status(out,cap)
+                    if required<=cap:return json.loads(out.value)
+                    cap=required*2
+                self.fail('status kept growing beyond retry budget')
             ctx=Context(c.sizeof(Context),1,lib.mod_test_thread_id(),1,lib.mod_test_frame_caller(),1,0)
             try:
                 self.assertEqual(lib.mod_tick(.05),1);self.assertEqual(status()['self_tick']['ticks'],0)

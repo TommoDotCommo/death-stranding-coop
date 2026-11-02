@@ -571,3 +571,38 @@ Game-free coverage includes actual fake-memory C ABI calls and worker threads,
 creation/movement readbacks, command stamping, shutdown exclusion, typed creator
 and deferred-remove argument transfer (also run on Windows), plus mutants for
 dispatch, world/local identity, one-shot behavior, arguments and readbacks.
+
+## Read-only actor resource discovery
+
+`python mod/find_actor_types.py <disposable-copy>/ds.exe` builds a hash-pinned
+static catalog of resource types derived from `HumanoidResource`. It follows
+bounded class metadata ancestry and the reviewed `lea rax,[rip+...]; ret` getter
+form, then reports data-table/factory candidates. Matches are discovery leads;
+no catalog entry approves an engine call. The pinned build exposes distinct
+`HumanoidResource` and `DSPlayerEntityResource` tables.
+
+For a loaded disposable process with enforced networking and `COOP_THREAD_TRACE=1`,
+run from native Windows Python:
+
+```sh
+python mod/read_actor_resources.py --log "<copy>/redirect-data/redirect-<pid>-<start>.log" --max-mib 1024 --seconds 20
+```
+
+The reader checks process creation time, exact disposable image path, executable
+hash, trace identity and loaded table/getter identity. It opens query/read handles
+and scans only committed readable private pages, excluding guard pages. Scans
+have byte/time/candidate limits. It rechecks candidate headers twice and reports
+partial coverage and failed reads; a missing candidate does not prove absence.
+Use `--start-address <next_address>` to continue a capped scan. Restart after an
+enumeration timeout before the first readable region (`next_address:0x0`).
+Output contains addresses and resource type names, never heap contents; keep
+reports outside the repository. Concurrent stable reads cannot prove object
+lifetime, ownership or a safe spawn contract. The reader never creates an actor
+and never changes the native Sam-resource quarantine.
+
+`python -m unittest test_actor_resources` (inside `mod`) exercises synthetic
+metadata, ancestry, decoys, hash refusal, torn reads and scan bounds.
+`python test_actor_resource_mutants.py` removes nine guards and requires the
+unchanged suite to fail. Native Windows `test_actor_reader_windows.py` also
+checks process identity, the actual OS-granted query/read rights, region layout
+and an independently allocated fixture buffer.
