@@ -17,7 +17,8 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 
 - Drawing the other player in the world (puppet). Static leads: `EntityResource_ExportedCreateEntity` is a real
   creation function; the SpawnSetup and buddy spawn exports are empty stubs in this build. See
-  `mod/game_offsets.md`. Needs a safe call point on the game's thread.
+  `mod/game_offsets.md`. The message pump and application callback chain are mapped statically; a safe call point
+  on the game's thread remains unverified.
 - Height-change snaps in the presence core (25-30 % of samples are near one; a puppet would jump on slopes).
 - Shared cargo (picking up the same package works in both worlds today: no sync), structures, BTs, vehicles,
   cutscenes, death and voidouts, saves of a shared world.

@@ -19,8 +19,7 @@ the game, and it never will. You need your own copy of the game.
 ## Build and test
 
 Needs `g++`, the MinGW-w64 cross-compiler, Python 3 and a checkout of
-[coop-anything](https://github.com/TommoDotCommo/coop-anything) for its fuzzer (`HUB=<path>`, default
-`~/source/coop-anything`); no game:
+[coop-anything](https://github.com/TommoDotCommo/coop-anything) for its fuzzer (`HUB=<path-to-playbook-checkout>`); no game:
 
 ```sh
 make test     # every game-free test and mutant

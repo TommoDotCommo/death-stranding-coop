@@ -493,3 +493,13 @@ RIP targets, section/address bounds, save-array bounds, chain changes, log/rate
 caps and stop files. Every such guard has an independently failing mutant oracle.
 The analyser has static-log and swapped-axis mutants. These do not establish
 Windows API behavior, filesystem isolation or game compatibility.
+
+
+## Puppet call-point research
+
+`python3 -B mod/find_message_calls.py "<game dir>/ds.exe"` (from the repository
+root) inventories the pinned executable's PeekMessageA/GetMessageA import call
+candidates and containing exception-directory ranges. It opens the file read-only
+and refuses another hash. See `game_offsets.md` for independently disassembled
+results and the application callback chain. A message-pump thread and a safe
+world-mutation phase are still unverified; no puppet is created by this tool.

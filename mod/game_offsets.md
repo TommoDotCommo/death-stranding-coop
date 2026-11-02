@@ -212,7 +212,7 @@ both match. Tool: a 40-line scanner over the pinned exe (kept in session scratch
 |---|---:|---|---|
 | `SpawnSetup_ExportedCreateEntityFromSpawnSetup` | 0x18f5a20 | `xor eax,eax; ret` | **stub in retail**: always null. Dead end. |
 | `BuddyManager_sExportedRequestSpawnBuddy` | 0x18e9b10 | `ret` | stub. |
-| `EntityResource_ExportedCreateEntity` | 0x23806a0 | 4 register args + byte + 2 pointers + pointer to 16 bytes (UUID-sized), forwards to 0x2374400 | **real**. Puppet candidate: create an entity from a character resource. Argument meanings UNKNOWN. |
+| `EntityResource_ExportedCreateEntity` | 0x23806a0 | 4 register args + byte + 2 pointers + pointer to a 16-byte tagged value, forwards to 0x2374400 | **real**. Puppet candidate: create an entity from a character resource. Argument meanings UNKNOWN. |
 | `EntityResource_ExportedCreateEntityWithParent` | 0x2380630 | real body | candidate. |
 | `EntityResource_ExportedCreateDamageEntity` | 0x23805b0 | real body | not for puppets. |
 | `Entity_ExportedSetWorldTransform` | 0x2361ea0 | null check on rcx; calls 0x22dff80 (rcx=entity, rdx passed through) then 0x235bf60(entity, 0) | drive the puppet from the received pose. Transform layout presumably the 60-byte H5 block; UNCONFIRMED. |
@@ -231,8 +231,8 @@ arguments (read the game's own callers of 0x2374400), entity lifetime/ownership,
 
 Hypothesis from the body: `CreateEntity(EntityResource* res /*rcx; null -> null*/, const double pos[3] /*rdx*/,
 const float rot[3][4] /*r8: 3 rows, 16-byte stride, xyz used*/, name_or_id /*r9: converted, stored at entity+0x50*/,
-bool place /*if set: 0x235a010(entity,&transform,1,0)*/, void* a /*optional: 0x235df30(entity,a)*/,
-void* b /*optional: 0x235d5f0(entity,b)*/, 16-byte value /*by pointer; 0x23c8130(value,entity) after creation*/)`.
+bool place /*if set: 0x235a010(entity,&transform,1,0)*/, instigator /*optional: 0x235df30(entity,a)*/,
+attack_event /*optional: 0x235d5f0(entity,b)*/, tagged_value /*16 bytes by pointer; 0x23c8130(value,entity)*/)`.
 It builds a 60-byte transform (3 x f64 position + 3x3 f32 rotation, the live H5 layout), calls `0x2378cf0` on it,
 creates through `res->vtable[0x80/8](res,&transform)`, then adds the entity to the world through the global at
 0x7bc4e70 (`vtable[3](mgr, entity, 0, 0, 0)`). The game's own code does not call 0x2374400 except through the export.
@@ -242,3 +242,60 @@ lives at +0x58. Candidate puppet chain, all through the game's own functions: lo
 GetResource -> CreateEntity(resource, pose) -> SetWorldTransform per received pose -> SetVisible/Remove.
 Risks: Sam's resource may carry player-only components (camera, input, BB, cargo); an NPC porter resource avoids that
 but must be found. `PlayerGame_ExportedSwitchPlayerCharacter` (0x2642cf0) suggests character resources are swappable.
+
+
+### Message pump and creator arguments: next static pass (2026-11-02)
+
+`python3 -B mod/find_message_calls.py "<game dir>/ds.exe"` is a reproducible,
+read-only inventory for the same pinned SHA-256. It parses the ordinary USER32
+imports and AMD64 exception directory, scans executable sections for RIP-relative
+indirect call/jump candidates, follows direct rel32 callers of jump stubs, and
+reports LEA references to containing function starts. It reports **byte candidates**,
+not decoded instructions; register-indirect uses and delay imports are outside its
+inventory. Function bounds are exception-directory ranges, not complete semantic
+functions. Synthetic tests cover bounds, signed displacements, data decoys,
+import thunks, malformed images, missing imports and the hash refusal.
+
+Focused `objdump` disassembly from the exception-directory start independently
+confirmed the following instruction boundaries and targets on the pinned file:
+
+| API | IAT RVA | Call RVA | Containing range (end exclusive) |
+|---|---:|---:|---|
+| PeekMessageA | 0x3b3a7b8 | 0x1a19381 | 0x1a19350–0x1a193df |
+| GetMessageA | 0x3b3a7c0 | 0x1a19398 | 0x1a19350–0x1a193df |
+
+The pump peeks without removing (fifth argument 0), then gets, translates and
+dispatches at most 100 messages per invocation. A zero GetMessage result returns
+false; a negative result is not specially handled by this game function. No
+thread identity or world-mutation phase follows from this code alone.
+
+There are no E8/E9 byte candidates targeting the pump start. Instead, LEA at
+0x1a16cae in constructor range 0x1a16c20–0x1a17050 resolves to the pump and the
+following store puts it at application object +0xc0. The object's vtable is
+0x3ba6488. The routine at 0x1a17a90 reads +0xc0 and invokes it through RAX at
+0x1a17aea. Its pointer occurs at 0x3ba6660 (vtable offset +0x1d8); a global
+counter at 0x577d68c guards reentrancy around this invocation. These are static
+links, **not proof of a safe game-thread callback**. That counter also means a
+hook must not assume message dispatch is a unique frame boundary. Thread ID,
+outer caller stack, cadence in gameplay/loading, and overlap with world jobs
+remain unknown. Do not drive an entity creator from either message API yet.
+
+The creator's arguments 6 and 7 now have stronger static names:
+
+| Argument | Evidence | Interpretation |
+|---|---|---|
+| 6 | Creator passes it to 0x235df30. Registered `Entity_ExportedSetInstigator` resolves to 0x2361d30 and tail-jumps to the same routine after checking existing fields. | Instigator, not an arbitrary attachment pointer. Exact pointee layout/lifetime unknown. |
+| 7 | Creator passes it to 0x235d5f0. Registered `Entity_ExportedSetAttackEvent` resolves to 0x2361c70 and tail-jumps there. | Attack event, not a parent pointer. Exact pointee layout/lifetime unknown. |
+| 8 | Export copies 16 bytes; helper 0x23c8130 reads signed tag byte +0, switches on tags 1/2/3, and loads a pointer at +8 in tags 1/2. Other tags return without those actions. | A tagged value; **the earlier UUID hypothesis is rejected**. Zero tag performs no branch action in this helper, but a safe complete spawn contract is not proven. |
+
+The helper unconditionally reads the tag through argument 8: null is not an
+acceptable default pointer. Its type name and tags' complete semantics remain
+unknown. A raw zero-initialized 16-byte value would exercise only the observed
+no-action branch; that does not establish a valid resource/lifetime contract.
+No creator or transform setter was called in this pass. Whether Sam's resource
+creates camera, input, BB or cargo components is still unknown.
+
+Verification for this pass: pinned-file scanner and focused disassembly ran;
+10 synthetic scanner tests and the full repository `make test` passed (including
+28 core and 33 pose mutants plus the proxy protection oracles). No game launched,
+no live thread identity observed, and no actor created.
