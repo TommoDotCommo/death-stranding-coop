@@ -30,6 +30,14 @@ int main() {
     auto gameBase=good;gameBase.replace(gameBase.find("synthetic"),9,"game");
     auto game=withKeys(gameBase,"\"self_tick\":true,"+pin);
     auto parsed=mod::parseConfig(game);assert(parsed.selfTick&&!parsed.discovery&&parsed.presenceLogMaxMiB==8&&parsed.provider=="game");
+    auto threaded=withKeys(gameBase,"\"game_thread\":true,"+pin);
+    assert(mod::parseConfig(threaded).gameThread&&!mod::parseConfig(threaded).selfTick);
+    assert(refused(withKeys(threaded,"\"self_tick\":true")));
+    assert(refused(withKeys(threaded,"\"discovery\":true")));
+    assert(refused(withKeys(good,"\"game_thread\":true")));
+    assert(refused(withKeys(threaded,"\"puppet_probe\":true")));
+    assert(mod::parseConfig(withKeys(threaded,"\"puppet_probe\":true,\"required\":true")).puppetProbe);
+    assert(refused(withKeys(game,"\"puppet_probe\":true,\"required\":true")));
     assert(!mod::parseConfig(good).selfTick);
     assert(refused(gameBase));                                                   // game without self_tick or pin
     assert(refused(withKeys(gameBase,pin)));                                     // game without self_tick

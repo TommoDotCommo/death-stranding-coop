@@ -7,6 +7,9 @@
 #include <bcrypt.h>
 #include <mmsystem.h>
 #include "../mod/config.h"
+#define MOD_INTERFACE_ONLY
+#include "../mod/game_thread.h"
+#undef MOD_INTERFACE_ONLY
 #include <shlobj.h>
 #include <knownfolders.h>
 #include <tlhelp32.h>
@@ -257,6 +260,28 @@ using PeekMessageFn=BOOL(WINAPI*)(LPMSG,HWND,UINT,UINT,UINT);
 using GetMessageFn=BOOL(WINAPI*)(LPMSG,HWND,UINT,UINT);
 PeekMessageFn real_peek=nullptr;
 GetMessageFn real_get=nullptr;
+using GameTick=int(*)(const mod_game_thread_context*);
+std::atomic<GameTick> game_tick{nullptr};
+std::atomic_flag game_dispatching=ATOMIC_FLAG_INIT;
+DWORD game_thread_owner=0;
+uint64_t last_game_dispatch=0;
+void dispatch_game_thread(const redirect::trace::Call& call,BOOL result) {
+    auto tick=game_tick.load(std::memory_order_acquire);
+    if(!tick || result || call.depth!=1 || call.tid!=game_thread_owner)return;
+    auto& host=thread_trace.buffer;
+    if(call.caller<host.hostBase || call.caller-host.hostBase!=mod::dispatch::PeekReturn)return;
+    auto now=GetTickCount64();if(now<last_game_dispatch || now-last_game_dispatch<50)return;
+    void* raw[32]{};auto count=CaptureStackBackTrace(0,32,raw,nullptr);uint64_t frames[32]{};
+    for(unsigned i=0;i<count;++i)frames[i]=reinterpret_cast<uint64_t>(raw[i]);
+    if(!mod::dispatch::frameStack(frames,count,host.hostBase,host.hostSize))return;
+    if(game_dispatching.test_and_set(std::memory_order_acquire))return;
+    last_game_dispatch=now;
+    const mod_game_thread_context context{sizeof(mod_game_thread_context),1,call.tid,call.depth,mod::dispatch::FrameReturn,1u,0};
+    auto status=tick(&context);
+    game_dispatching.clear(std::memory_order_release);
+    if(status<0) {game_tick.store(nullptr,std::memory_order_release);fatal("redirect: game-thread mod tick failed; inspect mod log\n");}
+}
+
 redirect::trace::Call trace_enter(redirect::trace::Api api,void* caller) noexcept {
     auto call=thread_trace.begin(api,GetCurrentThreadId(),GetTickCount64(),reinterpret_cast<uint64_t>(caller));
     if(call.sampled()) {
@@ -274,6 +299,7 @@ __attribute__((noinline)) BOOL WINAPI hook_PeekMessageA(LPMSG msg,HWND hwnd,UINT
     auto call=trace_enter(redirect::trace::Api::peek,__builtin_return_address(0));
     SetLastError(incoming);
     auto result=real_peek(msg,hwnd,lo,hi,remove);auto error=GetLastError();
+    dispatch_game_thread(call,result);
     thread_trace.finish(call,GetTickCount64(),result);
     SetLastError(error);return result;
 }
@@ -767,7 +793,7 @@ HINTERNET WINAPI hook_WinHttpConnect(HINTERNET session,LPCWSTR server,INTERNET_P
 }
 void flush_redirect_log() {flush_counts();}
 void install_redirect(void* self) {
-    own=(HMODULE)self;
+    own=(HMODULE)self;game_thread_owner=GetCurrentThreadId();
     policy.instance=env(L"COOP_REDIRECT_INSTANCE");policy.steam=env(L"COOP_REDIRECT_STEAM");
     for(auto pair:std::vector<std::pair<const wchar_t*,const wchar_t*>>{
         {L"COOP_REAL_LOCAL",L"local"},{L"COOP_REAL_ROAMING",L"roaming"},
@@ -916,6 +942,7 @@ BOOL CALLBACK bootstrap_mod(PINIT_ONCE,PVOID,PVOID*) {
         char bytes[4097];DWORD n=0;bool ok=ReadFile(f,bytes,sizeof(bytes),&n,nullptr);CloseHandle(f);
         if(!ok||n>4096) fatal("redirect: mod config read/size failure\n");
         auto c=mod::parseConfig(std::string(bytes,n));
+        if(c.gameThread&&(!trace_enabled||net.mode!=redirect::NetMode::enforce))fatal("redirect: game_thread requires observer hooks and enforced networking\n");
         // This single reviewed library is the only explicit loader exception.
         // Its CRT entry point has no mod startup or IO. Resolve dependencies only
         // from the DLL folder and System32. Patch BEFORE calling any mod API.
@@ -923,6 +950,8 @@ BOOL CALLBACK bootstrap_mod(PINIT_ONCE,PVOID,PVOID*) {
         drain_modules();
         auto init=mod_handle?reinterpret_cast<int(*)(const char*)>(real_gpa(mod_handle,"mod_init")):nullptr;
         auto tick=mod_handle?real_gpa(mod_handle,"mod_tick"):nullptr;
+        auto callback=mod_handle?reinterpret_cast<GameTick>(real_gpa(mod_handle,"mod_game_thread_tick")):nullptr;
+        if(c.gameThread&&!callback)fatal("redirect: game_thread callback export missing\n");
         auto stop=mod_handle?real_gpa(mod_handle,"mod_shutdown"):nullptr;
         auto error=mod_handle?reinterpret_cast<const char*(*)()>(real_gpa(mod_handle,"mod_last_error")):nullptr;
         bool started=false;
@@ -936,7 +965,8 @@ BOOL CALLBACK bootstrap_mod(PINIT_ONCE,PVOID,PVOID*) {
             if(c.required) fatal("redirect: REQUIRED mod failed to load/start; provider or hook unavailable\n");
             note(L"MOD_FAILED",L"optional mod failed to load/start",dll);return TRUE;
         }
-        mod_result=1;note(L"MOD_STARTED",L"network only; no game-thread hook",dll);return TRUE;
+        if(c.gameThread){game_tick.store(callback,std::memory_order_release);note(L"GAME_THREAD_ARMED",L"empty Peek; main thread, reviewed stack, depth 1; 20 Hz",dll);}
+        mod_result=1;note(L"MOD_STARTED",c.gameThread?L"guarded game-thread dispatch":L"network only; no game-thread hook",dll);return TRUE;
     } catch(...) {fatal("redirect: invalid mod config or mod bootstrap exception\n");}
 }
 }

@@ -18,7 +18,10 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 - Drawing the other player in the world (puppet). Static leads: `EntityResource_ExportedCreateEntity` is a real
   creation function; the SpawnSetup and buddy spawn exports are empty stubs in this build. See
   `mod/game_offsets.md`. The message pump and main-loop caller were observed on one game thread through menu, loading,
-  movement and pause. Entity creation and a safe world-mutation phase remain unverified.
+  movement and pause. Guarded mod callbacks now work live on that path. The first Sam-resource creation
+  attempt crashed during activation because DSPlayerController was missing; that resource is now
+  quarantined before creation. No actor returned and no transform setter ran. A supported resource/context
+  and a safe world-mutation phase remain unverified.
 - Height-change snaps in the presence core (25-30 % of samples are near one; a puppet would jump on slopes).
 - Shared cargo (picking up the same package works in both worlds today: no sync), structures, BTs, vehicles,
   cutscenes, death and voidouts, saves of a shared world.
@@ -30,3 +33,17 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 
 Game-free: simulator, fuzzer and mutants for the core and every proxy protection (`make test`). Live: supervised
 two-copy runs with state read from the processes; no automated in-game bot yet.
+
+### Guarded callback and failed Sam clone (2026-11-02)
+
+The versioned game-thread callback ran live on the reviewed main-loop stack in
+menu and loaded gameplay. The first supervised Sam-resource creator call then
+crashed during component activation with a null DSPlayerController; the actor
+never returned. No transform setter or removal ran. This establishes callback
+delivery but leaves the world-mutation contract unverified. The native resource
+is now quarantined before creation, with a tested refusal gate and no config
+override. The next actor experiment needs a standalone resource or the supported
+player-controller construction context. Full details are in `mod/game_offsets.md`.
+
+The test process was stopped by identity, normal read-only configs restored, and
+original saves remained unchanged immediately and after a 30-second settle check.

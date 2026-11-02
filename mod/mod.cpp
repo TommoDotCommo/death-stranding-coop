@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <cerrno>
+#include <sys/syscall.h>
 #include <random>
 using SOCKET=int;
 constexpr int INVALID_SOCKET=-1;
@@ -23,6 +24,8 @@ constexpr int INVALID_SOCKET=-1;
 #include "timing.h"
 #include "identity.h"
 #include "pose.h"
+#include "game_thread.h"
+#include "puppet.h"
 #ifdef MOD_FAKE_NETWORK
 #include "fake_memory.h"
 #endif
@@ -84,6 +87,13 @@ uint64_t nonce() {
     if(!n) throw std::runtime_error("zero OS nonce");
     return n;
 }
+uint32_t currentThread() {
+#ifdef _WIN32
+    return GetCurrentThreadId();
+#else
+    return uint32_t(syscall(SYS_gettid));
+#endif
+}
 struct Cache final:ds::StateProvider {
     uint64_t sampledAt=0;
     uint64_t localSampleTime(uint64_t) const override {return sampledAt;}
@@ -110,6 +120,10 @@ struct Runtime final:ds::Transport {
     std::unique_ptr<mod::PresenceLog> presence;
     mod::GameProvider* game=nullptr;       // alias of provider when provider is "game"
     std::thread ticker;uint64_t ticks=0;bool poseAvailable=false;std::string poseReason="not read";
+    mod::dispatch::Gate gameGate;
+    uint64_t gameRejected=0;bool dispatchVerified=false,staleCommandNoted=false;
+    std::filesystem::path puppetCommand;
+    std::unique_ptr<mod::puppet::Probe> puppet;
     Cache cache;std::unique_ptr<ds::StateProvider> provider;std::unique_ptr<ds::Core> core;
     uint64_t sent=0,received=0,dropped=0,wrongAccepted=0,buildRefused=0,versionRefused=0,sessionRefused=0;
     bool paired=false,failed=false;std::string failure;uint64_t startedAt=0;std::vector<double> errors;
@@ -240,12 +254,38 @@ struct Runtime final:ds::Transport {
             // An unavailable pose (main menu, loading) is NORMAL: presence stays gated until a pose is available.
             openPresenceLog(path);
             sampler=openSampler();
+            if(config.gameThread) {
+#ifdef MOD_FAKE_NETWORK
+                const auto sites=mod::dispatch::FixtureSites;
+                fake->dispatchSites(sites);
+#else
+                const auto sites=mod::dispatch::PinnedSites;
+#endif
+                mod::dispatch::validateSites(*sampler,sites);gameGate=mod::dispatch::Gate(sites.framePattern+16);dispatchVerified=true;
+            }
+            if(config.puppetProbe) {
+                puppetCommand=path.parent_path()/"puppet.spawn";
+#ifdef MOD_FAKE_NETWORK
+                mod::puppet::Api api;
+                api.local=[this]{return mod::puppet::readLocalAnchor(*sampler);};
+                api.read=[this](uint64_t e){return mod::puppet::readEntityPose(*sampler,e);};
+                api.canCreate=[](uint64_t){return true;};
+                api.resource=[this](uint64_t){return fake->base+0x9000;};
+                api.create=[this](uint64_t,const mod::puppet::Transform& t){fake->setEntityPose(0x8000,t.position.data(),t.rotation.data());return fake->base+0x8000;};
+                api.place=[this](uint64_t,const mod::puppet::Transform& t){fake->setEntityPose(0x8000,t.position.data(),t.rotation.data());};
+                api.remove=[this](uint64_t){fake->mutate([&]{fake->blocked=fake->base+0x80c8;});};
+#else
+                auto api=mod::puppet::nativeApi(*sampler);
+#endif
+                puppet=std::make_unique<mod::puppet::Probe>(std::move(api),[this](const std::string& row){note(row.c_str());});
+            }
             presence=std::make_unique<mod::PresenceLog>([this](const std::string& line){return writePresence(line);},uint64_t(config.presenceLogMaxMiB)*1024*1024,[this](const char* s){note(s);});
             auto* raw=sampler.get();
             auto g=std::make_unique<mod::GameProvider>([raw]{return mod::PoseReader(*raw).read();},mod::nowUs,presence.get());
             game=g.get();provider=std::move(g);
         } else provider=std::make_unique<mod::SyntheticProvider>(config.slot);
-        cache.sampledAt=mod::nowMs();cache.available=provider->readLocal(cache.local);cache.gated=provider->isInCutsceneOrLoading();provider->applyRemote({});
+        cache.sampledAt=mod::nowMs();
+        if(!config.gameThread){cache.available=provider->readLocal(cache.local);cache.gated=provider->isInCutsceneOrLoading();provider->applyRemote({});}
         if(game){poseAvailable=cache.available;poseReason=game->reason();}
         if(!cache.available && !game) throw std::runtime_error("provider unavailable: synthetic provider failed; mod startup refused");
 #ifndef MOD_FAKE_NETWORK
@@ -273,7 +313,7 @@ struct Runtime final:ds::Transport {
 #endif
         startedAt=mod::nowMs();
         auto prev=mod::nowUs();for(unsigned i=0;i<4096;++i) {auto t=mod::nowUs();if(t>prev && (!observedClockStep || t-prev<observedClockStep))observedClockStep=t-prev;prev=t;}
-        note(game?"network ready; game provider (read-only pose, guarded copies, no writes, no actor); no game hook installed\n":"network ready; synthetic provider; no game hook installed\n");running=true;worker=std::thread([this]{loop();});
+        note(config.gameThread?"network ready; awaiting validated game-thread callback\n":game?"network ready; game provider (read-only pose, guarded copies, no writes, no actor); no game hook installed\n":"network ready; synthetic provider; no game hook installed\n");running=true;worker=std::thread([this]{loop();});
         if(config.selfTick)ticker=std::thread([this]{tickLoop();});
     }
     void openPresenceLog(const std::filesystem::path& path) {
@@ -305,7 +345,7 @@ struct Runtime final:ds::Transport {
 #endif
     }
     // The body of mod_tick, shared with the self-tick thread. Takes only the runtime mutex (never the lifecycle lock).
-    bool tickOnce(std::string& err) {
+    bool tickOnce(std::string& err,bool gameContext=false) {
         std::lock_guard<std::mutex> guard(mutex);
         if(failed) {err=failure;return false;}
         try {
@@ -320,6 +360,16 @@ struct Runtime final:ds::Transport {
             if(game){poseAvailable=cache.available;poseReason=game->reason();}
             // Render at the actual apply time, not the preceding network iteration.
             core->frame(now);provider->applyRemote(cache.remote);
+            if(puppet&&gameContext) {
+                if(!puppet->armed()&&std::filesystem::exists(puppetCommand)) {
+                    auto command=readConfig(puppetCommand);
+                    if(command=="spawn "+mod::runStamp()+"\n") {
+                        if(!std::filesystem::remove(puppetCommand))throw std::runtime_error("cannot consume puppet command");
+                        note("PUPPET command consumed for this process; one experiment only\n");puppet->arm();
+                    } else if(!staleCommandNoted){note("PUPPET ignored command for another process\n");staleCommandNoted=true;}
+                }
+                puppet->tick(now,true);
+            }
             if(unappliedReceive) {receiveApply.add(clock-unappliedReceive);unappliedReceive=0;}
             if(!cache.available && !game) {err="provider unavailable during tick";note(err.c_str());return false;}
             if(now-startedAt>1000 && config.provider=="synthetic" && cache.remote.visible && core->connected()) {
@@ -365,6 +415,8 @@ extern "C" {
 #ifdef MOD_FAKE_NETWORK
 // Test-only datagram boundary. Production DLLs never export these functions.
 // Move the fake player (game axes, z up; rotation row-major) and enter the world; menu=1 returns to the main menu.
+MOD_API uint32_t mod_test_thread_id() {return currentThread();}
+MOD_API uint64_t mod_test_frame_caller() {return mod::dispatch::FixtureSites.framePattern+16;}
 MOD_API const char* mod_test_run_stamp() {static std::string stamp=mod::runStamp();return stamp.c_str();}
 MOD_API void mod_test_set_pose(const double* position,const float* rotation,int menu) {
     std::lock_guard<std::mutex> lock(lifecycle);if(!runtime||!runtime->fake)return;
@@ -396,13 +448,34 @@ int mod_tick(double dt) {
     std::lock_guard<std::mutex> lock(lifecycle);
     if(!runtime || !std::isfinite(dt)||dt<0||dt>1) {error="invalid tick or uninitialized mod";return 0;}
     auto& r=*runtime;
-    if(r.config.selfTick) {   // the mod ticks itself; an external tick is a validated no-op, never a second tick source
+    if(r.config.selfTick||r.config.gameThread) {   // the mod ticks itself; an external tick is a validated no-op, never a second tick source
         std::lock_guard<std::mutex> guard(r.mutex);
         if(r.failed) {error=r.failure;return 0;}
         return 1;
     }
     std::string err;
     if(!r.tickOnce(err)) {error=err;return 0;}
+    return 1;
+}
+int mod_game_thread_tick(const mod_game_thread_context* context) {
+    // A hook must never wait for bootstrap or shutdown to release lifecycle.
+    std::unique_lock<std::mutex> lock(lifecycle,std::try_to_lock);if(!lock)return 0;
+    if(!runtime||!context)return -1;
+    auto& r=*runtime;
+    if(!r.config.gameThread||!r.dispatchVerified)return -1;
+#if defined(_WIN32) && !defined(MOD_FAKE_NETWORK)
+    // Independently attest the actual stack; C ABI fields alone are not proof.
+    void* raw[32]{};auto count=CaptureStackBackTrace(0,32,raw,nullptr);uint64_t frames[32]{};
+    for(unsigned i=0;i<count;++i)frames[i]=reinterpret_cast<uint64_t>(raw[i]);
+    uint64_t size=0;for(auto section:r.sampler->sections)size=std::max(size,section.address-r.sampler->base+section.size);
+    if(!mod::dispatch::frameStack(frames,count,r.sampler->base,size)){++r.gameRejected;return 0;}
+#endif
+    if(!r.gameGate.accept(*context,currentThread())){++r.gameRejected;return 0;}
+    std::string err;
+    if(!r.tickOnce(err,true)) {
+        std::lock_guard<std::mutex> guard(r.mutex);r.failed=true;r.failure=err;r.running=false;error=err;
+        try{r.note(err.c_str());}catch(...){}return -1;
+    }
     return 1;
 }
 void mod_shutdown() {std::lock_guard<std::mutex> lock(lifecycle);auto* r=runtime;runtime=nullptr;delete r;}
@@ -419,6 +492,7 @@ unsigned mod_status(char* out,unsigned cap) {
     } else if(runtime) {auto& r=*runtime;std::lock_guard<std::mutex> guard(r.mutex);auto errors=r.errors;std::sort(errors.begin(),errors.end());
         auto p=[&](double q){return errors.empty()?-1.:errors[size_t((errors.size()-1)*q)];};
         std::ostringstream o;o<<"{\"handshake\":"<<(r.paired?"true":"false")<<",\"connected\":"<<(r.core->connected()?"true":"false")<<",\"sent\":"<<r.sent<<",\"received\":"<<r.received<<",\"dropped\":"<<r.dropped<<",\"accepted\":"<<r.core->accepted()<<",\"wrong_accepted\":"<<r.wrongAccepted<<",\"build_refused\":"<<r.buildRefused<<",\"version_refused\":"<<r.versionRefused<<",\"session_refused\":"<<r.sessionRefused<<",\"rtt_ms\":"<<r.measuredRtt<<",\"current_rtt_ms\":"<<r.core->rttMs()<<",\"samples\":"<<errors.size()<<",\"error_p50\":"<<p(.5)<<",\"error_p95\":"<<p(.95)<<",\"error_p99\":"<<p(.99)<<",\"error_max\":"<<p(1)<<",\"failed\":"<<(r.failed?"true":"false")<<",\"self_tick\":{\"enabled\":"<<(r.config.selfTick?"true":"false")<<",\"ticks\":"<<r.ticks<<"},\"pose\":{\"available\":"<<(r.poseAvailable?"true":"false")<<",\"reason\":\""<<r.poseReason<<"\"}";
+        o<<",\"game_thread\":{\"enabled\":"<<(r.config.gameThread?"true":"false")<<",\"verified\":"<<(r.dispatchVerified?"true":"false")<<",\"thread_id\":"<<r.gameGate.thread()<<",\"rejected\":"<<r.gameRejected<<"},\"puppet\":{\"enabled\":"<<(r.puppet?"true":"false")<<",\"stage\":\""<<(r.puppet?r.puppet->stage():"disabled")<<"\",\"actor\":"<<(r.puppet?r.puppet->actor():0)<<"}";
         o<<",\"timing\":{\"clock\":\""
 #ifdef _WIN32
         <<"QueryPerformanceCounter"

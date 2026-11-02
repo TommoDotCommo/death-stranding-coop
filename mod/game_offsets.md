@@ -360,3 +360,47 @@ DLLs and fresh isolation/module/network probes before the run. The observer is
 opt-in and changes no mod wire identity. Windows scope and enforced-network gate
 mutants were also rejected by the fixture probe. These checks do not turn the
 candidate into a verified entity-mutation API.
+
+
+### First guarded creator experiment: missing player controller (2026-11-02)
+
+An opt-in dispatcher successfully entered the mod on the observed startup/main
+thread, after an empty PeekMessage return, with the independently checked return
+chain `1a19387 -> 1a17aec -> 263d2ae -> 263a869 -> 263753d`.
+This verifies callback delivery, not a world-job barrier or mutation contract.
+
+One supervised native creator invocation using the loaded local Sam's resource
+crashed before returning an actor. No transform setter or removal call ran.
+The owner-provided crash stack contains `23806eb -> 237451c -> 23500e4 ->
+237c5c3 -> 271fa8e -> 373a94d -> 351b5c5 -> 27e6510 -> 26b8b00`.
+The faulting instruction writes through RCX, which was zero.
+
+Static inspection of the pinned executable explains that null: component init
+at 27e63c0 looks up metadata 4bb2770 through helper 22b2a60 at 27e6476.
+That metadata names DSPlayerController. The returned component is retained in
+R14 and at component+418; at 27e650b it is passed as RCX to 26b8b00 without
+a null check. That callee starts by writing RCX+5370. This matches the observed
+stack and null register. The generic resource path did not supply this required
+controller. Whether other player-only parts (camera/input/BB/cargo) can be
+safely cloned remains unknown.
+
+Creator helper 2374400 calls activation 234f3e0 before return site 237451c;
+its placement-flag check follows that activation. Changing placement or the
+optional tagged value does not address this failure. Do not bypass the null
+write or skip the initializer: subsequent calls need the same controller.
+The native local-Sam backend now refuses resource approval before calling the
+creator, emits `resource_rejected`, and has no config override. A missing
+approval callback also refuses. A mutant proves that removing this gate lets
+an unapproved fake resource reach creation. Next research needs a standalone
+NPC resource or the supported player-controller construction context.
+
+Additional ABI verification: Remove at 2361c20 tail-jumps to 234caa0, whose
+second argument (DL) selects immediate versus queued removal. Pass false for
+the reference-owning queued task; typed host and Windows stubs test this.
+The creator's fourth argument is a non-null C string, not a string object.
+Its rotation occupies three 16-byte rows; the transform setter reads 60 bytes.
+
+The failed test copy was stopped by process identity. Original saves were
+unchanged immediately and after a 30-second settle check; both copies passed
+post-run source verification (archive contents were not rehashed). These checks
+do not make the failed creator call safe.

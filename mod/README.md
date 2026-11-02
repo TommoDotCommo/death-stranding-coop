@@ -503,3 +503,71 @@ candidates and containing exception-directory ranges. It opens the file read-onl
 and refuses another hash. See `game_offsets.md` for independently disassembled
 results and the application callback chain. A message-pump thread and a safe
 world-mutation phase are still unverified; no puppet is created by this tool.
+
+
+## Experimental game-thread dispatch and one-shot actor probe
+
+Defaults retain read-only pose exchange. A game-provider config may select
+`game_thread:true` instead of `self_tick:true` (the two are exclusive). It also
+requires `COOP_THREAD_TRACE=1` in the disposable process environment and enforced
+networking. The proxy waits for an empty PeekMessage return on its startup thread,
+non-nested dispatch, and the reviewed main-loop stack. It calls the versioned
+`mod_game_thread_tick` ABI at most 20 times a second. The mod independently checks
+the real Windows stack, ABI fields, thread identity, caller and network attestation;
+its lifecycle try-lock skips bootstrap/shutdown contention. External `mod_tick`
+is a no-op in this mode. Hash-gated unique code signatures and reviewed branch
+operands are verified before callbacks are accepted. Thread IDs are bound per run,
+not taken from a previous observation.
+
+`puppet_probe:true` additionally requires `game_thread:true` and `required:true`.
+It validates the resource-getter/creator/transform/removal functions at init but
+calls none until an operator arms this process. The native Sam resource is quarantined: arming now records
+`resource_rejected` before creation. There is no config bypass. A future resource
+backend needs an independently reviewed creation context. Use a disposable copy, normal loaded
+gameplay, a stationary Sam and a closed pause menu. A valid pose is not a proven
+visual-cutscene or loading gate. The experiment has no supported mid-game DLL
+unload/reinitialization path: the proxy retains the module for process lifetime.
+Stop the test process when finished.
+
+Example additional config fields (retain role, ports, session and the pinned
+`discovery_sha256` from the normal game config):
+
+```json
+{"self_tick":false,"game_thread":true,"puppet_probe":true,"required":true}
+```
+
+After fresh isolation/module/network probes for the matching production DLLs and
+an authorized supervised launch, run from native Windows Python:
+
+```sh
+python mod/probe_puppet.py --log "<instance>/redirect-data/redirect-<pid>-<start>.log" --arm
+```
+
+The tool requires an enforced-network/armed-dispatch audit record and the explicit
+probe config. It validates process creation time, waits for fresh stationary pose
+samples, checks the entity-world manager, then atomically publishes a command
+containing this process's PID and creation time beside `mod.json`. An old process's
+command is ignored. Without `--arm` it only watches an already armed experiment.
+It opens the process with query/read access only and independently reads the
+actor/local transforms and model/mover pointers. Evidence output belongs outside
+the repository.
+
+The game-free backend exercises creation three metres ahead, one transform change,
+and deferred removal with independent local-player and actor readbacks. These
+operations have **not succeeded in the game**. The first supervised native call
+crashed during component activation because the clone lacked DSPlayerController;
+no actor returned and no transform setter ran. See `game_offsets.md`.
+
+The reviewed creator ABI uses a non-null C string name, a 48-byte padded rotation,
+null instigator/attack-event pointers and a zero-tagged 16-byte value. The transform
+setter consumes 60 bytes. Removal takes a second boolean argument: false selects
+queued removal. A removal request would not prove deallocation. Camera, input,
+BB, cargo, generation ownership and a safe world-mutation phase remain unknown.
+
+Failures stop further probe operations; unexpected engine/ABI failures may stop
+the disposable process. Nothing in this mode talks to the online service. The
+same source build must be deployed to both peers before another co-op launch.
+Game-free coverage includes actual fake-memory C ABI calls and worker threads,
+creation/movement readbacks, command stamping, shutdown exclusion, typed creator
+and deferred-remove argument transfer (also run on Windows), plus mutants for
+dispatch, world/local identity, one-shot behavior, arguments and readbacks.

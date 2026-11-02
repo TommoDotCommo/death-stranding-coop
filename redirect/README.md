@@ -133,3 +133,10 @@ scope or remove the enforced-network requirement.
 Portable tests cover publication, bounded storage, per-thread depth, sampling,
 concurrent producers, table exhaustion, incomplete reads and ABI validation.
 Mutants for depth, rate, capacity and publication must fail their oracles.
+
+
+When `mod.json` explicitly selects `game_thread:true`, the observer hooks also
+provide the reviewed dispatch seam described in `../mod/README.md`. This requires
+enforced networking and a matching `mod_game_thread_tick` export. `GAME_THREAD_ARMED`
+records the binding; defaults remain observation-only. A failed callback disarms
+the pointer and fails closed. The proxy retains its mod module for process lifetime.

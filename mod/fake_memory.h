@@ -1,6 +1,7 @@
 // Fake mapped PE + process memory for host tests: three pointer layers (manager -> selection -> player -> entity).
 #pragma once
 #include "discovery.h"
+#include "game_thread.h"
 #include <cstring>
 #include <mutex>
 #include <sstream>
@@ -45,6 +46,15 @@ struct Fake {
     }
     void menu() {put<uint64_t>(0x3000,0);}
     void game() {put<uint64_t>(0x3000,base+0x4000);}
+    void dispatchSites(const mod::dispatch::Sites& s) {
+        auto call=[&](uint64_t at,bool indirect,uint64_t target){data[at]=indirect?0xff:0xe8;if(indirect)data[at+1]=0x15;unsigned n=indirect?6:5;put<int32_t>(at+n-4,int32_t(target-(at+n)));};
+        call(s.peekCall,true,s.peekIat);call(s.getCall,true,s.getIat);call(s.outerCall,false,s.outerTarget);call(s.loopCall,false,s.loopTarget);
+        const unsigned char pattern[]={0x48,0x8b,0x0d,0,0,0,0,0x48,0x8b,0x01,0xff,0x90,0xd8,1,0,0,0x84,0xc0,0x0f,0x85,0,0,0,0};
+        memcpy(data.data()+s.framePattern,pattern,sizeof pattern);put<int32_t>(s.framePattern+3,int32_t(s.applicationGlobal-(s.framePattern+7)));
+    }
+    void setEntityPose(size_t entity,const double* position,const float* rotation) {
+        std::lock_guard<std::mutex> g(lock);memcpy(data.data()+entity+0xc8,position,24);memcpy(data.data()+entity+0xe0,rotation,36);
+    }
     std::mutex lock;   // only the threaded fake-network build uses these two
     bool readLocked(uint64_t a,void* p,size_t n) {std::lock_guard<std::mutex> g(lock);return read(a,p,n);}
     template<class F> void mutate(F f) {std::lock_guard<std::mutex> g(lock);f();}
