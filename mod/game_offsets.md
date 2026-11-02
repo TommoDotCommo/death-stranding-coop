@@ -299,3 +299,64 @@ Verification for this pass: pinned-file scanner and focused disassembly ran;
 10 synthetic scanner tests and the full repository `make test` passed (including
 28 core and 33 pose mutants plus the proxy protection oracles). No game launched,
 no live thread identity observed, and no actor created.
+
+
+### Message-thread observation: menu, loading, movement and pause (2026-11-02)
+
+The opt-in proxy observer (`redirect/thread_trace.h`, `COOP_THREAD_TRACE=1`)
+was first exercised by a Windows fixture probe: two threads, nested dispatch,
+message/flag and LastError preservation, GetMessage positive/zero/negative
+results, disabled mode, invalid configuration refusal, enforced-network
+requirement and process-creation-time refusal. Four recorder mutants and six
+reader tests passed their oracles. The repository's full `make test` and Windows
+cross-build passed before the game observation.
+
+A supervised single disposable instance of the pinned build then produced 906
+published records (entry/return pairs), zero dropped pairs, and counters of
+45,326 PeekMessageA and 9,947 GetMessageA calls. The only observed thread ID was
+9316. Independent pose sampling produced 844 samples, 422 with a local player;
+position spans were about 42.95/15.40/11.23 metres in adapter axes, peak sampled
+speed 5.32 m/s, and the final paused sample had speed zero. The owner identified
+the menu and completed the requested load/walk/pause sequence. A valid pose alone
+does not establish a pause or visual-cutscene gate.
+
+The common captured return-address chain was:
+
+`0x1a19387` (Peek) or `0x1a1939e` (Get) -> `0x1a17aec` ->
+`0x263d2ae` -> `0x263a869` -> `0x263753d` -> `0x18e9e88` ->
+`0x18ea224` -> `0x18ea0a6` -> `0x3b0405e`.
+
+Focused disassembly confirms the caller at 0x263d2a8 dispatches application
+vtable slot +0x1d8 through the application global at 0x577d3f0. Routine
+0x2637510 loops over calls to 0x263a5d0 and 0x263b860. The former calls
+0x263cfe0 at 0x263a864 (return 0x263a869); after that return it iterates
+subsystems via vtable +0x8 at 0x263a8a8, calls 0x263ec30, then iterates via
+vtable +0x10 at 0x263a8f6. Those subsystems' types and their job synchronization
+contracts remain unknown. Do not infer a completed world-job barrier here.
+
+Earlier startup/loading samples also had paths through 0x263094f or
+0x1a9862e/0x2630985, then 0x262c353/0x18e9e6c. Thus the message APIs are not
+exclusive to the steady main-loop phase. Every sampled live depth was 1, while
+the synthetic Windows probe demonstrated depth >1: absence in this sample is
+not proof that the game cannot reenter dispatch.
+
+**What this establishes:** a concrete, live-observed game-thread candidate and
+its common main-loop caller. It does not establish entity-creation safety,
+resource ownership, a visual cutscene gate, or a world-mutation phase. No entity
+creator or transform setter was called. A future experiment should restrict
+itself to the reviewed caller path and game-thread identity, reject nested or
+unavailable-world states, and validate the complete creation/lifetime contract.
+
+Additional static caution: the resource helper at 0x1dde990 (used by
+`Entity_ExportedGetResource`) follows a descriptor and can execute reference-count
+operations (`lock xadd` at 0x1dde9cf) on one branch. Treat it as an engine call
+with side effects, not as a substitute for a guarded read from a worker thread.
+
+
+The run was stopped by recorded process identity. Both copies passed post-run
+source/copy verification; original saves were unchanged immediately and after a
+30-second settle check. Both copies received matching source-built proxy and mod
+DLLs and fresh isolation/module/network probes before the run. The observer is
+opt-in and changes no mod wire identity. Windows scope and enforced-network gate
+mutants were also rejected by the fixture probe. These checks do not turn the
+candidate into a verified entity-mutation API.

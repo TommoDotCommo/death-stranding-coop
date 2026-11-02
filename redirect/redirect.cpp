@@ -19,6 +19,7 @@
 #include "hook_list.h"
 #include "objects.h"
 #include "network_policy.h"
+#include "thread_trace.h"
 #include <set>
 #include <winternl.h>
 #include <atomic>
@@ -246,6 +247,51 @@ DWORD WINAPI hook_GetEnvironmentVariableW(LPCWSTR key,LPWSTR out,DWORD n) {
     if(!out) {SetLastError(ERROR_INVALID_PARAMETER);return 0;}
     wcscpy(out,q.c_str()); note(L"REDIRECT",key,q); return (DWORD)q.size();
 }
+// Opt-in diagnostic observer. Only the main executable's two ordinary imports
+// are patched; GetProcAddress and late/system modules keep their original APIs.
+// This proxy remains loaded for process lifetime. There is no unhook/unload API.
+redirect::trace::Observer thread_trace;
+bool trace_enabled=false;
+unsigned trace_imports=0;
+using PeekMessageFn=BOOL(WINAPI*)(LPMSG,HWND,UINT,UINT,UINT);
+using GetMessageFn=BOOL(WINAPI*)(LPMSG,HWND,UINT,UINT);
+PeekMessageFn real_peek=nullptr;
+GetMessageFn real_get=nullptr;
+redirect::trace::Call trace_enter(redirect::trace::Api api,void* caller) noexcept {
+    auto call=thread_trace.begin(api,GetCurrentThreadId(),GetTickCount64(),reinterpret_cast<uint64_t>(caller));
+    if(call.sampled()) {
+        void* frames[redirect::trace::StackFrames]{};
+        // Native bounded unwinder; no DbgHelp, symbol lookup, file IO or game-object dereferences.
+        auto count=CaptureStackBackTrace(0,redirect::trace::StackFrames,frames,nullptr);
+        uint64_t addresses[redirect::trace::StackFrames]{};
+        for(unsigned i=0;i<count;++i)addresses[i]=reinterpret_cast<uint64_t>(frames[i]);
+        thread_trace.publish(call,redirect::trace::Phase::enter,GetTickCount64(),0,addresses,count);
+    }
+    return call;
+}
+__attribute__((noinline)) BOOL WINAPI hook_PeekMessageA(LPMSG msg,HWND hwnd,UINT lo,UINT hi,UINT remove) {
+    auto incoming=GetLastError();
+    auto call=trace_enter(redirect::trace::Api::peek,__builtin_return_address(0));
+    SetLastError(incoming);
+    auto result=real_peek(msg,hwnd,lo,hi,remove);auto error=GetLastError();
+    thread_trace.finish(call,GetTickCount64(),result);
+    SetLastError(error);return result;
+}
+__attribute__((noinline)) BOOL WINAPI hook_GetMessageA(LPMSG msg,HWND hwnd,UINT lo,UINT hi) {
+    auto incoming=GetLastError();
+    auto call=trace_enter(redirect::trace::Api::get,__builtin_return_address(0));
+    SetLastError(incoming);
+    auto result=real_get(msg,hwnd,lo,hi);auto error=GetLastError();
+    thread_trace.finish(call,GetTickCount64(),result);
+    SetLastError(error);return result; // -1, 0 (WM_QUIT), and positive results stay distinct
+}
+void replace_import(ULONG_PTR* slot,FARPROC hook) {
+    DWORD old,ignored;
+    if(!VirtualProtect(slot,sizeof(void*),PAGE_READWRITE,&old)) fatal("redirect: IAT protect failed\n");
+    InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(slot),reinterpret_cast<PVOID>(hook));
+    if(*slot!=reinterpret_cast<ULONG_PTR>(hook)) fatal("redirect: IAT write failed\n");
+    if(!VirtualProtect(slot,sizeof(void*),old,&ignored)) fatal("redirect: IAT restore failed\n");
+}
 struct Entry {const char* name; FARPROC hook; FARPROC original; HMODULE skip=nullptr;};
 std::vector<Entry> entries;
 size_t patch(HMODULE module) {
@@ -260,13 +306,16 @@ size_t patch(HMODULE module) {
     for(auto d=(IMAGE_IMPORT_DESCRIPTOR*)(b+dir.VirtualAddress); d->Name; ++d) {
         auto iat=(IMAGE_THUNK_DATA64*)(b+d->FirstThunk);
         for(;iat->u1.Function;++iat) {
+            if(trace_enabled && module==GetModuleHandleW(nullptr)) {
+                if(iat->u1.Function==reinterpret_cast<ULONG_PTR>(real_peek)) {
+                    replace_import(&iat->u1.Function,reinterpret_cast<FARPROC>(hook_PeekMessageA));trace_imports|=1;++count;
+                } else if(iat->u1.Function==reinterpret_cast<ULONG_PTR>(real_get)) {
+                    replace_import(&iat->u1.Function,reinterpret_cast<FARPROC>(hook_GetMessageA));trace_imports|=2;++count;
+                }
+            }
             for(auto& e:entries) if(module!=e.skip && iat->u1.Function==(ULONG_PTR)e.original) {
-                DWORD old,ignored;
-                if(!VirtualProtect(&iat->u1.Function,sizeof(void*),PAGE_READWRITE,&old)) fatal("redirect: IAT protect failed\n");
-                InterlockedExchangePointer((PVOID volatile*)&iat->u1.Function,(PVOID)e.hook);
-                if(iat->u1.Function!=(ULONG_PTR)e.hook) fatal("redirect: IAT write failed\n");
+                replace_import(&iat->u1.Function,e.hook);
                 ++count;
-                if(!VirtualProtect(&iat->u1.Function,sizeof(void*),old,&ignored)) fatal("redirect: IAT restore failed\n");
             }
         }
     }
@@ -805,6 +854,24 @@ void install_redirect(void* self) {
 #endif
         note(L"NETWORK",net.mode==redirect::NetMode::enforce?L"enforce":L"log-only",L"peers="+std::to_wstring(net.peers.size()));
     }
+    {
+        wchar_t value[16]{};auto n=::GetEnvironmentVariableW(L"COOP_THREAD_TRACE",value,16);
+        if(n>=16 || !redirect::trace::Observer::parse(value,trace_enabled)) fatal("redirect: invalid thread trace option\n");
+        if(trace_enabled) {
+            if(net.mode!=redirect::NetMode::enforce) fatal("redirect: thread trace requires enforced network policy\n");
+            auto user32=GetModuleHandleW(L"user32.dll");
+            real_peek=user32?reinterpret_cast<PeekMessageFn>(real_gpa(user32,"PeekMessageA")):nullptr;
+            real_get=user32?reinterpret_cast<GetMessageFn>(real_gpa(user32,"GetMessageA")):nullptr;
+            if(!real_peek||!real_get) fatal("redirect: message APIs unavailable\n");
+            auto host=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
+            auto dos=reinterpret_cast<IMAGE_DOS_HEADER*>(host);
+            auto nt=reinterpret_cast<IMAGE_NT_HEADERS64*>(host+dos->e_lfanew);
+            thread_trace.buffer.pid=GetCurrentProcessId();
+            thread_trace.buffer.processStart=(uint64_t(created.dwHighDateTime)<<32)|created.dwLowDateTime;
+            thread_trace.buffer.hostBase=reinterpret_cast<uint64_t>(host);
+            thread_trace.buffer.hostSize=nt->OptionalHeader.SizeOfImage;
+        }
+    }
     // System DLLs often import API-set targets in KernelBase, whereas game
     // imports target Kernel32 wrappers. Cover both resolved addresses. Keep the
     // Kernel32 -> KernelBase forwarding edge original: our real API calls use
@@ -819,6 +886,11 @@ void install_redirect(void* self) {
 #ifndef MUTANT_HOOKS_DISABLED
     patch_all(true);
 #endif
+    if(trace_enabled) {
+        if(trace_imports!=3) fatal("redirect: thread trace needs both host message imports\n");
+        wchar_t address[32];swprintf(address,32,L"0x%llx",reinterpret_cast<unsigned long long>(&thread_trace.buffer));
+        note(L"THREAD_TRACE",L"v1 buffer="+std::wstring(address),L"bytes="+std::to_wstring(sizeof(thread_trace.buffer))+L"; observation only; safe mutation phase unknown");
+    }
     register_notifications();
     note(L"READY",mode_n?mode:L"strict",policy.instance);
 }

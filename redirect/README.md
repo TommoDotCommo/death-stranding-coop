@@ -36,6 +36,7 @@ returned, never inside `DllMain`.
 | `COOP_MODULE_POLICY` | `strict` (default), `allowlist`, `log-only` |
 | `COOP_ISOLATE_OBJECTS` | `name|name` kernel object names to make per-copy |
 | `COOP_NETWORK_POLICY` | `enforce` (default) or `log-only` |
+| `COOP_THREAD_TRACE` | absent/`0`: off; `1`: observe main-executable message calls (requires enforced networking) |
 | `COOP_NETWORK_PEERS` | `a.b.c.d|...` co-op partners (numeric IPv4, at most 16) |
 
 Use the proxy only in a disposable copy of the game, never in your real Steam install. Disable Steam Cloud for the
@@ -70,3 +71,65 @@ while loopback works. The mutant DLLs must fail the probes.
   after every run, checked again after a settle wait).
 - With the network policy enforced, the game's calls to its configuration and online servers were refused and it
   showed its own "switching to offline mode" message; the co-op traffic over loopback was unaffected.
+
+
+## Message-thread observer (experimental)
+
+Set `COOP_THREAD_TRACE=1` in the disposable process's launch environment to observe
+its ordinary `PeekMessageA` and `GetMessageA` imports. It requires network policy
+`enforce`, both main-executable imports, and the usual isolation/launch gates.
+Absent or `0` leaves these imports untouched; other values refuse startup.
+This changes those two IAT slots and writes diagnostics into proxy-owned memory.
+It never invokes an entity function, reads an MSG payload, creates an actor or
+sets a transform. Dynamic lookups and imports in other modules are not observed.
+The proxy must remain loaded for process lifetime; there is no observer unload API.
+
+Each sampled call publishes an entry and a separate return record with thread ID,
+monotonic milliseconds, API, caller address, nesting depth and the signed return
+value. Entry records include up to 16 native stack frames without symbol lookup.
+The fixed buffer holds 2,048 records. Each thread/API samples its first four calls,
+then at most one per second, with a separate allowance for nested calls. There are
+64 thread-tracking slots. Saturation/contention drops pairs and increments a
+counter; it never waits for space or overwrites a published record. No log writes,
+heap allocations in the recorder, or game-object dereferences occur in the hooks.
+Native stack unwinding still has overhead; this is a diagnostic option.
+
+The audit log's `THREAD_TRACE` record identifies the buffer. From **native Windows
+Python**, while the process is alive:
+
+```sh
+python redirect/read_thread_trace.py --log "<instance>/redirect-data/redirect-<pid>-<start>.log"
+```
+
+The reader checks process creation time before reading, requests only
+`PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ`, and validates the buffer
+ABI/process identity. It double-reads append-only records and marks unpublished
+or changing records incomplete. It neither injects a thread nor suspends or writes
+the process. Save JSON output outside the repository. An entry with no return may
+mean a blocked message call; it is not proof of a dead thread. Frame addresses
+inside the host image also receive RVAs for comparison with `mod/game_offsets.md`.
+
+A recorded thread and caller stack do **not** establish a safe mutation phase.
+Message dispatch may be nested, jobs may still be running, and thread IDs can be
+reused. Thread identity, world lifecycle and a job synchronization boundary need
+separate evidence before calling the entity creator or transform setter.
+
+Game-free checks:
+
+```sh
+make -C redirect thread-trace-test
+# Native Windows Python; creates new fixture trees, never launches ds.exe:
+python redirect/test_thread_trace_windows.py --proxy "<build>/d3dcompiler_47.dll" --probe "<build>/thread_trace_probe.exe" --work-dir "<disposable drive folder>"
+```
+
+The native probe uses its own queues and a message-only window: two threads,
+nested dispatch, message/flag preservation, GetMessage positive/zero/negative
+results, and LastError preservation. It checks disabled tracing, enabled tracing,
+invalid option refusal, enforced-network requirement, PID-reuse refusal and native
+message imports in a real late-loaded DLL. The WSL cross-build driver
+`test_thread_trace_windows_mutants.py --windows-python <native Windows Python>
+--work-dir <disposable drive folder>` must kill mutants that broaden observer
+scope or remove the enforced-network requirement.
+Portable tests cover publication, bounded storage, per-thread depth, sampling,
+concurrent producers, table exhaustion, incomplete reads and ABI validation.
+Mutants for depth, rate, capacity and publication must fail their oracles.

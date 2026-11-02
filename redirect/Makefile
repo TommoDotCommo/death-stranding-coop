@@ -2,8 +2,8 @@ CXX = x86_64-w64-mingw32-g++
 FLAGS = -std=c++17 -O2 -Wall -Wextra -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++
 LIBS = -lshell32 -lole32 -luuid -lws2_32 -lwinhttp -lbcrypt -lwinmm
 PROXY_SRC = path_map.cpp module_policy.cpp audit_throttle.cpp objects.cpp network_policy.cpp redirect.cpp proxy.cpp ../mod/config.cpp
-PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h
-all: build/d3dcompiler_47.dll build/redirect_probe.exe build/redirect_probe_module.dll build/hooks-disabled.dll build/mutant-queries-unmapped.dll build/mutant-find-unmapped.dll build/mutant-attributes-unmapped.dll build/mutant-net-unhooked.dll build/net_probe.exe
+PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h
+all: build/thread_trace_probe_module.dll build/thread_trace_probe.exe build/d3dcompiler_47.dll build/redirect_probe.exe build/redirect_probe_module.dll build/hooks-disabled.dll build/mutant-queries-unmapped.dll build/mutant-find-unmapped.dll build/mutant-attributes-unmapped.dll build/mutant-net-unhooked.dll build/net_probe.exe
 build:
 	mkdir -p build
 build/d3dcompiler_47.dll: $(PROXY_DEPS) d3dcompiler_47.def | build
@@ -24,7 +24,17 @@ build/redirect_probe.exe: redirect_probe.cpp | build
 	$(CXX) $(FLAGS) -municode $< -o $@ $(LIBS)
 build/redirect_probe_module.dll: redirect_probe.cpp | build
 	$(CXX) $(FLAGS) -DPROBE_LIBRARY -shared $< -o $@ $(LIBS)
-test: | build
+build/thread-trace-test: thread_trace_test.cpp thread_trace.h | build
+	g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread $< -o $@
+thread-trace-test: build/thread-trace-test
+	./build/thread-trace-test
+	@for mutant in TRACE_DEPTH TRACE_RATE TRACE_CAP TRACE_PUBLISH; do \
+	 g++ -std=c++17 -O2 -pthread -DMUTANT_$$mutant thread_trace_test.cpp -o build/mutant-$$mutant || exit 1; \
+	 ./build/mutant-$$mutant >build/mutant-$$mutant.log 2>&1; code=$$?; \
+	 if test $$code -ne 1 || ! rg -q 'trace oracle' build/mutant-$$mutant.log; then echo "SURVIVED or crashed $$mutant ($$code)"; exit 1; fi; done
+	python3 -B -m unittest -q test_read_thread_trace
+.PHONY: thread-trace-test
+test: thread-trace-test | build
 	g++ -std=c++17 -Wall -Wextra -Werror network_policy.cpp network_test.cpp -o build/network-test
 	./build/network-test
 	@for mutant in NET_ALLOW_ALL NET_EXACT_LOOPBACK NET_NO_PEERS NET_ANY_V6 NET_MAPPED_LOCAL NET_NAME_PREFIX NET_NEVER_REFUSE NET_REFUSE_LOG_ONLY; do \
@@ -56,3 +66,9 @@ test: | build
 	 g++ -std=c++17 -DMUTANT_$$mutant audit_throttle.cpp audit_test.cpp -o build/mutant-$$mutant || exit 1; \
 	 if ./build/mutant-$$mutant >/dev/null 2>&1; then echo "SURVIVED $$mutant"; exit 1; fi; done
 .PHONY: all test
+
+build/thread_trace_probe.exe: thread_trace_probe.cpp | build
+	$(CXX) $(FLAGS) -municode $< -o $@ -luser32
+
+build/thread_trace_probe_module.dll: thread_trace_probe_module.cpp | build
+	$(CXX) $(FLAGS) -shared $< -o $@ -luser32
