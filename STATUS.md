@@ -15,19 +15,13 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 
 ## Not done
 
-- Drawing the other player in the world (puppet). Static leads: `EntityResource_ExportedCreateEntity` is a real
-  creation function; the SpawnSetup and buddy spawn exports are empty stubs in this build. See
-  `mod/game_offsets.md`. The message pump and main-loop caller were observed on one game thread through menu, loading,
-  movement and pause. Guarded mod callbacks now work live on that path. The first Sam-resource creation
-  attempt crashed during activation because DSPlayerController was missing; that resource is now
-  quarantined before creation. No actor returned and no transform setter ran. A supported resource/context
-  and a safe world-mutation phase remain unverified.
-- Height-change snaps in the presence core (25-30 % of samples are near one; a puppet would jump on slopes).
-- Shared cargo (picking up the same package works in both worlds today: no sync), structures, BTs, vehicles,
-  cutscenes, death and voidouts, saves of a shared world.
+- The partner's own body. Today the partner is drawn with the game's resident Sam double (below), which the game
+  takes back for the private room. The engine's own spawn path (`Spawnpoint`, the common entity creator) is mapped
+  in `mod/game_offsets.md`; an experiment that asks it for a second Sam (`puppet.body`) is built but has not run live.
+- Picking cargo up (placing it is shared), structures, BTs, vehicles, cutscenes, death and voidouts, saves of a
+  shared world, the partner's gear and outfit, and the partner's own controller input.
 - Networking beyond one PC (partners' addresses can already be allowed in the network policy; the mod itself still
   only talks to 127.0.0.1).
-- A license. Until one is chosen, all rights are reserved by the author.
 
 ## QA level
 
@@ -102,3 +96,15 @@ Unattended testing: live tests drive the focused copy with synthetic keyboard in
 copies with PrintWindow. The proxy's opt-in virtual gamepad (`COOP_VIRTUAL_PAD=1`, the mod's `virtual_pad`,
 a stamp-guarded `pad.script`) works on Windows without the game, but the game never polls it. A connected
 controller holds pad slot 0 through Windows.Gaming.Input, and the game only checks XInput for unassigned slots.
+
+## Testing aids, built but not yet run live (2026-11-03)
+
+- `COOP_BACKGROUND_FPS` (proxy): with two copies on one GPU, the copy that is not in front is held to a few frames
+  per second so the one being played keeps its full frame rate. Measured before the cap existed: suspending the
+  second copy roughly doubled the first copy's frame rate.
+- The partner's double now stays borrowed, hidden and asleep through short gaps in the partner's packets instead of
+  being handed back and taken again each time (`Hidden` stage in `mod/double.cpp`).
+- `coop-partner`: a stand-in partner process that speaks the real protocol, follows the porter or replays a
+  recorded walk, and can place cargo, so one copy can be tested at full speed. Tested game-free on Linux, including
+  two partners against each other.
+- `auto_continue` (mod): from the title screen, asks the game to continue the last save, with no menu input.
