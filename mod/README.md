@@ -636,5 +636,14 @@ Each command is a file in the mod folder. The mod consumes it and accepts it onl
   `peer <stamp>` (it shows the received partner), `off <stamp>` (hand it back to the game), `still <stamp>` (keep the
   double's own private-room animation network on the next acquire instead of the porter's). Requires `puppet_probe`.
 - `pad.script`: a virtual gamepad script (`pad.h`), requires `virtual_pad` and `COOP_VIRTUAL_PAD=1`.
+- `puppet.body`: `create <stamp>` asks the engine for a second Sam from the double's resource, 3 m to the porter's side,
+  and logs what the request produces (`BODY ...` lines); `remove <stamp>` removes it (`body.h`, an experiment).
+
+`auto_continue: true` in `mod.json` (requires `game_thread`) gets a test copy from the title screen into the last save
+without menu input or window focus: on the game thread, every 2 s from 5 s after start, the mod calls the game's
+`Application_sExportedContinueLastSave`, which the game refuses whenever a continue is not allowed. It stops for good once
+the porter is in the world (`AUTO in game after N s` in the log), so it never loads a save during play. Turning off
+"Login Upon Launch" in the copy's game settings (`"AutoLogin" "0"` in `game_settings.cfg`) avoids the online login
+attempt, and with it the offline notices of an isolated copy.
 
 The mod log records `POSE available|unavailable reason=...` on every change, so an outside driver can wait for gameplay.

@@ -58,6 +58,8 @@ std::optional<uint32_t> parseCargoCommand(const std::string& text,const std::str
 std::function<void(uint32_t,const Transform&)> nativeCargoCreate(discovery::Sampler&);
 // DSGameState_sExportedIsStoppingGameEvent (2dd3760): true while a game event or cutscene holds gameplay. Game thread.
 std::function<bool()> nativeGameEvent(discovery::Sampler&);
+// Application_sExportedContinueLastSave (2642a00): asks the game to load the last save; refused by the game when not allowed.
+std::function<void()> nativeContinueLastSave(discovery::Sampler&);
 // DSBaggage2Manager_sExportedCreateAndAddBaggageToPlayer (2cd6a60): queues cargo of that id into the porter's load.
 std::function<void(uint32_t)> nativeCargoGive(discovery::Sampler&);
 class Double {

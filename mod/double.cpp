@@ -296,6 +296,22 @@ std::function<void(uint32_t)> nativeCargoGive(discovery::Sampler& s){
     return [give](uint32_t id){give(id,false);};
 #endif
 }
+std::function<void()> nativeContinueLastSave(discovery::Sampler& s){
+#ifndef _WIN32
+    (void)s;throw std::runtime_error("native continue API requires Windows");
+#else
+    const std::vector<uint8_t> sig={0x48,0x83,0x3d,0x10,0x39,0x5a,0x05,0x00,0x75,0x11,0x41,0xb0,0xff,0x48,0x8d,0x0d,0x1c,0x39,0x5a,0x05,0xb2,0x0f,0xe9,0x55,0x20,0xfe,0xff};
+    unsigned count=0;
+    for(auto section:s.sections)if(section.executable){
+        std::vector<uint8_t> code(section.size);require(s.read(section.address,code.data(),code.size()),"continue code unreadable");
+        for(auto at=code.begin();(at=std::search(at,code.end(),sig.begin(),sig.end()))!=code.end();++at){
+            ++count;require(section.address+size_t(at-code.begin())==s.base+0x2642a00,"continue function signature moved/duplicated");}
+    }
+    require(count==1,"continue function signature missing/ambiguous");
+    using ContinueFn=void(*)();auto go=reinterpret_cast<ContinueFn>(s.base+0x2642a00);
+    return [go]{go();};
+#endif
+}
 std::function<bool()> nativeGameEvent(discovery::Sampler& s){
 #ifndef _WIN32
     (void)s;throw std::runtime_error("native game event API requires Windows");

@@ -28,6 +28,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "puppet.h"
 #include "double.h"
 #include "body.h"
+#include "auto_continue.h"
 #include "pad.h"
 #include "cargo.h"
 #ifdef MOD_FAKE_NETWORK
@@ -139,6 +140,7 @@ struct Runtime final:ds::Transport {
     std::filesystem::path cargoCommand;std::function<void(uint32_t,const mod::puppet::Transform&)> cargoCreate;
     std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
     std::function<void(uint32_t)> cargoGive;
+    std::function<void()> continueLastSave;mod::AutoContinue autoContinue;bool autoNoted=false;
     std::function<bool()> gameEvent;bool inEvent=false;std::atomic<bool> fakeEvent{false};
     // Shared cargo (cargo.h): placements read from the game's cargo map go to the partner; theirs are created here.
     mod::cargo::Sync cargoSync;uint64_t cargoReadAt=0,cargoManagerSlot=0,cargoManagerVtable=0,cargoSent=0,cargoMade=0;
@@ -365,6 +367,7 @@ struct Runtime final:ds::Transport {
                 auto twinApi=mod::puppet::nativeDoubleApi(*sampler);
                 cargoCreate=mod::puppet::nativeCargoCreate(*sampler);cargoGive=mod::puppet::nativeCargoGive(*sampler);
                 gameEvent=mod::puppet::nativeGameEvent(*sampler);
+                if(config.autoContinue){continueLastSave=mod::puppet::nativeContinueLastSave(*sampler);autoContinue=mod::AutoContinue(true);}
                 body=std::make_unique<mod::body::Probe>(mod::body::nativeApi(*sampler),sampler->base+0x3d7de48,[this](const std::string& row){note(row.c_str());});
 #endif
 #ifdef MOD_FAKE_NETWORK
@@ -557,6 +560,10 @@ struct Runtime final:ds::Transport {
                     cargoCreate(*id,t);
                     note(("CARGO create id="+std::to_string(*id)+"\n").c_str());
                 }
+            }
+            if(continueLastSave&&gameContext) {
+                if(autoContinue.tick(now-startedAt,cache.available)){continueLastSave();if(autoContinue.calls()==1)note("AUTO continue: asking the game to load the last save\n");}
+                if(autoContinue.done()&&!autoNoted){autoNoted=true;note(("AUTO in game after "+std::to_string((now-startedAt)/1000)+" s, "+std::to_string(autoContinue.calls())+" requests\n").c_str());}
             }
             if(body&&gameContext)tickBody();
             tickPad();notePose();
