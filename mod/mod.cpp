@@ -477,7 +477,9 @@ struct Runtime final:ds::Transport {
         // During a local game event or cutscene the double goes back to the game, so it never appears in one.
         bool event=gameEvent&&gameEvent();
         if(event!=inEvent){inEvent=event;note(event?"DOUBLE game event: double handed back\n":"DOUBLE game event over\n");}
-        twin->tick(true,(target&&!event)?&*target:nullptr,speed,actions);
+        // A partner who is only missing for now (late packets, private room) is hidden, not handed back; a game event
+        // or the mode switched off hands the double back.
+        twin->tick(true,(target&&!event)?&*target:nullptr,speed,actions,twinMode!=TwinMode::None&&!event);
     }
     bool tickOnce(std::string& err,bool gameContext=false) {
         std::lock_guard<std::mutex> guard(mutex);

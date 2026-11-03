@@ -85,7 +85,7 @@ bool Double::gameUsesDouble(uint64_t porter){
 #endif
 }
 const char* Double::name() const {
-    switch(stage_){case Stage::Off:return "off";case Stage::Parked:return "parked";case Stage::Driving:return "driving";case Stage::Yielded:return "yielded";default:return "failed";}
+    switch(stage_){case Stage::Off:return "off";case Stage::Parked:return "parked";case Stage::Driving:return "driving";case Stage::Hidden:return "hidden";case Stage::Yielded:return "yielded";default:return "failed";}
 }
 void Double::note(const char* event,uint64_t flags,const Pose& p){
     std::ostringstream o;o<<std::setprecision(17)<<"DOUBLE {\"event\":\""<<event<<"\",\"double\":\"0x"<<std::hex<<double_<<"\",\"player\":\"0x"<<player_<<"\",\"flags\":\"0x"<<flags<<std::dec<<"\",\"readback\":";
@@ -176,7 +176,33 @@ void Double::release(const Anchor& source,bool force){
     note(parked(after)&&atTarget(p,parked_)?"released":"release_unconfirmed",after,p);
     stage_=parked(after)?Stage::Parked:Stage::Failed;if(stage_==Stage::Parked)double_=player_=0;
 }
-void Double::tick(bool permitted,const Transform* target,double speed,uint32_t flags){
+// Hidden: still borrowed (network, effects, mover), asleep and invisible where the partner was last seen.
+void Double::hide(const Anchor& source){
+    api_.animate(double_,0,0);api_.visible(double_,false);api_.sleep(double_,true);
+    auto after=api_.flags(double_);checkLocal(source);
+    if(!parked(after)){note("hide_unconfirmed",after,{});release(source,true);return;}
+    stage_=Stage::Hidden;note("hidden",after,{});
+}
+// While hidden the double looks parked to the game. If the game takes it (private room) or it changes, give it up.
+bool Double::stillOurs(const Anchor& source){
+#ifndef MUTANT_DOUBLE_IDENTITY
+    if(api_.find(source.entity)!=double_){forget("double_changed");return false;}
+#endif
+#ifndef MUTANT_DOUBLE_HIDDEN_YIELD
+    auto f=api_.flags(double_);
+    if(!parked(f)){restoreNetwork();stage_=Stage::Yielded;note("yielded",f,api_.read(double_));return false;}
+#endif
+    return true;
+}
+void Double::reveal(const Anchor& source,const Transform& target){
+    placed_=target;api_.anchor(double_,target);api_.place(double_,target);api_.visible(double_,true);api_.sleep(double_,false);
+    api_.animate(double_,speed_,flags_);
+    if(hidEffects_)api_.effects(double_,false);
+    auto after=api_.flags(double_);auto p=api_.read(double_);checkLocal(source);
+    if(!driven(after)||!atTarget(p,target)){note("reveal_unconfirmed",after,p);release(source,true);stage_=Stage::Failed;return;}
+    stage_=Stage::Driving;note("shown",after,p);
+}
+void Double::tick(bool permitted,const Transform* target,double speed,uint32_t flags,bool hold){
     if(stage_==Stage::Off||stage_==Stage::Failed)return;
 #ifndef MUTANT_DOUBLE_ACTION_MASK
     flags_=flags&ReplayedActions;
@@ -210,11 +236,20 @@ void Double::tick(bool permitted,const Transform* target,double speed,uint32_t f
         case Stage::Parked:if(target)acquire(source,*target);break;
         case Stage::Driving:
 #ifndef MUTANT_DOUBLE_RELEASE
-            if(!target){release(source,false);break;}
+            if(!target){
+#ifndef MUTANT_DOUBLE_HOLD
+                if(hold&&driven(api_.flags(double_))&&api_.find(source.entity)==double_){hide(source);break;}
+#endif
+                release(source,false);break;}
 #else
             if(!target)break;
 #endif
             drive(source,*target);break;
+        case Stage::Hidden:
+            if(!stillOurs(source))break;
+            if(target){reveal(source,*target);break;}
+            if(!hold)release(source,true);
+            break;
         case Stage::Yielded:
             if(api_.find(source.entity)==double_&&parked(api_.flags(double_))){note("returned_by_game",parkedFlags_,{});double_=player_=0;stage_=Stage::Parked;}
             break;

@@ -38,6 +38,7 @@ returned, never inside `DllMain`.
 | `COOP_NETWORK_POLICY` | `enforce` (default) or `log-only` |
 | `COOP_THREAD_TRACE` | absent/`0`: off; `1`: observe main-executable message calls (requires enforced networking) |
 | `COOP_VIRTUAL_PAD` | absent/`0`: off; `1`: wrap the game's by-name `XInputGetState` lookup in `xinput1_4.dll` so a mod pad script drives player 1 (requires enforced networking, the mod, and the mod's `virtual_pad`; a mismatch refuses startup) |
+| `COOP_BACKGROUND_FPS` | absent/`0`: off; `1`–`240`: for two copies on one PC, the copy whose window is not in the foreground holds its game thread in the frame's empty `PeekMessage` until 1/n s has passed since its last frame (requires `COOP_THREAD_TRACE=1`). The copy in front is never delayed and the mod's network worker is never held. Two copies on one GPU halve each other's frame rate or worse even with the GPU half idle; the copy you look at gets its full rate back only when the other one nearly stops (measured: about 2× when the background copy is held to under 1 frame per second, about 1.2× at a quarter of its speed) |
 | `COOP_NETWORK_PEERS` | `a.b.c.d|...` co-op partners (numeric IPv4, at most 16) |
 
 Use the proxy only in a disposable copy of the game, never in your real Steam install. Disable Steam Cloud for the

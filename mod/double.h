@@ -62,7 +62,7 @@ std::function<bool()> nativeGameEvent(discovery::Sampler&);
 std::function<void(uint32_t)> nativeCargoGive(discovery::Sampler&);
 class Double {
 public:
-    enum class Stage {Off,Parked,Driving,Yielded,Failed};
+    enum class Stage {Off,Parked,Driving,Hidden,Yielded,Failed};
     Double(DoubleApi api,std::function<void(const std::string&)> record):api_(std::move(api)),record_(std::move(record)) {}
     void enable(){if(stage_==Stage::Off)stage_=Stage::Parked;}
     void walk(bool on){walk_=on;}   // use upgrade/downgrade on the next acquire
@@ -71,7 +71,10 @@ public:
     bool gameUsesDouble(uint64_t porter);
     // target==nullptr releases the double to the game's parked state. Calls happen only when permitted.
     // speed is the partner's horizontal speed in m/s; it drives the double's walk/run animation.
-    void tick(bool permitted,const Transform* target,double speed=0,uint32_t actions=0);
+    // hold: the partner is only missing for now (late packets, private room, loading): the double is hidden and put
+    // to sleep where it stands but stays borrowed, so it comes back without a new acquire. Each acquire with walk
+    // builds an animation-network instance the game never frees, so a flickering partner must not re-acquire.
+    void tick(bool permitted,const Transform* target,double speed=0,uint32_t actions=0,bool hold=false);
     Stage stage() const {return stage_;}
     const char* name() const;
     uint64_t entity() const {return double_;}
@@ -84,6 +87,9 @@ private:
     void acquire(const Anchor&,const Transform&);
     void drive(const Anchor&,const Transform&);
     void release(const Anchor&,bool force);
+    void hide(const Anchor&);
+    void reveal(const Anchor&,const Transform&);
+    bool stillOurs(const Anchor&);
     void forget(const char* why);
     void checkLocal(const Anchor& before);
     void note(const char* event,uint64_t flags,const Pose& readback);

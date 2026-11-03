@@ -24,6 +24,7 @@
 #include "network_policy.h"
 #include "thread_trace.h"
 #include "virtual_pad.h"
+#include "frame_cap.h"
 #include <set>
 #include <winternl.h>
 #include <atomic>
@@ -282,6 +283,19 @@ void dispatch_game_thread(const redirect::trace::Call& call,BOOL result) {
     game_dispatching.clear(std::memory_order_release);
     if(status<0) {game_tick.store(nullptr,std::memory_order_release);fatal("redirect: game-thread mod tick failed; inspect mod log\n");}
 }
+// Background frame cap (frame_cap.h): once per game frame, the main executable's empty PeekMessage on the game thread.
+redirect::frame_cap::Cap background_cap;
+LARGE_INTEGER cap_frequency{};
+void cap_game_frame(const redirect::trace::Call& call,BOOL result) {
+    if(!background_cap.fps() || result || call.depth!=1 || call.tid!=game_thread_owner)return;
+    auto& host=thread_trace.buffer;
+    if(call.caller<host.hostBase || call.caller-host.hostBase!=mod::dispatch::PeekReturn)return;
+    DWORD owner=0;GetWindowThreadProcessId(GetForegroundWindow(),&owner);
+    LARGE_INTEGER now;QueryPerformanceCounter(&now);
+    auto us=uint64_t(now.QuadPart/cap_frequency.QuadPart)*1000000+uint64_t(now.QuadPart%cap_frequency.QuadPart)*1000000/uint64_t(cap_frequency.QuadPart);
+    auto wait=background_cap.delay(us,owner==GetCurrentProcessId());
+    if(wait>=1000)Sleep(DWORD(wait/1000));
+}
 
 redirect::trace::Call trace_enter(redirect::trace::Api api,void* caller) noexcept {
     auto call=thread_trace.begin(api,GetCurrentThreadId(),GetTickCount64(),reinterpret_cast<uint64_t>(caller));
@@ -301,6 +315,7 @@ __attribute__((noinline)) BOOL WINAPI hook_PeekMessageA(LPMSG msg,HWND hwnd,UINT
     SetLastError(incoming);
     auto result=real_peek(msg,hwnd,lo,hi,remove);auto error=GetLastError();
     dispatch_game_thread(call,result);
+    cap_game_frame(call,result);
     thread_trace.finish(call,GetTickCount64(),result);
     SetLastError(error);return result;
 }
@@ -947,6 +962,13 @@ void install_redirect(void* self) {
         if(n>=16 || !redirect::pad::parse(n?value:L"",pad_enabled)) fatal("redirect: invalid virtual pad option\n");
         if(pad_enabled && net.mode!=redirect::NetMode::enforce) fatal("redirect: virtual pad requires enforced network policy\n");
         if(pad_enabled) note(L"VIRTUAL_PAD",L"enabled",L"player 1 only; scripted by the mod");
+    }
+    {
+        wchar_t value[16]{};auto n=::GetEnvironmentVariableW(L"COOP_BACKGROUND_FPS",value,16);uint32_t fps=0;
+        if(n>=16 || !redirect::frame_cap::parse(n?value:L"",fps)) fatal("redirect: invalid background frame cap\n");
+        if(fps && !trace_enabled) fatal("redirect: background frame cap requires COOP_THREAD_TRACE=1\n");
+        if(fps) {QueryPerformanceFrequency(&cap_frequency);background_cap=redirect::frame_cap::Cap(fps);
+                 wchar_t detail[48];swprintf(detail,48,L"%u fps while not in the foreground",fps);note(L"BACKGROUND_FPS",L"enabled",detail);}
     }
     // System DLLs often import API-set targets in KernelBase, whereas game
     // imports target Kernel32 wrappers. Cover both resolved addresses. Keep the

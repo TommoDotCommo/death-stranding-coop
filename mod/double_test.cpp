@@ -183,10 +183,32 @@ void conversion(){
         CHECK(std::fabs(det-1)<1e-6);}
     bool threw=false;try{fromState({NAN,0,0},0);}catch(const std::exception&){threw=true;}CHECK(threw);
 }
+void hold(){
+    // A partner who drops out briefly: the double hides in place and stays borrowed (no second upgrade), then reappears.
+    Scene s;auto d=s.make();d.enable();d.walk(true);auto t=at(5);d.tick(true,&t);
+    s.frame();d.tick(true,nullptr,0,0,true);
+    CHECK(d.stage()==Double::Stage::Hidden&&!(s.flags&FlagVisible)&&(s.flags&FlagSleeping)&&s.network==0x600&&s.downgrades==0&&!s.effectsShown&&s.last("hidden"));
+    CHECK(!d.gameUsesDouble(s.anchor.entity));
+    for(int i=0;i<5;++i)d.tick(true,nullptr,0,0,true);
+    CHECK(d.stage()==Double::Stage::Hidden&&s.downgrades==0);
+    auto u=at(9);d.tick(true,&u,0,0,true);
+    CHECK(d.stage()==Double::Stage::Driving&&(s.flags&FlagVisible)&&!(s.flags&FlagSleeping)&&s.pose.position[0]==9&&s.mover.position[0]==9&&s.last("shown"));
+    CHECK(s.upgradedFor==s.anchor.entity&&s.downgrades==0);   // the same borrowed network, never rebuilt
+    // Hidden, then handed back for real (event or mode off): everything restored.
+    s.frame();d.tick(true,nullptr,0,0,true);d.tick(true,nullptr,0,0,false);
+    CHECK(d.stage()==Double::Stage::Parked&&s.network==0x500&&s.downgrades==1&&s.effectsShown&&s.mover.position[0]==0&&s.last("released"));
+    // Hidden, and the game takes its double (private room): yield, everything restored, no calls of ours.
+    Scene g;auto e=g.make();e.enable();e.walk(true);e.tick(true,&t);g.frame();e.tick(true,nullptr,0,0,true);
+    auto n=g.calls.size();g.flags&=~FlagSleeping;g.flags|=FlagVisible;
+    e.tick(true,nullptr,0,0,true);CHECK(e.stage()==Double::Stage::Yielded&&g.network==0x500&&g.mover.position[0]==0&&g.calls.size()==n&&e.gameUsesDouble(g.anchor.entity));
+    // Hidden, and the double changes: forgotten, nothing touched.
+    Scene c;auto f=c.make();f.enable();f.tick(true,&t);c.frame();f.tick(true,nullptr,0,0,true);n=c.calls.size();
+    c.found=0x7100;f.tick(true,&t,0,0,true);CHECK(f.stage()==Double::Stage::Parked&&c.calls.size()==n&&c.last("double_changed"));
+}
 int main(){
     lifecycle();mover();animation();network();refusedUpgrade();actions();effects();releasedByGame();cargoCommand();privateRoom();
     try{transient();}catch(const std::exception& e){std::fprintf(stderr,"double oracle: transient threw %s\n",e.what());++failures;}
-    busy();yields(true);yields(false);identity();unconfirmed();tree();conversion();
+    hold();busy();yields(true);yields(false);identity();unconfirmed();tree();conversion();
     if(!failures)std::puts("double borrow, yield, release and pointer-path checks passed");
     return failures?1:0;
 }

@@ -2,7 +2,7 @@ CXX = x86_64-w64-mingw32-g++
 FLAGS = -std=c++17 -O2 -Wall -Wextra -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++
 LIBS = -lshell32 -lole32 -luuid -lws2_32 -lwinhttp -lbcrypt -lwinmm
 PROXY_SRC = path_map.cpp module_policy.cpp audit_throttle.cpp objects.cpp network_policy.cpp redirect.cpp proxy.cpp ../mod/config.cpp
-PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h virtual_pad.h ../mod/game_thread.h ../mod/mod.h
+PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h virtual_pad.h frame_cap.h ../mod/game_thread.h ../mod/mod.h
 all: build/thread_trace_probe_module.dll build/thread_trace_probe.exe build/d3dcompiler_47.dll build/redirect_probe.exe build/redirect_probe_module.dll build/hooks-disabled.dll build/mutant-queries-unmapped.dll build/mutant-find-unmapped.dll build/mutant-attributes-unmapped.dll build/mutant-net-unhooked.dll build/net_probe.exe build/pad_probe.exe
 build:
 	mkdir -p build
@@ -64,6 +64,11 @@ test: thread-trace-test | build
 	./build/pad-test
 	@for mutant in PAD_ANY_NAME PAD_ANY_MODULE PAD_ALL_USERS PAD_STATIC_PACKET; do \
 	 g++ -std=c++17 -DMUTANT_$$mutant pad_test.cpp -o build/mutant-$$mutant || exit 1; \
+	 if ./build/mutant-$$mutant >/dev/null 2>&1; then echo "SURVIVED $$mutant"; exit 1; fi; done
+	g++ -std=c++17 -Wall -Wextra -Werror frame_cap_test.cpp -o build/frame-cap-test
+	./build/frame-cap-test
+	@for mutant in CAP_FOCUSED CAP_BURST; do \
+	 g++ -std=c++17 -DMUTANT_$$mutant frame_cap_test.cpp -o build/mutant-$$mutant || exit 1; \
 	 if ./build/mutant-$$mutant >/dev/null 2>&1; then echo "SURVIVED $$mutant"; exit 1; fi; done
 	g++ -std=c++17 -Wall -Wextra -Werror audit_throttle.cpp audit_test.cpp -o build/audit-test
 	./build/audit-test
