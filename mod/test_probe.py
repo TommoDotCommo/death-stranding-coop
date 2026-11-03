@@ -120,9 +120,15 @@ def load(directory, slot, **extra):
 
 
 def status(lib):
-    data = c.create_string_buffer(lib.mod_status(None, 0))
-    lib.mod_status(data, len(data))
-    return json.loads(data.value)
+    # Counters can grow between the size query and the copy (the mod ticks itself): retry with headroom.
+    cap = lib.mod_status(None, 0)
+    for _ in range(8):
+        data = c.create_string_buffer(cap)
+        need = lib.mod_status(data, len(data))
+        if need <= cap:
+            return json.loads(data.value)
+        cap = need * 2
+    raise AssertionError('status kept growing beyond retry budget')
 
 
 def set_pose(lib, x, y, z, heading_deg, menu=False):

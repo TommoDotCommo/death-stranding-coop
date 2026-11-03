@@ -37,6 +37,7 @@ returned, never inside `DllMain`.
 | `COOP_ISOLATE_OBJECTS` | `name|name` kernel object names to make per-copy |
 | `COOP_NETWORK_POLICY` | `enforce` (default) or `log-only` |
 | `COOP_THREAD_TRACE` | absent/`0`: off; `1`: observe main-executable message calls (requires enforced networking) |
+| `COOP_VIRTUAL_PAD` | absent/`0`: off; `1`: wrap the game's by-name `XInputGetState` lookup in `xinput1_4.dll` so a mod pad script drives player 1 (requires enforced networking, the mod, and the mod's `virtual_pad`; a mismatch refuses startup) |
 | `COOP_NETWORK_PEERS` | `a.b.c.d|...` co-op partners (numeric IPv4, at most 16) |
 
 Use the proxy only in a disposable copy of the game, never in your real Steam install. Disable Steam Cloud for the
@@ -140,3 +141,24 @@ provide the reviewed dispatch seam described in `../mod/README.md`. This require
 enforced networking and a matching `mod_game_thread_tick` export. `GAME_THREAD_ARMED`
 records the binding; defaults remain observation-only. A failed callback disarms
 the pointer and fails closed. The proxy retains its mod module for process lifetime.
+
+## Virtual gamepad (experimental)
+
+`virtual_pad.h` holds the pure rules, pinned by `pad_test.cpp` and its four mutants. The proxy returns a wrapper only for a
+by-name `XInputGetState` lookup on `xinput1_4.dll`, never for an ordinal lookup or another module. The wrapper calls the real
+function first. For user 0, while the mod's `mod_pad` export reports an active script, it substitutes the scripted gamepad
+and advances the packet number whenever the content changes. Other users and `XInputSetState` are untouched.
+`test_pad_windows.py` (native Windows, no game) runs the real proxy and mod in a fixture tree, then checks:
+- the presses reach player 1;
+- player 2 is untouched;
+- the real pad returns when the script ends;
+- the proxy refuses a mismatched or invalid option.
+
+Live status: the game resolves the wrapper but never polls it. The game keeps four pad slots, each with its own
+backends (XInput, Windows.Gaming.Input, ...). A slot's current type is at device+28 and its index at device+6c; the
+XInput backend holds the `XInputGetState` pointer at +16818. On the test PC, slot 0 is type 4 (Windows.Gaming.Input,
+the connected controller) and slots 1-3 are unassigned. XInput detection runs only for unassigned or type-4 slots,
+and the wrapper answers only user 0, so it is never asked. Keyboard input drives the live tests instead.
+
+Module snapshots retry on `ERROR_BAD_LENGTH`, the documented race with a concurrent module load, which once ended a copy at
+startup. Any other failure is still fatal, and the message includes the error code.

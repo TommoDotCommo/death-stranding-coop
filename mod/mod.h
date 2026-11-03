@@ -26,6 +26,16 @@ typedef struct mod_game_thread_context {
 } mod_game_thread_context;
 MOD_API int mod_game_thread_tick(const mod_game_thread_context* context);
 MOD_API void mod_shutdown(void);
+/* Scripted virtual gamepad for player 1 (XInput gamepad layout), polled by the proxy's XInputGetState wrapper
+   from the game's input thread. Never blocks. Returns 1 while a pad script is active, 0 otherwise, -1 on a
+   wrong size. Only when the config enables virtual_pad. */
+typedef struct mod_pad_state {
+    uint32_t size;
+    uint16_t buttons;
+    uint8_t left_trigger, right_trigger;
+    int16_t lx, ly, rx, ry;
+} mod_pad_state;
+MOD_API int mod_pad(mod_pad_state* state);
 /* Copies a NUL-terminated JSON status, returns required bytes including NUL. */
 MOD_API unsigned mod_status(char* output, unsigned capacity);
 MOD_API const char* mod_last_error(void);

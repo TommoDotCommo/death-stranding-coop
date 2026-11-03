@@ -606,3 +606,16 @@ metadata, ancestry, decoys, hash refusal, torn reads and scan bounds.
 unchanged suite to fail. Native Windows `test_actor_reader_windows.py` also
 checks process identity, the actual OS-granted query/read rights, region layout
 and an independently allocated fixture buffer.
+
+## Live test commands (per process, stamp-guarded)
+
+Each command is a file in the mod folder. The mod consumes it and accepts it only for this process
+(`<run stamp>` = `<pid>-<process creation time, 16 hex digits>`, the stem of the mod log).
+
+- `puppet.double`: `echo <stamp>` (the double replays the local porter 1 s late, 2 m to the right),
+  `lead <stamp>` (3 m ahead and 1.5 m right of the porter, in view of the camera),
+  `peer <stamp>` (it shows the received partner), `off <stamp>` (hand it back to the game), `still <stamp>` (keep the
+  double's own private-room animation network on the next acquire instead of the porter's). Requires `puppet_probe`.
+- `pad.script`: a virtual gamepad script (`pad.h`), requires `virtual_pad` and `COOP_VIRTUAL_PAD=1`.
+
+The mod log records `POSE available|unavailable reason=...` on every change, so an outside driver can wait for gameplay.

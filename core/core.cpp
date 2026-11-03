@@ -25,7 +25,7 @@ Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
     if(p.length && get(b,8,2)!=WireSize) return Error::Length;
     if(p.checksum && get(b,120,4)!=checksum(b)) return Error::Checksum;
     if(p.reserved && (get(b,10,2)||b[95]||get(b,124,4))) return Error::Reserved;
-    if(p.kind && (b[6]<1||b[6]>6)) return Error::Kind;
+    if(p.kind && (b[6]<1||b[6]>8)) return Error::Kind;
     if(p.role && (b[7]<1||b[7]>2)) return Error::Role;
     Packet q; q.kind=Kind(b[6]); q.role=Role(b[7]); q.game=uint32_t(get(b,12,4));
     std::copy(b+16,b+32,q.mod.begin());
@@ -134,12 +134,15 @@ void Core::send(Kind k,uint64_t now) {
 void Core::reset(bool rotate) {
     connected_=false; sentHello_=false; peer_=0; snapshots_.clear(); haveSequence_=false; haveTeleport_=false; haveSent_=false; clockValid_=false; pendingPings_.clear(); rtt_=-1; offset_=0;
     nextHello_=nextSend_=nextPing_=0; outgoing_=0;
+    // A new connection numbers cargo from 1 again on both sides; undelivered events are kept and renumbered.
+    cargoSeen_=0; cargoIn_.clear(); cargoNext_=0; for(auto& e:cargoOut_) e.sequence=++cargoNext_; nextCargo_=0;
     if(rotate) { if(config_.nonce==std::numeric_limits<uint64_t>::max()) throw std::overflow_error("nonce exhausted"); ++config_.nonce; }
 }
 void Core::tick(uint64_t now) {
     if(connected_ && protections_.timeout && now-lastReceive_>3000) reset(true);
     if(!connected_) { if(now>=nextHello_) { send(Kind::Hello,now); nextHello_=now+250; } return; }
     if(now>=nextPing_) { send(Kind::Ping,now); nextPing_=now+((clockValid_||!protections_.pingRetry)?1000:100); }
+    if(!cargoOut_.empty() && now>=nextCargo_) { sendCargo(cargoOut_.front(),now); nextCargo_=now+200; }
     if(protections_.gate && provider_.isInCutsceneOrLoading()) return;
     State s; if(!provider_.readLocal(s)||!sanitiseImpl(s,protections_)) return;
     bool changed=!haveSent_||distance(s,sentState_)>=0.01||std::abs(s.yaw-sentState_.yaw)>=0.01||s.flags!=sentState_.flags||s.action!=sentState_.action||std::abs(s.phase-sentState_.phase)>=1./255.||s.health!=sentState_.health||s.stamina!=sentState_.stamina||s.velocity!=sentState_.velocity;
@@ -184,6 +187,26 @@ Error Core::receive(const uint8_t* b,size_t n,uint64_t now) {
         if(!clockValid_) { offset_=candidate; clockValid_=true; }
         lastReceive_=now; return fail(Error::None);
     }
+    if(q.kind==Kind::Cargo) {
+        if(q.state.action<1||q.state.action>3||q.t0>0xffffffffull||!q.t1) return fail(Error::Range);
+        bool next=q.sequence==cargoSeen_+1;
+        if(next||!protections_.cargoOrder) {
+            CargoEvent e; e.sequence=q.sequence; e.type=q.state.action; e.item=uint32_t(q.t0); e.position=q.state.position; e.yaw=q.state.yaw; e.id=q.t1;
+            bool seen=std::find(deliveredIds_.begin(),deliveredIds_.end(),e.id)!=deliveredIds_.end();
+            if(!seen||!protections_.cargoOnce) { cargoIn_.push_back(e); deliveredIds_.push_back(e.id); while(deliveredIds_.size()>4096) deliveredIds_.pop_front(); }
+            cargoSeen_=q.sequence;
+        }
+        // Acknowledge the event just taken and any repeat of an older one (its acknowledgement may have been lost).
+        if(next||q.sequence<=cargoSeen_||!protections_.cargoOrder) {
+            Packet a; a.kind=Kind::CargoAck; a.role=config_.role; a.session=config_.session; a.nonce=config_.nonce; a.echo=peer_; a.stamp=now; a.sequence=q.sequence;
+            transport_.send(encode(a));
+        }
+        return fail(next||q.sequence<=cargoSeen_?Error::None:Error::Duplicate);
+    }
+    if(q.kind==Kind::CargoAck) {
+        if(!cargoOut_.empty() && (cargoOut_.front().sequence==q.sequence||!protections_.cargoAck)) { cargoOut_.pop_front(); nextCargo_=0; }
+        return fail(Error::None);
+    }
     uint32_t advance=q.sequence-incoming_;
     if(protections_.duplicate && haveSequence_ && (advance==0||advance>=0x80000000u)) return fail(Error::Duplicate);
     double mapped=double(q.stamp)-offset_;
@@ -201,6 +224,17 @@ Error Core::receive(const uint8_t* b,size_t n,uint64_t now) {
     incoming_=q.sequence; haveSequence_=true; lastArrival_=q.stamp; lastReceive_=now; ++accepted_;
     if(teleport) { haveTeleport_=true; lastTeleport_=now; }
     return fail(Error::None);
+}
+void Core::queueCargo(CargoEvent e) {
+    // Sender identity: this connection-independent counter, salted with the configured nonce at first use.
+    if(!e.id) e.id=(uint64_t(config_.nonce)<<20)^++cargoIds_;
+    e.sequence=++cargoNext_; cargoOut_.push_back(e);
+}
+std::vector<CargoEvent> Core::takeCargo() { std::vector<CargoEvent> out; out.swap(cargoIn_); return out; }
+void Core::sendCargo(const CargoEvent& e,uint64_t now) {
+    Packet q; q.kind=Kind::Cargo; q.role=config_.role; q.session=config_.session; q.nonce=config_.nonce; q.echo=peer_; q.stamp=now;
+    q.sequence=e.sequence; q.state.action=e.type; q.t0=e.item; q.t1=e.id; q.state.position=e.position; q.state.yaw=e.yaw;
+    transport_.send(encode(q));
 }
 Render Core::render(uint64_t now) const { return sampling(snapshots_,now,protections_.delay?config_.delayMs:0,150,protections_); }
 void Core::frame(uint64_t now) { Render r=render(now); if(protections_.gate && provider_.isInCutsceneOrLoading()) r.visible=false; provider_.applyRemote(r); }

@@ -37,7 +37,7 @@ not authentication or proof of a trusted binary.
 
 ## Wire format
 
-All six packet types are **exactly 128 bytes**, one UDP datagram each. Integers
+All eight packet types are **exactly 128 bytes**, one UDP datagram each. Integers
 are explicitly little endian; signed values use two's complement. No packed
 structs, float bit patterns, pointer casts or native padding are on the wire.
 Reserved bytes must be zero. Fields unused by a packet type are ignored after
@@ -48,7 +48,7 @@ and stamina 255). Receivers do not require ignored fields to be zero.
 |---|---:|---|
 | 0 | 4 | Magic ASCII `DSP1` (`0x31505344`) |
 | 4 | 2 | Protocol version, exactly 1 |
-| 6 | 1 | Kind: HELLO=1, HELLO_ACK=2, PRESENCE=3, PING=4, PONG=5, BYE=6 |
+| 6 | 1 | Kind: HELLO=1, HELLO_ACK=2, PRESENCE=3, PING=4, PONG=5, BYE=6, CARGO=7, CARGO_ACK=8 |
 | 7 | 1 | Sender role: host=1, client=2; peer must have opposite role |
 | 8 | 2 | Datagram length, exactly 128; actual received length must match |
 | 10 | 2 | Reserved zero |
@@ -255,3 +255,25 @@ animation/phase reads and writes; floor/support/streaming detection; Steam same-
 concurrency and real game compatibility with save redirection; two-instance frame
 rate and memory/VRAM limits. No network research claims or copied game addresses
 are treated as an implementation contract.
+
+## Cargo events (CARGO=7, CARGO_ACK=8)
+
+Shared-world cargo travels as events on the same 128-byte layout, after the handshake, with the usual session,
+nonce and build checks:
+
+| Field | CARGO | CARGO_ACK |
+|---|---|---|
+| 56 sequence | event number, 1, 2, 3... per connection | the event number acknowledged |
+| 62 action | event type 1..3 (1 = cargo placed in the world) | ignored |
+| 72 position, 90 yaw | where the cargo is, adapter axes | ignored |
+| 96 t0 | the game's cargo item hash, 0..2^32-1 | ignored |
+| 104 t1 | nonzero event id chosen by the sender, stable across reconnections | ignored |
+
+Delivery is reliable, ordered and at most once per connection. The sender repeats the oldest unacknowledged event
+every 200 ms. The receiver takes only the next sequence and acknowledges it, and acknowledges any repeat of an older
+one again (its earlier acknowledgement may have been lost). A gap is neither delivered nor acknowledged. On a new
+connection both sides number from 1 again, and undelivered events are kept and renumbered. The receiver delivers
+each event id only once for the lifetime of the connection object (it remembers the last 4096 ids), so an event
+whose acknowledgement was lost just before a reconnection is not delivered twice (mutant `cargoOnce`). Mutants `cargoOrder` and
+`cargoAck` remove ordering and acknowledgement matching. The lossy-link fuzz (500 seeds, 10% loss, 5% duplicates,
+an outage and reconnect) checks that every event is delivered exactly once and in order.

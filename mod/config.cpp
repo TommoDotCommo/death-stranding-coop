@@ -19,7 +19,7 @@ Config parseConfig(const std::string& s) {
         ws();if(at==s.size() || s[at]!=',') break;++at;
     }
     take('}');ws();if(at!=s.size()) throw std::runtime_error("trailing JSON");
-    for(auto& kv:values) if(!std::set<std::string>{"slot","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","presence_log_max_mib"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
+    for(auto& kv:values) if(!std::set<std::string>{"slot","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","presence_log_max_mib"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
     auto text=[&](const char* k){if(!strings.count(k)) throw std::runtime_error(std::string("missing/string expected: ")+k);return values.at(k);};
     auto number=[&](const char* k){auto v=values[k];if(strings.count(k)||v.empty()||v.size()>15||v.find_first_not_of("0123456789")!=std::string::npos||(v.size()>1&&v[0]=='0')) throw std::runtime_error(std::string("invalid integer: ")+k);return std::stoull(v);};
     auto boolean=[&](const char* k,bool d){if(!values.count(k)) return d;auto v=values[k];if(strings.count(k)||(v!="true"&&v!="false")) throw std::runtime_error("boolean expected");return v=="true";};
@@ -41,6 +41,8 @@ Config parseConfig(const std::string& s) {
     c.gameThread=boolean("game_thread",false);c.puppetProbe=boolean("puppet_probe",false);
     if(c.gameThread&&(c.provider!="game"||c.discovery||c.selfTick))throw std::runtime_error("game_thread requires game provider, no discovery or self_tick");
     if(c.puppetProbe&&(!c.gameThread||!c.required))throw std::runtime_error("puppet_probe requires game_thread and required true");
+    c.virtualPad=boolean("virtual_pad",false);
+    if(c.virtualPad&&(c.discovery||!c.required||(!c.selfTick&&!c.gameThread)))throw std::runtime_error("virtual_pad requires a ticking mod (self_tick or game_thread), no discovery and required true");
     if(c.discovery && (c.selfTick||values.count("presence_log_max_mib"))) throw std::runtime_error("discovery is exclusive with self_tick and presence");
     if(c.provider=="game" && !c.discovery) {
         // Reads happen off the game thread (no hook exists), so the mod must tick itself; the executable pin is mandatory.

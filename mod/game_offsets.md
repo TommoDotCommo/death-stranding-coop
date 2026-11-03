@@ -449,3 +449,271 @@ a possible NPC lead, not an approved standalone resource; no live instance has
 yet been identified by the new collector. Its bounded read-only heap inventory
 is available as `read_actor_resources.py`; no production DLL or build identity
 changed in this follow-up.
+
+### Live resource inventory: NPCs are not HumanoidResources (2026-11-02, read-only)
+
+One supervised run of one copy, early Episode 1, with only query/VM_READ handles:
+no injection, no engine call, no creation. The whole private address space
+(about 10.4 GB) was scanned to exhaustion more than once, including while the
+player carried the episode's corpse.
+
+- `read_actor_resources.py` found only the player's resource
+  (`ds/entities/player/ds_player_character`, DSPlayerEntityResource). No plain
+  HumanoidResource was loaded at any point.
+- A wider scan over every vtable whose slot 0 is a reviewed type getter with
+  ControlledEntity or ControlledEntityResource ancestry found no Humanoid entity
+  other than DSPlayerEntity. The loaded NPC resources are
+  **DSControlledEntityResource** (`ds/entities/npc/mule/pe_mule`,
+  `.../pe_demens`, catchers, gazers, animals) and DSDeliveryBotEntityResource,
+  plus many cinematics resources.
+- Resource layout matches the player's: +30 path string, +48
+  SphereBasedActivationPolicy (NPC), +98 Decima array (count/capacity, pointer)
+  of 40 component resources, +140 DSNpcImpactEffectResource, +148
+  DSGroundMoveEntityUpdaterResource. The MULE component list has no
+  DSPlayerPadOperator, Camera, DSPlayerInventory or DSPlayerLife component, which
+  the player's list has. It does have AI, combat, patrol, weapon and Odradek
+  components (DSAIIndividual, AIHelper, DSPatrol, DSNpcCombatSettings,
+  DSMuleWeapon, DSMuleOdradek); demens adds DSDemensComponentResource.
+- A bounded (4 GiB, incomplete) reverse-pointer scan attributed no live
+  DSControlledEntity to the MULE resources: loaded, apparently not instanced.
+
+So the HumanoidResource lead does not reach NPCs in this build. A MULE-family
+resource is a loaded standalone NPC candidate without the player-controller
+dependency, but it carries hostile AI. Whether its activation needs other
+context, and how to keep its AI inert, are unknown. The creation quarantine is
+unchanged and nothing here approves a spawn.
+
+### MULE resource creation path, read statically (2026-11-02, nothing called)
+
+All five ControlledEntityResource classes share factory slot +80 (2366570 ->
+2373940). They differ in the entity-type slot +68, which reads a static class
+pointer:
+
+| Resource | +68 getter | Entity class created | +70 / +78 |
+|---|---:|---|---|
+| DSControlledEntityResource (MULE, demens, cinematics) | 2da4880 -> 4c5d438 | DSControlledEntity | DSControlledEntityRep / NetControlledEntity |
+| HumanoidResource | 3737030 -> 4ebf408 | Humanoid | HumanoidRep / NetHumanoid |
+| DSPlayerEntityResource | 270fd70 -> 4bb59c8 | DSPlayerEntity | |
+
+The failed Sam creation faulted in function 27e63c0, which is DSPlayerState
+vtable 3d82348 slot +2c8. DSPlayerState (metadata 4bcf7d0) is a
+**HumanoidSubState**, built from the player resource's +2e0 array of
+DSPlayerStateResource. Its `FindComponentByType` lookup (22b2a60) for
+DSPlayerController (a HumanoidController component, metadata 4bb2770) returned
+null. The MULE resource object ends before +2e0 and creates a DSControlledEntity,
+which is not a Humanoid. So this crash path has no static reason to run for a
+MULE resource. This is untested, and other activation requirements are unknown.
+
+Exports for keeping a created NPC quiet, resolved with the method above
+(calibrated on GetPosition 2362af0, Player GetEntity 2361b80):
+
+| Export | Impl RVA | Reading |
+|---|---:|---|
+| `Entity_ExportedFindComponentByType(entity, rtti)` | 2361990 | null checks; `22b2a60(entity+90, rtti)` |
+| `Entity_ExportedFindComponentsByType` | 23619b0 | |
+| `EntityComponent_ExportedRemove(component)` | 23618c0 | `235b930(component+48 /*owner*/, component)` |
+| `Entity_ExportedSetSleeping(entity, bool, byte)` | 2361e20 | sleeping flag is bit 8 of entity+88; vtable +a0 sleep / +a8 wake |
+| `Entity_ExportedSetFaction` / `SetDefaultFaction` | 2361d00 / 2361c90 | |
+| `Entity_ExportedSetInvulnerable` / `SetVisible` | 2361d90 / 2361e90 | |
+| `AIIndividualComponent_ExportedGetAIIndividual` | 241dd20 | returns component+50 |
+| `AIIndividual_ExportedIncrementIgnoreOrderCount` | 2562e10 | |
+| `DSNpcCombatSettings_ExportedSetCombatSettings` | 2b9e550 | |
+
+Component class metadata for the MULE's AI-related parts: DSAIIndividualComponent
+4c289a0, AIHelperComponent 4af5990, DSPatrolComponent 4c1d300, DSMuleComponent
+4c116f0, DSMuleWeaponComponent 4c12540, DSNpcCombatSettingsComponent 4c1c6b0,
+DSMuleOdradekComponent 4c15b60, DSNoticeAndKnowledgeReceiveComponent 4c23180,
+DSGroundMovementComponent 4c60400, DSDemensComponent 4c1abb0.
+
+Candidate plan for a later supervised experiment (not authorized; the creation
+quarantine still refuses every native resource): create from a loaded pe_mule
+resource far from the player, then immediately make it invulnerable, neutral and
+quiet (find and remove the AI, patrol, weapon and Odradek components, or sleep
+it), and drive it with SetWorldTransform. Unknowns: whether removing components
+after activation is safe, whether sleeping stops animation as well as AI, what
+the NPC looks like as a stand-in for the partner, and the entity lifetime under
+world streaming.
+
+## The resident Sam double: DSPlayerAKukanEntity (2026-11-02, read-only)
+
+The pinned build ships two Sam doubles that are plain `Entity` subclasses (not
+`DSControlledEntity` or `HumanoidEntity`), built by the shared entity factory
+2366570:
+
+| Class | Resource vtable | Entity vtable | Notes |
+|---|---:|---:|---|
+| `DSPlayerAKukanEntity` | 3d7dcf0 | 3d7de48 (type getter 2711a80) | resource `ds/entities/player/akukan/ds_player_akukan_entity`; depends on the Sam model, Sam's morpheme network, facial rig, voice and the Odradek |
+| `DSPlayerMotionEntity` | 3d7d490 | 3d7d5e8 (ctor 26f4f00) | used by one mission scene only; not loaded in the runs below |
+
+"AKukan" is read here as 亜空間 (subspace), so the double is probably Sam's
+private-room body. That is a guess and unverified. Game code at 2922cc0 treats `DSPlayerEntity` and
+`DSPlayerAKukanEntity` alike when fetching `DSBaggage2CarrierComponent`.
+
+Live, read-only, with the porter in open world in Episode 1 (two runs):
+
+- One live `DSPlayerAKukanEntity` exists. It has 15 components: AKukanConfig, AKukanInventory,
+  Baggage2Carrier, Voice, CustomSound, MorphemeAnimationManager, DSTalk,
+  FacialRigManager, FacialRig, DSCoverAndAnimModel, DSCoverModel, ArtPartsData,
+  NodeGraph, SkinnedModel and FixedPositionMover. It has no AI, controller, pad
+  input or player state (which is what crashed the Sam clone above).
+- It is parked at (0,0,0) with identity rotation, asleep and hidden. Its flags at
+  entity+88 read 0x232850551; the porter's read 0x232854453.
+- Flags at entity+88: bit 1 = visible (SetVisible 2361e90 → 235f640 sets or clears it),
+  bit 8 = sleeping (SetSleeping 2361e20 calls vtable +a0 to sleep and +a8 to wake;
+  the third argument is passed through to +a0 and its meaning is unknown).
+- Entity tree, as walked by the engine's own transform propagation
+  (235bf60): +70 parent, +78 first child, +80 next sibling. A dynamic child array
+  also sits at +240 (count, capacity) / +248 (pointer).
+- Pointer path, checked by type and by the child's parent slot at every step:
+  porter `DSPlayerEntity` → child `CameraEntity` (vtable 3d198e8, getter
+  242daf0) → child `DSPlayerAKukanEntity`. The double's parent chain is exactly
+  `CameraEntity` → `DSPlayerEntity`. A complete reverse-pointer scan of the
+  process found it referenced only by its own components and children, AI notice
+  publishers, render effects, a shared gimmick and the position telemetry. No
+  global singleton holds it.
+- SetWorldTransform (2361ea0 → 22dff80) copies the 60-byte block to entity+c8
+  under a lock at entity+288, sets flag bit 0, then 235bf60 sets bit 4 on the entity
+  and its subtree. The double sat at the world origin while its parent camera
+  moved with the porter, so placement is not simply relative to the parent.
+  A woken double does NOT keep a position set this way. Its `FixedPositionMover`
+  (vtable 3d0d270, at double+b0, owner at mover+48) stores its own 60-byte
+  transform at mover+58 (position) / +70 (rotation). Its constructor 23b1eb0 sets that
+  to origin/identity, and its update (vtable slot 38, 23b6dc0) copies it back into the
+  entity through 22dff80 every frame unless the entity sleeps. No setter was found, so
+  the backend writes mover+58 as well, and restores it on release.
+
+Live results, 2026-11-02, unattended disposable copies with networking enforced:
+- one copy, `echo`: the double appeared beside the porter and followed him;
+  release restored the resting flags exactly (0x232850551) at the origin.
+- two copies from the same save, `peer`: each copy showed the other porter
+  through its own double. The double's position in one copy matched the other
+  copy's porter exactly. Saves were unchanged and both copies verified after every run.
+- the double has no locomotion animation yet. It runs a different animation network from
+  the porter (`sam/references/akukan`; its variable ids differ). That network does contain
+  `Speed`, `DSMove`, `Move_Float` and `Move_Float_Interp`, and the backend sets them through
+  `AnimationManager_Exported{Init,Set}{Bool,Float}AnimationVariable`
+  (2397050/23970b0/23971e0/2397220; `Init(manager, name)` returns an index). The ids are valid
+  and the manager updates (`Distance_To_Camera` changes), but the double holds a near-bind pose
+  while moving. The prefetch index explains why: `sam/references/akukan` is 1.0 MB against
+  121 MB for the porter's `sam/sam`, so the private-room network carries almost no clips.
+  A walking double needs the `sam/sam` network.
+- Walking works (2026-11-03, live). The manager (vtable 3d09910) holds its
+  `MorphemeAnimationManagerResource` at +30 and its network instance at +a0. That instance's
+  `MorphemeNetworkDefResource` is at instance+38 (the double's def has 0x1d3 entries, the
+  porter's 0x2da3). The manager method 23a2fc0(manager) builds a new instance from
+  resource+d8 into +a0. It neither frees nor unregisters the old one, so it is not torn down.
+  The backend points the double's resource+d8 at the porter's definition only for the call, then
+  restores it. It keeps the old instance pointer and puts it back on release (the borrowed
+  instance stays allocated). With the porter's network, the same
+  `Speed`/`DSMove`/`Move_Float`/`Move_Float_Interp` settings give a normal walk.
+  The borrowed instance is kept after release and swapped back in on the next borrow of the
+  same manager, verified live over three cycles. A world reload builds new managers, so a new one
+  is made.
+- Animation variable slots: manager+50 is the u32 count and +58 points to 48-byte slots
+  (+0 a pointer to the C-string name, +8 the network control id or -1, +20 the value as an f32
+  or a byte). Measured on the porter: walking sets `Speed`, `DSMove`, `Move_Float(_Interp)`,
+  `RealMoveSpeedInterp`, `Move_Speed_Config` and `RealSpeedFrame`. Sprinting sets `Sprint` and
+  `RunToDash_Rate(_Interp)`. Crouching sets `Is_Crouch`, `Crouch_Rate` = 1 and
+  `Stance_Change_Level`. The mod reads `Sprint` and `Is_Crouch` read-only into the presence
+  flags (`ds::Sprint`, `ds::Crouch`), and the receiver sets `Sprint`, `Is_Crouch` and
+  `Crouch_Rate` on the double. Jumping sets `Is_Jump`, `Action_Move` and `Is_Actions`, and clears
+  `Is_BasicAction`. These, with `Is_Fall` and `Is_Landed`, travel as bits in the wire `action` field,
+  and the receiver sets the same bools on the double (`Is_BasicAction` = not `Is_Actions`), which
+  makes it jump.
+- The double's three `DSPlayerAKukanEffFloorEntity` children (vtable 3d7db80) draw the
+  private room's yellow floor ring under it once it is shown. Parked, they are hidden and asleep.
+  Waking the double wakes them, and an awake floor effect shows itself again every frame, so
+  SetVisible alone does not hold. While the double is borrowed, the backend records each one's
+  visible and sleeping state and hides and sleeps them on every tick. On release or yield it
+  restores the recorded state.
+- Hand-back order, the same on release and on yield: the mover's resting target first (the game never sets it, so a
+  stale target would pull its own double to the partner's last position every frame), then the animation network,
+  then the floor effects.
+- Game events: `DSGameState_sExportedIsStoppingGameEvent` (2dd3760) takes no arguments and returns a bool. It
+  checks game-state flags (global 7bf6e88, +8/+10 against a mask) or 26303b0. Live, it is true from the title menu
+  through loading and the start-up notices, and false in gameplay. During a local event the mod hands the double
+  back and marks its presence like the private room, so the partner hides the player instead of showing a porter
+  frozen in a cutscene pose.
+- Private room signal: the game wakes and uses a porter's own double for the private room. When that double has been
+  yielded to the game, or is awake or shown while the mod is not driving it, the mod sets `ds::PrivateRoom` in its
+  presence, and the partner's core then hides that porter (the partner's double is released). On two copies there
+  were no false signals before, during or after borrowing. A live private-room entry is untested: the test save
+  carries a corpse bag, and the game refuses the private room with one ("Cannot enter to the privateroom :
+  CorpseBag").
+- the exported SetWorldTransform also runs 235bf60, which marks the entity and its subtree
+  as transform-changed. Calling it every tick froze the double mid-stride, so driving now
+  only updates the mover target and lets the game move the entity.
+
+`mod/double.cpp` borrows this entity as the partner's body. It only takes the
+double when the game has it asleep and hidden. It stops calling as soon as the
+double's flags or position differ from what it set (the game is using it), and it
+puts it back to its saved resting transform, hidden and asleep, when there is
+nothing to show. It never creates or removes anything; its only direct write is
+the mover transform above. Unknowns: how to drive its locomotion animation, and whether the private room
+still works normally after the double has been borrowed and released.
+
+## Cargo (research for shared-world cargo, 2026-11-03, static)
+
+Script exports of `DSBaggage2Manager`, resolved with the `lea r8,[name]` / `lea rax,[impl]` method:
+
+| Export | Thunk | Implementation | Reading |
+|---|---:|---:|---|
+| `CreateBaggage` | 2cd1450 | 2cd6b20 | ecx = cargo type id, rdx = 60-byte world transform; fills a request (mask 0x1fffff, kind 4) and queues it with 2c2a9c0 on the manager (global at 7bf4968) + 46d9f0. Creation is asynchronous and returns nothing. |
+| `CreateAndAddBaggageToPlayer` | 2cd1440 | | |
+| `DeleteBaggage` | 2cd1460 | | |
+| `ExtractBaggageInfo` | 2cd14d0 | (inline) | |
+| `GetAllBaggages` | 2cd15a0 | 2cd74f0 | filter arguments (ecx id/mask 0x1fe000, r8b, r9b); builds a large list on the stack |
+| `GetBaggagesInRange` | 2cd15d0 | 2cd7ae0 | |
+
+Live and read-only, early Episode 1: there are 264 `DSBaggage2Entity` objects, and 263 of them are a hidden,
+sleeping pool (flags 0x30040540). The one active entity is the cargo the porter carries. A cargo entity has the
+standard entity layout: components at +98 (interaction, anti-gravity, stencil, sound...), `PhysicsMover`
+at +b0, `SkinnedModel` at +b8, `AIFaction` at +178 and `ArtPartsData` at +180. The cargo data itself (type,
+owner, state) is in the single `DSBaggage2Manager`'s `DSBaggage2` records:
+- The manager holds 511 records inline at +20, with a stride of 0x240.
+- Record fields: +18 slot, +20 a state bitfield (not a type id: the same corpse record read 0x205 and later 0x105,
+  perhaps the holder in bits 8-9), +28 a `DSGameBaggageListItem*`, and +c8 the item hash.
+- List items (stride 0x70): +20 is the name text resource (a string at its +20, for example "Resins ({0})"),
+  +28 the description, +30 the hash and +50 small floats (weight?).
+- Early Episode 1 has 35 live records: metals, resins, boots and the corpse the porter carries.
+- A cargo entity points to its record at entity+330.
+- Record +38 is the world position as 3 x f64; it is zero for equipped items, and distant world cargo is listed too.
+- Record +30 holds two floats, probably durability current and max (900/900, 1500/0).
+- Record +1c reads 0xfffffe00 for loose or equipped items and 0 for the carried cargo, so it may be the holder. Unconfirmed.
+
+`CreateBaggage` and `CreateAndAddBaggageToPlayer` work live (2026-11-03). Their id is the cargo **item hash**
+(`DSGameBaggageListItem`+30, also record +c8; for example resins = 0x0782598d). Called on the game thread,
+`CreateBaggage(hash, transform)` put a real "Resins (40)" crate on the road at the requested point: a new world
+record (state 0x107) whose +38 position is the spawn point. `CreateAndAddBaggageToPlayer(hash, false)` adds a record
+too. Earlier attempts with other numbers were silently ignored, and the "+4c" exit in 2c470e0 belongs to a different
+branch, not to this path.
+
+Shared cargo, first version (`mod/cargo.{h,cpp}`, core CARGO events):
+- **Read:** the mod reads the record table through the manager global (image 7bf4968, vtable 3dd9338) four times a
+  second, read-only.
+- **Announce:** a record counts as placed by this porter when it is new within 15 m of him, or when he held it
+  (within 2.5 m) and it now stays put while he is at least 3 m away. It must also have settled for 1 s. Each
+  placement is announced once, as {item hash, position}.
+- **Recreate:** the partner calls `CreateBaggage(hash, transform)` on its game thread. It first registers the
+  expected item and point, so the record that appears for it is marked as a mirror and never announced back.
+- **Live, two copies:** a crate created on one copy appeared in the other at the same coordinates, with no echo.
+- **Not yet:** picking cargo up and ownership (a mirrored item stays in the partner's world when the original is
+  picked up), a real put-down by the porter (the keyboard binding is still unknown), and cargo far from the
+  partner.
+
+## Outfit (2026-11-03, read-only)
+
+The double has no backpack or hood. The porter's backpack, pouches and other gear are about 30 attached child
+entities (plain `Entity` and groups of `DSAttachOrPhysicsEntity`), not body art parts, so outfit parity means
+attaching gear entities to the double. Body art parts are switched by `ArtPartsData_sExportedEnableModelPartFromHash`
+(22b4f80 -> 22b5090: entity, part name, on). The name is hashed with CRC32C (190fe50) and looked up in the 52-entry
+table of the entity's `ArtPartsData` (entity+180, +100 count, +108 array). The porter and the double share that
+resource. The archive lists 133 Sam art parts (`part_sam_part_hoodotter`, caps, boots, suits, ...).
+
+Outfit route, static and untried: `ArtPartsVariation_sExportedApplyArtPartsVariation` (22bc100) takes an entity and a
+variation resource. It adds a component built from that resource (234ae90, refused when entity+88 bit 31 is set),
+then applies it (22bae20). Applying the porter's variation to the double would need the added component removed on
+release (`EntityComponent_ExportedRemove`, 23618c0) so the private room is unchanged. It would cover the suit and
+hood, but not the backpack. Live, though, the porter has no variation component: 68 components, including `ArtPartsData`,
+`ArtPartsShaderVariableComponent` and `BoostMeshStreamingForArtPartsDataComponent`. His look is the art-part states
+plus attached gear, so this route does not reproduce it.

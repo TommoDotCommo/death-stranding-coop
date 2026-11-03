@@ -3,8 +3,8 @@ CXX ?= g++
 MINGW ?= x86_64-w64-mingw32-g++-posix
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = game_thread.cpp puppet.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = game_thread.h puppet.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = game_thread.cpp puppet.cpp double.cpp pad.cpp cargo.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = game_thread.h puppet.h double.h pad.h cargo.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -69,9 +69,18 @@ build/game-thread-test: game_thread_test.cpp game_thread.cpp discovery.cpp game_
 	$(CXX) $(FLAGS) game_thread_test.cpp game_thread.cpp discovery.cpp -o $@
 build/puppet-test: puppet_test.cpp puppet.cpp pose.cpp discovery.cpp puppet.h | build
 	$(CXX) $(FLAGS) puppet_test.cpp puppet.cpp pose.cpp discovery.cpp -o $@
-game-thread-test: build/game-thread-test build/puppet-test
+build/double-test: double_test.cpp double.cpp puppet.cpp pose.cpp discovery.cpp double.h puppet.h fake_memory.h | build
+	$(CXX) $(FLAGS) double_test.cpp double.cpp puppet.cpp pose.cpp discovery.cpp -o $@
+build/cargo-test: cargo_test.cpp cargo.cpp cargo.h discovery.cpp | build
+	$(CXX) $(FLAGS) cargo_test.cpp cargo.cpp discovery.cpp -o $@
+build/pad-test: pad_test.cpp pad.cpp pad.h | build
+	$(CXX) $(FLAGS) pad_test.cpp pad.cpp -o $@
+game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test
 	./build/game-thread-test
 	./build/puppet-test
+	./build/double-test
+	./build/pad-test
+	./build/cargo-test
 	python3 -B test_game_thread_mutants.py
 .PHONY: game-thread-test
 

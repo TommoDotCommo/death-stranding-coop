@@ -16,7 +16,9 @@ Anchor local(discovery::Sampler& s){
     uint64_t manager=0;if(!s.read(managerSlot,&manager,8)||!manager)return {};
     auto selected=s.selectPlayer(manager);if(!selected.player)return {};
     uint64_t entity=0;if(!s.read(selected.player+0x70,&entity,8)||!entity)return {};
-    Anchor a;a.pose=PoseReader(s).read();a.entity=entity;if(!valid(a.pose))return {};
+    // The entity is reported whenever the pointer chain is coherent, even if this pose read is not: callers must tell
+    // "porter gone" (entity 0 or changed) from "pose unreadable this tick" (entity kept, pose not valid).
+    Anchor a;a.pose=PoseReader(s).read();a.entity=entity;if(!valid(a.pose)){a.pose.available=a.pose.coherent=false;}
     uint64_t manager2=0,player2=0,entity2=0;
     if(!s.read(managerSlot,&manager2,8)||manager2!=manager||!s.read(selected.slot,&player2,8)||player2!=selected.player||!s.read(selected.player+0x70,&entity2,8)||entity2!=entity)return {};
     return a;

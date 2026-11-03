@@ -39,6 +39,14 @@ int main() {
     assert(mod::parseConfig(withKeys(threaded,"\"puppet_probe\":true,\"required\":true")).puppetProbe);
     assert(refused(withKeys(game,"\"puppet_probe\":true,\"required\":true")));
     assert(!mod::parseConfig(good).selfTick);
+    // Virtual pad: only on a ticking, required mod; off by default; never with discovery.
+    assert(!mod::parseConfig(good).virtualPad);
+    assert(mod::parseConfig(withKeys(threaded,"\"virtual_pad\":true,\"required\":true")).virtualPad);
+    assert(mod::parseConfig(withKeys(good,"\"virtual_pad\":true,\"required\":true,\"self_tick\":true")).virtualPad);
+    assert(refused(withKeys(threaded,"\"virtual_pad\":true")));
+    assert(refused(withKeys(good,"\"virtual_pad\":true,\"required\":true")));
+    assert(refused(withKeys(discovery,"\"virtual_pad\":true,\"required\":true")));
+    assert(refused(withKeys(threaded,"\"virtual_pad\":1,\"required\":true")));
     assert(refused(gameBase));                                                   // game without self_tick or pin
     assert(refused(withKeys(gameBase,pin)));                                     // game without self_tick
     assert(refused(withKeys(gameBase,"\"self_tick\":false,"+pin)));

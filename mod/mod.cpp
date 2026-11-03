@@ -26,6 +26,9 @@ constexpr int INVALID_SOCKET=-1;
 #include "pose.h"
 #include "game_thread.h"
 #include "puppet.h"
+#include "double.h"
+#include "pad.h"
+#include "cargo.h"
 #ifdef MOD_FAKE_NETWORK
 #include "fake_memory.h"
 #endif
@@ -33,6 +36,8 @@ constexpr int INVALID_SOCKET=-1;
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <deque>
+#include <optional>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -94,6 +99,9 @@ uint32_t currentThread() {
     return uint32_t(syscall(SYS_gettid));
 #endif
 }
+// Process-lifetime pad state shared with the proxy's input-thread wrapper; never destroyed with a Runtime.
+struct PadShared {std::mutex lock;mod::pad::Player player;std::atomic<bool> enabled{false};std::atomic<uint64_t> calls{0},active{0};};
+PadShared padShared;
 struct Cache final:ds::StateProvider {
     uint64_t sampledAt=0;
     uint64_t localSampleTime(uint64_t) const override {return sampledAt;}
@@ -124,6 +132,58 @@ struct Runtime final:ds::Transport {
     uint64_t gameRejected=0;bool dispatchVerified=false,staleCommandNoted=false;
     std::filesystem::path puppetCommand;
     std::unique_ptr<mod::puppet::Probe> puppet;
+    // The game's resident Sam double, borrowed as the partner's body (double.h). Armed only by a command for this process.
+    enum class TwinMode {None,Echo,Lead,Peer};
+    std::filesystem::path twinCommand;std::unique_ptr<mod::puppet::Double> twin;TwinMode twinMode=TwinMode::None;
+    std::filesystem::path cargoCommand;std::function<void(uint32_t,const mod::puppet::Transform&)> cargoCreate;
+    std::function<void(uint32_t)> cargoGive;
+    std::function<bool()> gameEvent;bool inEvent=false;std::atomic<bool> fakeEvent{false};
+    // Shared cargo (cargo.h): placements read from the game's cargo map go to the partner; theirs are created here.
+    mod::cargo::Sync cargoSync;uint64_t cargoReadAt=0,cargoManagerSlot=0,cargoManagerVtable=0,cargoSent=0,cargoMade=0;
+    void tickCargo(uint64_t now) {
+        if(!core||!core->connected())return;
+        auto incoming=core->takeCargo();
+        bool coop=twinMode==TwinMode::Peer&&cargoCreate&&cargoManagerSlot;
+        for(auto& e:incoming) {
+            if(!coop){note("CARGO partner placement ignored (not in peer mode)\n");continue;}
+            auto t=mod::puppet::fromState(e.position,e.yaw);
+            cargoSync.expect({e.item,t.position},now);cargoCreate(e.item,t);++cargoMade;
+            std::ostringstream o;o<<"CARGO created partner item "<<e.item<<" at "<<t.position[0]<<","<<t.position[1]<<","<<t.position[2]<<"\n";note(o.str().c_str());
+        }
+        if(!coop||now-cargoReadAt<250)return;
+        cargoReadAt=now;uint64_t manager=0;if(!sampler->read(cargoManagerSlot,&manager,8))return;
+        auto anchor=mod::puppet::readLocalAnchor(*sampler);if(!anchor.entity||!anchor.pose.available)return;
+        auto records=mod::cargo::readRecords(*sampler,manager,cargoManagerVtable);if(records.empty())return;
+        for(auto& p:cargoSync.observe(records,anchor.pose.position,now)) {
+            ds::CargoEvent e;e.type=1;e.item=p.hash;e.position={p.position[0],p.position[2],p.position[1]};   // game -> adapter axes
+            core->queueCargo(e);++cargoSent;
+            std::ostringstream o;o<<"CARGO placed item "<<p.hash<<" at "<<p.position[0]<<","<<p.position[1]<<","<<p.position[2]<<" -> partner\n";note(o.str().c_str());
+        }
+    }
+    std::deque<std::pair<uint64_t,ds::State>> echo;
+    mod::puppet::ActionCache actionCache;uint64_t animatorVtable=0;
+    std::filesystem::path padCommand;bool padRunning=false,posePublished=false,poseLogged=false;
+    // pad.script: a stamp-guarded script (pad.h) that replaces any running one; consumed when read.
+    void tickPad() {
+        if(!config.virtualPad)return;
+        if(std::filesystem::exists(padCommand)) {
+            auto text=readConfig(padCommand);
+            if(!std::filesystem::remove(padCommand))throw std::runtime_error("cannot consume pad script");
+            try {
+                auto steps=mod::pad::parse(text,mod::runStamp());auto n=steps.size();
+                {std::lock_guard<std::mutex> l(padShared.lock);padShared.player.load(std::move(steps));}
+                padRunning=true;note(("PAD script started steps="+std::to_string(n)+"\n").c_str());
+            } catch(const std::exception& e) {note((std::string("PAD script refused: ")+e.what()+"\n").c_str());}
+        }
+        if(padRunning) {bool done;{std::lock_guard<std::mutex> l(padShared.lock);done=padShared.player.done();}
+            if(done){padRunning=false;note("PAD script finished\n");}}
+    }
+    // One line per change, so an outside driver can wait for gameplay by reading the log.
+    void notePose() {
+        if(!game||(poseLogged&&posePublished==poseAvailable))return;
+        poseLogged=true;posePublished=poseAvailable;
+        note((std::string("POSE ")+(poseAvailable?"available":"unavailable")+" reason="+poseReason+"\n").c_str());
+    }
     Cache cache;std::unique_ptr<ds::StateProvider> provider;std::unique_ptr<ds::Core> core;
     uint64_t sent=0,received=0,dropped=0,wrongAccepted=0,buildRefused=0,versionRefused=0,sessionRefused=0;
     bool paired=false,failed=false;std::string failure;uint64_t startedAt=0;std::vector<double> errors;
@@ -278,12 +338,48 @@ struct Runtime final:ds::Transport {
                 auto api=mod::puppet::nativeApi(*sampler);
 #endif
                 puppet=std::make_unique<mod::puppet::Probe>(std::move(api),[this](const std::string& row){note(row.c_str());});
+                twinCommand=path.parent_path()/"puppet.double";cargoCommand=path.parent_path()/"puppet.cargo";
+#ifdef MOD_FAKE_NETWORK
+                // Fake tree: player entity 0x6000 -> CameraEntity 0xa000 -> parked double 0xa800.
+                fake->mutate([&]{auto B=fake->base;fake->put<uint64_t>(0x6078,B+0xa000);
+                    fake->put<uint64_t>(0xa000,B+0xff00);fake->put<uint64_t>(0xa070,B+0x6000);fake->put<uint64_t>(0xa078,B+0xa800);
+                    fake->put<uint64_t>(0xa800,B+0xff10);fake->put<uint64_t>(0xa870,B+0xa000);fake->put<uint64_t>(0xa888,mod::puppet::FlagSleeping|0x551);
+                    const double origin[3]{};const float identity[9]{1,0,0,0,1,0,0,0,1};
+                    memcpy(fake->data.data()+0xa8c8,origin,24);memcpy(fake->data.data()+0xa8e0,identity,36);});
+                mod::puppet::DoubleApi twinApi;
+                twinApi.local=[this]{return mod::puppet::readLocalAnchor(*sampler);};
+                twinApi.find=[this](uint64_t p){return mod::puppet::findDouble(*sampler,p,fake->base+0xff00,fake->base+0xff10);};
+                twinApi.flags=[this](uint64_t e){return mod::puppet::readFlags(*sampler,e);};
+                twinApi.read=[this](uint64_t e){return mod::puppet::readEntityPose(*sampler,e);};
+                auto flag=[this](uint64_t bit,bool on){fake->mutate([&]{uint64_t f=0;memcpy(&f,fake->data.data()+0xa888,8);fake->put<uint64_t>(0xa888,on?f|bit:f&~bit);});};
+                twinApi.sleep=[flag](uint64_t,bool b){flag(mod::puppet::FlagSleeping,b);};
+                twinApi.visible=[flag](uint64_t,bool b){flag(mod::puppet::FlagVisible,b);};
+                twinApi.place=[this](uint64_t,const mod::puppet::Transform& t){fake->setEntityPose(0xa800,t.position.data(),t.rotation.data());};
+                twinApi.anchor=[this](uint64_t,const mod::puppet::Transform& t){fake->mutate([&]{memcpy(fake->data.data()+0xab58,&t,60);});};
+                twinApi.animate=[](uint64_t,double,uint32_t){};
+                twinApi.upgrade=[](uint64_t,uint64_t){return uint64_t(0);};twinApi.downgrade=[](uint64_t,uint64_t){};
+                twinApi.effects=[](uint64_t,bool){};
+#else
+                auto twinApi=mod::puppet::nativeDoubleApi(*sampler);
+                cargoCreate=mod::puppet::nativeCargoCreate(*sampler);cargoGive=mod::puppet::nativeCargoGive(*sampler);
+                gameEvent=mod::puppet::nativeGameEvent(*sampler);
+#endif
+#ifdef MOD_FAKE_NETWORK
+                gameEvent=[this]{return fakeEvent.load();};
+#endif
+                twin=std::make_unique<mod::puppet::Double>(std::move(twinApi),[this](const std::string& row){note(row.c_str());});
+                twin->walk(true);   // borrow the porter's animation network so the partner walks (game_offsets.md)
             }
             presence=std::make_unique<mod::PresenceLog>([this](const std::string& line){return writePresence(line);},uint64_t(config.presenceLogMaxMiB)*1024*1024,[this](const char* s){note(s);});
             auto* raw=sampler.get();
             auto g=std::make_unique<mod::GameProvider>([raw]{return mod::PoseReader(*raw).read();},mod::nowUs,presence.get());
             game=g.get();provider=std::move(g);
         } else provider=std::make_unique<mod::SyntheticProvider>(config.slot);
+        padCommand=path.parent_path()/"pad.script";padShared.enabled=config.virtualPad;
+        if(sampler)animatorVtable=sampler->base+0x3d09910;   // MorphemeAnimationManager (pinned build)
+#ifndef MOD_FAKE_NETWORK
+        if(sampler){cargoManagerSlot=sampler->base+0x7bf4968;cargoManagerVtable=sampler->base+0x3dd9338;}   // DSBaggage2Manager global, vtable
+#endif
         cache.sampledAt=mod::nowMs();
         if(!config.gameThread){cache.available=provider->readLocal(cache.local);cache.gated=provider->isInCutsceneOrLoading();provider->applyRemote({});}
         if(game){poseAvailable=cache.available;poseReason=game->reason();}
@@ -345,6 +441,44 @@ struct Runtime final:ds::Transport {
 #endif
     }
     // The body of mod_tick, shared with the self-tick thread. Takes only the runtime mutex (never the lifecycle lock).
+    // echo: the double replays the local porter one second late, two metres to the right (single-instance check).
+    // peer: the double shows the received partner. off: hand it back to the game. One command per file write.
+    void tickTwin(uint64_t now) {
+        if(std::filesystem::exists(twinCommand)) {
+            auto command=readConfig(twinCommand);auto stamp=" "+mod::runStamp()+"\n";
+            if(!std::filesystem::remove(twinCommand))throw std::runtime_error("cannot consume double command");
+            if(command=="echo"+stamp)twinMode=TwinMode::Echo;else if(command=="peer"+stamp)twinMode=TwinMode::Peer;
+            else if(command=="lead"+stamp)twinMode=TwinMode::Lead;
+            else if(command=="still"+stamp){twin->walk(false);note("DOUBLE own (private-room) network for the next acquire\n");return;}
+            else if(command=="off"+stamp)twinMode=TwinMode::None;else {note("DOUBLE ignored command for another process\n");return;}
+            note(("DOUBLE command "+command.substr(0,command.find(' '))+"\n").c_str());twin->enable();echo.clear();
+        }
+        std::optional<mod::puppet::Transform> target;double speed=0;uint32_t actions=0;
+        auto packed=[](const ds::State& s){return uint32_t(s.flags)|(uint32_t(s.action&31)<<16);};
+        auto horizontal=[](const ds::State& s){return std::hypot(s.velocity[0],s.velocity[2]);};
+        if(twinMode==TwinMode::Peer&&cache.remote.visible){target=mod::puppet::fromState(cache.remote.state.position,cache.remote.state.yaw);speed=horizontal(cache.remote.state);actions=packed(cache.remote.state);}
+        if(twinMode==TwinMode::Echo&&cache.available) {
+            echo.emplace_back(now,cache.local);
+            while(echo.size()>1&&now-echo[1].first>=1000)echo.pop_front();
+            if(now-echo.front().first>=1000) {
+                auto s=echo.front().second;double y=s.yaw;
+                // Game right vector (cos, -sin, 0) in adapter axes (x, up, z).
+                s.position[0]+=2*std::cos(y);s.position[2]-=2*std::sin(y);
+                target=mod::puppet::fromState(s.position,y);speed=horizontal(s);actions=packed(s);
+            }
+        }
+        if(twinMode==TwinMode::Lead&&cache.available) {
+            // Single-copy view test: the double walks 3 m ahead and 1.5 m right of the porter, in front of the camera.
+            auto s=cache.local;double y=s.yaw;
+            s.position[0]+=3*std::sin(y)+1.5*std::cos(y);s.position[2]+=3*std::cos(y)-1.5*std::sin(y);
+            target=mod::puppet::fromState(s.position,y);speed=horizontal(s);actions=packed(s);
+        }
+        if(twinMode==TwinMode::None)echo.clear();
+        // During a local game event or cutscene the double goes back to the game, so it never appears in one.
+        bool event=gameEvent&&gameEvent();
+        if(event!=inEvent){inEvent=event;note(event?"DOUBLE game event: double handed back\n":"DOUBLE game event over\n");}
+        twin->tick(true,(target&&!event)?&*target:nullptr,speed,actions);
+    }
     bool tickOnce(std::string& err,bool gameContext=false) {
         std::lock_guard<std::mutex> guard(mutex);
         if(failed) {err=failure;return false;}
@@ -353,6 +487,15 @@ struct Runtime final:ds::Transport {
             if(lastProvider)providerTick.add(clock-lastProvider);
             lastProvider=clock;++ticks;
             cache.sampledAt=now;cache.available=provider->readLocal(cache.local);cache.gated=provider->isInCutsceneOrLoading();
+            if(game&&cache.available&&gameContext) {
+                // What the porter is doing, from his own animation variables (read-only): sprint and crouch.
+                auto anchor=mod::puppet::readLocalAnchor(*sampler);
+                if(anchor.entity){auto a=mod::puppet::readActions(*sampler,anchor.entity,animatorVtable,actionCache);
+                    cache.local.flags|=uint16_t(a&0xffff);cache.local.action=uint8_t((a>>16)&31);}
+                // In the private room the game uses this porter's own double: tell the partner, whose core then hides us.
+                // Same for a game event or cutscene: the partner hides us instead of showing a porter in a cutscene pose.
+                if(anchor.entity&&twin&&(twin->gameUsesDouble(anchor.entity)||inEvent))cache.local.flags|=ds::PrivateRoom;
+            }
             if(cache.available) {
                 // A jump flag must survive until a presence packet carrying it has been sent.
                 if(cache.local.flags&ds::Teleport)cache.stickyTeleport=true;else if(cache.stickyTeleport)cache.local.flags|=ds::Teleport;
@@ -370,6 +513,26 @@ struct Runtime final:ds::Transport {
                 }
                 puppet->tick(now,true);
             }
+            if(twin&&gameContext)tickTwin(now);
+            if(twin&&gameContext)tickCargo(now);
+            if(cargoCreate&&gameContext&&std::filesystem::exists(cargoCommand)) {
+                auto text=readConfig(cargoCommand);
+                if(!std::filesystem::remove(cargoCommand))throw std::runtime_error("cannot consume cargo command");
+                auto id=mod::puppet::parseCargoCommand(text,mod::runStamp());auto anchor=mod::puppet::readLocalAnchor(*sampler);
+                auto give=mod::puppet::parseCargoCommand(text,mod::runStamp(),"give");
+                if(give&&cargoGive){cargoGive(*give);note(("CARGO give id="+std::to_string(*give)+"\n").c_str());}
+                else if(!id||!anchor.entity||!anchor.pose.available)note("CARGO refused command\n");
+                else {
+                    // Two metres behind the porter (the side he just came from is free), half a metre up, upright.
+                    auto t=mod::puppet::transform(anchor.pose);double fx=t.rotation[3],fy=t.rotation[4],l=std::hypot(fx,fy);
+                    if(l>.5){t.position[0]-=2*fx/l;t.position[1]-=2*fy/l;}
+                    t.position[2]+=.5;
+                    t.rotation={1,0,0,0,1,0,0,0,1};
+                    cargoCreate(*id,t);
+                    note(("CARGO create id="+std::to_string(*id)+"\n").c_str());
+                }
+            }
+            tickPad();notePose();
             if(unappliedReceive) {receiveApply.add(clock-unappliedReceive);unappliedReceive=0;}
             if(!cache.available && !game) {err="provider unavailable during tick";note(err.c_str());return false;}
             if(now-startedAt>1000 && config.provider=="synthetic" && cache.remote.visible && core->connected()) {
@@ -418,6 +581,7 @@ extern "C" {
 MOD_API uint32_t mod_test_thread_id() {return currentThread();}
 MOD_API uint64_t mod_test_frame_caller() {return mod::dispatch::FixtureSites.framePattern+16;}
 MOD_API const char* mod_test_run_stamp() {static std::string stamp=mod::runStamp();return stamp.c_str();}
+MOD_API void mod_test_set_event(int on) {std::lock_guard<std::mutex> lock(lifecycle);if(runtime)runtime->fakeEvent=on!=0;}
 MOD_API void mod_test_set_pose(const double* position,const float* rotation,int menu) {
     std::lock_guard<std::mutex> lock(lifecycle);if(!runtime||!runtime->fake)return;
     auto* f=runtime->fake.get();
@@ -439,6 +603,17 @@ MOD_API void mod_test_deliver(const unsigned char* bytes) {
     r.pending.push_back({mod::nowUs(),mod::nowMs()+delay,b,b.size()});
 }
 #endif
+int mod_pad(mod_pad_state* s) {
+    if(!s||s->size!=sizeof(mod_pad_state))return -1;
+    const uint32_t size=s->size;*s={};s->size=size;
+    if(!padShared.enabled.load(std::memory_order_acquire))return 0;
+    ++padShared.calls;
+    // The game's input thread must never wait: skip this poll when a script is being swapped in.
+    std::unique_lock<std::mutex> l(padShared.lock,std::try_to_lock);if(!l)return 0;
+    mod::pad::Gamepad g;if(!padShared.player.sample(mod::nowMs(),g))return 0;
+    s->buttons=g.buttons;s->left_trigger=g.leftTrigger;s->right_trigger=g.rightTrigger;s->lx=g.lx;s->ly=g.ly;s->rx=g.rx;s->ry=g.ry;
+    ++padShared.active;return 1;
+}
 int mod_init(const char* path) {
     std::lock_guard<std::mutex> lock(lifecycle);
     try {if(runtime) throw std::runtime_error("mod already initialized");if(!path) throw std::runtime_error("null config path");auto r=std::make_unique<Runtime>();r->init(std::filesystem::path(path));runtime=r.release();error.clear();return 1;}
@@ -493,6 +668,9 @@ unsigned mod_status(char* out,unsigned cap) {
         auto p=[&](double q){return errors.empty()?-1.:errors[size_t((errors.size()-1)*q)];};
         std::ostringstream o;o<<"{\"handshake\":"<<(r.paired?"true":"false")<<",\"connected\":"<<(r.core->connected()?"true":"false")<<",\"sent\":"<<r.sent<<",\"received\":"<<r.received<<",\"dropped\":"<<r.dropped<<",\"accepted\":"<<r.core->accepted()<<",\"wrong_accepted\":"<<r.wrongAccepted<<",\"build_refused\":"<<r.buildRefused<<",\"version_refused\":"<<r.versionRefused<<",\"session_refused\":"<<r.sessionRefused<<",\"rtt_ms\":"<<r.measuredRtt<<",\"current_rtt_ms\":"<<r.core->rttMs()<<",\"samples\":"<<errors.size()<<",\"error_p50\":"<<p(.5)<<",\"error_p95\":"<<p(.95)<<",\"error_p99\":"<<p(.99)<<",\"error_max\":"<<p(1)<<",\"failed\":"<<(r.failed?"true":"false")<<",\"self_tick\":{\"enabled\":"<<(r.config.selfTick?"true":"false")<<",\"ticks\":"<<r.ticks<<"},\"pose\":{\"available\":"<<(r.poseAvailable?"true":"false")<<",\"reason\":\""<<r.poseReason<<"\"}";
         o<<",\"game_thread\":{\"enabled\":"<<(r.config.gameThread?"true":"false")<<",\"verified\":"<<(r.dispatchVerified?"true":"false")<<",\"thread_id\":"<<r.gameGate.thread()<<",\"rejected\":"<<r.gameRejected<<"},\"puppet\":{\"enabled\":"<<(r.puppet?"true":"false")<<",\"stage\":\""<<(r.puppet?r.puppet->stage():"disabled")<<"\",\"actor\":"<<(r.puppet?r.puppet->actor():0)<<"}";
+        o<<",\"pad\":{\"enabled\":"<<(r.config.virtualPad?"true":"false")<<",\"running\":"<<(r.padRunning?"true":"false")<<",\"calls\":"<<padShared.calls.load()<<",\"active_calls\":"<<padShared.active.load()<<"}";
+        o<<",\"event\":"<<(r.inEvent?"true":"false")<<",\"cargo\":{\"sent\":"<<r.cargoSent<<",\"created\":"<<r.cargoMade<<",\"mirrored\":"<<r.cargoSync.mirrored()<<",\"pending\":"<<(r.core?r.core->cargoPending():0)<<"}";
+        o<<",\"double\":{\"stage\":\""<<(r.twin?r.twin->name():"disabled")<<"\",\"mode\":\""<<(r.twinMode==Runtime::TwinMode::Echo?"echo":r.twinMode==Runtime::TwinMode::Lead?"lead":r.twinMode==Runtime::TwinMode::Peer?"peer":"none")<<"\",\"entity\":"<<(r.twin?r.twin->entity():0)<<"}";
         o<<",\"timing\":{\"clock\":\""
 #ifdef _WIN32
         <<"QueryPerformanceCounter"

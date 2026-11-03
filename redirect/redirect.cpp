@@ -23,6 +23,7 @@
 #include "objects.h"
 #include "network_policy.h"
 #include "thread_trace.h"
+#include "virtual_pad.h"
 #include <set>
 #include <winternl.h>
 #include <atomic>
@@ -348,8 +349,15 @@ size_t patch(HMODULE module) {
     return count;
 }
 void patch_all(bool startup=false) {
-    HANDLE snap=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE,GetCurrentProcessId());
-    if(snap==INVALID_HANDLE_VALUE) fatal("redirect: module enumeration failed\n");
+    // Documented race: the snapshot fails with ERROR_BAD_LENGTH while another thread loads or unloads a module
+    // (live 2026-11-02, a copy died here at startup). Retry a bounded number of times; anything else stays fatal.
+    HANDLE snap=INVALID_HANDLE_VALUE;
+    for(unsigned attempt=0;attempt<50;++attempt) {
+        snap=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE,GetCurrentProcessId());
+        if(snap!=INVALID_HANDLE_VALUE || GetLastError()!=ERROR_BAD_LENGTH) break;
+        Sleep(attempt<10?0:1);
+    }
+    if(snap==INVALID_HANDLE_VALUE) {char message[80];snprintf(message,sizeof message,"redirect: module enumeration failed (error %lu)\n",GetLastError());fatal(message);}
     MODULEENTRY32W m{}; m.dwSize=sizeof(m);
     if(!Module32FirstW(snap,&m)) fatal("redirect: no modules\n");
     size_t host_count=0;
@@ -363,9 +371,45 @@ void patch_all(bool startup=false) {
     CloseHandle(snap);
     if(startup && !host_count) fatal("redirect: no host imports patched\n");
 }
+// Opt-in virtual gamepad (virtual_pad.h). The real XInputGetState still runs; for user 0, while the mod reports
+// an active pad script, its gamepad replaces the result. No allocation, IO or waiting on the input thread.
+bool pad_enabled=false;
+using XInputGetStateFn=DWORD(WINAPI*)(DWORD,void*);
+using PadFn=int(*)(mod_pad_state*);
+std::atomic<XInputGetStateFn> real_xinput{nullptr};
+std::atomic<PadFn> pad_source{nullptr};
+std::atomic<bool> pad_noted{false};
+redirect::pad::Overlay pad_overlay;
+SRWLOCK pad_lock=SRWLOCK_INIT;
+DWORD WINAPI hook_XInputGetState(DWORD user,void* state) {
+    auto real=real_xinput.load(std::memory_order_acquire);
+    DWORD result=real?real(user,state):ERROR_DEVICE_NOT_CONNECTED;
+    auto source=pad_source.load(std::memory_order_acquire);
+    if(!source||!state)return result;
+    mod_pad_state m{};m.size=sizeof m;
+    bool active=source(&m)==1;
+    redirect::pad::Gamepad g;g.buttons=m.buttons;g.leftTrigger=m.left_trigger;g.rightTrigger=m.right_trigger;g.lx=m.lx;g.ly=m.ly;g.rx=m.rx;g.ry=m.ry;
+    redirect::pad::State out;
+    AcquireSRWLockExclusive(&pad_lock);bool applied=pad_overlay.apply(user,active,g,out);ReleaseSRWLockExclusive(&pad_lock);
+    if(!applied)return result;
+    memcpy(state,&out,sizeof out);return ERROR_SUCCESS;
+}
 FARPROC WINAPI hook_GetProcAddress(HMODULE m,LPCSTR name) {
     auto p=real_gpa(m,name);
     for(auto& e:entries) if(p==e.original) return e.hook;
+    // Cheap name test first: only the XInputGetState lookup pays for the module-name query.
+    if(pad_enabled&&p&&name&&(reinterpret_cast<uintptr_t>(name)>>16)&&!std::strcmp(name,"XInputGetState")) {
+        wchar_t path[MAX_PATH];DWORD n=GetModuleFileNameW(m,path,MAX_PATH);
+        if(n&&n<MAX_PATH) {
+            const wchar_t* base=wcsrchr(path,L'\\');base=base?base+1:path;
+            if(redirect::pad::replaces(base,name)) {
+                XInputGetStateFn expected=nullptr;auto real=reinterpret_cast<XInputGetStateFn>(reinterpret_cast<void*>(p));
+                if(!real_xinput.compare_exchange_strong(expected,real)&&expected!=real) return p;   // a second, different xinput: leave it alone
+                if(!pad_noted.exchange(true)) note(L"VIRTUAL_PAD",L"XInputGetState wrapped",path);
+                return reinterpret_cast<FARPROC>(hook_XInputGetState);
+            }
+        }
+    }
     return p;
 }
 // Final-path equality plus ancestor checks rejects junctions, short names and
@@ -898,6 +942,12 @@ void install_redirect(void* self) {
             thread_trace.buffer.hostSize=nt->OptionalHeader.SizeOfImage;
         }
     }
+    {
+        wchar_t value[16]{};auto n=::GetEnvironmentVariableW(L"COOP_VIRTUAL_PAD",value,16);
+        if(n>=16 || !redirect::pad::parse(n?value:L"",pad_enabled)) fatal("redirect: invalid virtual pad option\n");
+        if(pad_enabled && net.mode!=redirect::NetMode::enforce) fatal("redirect: virtual pad requires enforced network policy\n");
+        if(pad_enabled) note(L"VIRTUAL_PAD",L"enabled",L"player 1 only; scripted by the mod");
+    }
     // System DLLs often import API-set targets in KernelBase, whereas game
     // imports target Kernel32 wrappers. Cover both resolved addresses. Keep the
     // Kernel32 -> KernelBase forwarding edge original: our real API calls use
@@ -934,6 +984,7 @@ BOOL CALLBACK bootstrap_mod(PINIT_ONCE,PVOID,PVOID*) {
     try {
         if(GetFileAttributesW(config.c_str())==INVALID_FILE_ATTRIBUTES) {
             if(GetLastError()!=ERROR_FILE_NOT_FOUND && GetLastError()!=ERROR_PATH_NOT_FOUND) fatal("redirect: cannot inspect mod config\n");
+            if(pad_enabled) fatal("redirect: virtual pad requires the mod\n");
             note(L"MOD_ABSENT",L"optional mod config absent",directory);return TRUE;
         }
         if(!safe_tree(config,true)||!safe_tree(dll,true)) fatal("redirect: unsafe mod/config path\n");
@@ -943,6 +994,7 @@ BOOL CALLBACK bootstrap_mod(PINIT_ONCE,PVOID,PVOID*) {
         if(!ok||n>4096) fatal("redirect: mod config read/size failure\n");
         auto c=mod::parseConfig(std::string(bytes,n));
         if(c.gameThread&&(!trace_enabled||net.mode!=redirect::NetMode::enforce))fatal("redirect: game_thread requires observer hooks and enforced networking\n");
+        if(c.virtualPad!=pad_enabled)fatal("redirect: COOP_VIRTUAL_PAD and mod virtual_pad must agree\n");
         // This single reviewed library is the only explicit loader exception.
         // Its CRT entry point has no mod startup or IO. Resolve dependencies only
         // from the DLL folder and System32. Patch BEFORE calling any mod API.
@@ -964,6 +1016,11 @@ BOOL CALLBACK bootstrap_mod(PINIT_ONCE,PVOID,PVOID*) {
         if(!started) {
             if(c.required) fatal("redirect: REQUIRED mod failed to load/start; provider or hook unavailable\n");
             note(L"MOD_FAILED",L"optional mod failed to load/start",dll);return TRUE;
+        }
+        if(pad_enabled) {
+            auto pad=reinterpret_cast<PadFn>(real_gpa(mod_handle,"mod_pad"));
+            if(!pad) fatal("redirect: virtual pad export missing\n");
+            pad_source.store(pad,std::memory_order_release);
         }
         if(c.gameThread){game_tick.store(callback,std::memory_order_release);note(L"GAME_THREAD_ARMED",L"empty Peek; main thread, reviewed stack, depth 1; 20 Hz",dll);}
         mod_result=1;note(L"MOD_STARTED",c.gameThread?L"guarded game-thread dispatch":L"network only; no game-thread hook",dll);return TRUE;

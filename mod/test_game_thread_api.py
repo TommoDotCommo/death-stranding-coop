@@ -14,6 +14,10 @@ class Context(c.Structure):
     _fields_=[('size',c.c_uint32),('version',c.c_uint32),('thread_id',c.c_uint32),('depth',c.c_uint32),
               ('caller_rva',c.c_uint64),('network_enforced',c.c_uint32),('reserved',c.c_uint32)]
 
+class Pad(c.Structure):
+    _fields_=[('size',c.c_uint32),('buttons',c.c_uint16),('left_trigger',c.c_uint8),('right_trigger',c.c_uint8),
+              ('lx',c.c_int16),('ly',c.c_int16),('rx',c.c_int16),('ry',c.c_int16)]
+
 class ApiTests(unittest.TestCase):
     def test_guarded_tick_and_one_shot_command(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -23,8 +27,9 @@ class ApiTests(unittest.TestCase):
             lib.mod_last_error.restype=c.c_char_p;lib.mod_test_run_stamp.restype=c.c_char_p
             lib.mod_test_thread_id.restype=c.c_uint32;lib.mod_test_frame_caller.restype=c.c_uint64
             lib.mod_test_set_pose.argtypes=[c.POINTER(c.c_double),c.POINTER(c.c_float),c.c_int]
+            lib.mod_pad.argtypes=[c.POINTER(Pad)]
             config=root/'mod.json';config.write_text(json.dumps(dict(role='host',peer='127.0.0.1',slot=0,peer_slot=1,
-                nickname='probe',provider='game',session=44,required=True,game_thread=True,puppet_probe=True,
+                nickname='probe',provider='game',session=44,required=True,game_thread=True,puppet_probe=True,virtual_pad=True,
                 discovery_sha256=PIN)))
             self.assertEqual(lib.mod_init(str(config).encode()),1,lib.mod_last_error())
             def status():
@@ -66,6 +71,46 @@ class ApiTests(unittest.TestCase):
                     self.assertNotEqual(event['actor'],event['local_entity']);self.assertTrue(event['readback_available'])
                     self.assertEqual(event['local_after_entity'],event['local_entity']);self.assertTrue(event['local_after_available'])
                     self.assertEqual(event['requested_position'],event['readback_position'])
+                # The resident double: echo the porter one second late, two metres to the right, then hand it back.
+                self.assertEqual(status()['double'],dict(stage='off',mode='none',entity=0))
+                twin=root/'puppet.double';twin.write_text('echo wrong-process\n')
+                self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1);self.assertEqual(status()['double']['stage'],'off')
+                stamp=lib.mod_test_run_stamp().decode()
+                twin.write_text('echo '+stamp+'\n');self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1)
+                self.assertFalse(twin.exists());self.assertEqual(status()['double']['stage'],'parked')
+                time.sleep(1.02);self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1)
+                self.assertEqual(status()['double']['stage'],'driving');self.assertEqual(status()['double']['mode'],'echo')
+                # A local game event hands the double back; it comes back when the event ends.
+                lib.mod_test_set_event(1);self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1)
+                self.assertEqual(status()['double']['stage'],'parked');self.assertTrue(status()['event'])
+                lib.mod_test_set_event(0);time.sleep(.06);self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1)
+                self.assertEqual(status()['double']['stage'],'driving');self.assertFalse(status()['event'])
+                twin.write_text('off '+stamp+'\n');self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1)
+                self.assertEqual(status()['double']['stage'],'parked')
+                log=next(root.glob('mod-*.log')).read_text()
+                rows=[json.loads(line[len('DOUBLE '):]) for line in log.splitlines() if line.startswith('DOUBLE {')]
+                self.assertEqual([r['event'] for r in rows],['acquired','released','acquired','released'])
+                self.assertEqual(rows[0]['readback'],[12,20,30]);self.assertEqual(int(rows[0]['flags'],16)&0x102,0x2)
+                self.assertEqual(rows[1]['readback'],[0,0,0]);self.assertEqual(int(rows[1]['flags'],16)&0x102,0x100)
+                self.assertIn('DOUBLE game event: double handed back',log);self.assertIn('DOUBLE game event over',log)
+                self.assertIn('DOUBLE ignored command for another process',log)
+                # Scripted pad: refused foreign script, then press A for 300 ms; never blocks, size-checked.
+                pad=Pad(c.sizeof(Pad));self.assertEqual(c.sizeof(Pad),16)
+                self.assertEqual(lib.mod_pad(c.byref(pad)),0);self.assertEqual(pad.buttons,0)
+                script=root/'pad.script';script.write_text('pad other\npress A 300\n')
+                self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1);self.assertFalse(script.exists())
+                self.assertEqual(lib.mod_pad(c.byref(pad)),0)
+                script.write_text('pad '+stamp+'\npress A 300\nstick 0 1 200\n')
+                self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1);self.assertTrue(status()['pad']['running'])
+                self.assertEqual(lib.mod_pad(c.byref(pad)),1);self.assertEqual((pad.buttons,pad.ly,pad.size),(0x1000,0,16))
+                bad=Pad(15);self.assertEqual(lib.mod_pad(c.byref(bad)),-1)
+                time.sleep(.55);self.assertEqual(lib.mod_pad(c.byref(pad)),1);self.assertEqual((pad.buttons,pad.ly),(0,32767))
+                time.sleep(.25);self.assertEqual(lib.mod_pad(c.byref(pad)),0);self.assertEqual(pad.ly,0)
+                self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1);self.assertFalse(status()['pad']['running'])
+                self.assertGreaterEqual(status()['pad']['active_calls'],2)
+                log=next(root.glob('mod-*.log')).read_text()
+                self.assertIn('PAD script refused: pad script line 1',log);self.assertIn('PAD script started steps=3',log)
+                self.assertIn('PAD script finished',log);self.assertIn('POSE available',log)
             finally:lib.mod_shutdown()
             self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),-1)
 

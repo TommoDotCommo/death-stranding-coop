@@ -54,3 +54,51 @@ and attaches DSPlayerController. It also changes player ownership, so it cannot
 be used on the local player to make an independent puppet. Read-only resource
 discovery now catalogs the separate HumanoidResource class and can search loaded
 private memory for candidate instances. No new native creation attempt has run.
+
+A later read-only live inventory found no loaded HumanoidResource in early
+Episode 1: NPC humans (MULEs) use DSControlledEntityResource, whose component
+list has no player-controller dependency but includes hostile AI. Details in
+`mod/game_offsets.md`. No creation attempt has run since the quarantine.
+Static follow-up: the crash came from DSPlayerState, a Humanoid sub-state. The
+MULE resource creates a non-humanoid DSControlledEntity, so that path should not
+run for it (untested). Component-removal, sleep, faction and invulnerability
+exports are resolved as candidates for keeping such an NPC inert.
+
+## The partner's body: the game's resident Sam double (2026-11-03)
+
+The game keeps a second Sam in memory: `DSPlayerAKukanEntity`, the private-room body. It is parked asleep and
+hidden at the world origin as a child of the porter's camera entity, and has no AI, controller or player state.
+`mod/double.cpp` borrows it as the partner's body. It only takes the double while the game has it parked, and
+it never creates or removes entities. All calls run on the game thread:
+- the game's own SetSleeping, SetVisible and SetWorldTransform;
+- its FixedPositionMover target (the double's only movement source while awake);
+- the animation-variable exports;
+- the manager's network-rebuild method.
+
+Working live, unattended, in disposable copies with networking enforced:
+- Two copies started from the same save each show the other player as their double. The two-copy regression
+  measured the double within 1 cm of the real partner.
+- The double walks, runs, crouches and jumps with the partner. It gets an instance of the porter's animation
+  network while borrowed, because its own private-room network has almost no clips. Speed comes from the
+  partner's movement and is smoothed. Sprint, crouch, jump, fall and landing travel in the presence flags and
+  `action` bits and are set on the double's animation variables.
+- Hand-back on release, on yield and when the game takes the double restores everything borrowed: the mover's
+  resting target, the original animation network instance (the borrowed one is reused on the next borrow),
+  the private-room floor effects (hidden and asleep while borrowed) and the parked flags and transform.
+- A player in their private room (the game is using their own double) or in a game event or cutscene marks
+  their presence accordingly, and the partner hides them. Locally, the double goes back to the game for the
+  duration of an event.
+- An unreadable pose for one tick never makes the mod forget a borrowed double; only a new or missing porter
+  entity does.
+
+Not done: the partner has no backpack or hood (the porter's gear is about 30 attached entities). A real
+private-room entry is untested, because the test save carries a corpse bag and the game refuses entry with one.
+Shared cargo works in a first version: cargo one porter places appears in the partner's world at the same spot. It
+travels as reliable CARGO events, at most once even across reconnects; the core's fuzz tests run them through loss,
+duplicates and an outage. The partner's mod creates the item with the game's own `CreateBaggage`. Picking cargo up
+is not synchronised yet (`mod/game_offsets.md`, "Cargo").
+
+Unattended testing: live tests drive the focused copy with synthetic keyboard input and capture background
+copies with PrintWindow. The proxy's opt-in virtual gamepad (`COOP_VIRTUAL_PAD=1`, the mod's `virtual_pad`,
+a stamp-guarded `pad.script`) works on Windows without the game, but the game never polls it. A connected
+controller holds pad slot 0 through Windows.Gaming.Input, and the game only checks XInput for unassigned slots.

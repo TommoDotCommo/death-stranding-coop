@@ -3,13 +3,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <algorithm>
+#include <vector>
 #include "build_id.h"
 
 namespace ds {
 constexpr size_t WireSize = 128;
 constexpr uint32_t GameBuild = 13300582;
 using Bytes = std::array<uint8_t,WireSize>;
-enum class Kind : uint8_t { Hello=1, Ack, Presence, Ping, Pong, Bye };
+enum class Kind : uint8_t { Hello=1, Ack, Presence, Ping, Pong, Bye, Cargo, CargoAck };
 enum class Role : uint8_t { Host=1, Client=2 };
 enum class Error { None, Length, Magic, Version, Checksum, Reserved, Kind, Role, Build, Session, Nonce, Range, Duplicate, Time, Speed, Teleport, NotConnected };
 const char* reason(Error);
@@ -29,12 +31,18 @@ struct Packet {
     uint32_t sequence=0; State state{};
     uint8_t byeReason=0;
 };
+// A shared-world cargo event (adapter axes, like State). Delivered reliably and in order, at most once per connection:
+// the sender repeats the oldest unacknowledged event, the receiver accepts only the next sequence and acknowledges
+// it and any repeat. item is the game's cargo item hash; type 1 = cargo placed in the world.
+// id is a stable nonzero identity chosen by the sender; the receiver delivers each id once for the lifetime of the
+// Core, so an event resent after a reconnection (its acknowledgement lost) is not delivered twice.
+struct CargoEvent { uint32_t sequence=0; uint8_t type=1; uint32_t item=0; std::array<double,3> position{}; double yaw=0; uint64_t id=0; };
 // Mutants exist only in test builds (-DDS_TESTING).
 struct Protection {
     bool version=true, range=true, teleport=true, duplicate=true, delay=true, session=true, build=true;
     bool magic=true, checksum=true, reserved=true, nonce=true, time=true, speed=true;
     bool length=true, kind=true, role=true, handshake=true, ping=true, clamp=true, finite=true;
-    bool pingRetry=true, pingHistory=true;
+    bool pingRetry=true, pingHistory=true, cargoOrder=true, cargoAck=true, cargoOnce=true;
     bool floor=true, extrapolate=true, stale=true, gate=true, timeout=true, buffer=true, rate=true;
 };
 Bytes encode(Packet); // throws invalid_argument for nonfinite state
@@ -76,6 +84,9 @@ public:
     double rttMs() const { return rtt_; }
     double clockOffsetMs() const { return offset_; } // remote minus local
     Render render(uint64_t now) const;
+    void queueCargo(CargoEvent);              // sequence is assigned here
+    std::vector<CargoEvent> takeCargo();      // received events, each exactly once, in order
+    size_t cargoPending() const { return cargoOut_.size(); }
 private:
     void send(Kind,uint64_t);
     void reset(bool rotateNonce);
@@ -88,6 +99,10 @@ private:
     uint32_t outgoing_=0, incoming_=0;
     double rtt_=-1, offset_=0;
     State sentState_{};
+    std::deque<CargoEvent> cargoOut_; std::vector<CargoEvent> cargoIn_;
+    uint32_t cargoNext_=0, cargoSeen_=0; uint64_t nextCargo_=0, cargoIds_=0;
+    std::deque<uint64_t> deliveredIds_;   // bounded memory of delivered event ids
+    void sendCargo(const CargoEvent&,uint64_t now);
     Error error_=Error::None;
 };
 }

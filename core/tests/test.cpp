@@ -45,8 +45,8 @@ void parserTests() {
     bad=b; patch(bad,8,127,2); check(parse(bad)==Error::Length,"length");
     bad=b; bad[80]^=4; check(parse(bad)==Error::Checksum,"checksum");
     for(size_t at:{size_t(10),size_t(95),size_t(124)}) { bad=b; patch(bad,at,1,1); check(parse(bad)==Error::Reserved,"reserved"); }
-    for(int kind=1;kind<=6;++kind) { bad=b; patch(bad,6,kind,1); check(parse(bad)==Error::None,"every_kind"); }
-    for(int kind:{0,7,255}) { bad=b; patch(bad,6,kind,1); check(parse(bad)==Error::Kind,"kind"); }
+    for(int kind=1;kind<=8;++kind) { bad=b; patch(bad,6,kind,1); check(parse(bad)==Error::None,"every_kind"); }
+    for(int kind:{0,9,255}) { bad=b; patch(bad,6,kind,1); check(parse(bad)==Error::Kind,"kind"); }
     bad=b; patch(bad,7,0,1); check(parse(bad)==Error::Role,"role");
     for(size_t at:{size_t(12),size_t(16)}) { bad=b; patch(bad,at,0,4); check(parse(bad)==Error::Build,"build"); }
     bad=b; patch(bad,32,0,8); check(parse(bad)==Error::Nonce,"zero_session");
@@ -65,6 +65,35 @@ void parserTests() {
     Packet nan; nan.state.yaw=std::nan(""); bool threw=false; try { encode(nan); } catch(const std::invalid_argument&) { threw=true; } check(threw,"nonfinite_encoder");
     for(unsigned i=0;i<16;++i) check(portForSlot(i)==49000+i,"ports");
     bool threwSlot=false; try { portForSlot(16); } catch(const std::out_of_range&) { threwSlot=true; } check(threwSlot,"port_range");
+}
+void cargoTests() {
+    // Wire: an event survives encode/decode with its item hash (t0), type (action), position and yaw.
+    { Fixture f; CargoEvent e; e.item=0x0782598d; e.position={1694.7,135.7,1056.4}; e.yaw=1.5; f.core.queueCargo(e); f.core.tick(10);
+      Packet q; bool sent=false; for(auto& b:f.transport.packets) if(b[6]==uint8_t(Kind::Cargo)) { sent=decode(b.data(),b.size(),q)==Error::None; }
+      check(sent&&q.sequence==1&&q.t0==0x0782598d&&q.state.action==1&&std::abs(q.state.position[0]-1694.7)<.01&&std::abs(q.state.yaw-1.5)<.001,"cargo_wire");
+      // Repeated until acknowledged, then never again.
+      f.transport.packets.clear(); f.core.tick(100); f.core.tick(220); unsigned repeats=0; for(auto& b:f.transport.packets) repeats+=b[6]==uint8_t(Kind::Cargo);
+      check(repeats==1,"cargo_repeat");
+      Packet ack=f.presence(1,0); ack.kind=Kind::CargoAck; ack.sequence=2; f.receive(ack,230); check(f.core.cargoPending()==1,"cargoAck");   // wrong sequence
+      ack.sequence=1; f.receive(ack,240); check(f.core.cargoPending()==0,"cargo_acked");
+      f.transport.packets.clear(); f.core.tick(500); for(auto& b:f.transport.packets) check(b[6]!=uint8_t(Kind::Cargo),"cargo_acked"); }
+    // Receiver: only the next sequence is taken, exactly once; repeats are acknowledged again but not delivered.
+    { Fixture f; auto cargo=[&](uint32_t seq,uint32_t item){ Packet p=f.presence(seq,0); p.kind=Kind::Cargo; p.state.action=1; p.t0=item; p.t1=1000+item; return p; };
+      f.receive(cargo(2,22),100); check(f.core.takeCargo().empty(),"cargoOrder");                       // gap: not delivered
+      f.receive(cargo(1,11),110); f.receive(cargo(1,11),120); f.receive(cargo(2,22),130);
+      auto got=f.core.takeCargo(); check(got.size()==2&&got[0].item==11&&got[1].item==22,"cargoOrder");
+      unsigned acks=0; for(auto& b:f.transport.packets) acks+=b[6]==uint8_t(Kind::CargoAck); check(acks==3,"cargo_ack_repeats");
+      auto bad=cargo(3,33); bad.state.action=0; check(f.receive(bad,140)==Error::Range,"cargo_type_range");
+      check(f.core.takeCargo().empty(),"cargo_taken_once");
+      auto noid=cargo(3,33); noid.t1=0; check(f.receive(noid,150)==Error::Range,"cargo_id_required"); }
+    // Acknowledgement lost, then a reconnection: the sender renumbers and repeats the event; it is not delivered twice.
+    { Fixture f; Packet p=f.presence(1,0); p.kind=Kind::Cargo; p.state.action=1; p.t0=7; p.t1=77; f.receive(p,100);
+      check(f.core.takeCargo().size()==1,"cargo_first_delivery");
+      f.core.tick(3200); Packet a; a.kind=Kind::Ack; a.role=Role::Client; a.session=42; a.nonce=201; a.echo=101; f.receive(a,3300);   // new connection
+      p.nonce=201; p.echo=101; p.sequence=1; check(f.receive(p,3400)==Error::None,"cargo_after_reconnect");
+      check(f.core.takeCargo().empty(),"cargoOnce"); }
+    // A new connection renumbers undelivered events from 1.
+    { Fixture f; CargoEvent e; e.item=5; f.core.queueCargo(e); f.core.queueCargo(e); f.core.tick(3001); check(!f.core.connected()&&f.core.cargoPending()==2,"cargo_kept_on_reset"); }
 }
 void sessionTests() {
     { Fixture f;f.core.tick(10);f.core.tick(110);
@@ -115,6 +144,7 @@ void fuzz() {
     for(uint64_t seed=1;seed<=500;++seed) {
         coopfuzz::LossyLink link(2,seed); link.setLink({20,150,.10,.05,0});
         Fake a,b; NetworkTransport at(link,0),bt(link,1); Core ac({Role::Host,seed+100,seed*10+1,120},a,at),bc({Role::Client,seed+100,seed*10+2,120},b,bt);
+        std::vector<uint32_t> delivered;
         const uint64_t clocks[2]={10000,20000+seed*7};
         for(uint64_t now=0;now<=16000;now+=10) {
             // Seeded outage followed by healing exercises timeout/reconnect; no metrics collected in outage/warmup.
@@ -123,7 +153,9 @@ void fuzz() {
             link.advance(now); int from; coopfuzz::Bytes wire;
             for(int side=0;side<2;++side) while(link.poll(side,from,wire)) (side?bc:ac).receive(wire.data(),wire.size(),now+clocks[side]);
             a.local=trajectory(now,0,seed); b.local=trajectory(now,1,seed);
+            if(now%500==0&&now>=1000&&now<5000) { CargoEvent e; e.item=uint32_t(now); ac.queueCargo(e); }
             ac.tick(now+clocks[0]); bc.tick(now+clocks[1]); ac.frame(now+clocks[0]); bc.frame(now+clocks[1]);
+            for(auto& e:bc.takeCargo()) delivered.push_back(e.item);
             if((now>=2500&&now<5900)||(now>=11500&&now<12000)) {
                 for(int side=0;side<2;++side) {
                     Render r=(side?bc:ac).render(now+clocks[side]); State truth=trajectory(now>120?now-120:0,1-side,seed);
@@ -133,6 +165,9 @@ void fuzz() {
             }
         }
         check(ac.connected()&&bc.connected(),"fuzz_reconnected");
+        // Eight events queued before the outage: all delivered, in order, none twice (the outage may cut them off
+        // only if they were still pending; then they are renumbered and delivered after reconnection).
+        { std::vector<uint32_t> want; for(uint32_t t=1000;t<5000;t+=500) want.push_back(t); check(delivered==want,"fuzz_cargo_exactly_once"); }
         check(ac.rttMs()>=0&&bc.rttMs()>=0,"fuzz_rtt");
         check(std::abs(ac.clockOffsetMs()-double(clocks[1]-clocks[0]))<151,"fuzz_clock_offset");
         for(int side=0;side<2;++side) { auto r=(side?bc:ac).render(16000+clocks[side]); auto truth=trajectory(16000,1-side,seed); double error=0; for(int k=0;k<3;++k) error+=std::pow(r.state.position[k]-truth.position[k],2); finalMax=std::max(finalMax,std::sqrt(error)); check(error<.001,"fuzz_final_convergence"); }
@@ -151,9 +186,9 @@ int main(int argc,char** argv) {
     auto start=std::chrono::steady_clock::now(); std::string mutant=argc>1?argv[1]:"";
 #define MUTATE(name) if(mutant==#name) protection.name=false
     MUTATE(version); MUTATE(range); MUTATE(teleport); MUTATE(duplicate); MUTATE(delay); MUTATE(session); MUTATE(build);
-    MUTATE(magic); MUTATE(checksum); MUTATE(reserved); MUTATE(nonce); MUTATE(time); MUTATE(speed); MUTATE(floor); MUTATE(extrapolate); MUTATE(stale); MUTATE(gate); MUTATE(timeout); MUTATE(buffer); MUTATE(rate); MUTATE(length); MUTATE(kind); MUTATE(role); MUTATE(handshake); MUTATE(ping); MUTATE(pingHistory); MUTATE(clamp); MUTATE(finite);
+    MUTATE(magic); MUTATE(checksum); MUTATE(reserved); MUTATE(nonce); MUTATE(time); MUTATE(speed); MUTATE(floor); MUTATE(extrapolate); MUTATE(stale); MUTATE(gate); MUTATE(timeout); MUTATE(buffer); MUTATE(rate); MUTATE(length); MUTATE(kind); MUTATE(role); MUTATE(handshake); MUTATE(ping); MUTATE(pingHistory); MUTATE(clamp); MUTATE(finite); MUTATE(cargoOrder); MUTATE(cargoAck); MUTATE(cargoOnce);
 #undef MUTATE
-    parserTests(); sessionTests(); if(mutant.empty()&&failures==0) fuzz();
+    parserTests(); cargoTests(); sessionTests(); if(mutant.empty()&&failures==0) fuzz();
     std::printf("%s failures=%d runtime=%.3fs\n",failures?"FAILED":"PASSED",failures,std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());
     return failures?1:0;
 }
