@@ -27,6 +27,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "game_thread.h"
 #include "puppet.h"
 #include "double.h"
+#include "body.h"
 #include "pad.h"
 #include "cargo.h"
 #ifdef MOD_FAKE_NETWORK
@@ -136,6 +137,7 @@ struct Runtime final:ds::Transport {
     enum class TwinMode {None,Echo,Lead,Peer};
     std::filesystem::path twinCommand;std::unique_ptr<mod::puppet::Double> twin;TwinMode twinMode=TwinMode::None;
     std::filesystem::path cargoCommand;std::function<void(uint32_t,const mod::puppet::Transform&)> cargoCreate;
+    std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
     std::function<void(uint32_t)> cargoGive;
     std::function<bool()> gameEvent;bool inEvent=false;std::atomic<bool> fakeEvent{false};
     // Shared cargo (cargo.h): placements read from the game's cargo map go to the partner; theirs are created here.
@@ -338,7 +340,7 @@ struct Runtime final:ds::Transport {
                 auto api=mod::puppet::nativeApi(*sampler);
 #endif
                 puppet=std::make_unique<mod::puppet::Probe>(std::move(api),[this](const std::string& row){note(row.c_str());});
-                twinCommand=path.parent_path()/"puppet.double";cargoCommand=path.parent_path()/"puppet.cargo";
+                twinCommand=path.parent_path()/"puppet.double";cargoCommand=path.parent_path()/"puppet.cargo";bodyCommand=path.parent_path()/"puppet.body";
 #ifdef MOD_FAKE_NETWORK
                 // Fake tree: player entity 0x6000 -> CameraEntity 0xa000 -> parked double 0xa800.
                 fake->mutate([&]{auto B=fake->base;fake->put<uint64_t>(0x6078,B+0xa000);
@@ -363,6 +365,7 @@ struct Runtime final:ds::Transport {
                 auto twinApi=mod::puppet::nativeDoubleApi(*sampler);
                 cargoCreate=mod::puppet::nativeCargoCreate(*sampler);cargoGive=mod::puppet::nativeCargoGive(*sampler);
                 gameEvent=mod::puppet::nativeGameEvent(*sampler);
+                body=std::make_unique<mod::body::Probe>(mod::body::nativeApi(*sampler),sampler->base+0x3d7de48,[this](const std::string& row){note(row.c_str());});
 #endif
 #ifdef MOD_FAKE_NETWORK
                 gameEvent=[this]{return fakeEvent.load();};
@@ -443,6 +446,27 @@ struct Runtime final:ds::Transport {
     // The body of mod_tick, shared with the self-tick thread. Takes only the runtime mutex (never the lifecycle lock).
     // echo: the double replays the local porter one second late, two metres to the right (single-instance check).
     // peer: the double shows the received partner. off: hand it back to the game. One command per file write.
+    // Own-body experiment: "create <stamp>" asks the engine for a second Sam from the double's resource, 3 m to the
+    // porter's right; "remove <stamp>" removes what it produced. One command per file write; the probe logs the rest.
+    void tickBody() {
+        if(std::filesystem::exists(bodyCommand)) {
+            auto command=readConfig(bodyCommand);auto stamp=" "+mod::runStamp()+"\n";
+            if(!std::filesystem::remove(bodyCommand))throw std::runtime_error("cannot consume body command");
+            if(command=="create"+stamp) {
+                auto anchor=mod::puppet::readLocalAnchor(*sampler);
+                auto twinEntity=anchor.entity?mod::puppet::findDouble(*sampler,anchor.entity,sampler->base+0x3d198e8,sampler->base+0x3d7de48):0;
+                if(!anchor.entity||!anchor.pose.available||!twinEntity)note("BODY refused: no porter or no double\n");
+                else {
+                    auto t=mod::puppet::transform(anchor.pose);double rx=t.rotation[0],ry=t.rotation[1],l=std::hypot(rx,ry);
+                    if(l>.5){t.position[0]+=3*rx/l;t.position[1]+=3*ry/l;}
+                    std::array<uint64_t,2> id{mod::nowUs()^0x436f6f70426f6479ULL,std::hash<std::string>{}(mod::runStamp())|1};
+                    body->create(twinEntity,t,id);
+                }
+            } else if(command=="remove"+stamp)body->remove();
+            else note("BODY ignored command for another process\n");
+        }
+        body->tick();
+    }
     void tickTwin(uint64_t now) {
         if(std::filesystem::exists(twinCommand)) {
             auto command=readConfig(twinCommand);auto stamp=" "+mod::runStamp()+"\n";
@@ -534,6 +558,7 @@ struct Runtime final:ds::Transport {
                     note(("CARGO create id="+std::to_string(*id)+"\n").c_str());
                 }
             }
+            if(body&&gameContext)tickBody();
             tickPad();notePose();
             if(unappliedReceive) {receiveApply.add(clock-unappliedReceive);unappliedReceive=0;}
             if(!cache.available && !game) {err="provider unavailable during tick";note(err.c_str());return false;}
