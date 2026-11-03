@@ -607,6 +607,25 @@ unchanged suite to fail. Native Windows `test_actor_reader_windows.py` also
 checks process identity, the actual OS-granted query/read rights, region layout
 and an independently allocated fixture buffer.
 
+## A stand-in partner for one game copy (`coop-partner`)
+
+Two copies of the game on one GPU cost each other about half their frame rate even with the GPU half idle, so playing
+against a second copy on the same PC is not a fair test. `build/coop-partner.exe` stands in for the second copy: it
+binds that copy's loopback slot and runs the real protocol core, so the game cannot tell it from a partner.
+
+```
+coop-partner --slot 1 --peer-slot 0 --role client --session <the game copy's mod.json session> --follow
+coop-partner ... --replay presence-<pid>-<start>.jsonl [--where-recorded]
+coop-partner ... --drop 10 125983117      # place one cargo item where the partner stands, 10 s after connecting
+```
+
+`--follow` keeps a place 3 m to the porter's right and 1 m behind, walking, running or sprinting to it with a person's
+acceleration and facing where it goes; a gap over 60 m is a jump. `--replay` plays a recorded walk (the `local` rows of
+a presence log) from beside the porter, or where it was recorded. It prints a status line a second and every cargo
+event the game sends, so cargo put down in the game is seen arriving. The movement rules live in `partner.h` and are
+pinned by `partner_test.cpp` and two mutants. Two partners run against each other on Linux (`build/coop-partner`, one as
+slot 0 host replaying, one as slot 1 client following) as an end-to-end check of the protocol without any game.
+
 ## Live test commands (per process, stamp-guarded)
 
 Each command is a file in the mod folder. The mod consumes it and accepts it only for this process

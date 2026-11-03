@@ -10,7 +10,8 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('double',['ANCHOR','STILL','NETWORK','ACTION_OWNER','ACTION_MASK','TRANSIENT','EFFECTS','SMOOTH','YIELD_ANCHOR','PRIVATE_ROOM','PERMISSION','PARKED','IDENTITY','YIELD','READBACK','LOCAL','RELEASE','WORLD','FIND_PARENT','FIND_UNIQUE','HOLD','HIDDEN_YIELD'],
            ['double_test.cpp','double.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
           ('padscript',['BOUNDS','STAMP','TIMING'],['pad_test.cpp','pad.cpp']),
-          ('cargo',['ECHO','HELD'],['cargo_test.cpp','cargo.cpp','discovery.cpp'])]
+          ('cargo',['ECHO','HELD'],['cargo_test.cpp','cargo.cpp','discovery.cpp']),
+          ('partner',['TELEPORT','ACCEL'],['partner_test.cpp','partner_logic.cpp'])]
 with tempfile.TemporaryDirectory() as directory:
     executable=Path(directory)/'mutant'
     for family,mutants,sources in families:

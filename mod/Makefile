@@ -11,7 +11,7 @@ identity:
 	python3 -B generate_discovery_signatures.py
 	python3 build_id.py
 	python3 ../core/build_id.py
-all: identity build/puppet-test.exe build/mod.dll build/mod_probe.exe build/mod-no-build.dll build/mod-no-interpolation.dll
+all: identity build/puppet-test.exe build/mod.dll build/mod_probe.exe build/mod-no-build.dll build/mod-no-interpolation.dll build/coop-partner.exe
 build/mod.dll: $(SRC) $(HEADERS) | build
 	$(MINGW) $(WINFLAGS) -shared $(SRC) -o $@ -lws2_32 -lbcrypt -lwinmm
 build/mod-no-build.dll: $(SRC) $(HEADERS) | build
@@ -75,12 +75,19 @@ build/cargo-test: cargo_test.cpp cargo.cpp cargo.h discovery.cpp | build
 	$(CXX) $(FLAGS) cargo_test.cpp cargo.cpp discovery.cpp -o $@
 build/pad-test: pad_test.cpp pad.cpp pad.h | build
 	$(CXX) $(FLAGS) pad_test.cpp pad.cpp -o $@
-game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test
+build/partner-test: partner_test.cpp partner_logic.cpp partner.h ../core/core.h | build
+	$(CXX) $(FLAGS) partner_test.cpp partner_logic.cpp -o $@
+build/coop-partner: partner.cpp partner_logic.cpp partner.h ../core/core.cpp ../core/core.h | build
+	$(CXX) $(FLAGS) partner.cpp partner_logic.cpp ../core/core.cpp -o $@
+build/coop-partner.exe: partner.cpp partner_logic.cpp partner.h ../core/core.cpp ../core/core.h | build
+	$(MINGW) $(WINFLAGS) partner.cpp partner_logic.cpp ../core/core.cpp -o $@ -lws2_32
+game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/partner-test build/coop-partner
 	./build/game-thread-test
 	./build/puppet-test
 	./build/double-test
 	./build/pad-test
 	./build/cargo-test
+	./build/partner-test
 	python3 -B test_game_thread_mutants.py
 .PHONY: game-thread-test
 
