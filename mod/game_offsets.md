@@ -748,3 +748,22 @@ puppeted (no player controller). A spawnpoint with `EntityResource` set to it (o
 (mover target, the porter's animation network) and despawned on disconnect. It has not been called yet. Open: whether
 the spawnpoint must be registered in a world-node tree, the memory owner for a refcounted `RTTIRefObject` built
 outside the engine allocator, and whether the spawned Sam has a FixedPositionMover like the double.
+
+### The engine's common entity creator (static, 2026-11-03, nothing called)
+
+`Spawnpoint_ExportedSpawn` (`0x23da6c0`) only proceeds when spawnpoint `+188` and `+189` are 0 and `+138` is non-zero
+(probably "active in a loaded world", set by the world-node tree), then calls vtable slot 28 (`0x23d8580` ->
+`0x23d8b10(spawnpoint, false)`). A spawnpoint built by the mod outside a world tree would therefore be refused
+silently. The spawn path ends in `0x2380920`, which 33 game sites call (Spawnpoint, EntityResource exports, gimmicks):
+
+`0x2380920(Ref* out /*rcx, zeroed first*/, const WorldTransform* at /*rdx, 0x3c bytes: 3 f64 position + 9 f32
+rotation*/, Resource* resource /*r8*/, void* unknown /*r9*/, const GGUUID* id /*stack +0x20*/)`
+
+It allocates a 0x1f0-byte object, initialised by `0x236cfc0` (vtable `0x3d07fa8`, refcount at `+18`, the transform
+copied to `+50`, the id to `+38`), and stores it in `*out` with a reference taken. It also asks the global at
+`0x7ae90e0` (vtable slot 3, mode byte 5) for the resource. **Reading:** the result is an asynchronous creation
+request, not the entity. The entity appears once the resource is ready, which for an already loaded resource (the
+double's own, `double+58`) should be within a frame or two. Caller at `0x2373d6b`: transform = object+20, resource =
+object+60, unknown = object+80, id derived from object+8. First live step (one copy, owner away): call it once on the
+game thread with the double's resource, a transform 3 m beside the porter and a fresh id; log the request's fields
+for a few frames; look for a new DSPlayerAKukanEntity in the world. Remove it with `Entity_ExportedRemove`.
