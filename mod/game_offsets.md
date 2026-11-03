@@ -717,3 +717,34 @@ release (`EntityComponent_ExportedRemove`, 23618c0) so the private room is uncha
 hood, but not the backpack. Live, though, the porter has no variation component: 68 components, including `ArtPartsData`,
 `ArtPartsShaderVariableComponent` and `BoostMeshStreamingForArtPartsDataComponent`. His look is the art-part states
 plus attached gear, so this route does not reproduce it.
+
+## The partner's own body: the engine's spawn path, read from RTTI (static, 2026-11-03, nothing called)
+
+The double is the game's own private-room Sam, so the game takes it back for the private room and cutscenes. Co-op mods
+elsewhere (Skyrim Together's proxy actors, the Horizon Zero Dawn Remastered entity spawner) give each remote player a
+character of its own, created through the engine. Decima keeps a type descriptor for every class in `.data`, and that
+descriptor names the constructor and the fields. Compound descriptor: `+0` id (`-1`), `+4` kind (4 = compound),
+`+6` base count, `+7` field count, `+14` size, `+18` alignment, `+20` constructor, `+28` destructor, `+40` name,
+`+60` bases (16 bytes each: type, offset), `+68` fields (0x38 bytes each: `+0` type (null = category heading),
+`+8` u16 offset, `+a` u16 flags, `+10` name, `+18` getter, `+20` setter). Found by the name string's address appearing
+at descriptor+0x40 after an `ffffffff 04` head.
+
+| Type | Descriptor | Size | Constructor / destructor | Fields used |
+|---|---:|---:|---|---|
+| `Spawnpoint` : `SpawnpointBase` : `ParentWorldNode` : `WorldNode` | `0x4b1dbc0` | 0x1b0 | `0x23cd210` / `0x23cd230` | `ObjectUUID` +8 (GGUUID), `Orientation` (WorldTransform, accessor: getter `0x1dfe580`, setter `0x1dfe5c0`), `SpawnSetup` +88, `EntityResource` +90, `FactsArePersistent` +b0, `AutoSpawn` +b1 |
+| `Entity` | `0x4afcdb0` | 0x330 | `0x2330720` / `0x2330780` | `Resource` +58 (the entity's EntityResource), `Model` +b8 |
+| `DSPlayerAKukanEntity` : `Entity` | `0x4bca020` | 0x7a0 | `0x26eeb20` / `0x26eeb40` | none of its own |
+| `EntityResource` | `0x4b02810` | | | |
+| `SpawnSetup` | `0x4ed4830` | | | |
+
+The spawner's recipe, read-only reference (Nukem9/hzdr-gameplay-tweaks, `EntitySpawnerWindow.cpp`): build a
+`Spawnpoint` through its RTTI constructor, set `ObjectUUID` (fresh), `Orientation`, `SpawnSetup`, `FactsLifetime` 0
+and `AutoSpawn` false, call the spawnpoint's Spawn on a job, then GetEntity. In ds.exe these are
+`Spawnpoint_ExportedSpawn` (`0x23da6c0`), `Spawnpoint_ExportedGetEntity` and `Spawnpoint_ExportedDespawn`.
+
+Plan for the partner: the double's own resource (`double+58`) is a Sam body that is already loaded and made to be
+puppeted (no player controller). A spawnpoint with `EntityResource` set to it (or `EntityResource_ExportedCreateEntity`
+`0x23806a0` directly) should give a second Sam that belongs to the mod alone. It would be driven exactly like the double
+(mover target, the porter's animation network) and despawned on disconnect. It has not been called yet. Open: whether
+the spawnpoint must be registered in a world-node tree, the memory owner for a refcounted `RTTIRefObject` built
+outside the engine allocator, and whether the spawned Sam has a FixedPositionMover like the double.
