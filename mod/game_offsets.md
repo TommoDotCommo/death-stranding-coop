@@ -892,3 +892,13 @@ of the standing body). `Application_sExportedContinueLastSave` called during gam
 the title screen), so a world-change test of the own body needs the pause menu. With `own`, the one-copy regression
 passes (the body driven is the made one, 0.032 m from the partner, cargo and structures both ways).
 
+Static lead (2026-11-07): `AddComponentFromResource` (234ae90; callers: ApplyArtPartsVariation 22bc111 and 234b025)
+refuses when entity+88 bit 31 is set; with its third argument true it first removes the entity's components of the
+resource's component type that were built from the same resource (resource+30 equal), then builds and attaches the
+new one (22b5970, 2348220). It never removes a component built from another resource, which is why a made body ends
+up with two `ArtPartsData` (its own one-part one and the porter's). The game's double, made from the same entity
+resource, has only the porter's, so the game removes the original somewhere else; removing it right after the
+apply froze the game. Next: find that removal (callers of 235b930 near the double's setup: the double's class is
+referenced at 26f329e, 26fb1d4 (vtable) and 2711a80, 291160c, 2922d5b, 2cc37b3 (type)), and try the removal while
+the body is parked and asleep instead.
+
