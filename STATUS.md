@@ -31,7 +31,11 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 
 ## QA level
 
-Game-free: simulator, fuzzer and mutants for the core and every proxy protection (`make test`). Live: two-copy runs
+Game-free: simulator, fuzzer and mutants for the core and every proxy protection (`make test`), plus seeded fuzzers
+for the shared world: one runs the cargo and structure logic through random worlds and checks its invariants, one
+runs two simulated worlds against each other and checks that they hold the same cargo after every quiet period.
+They found two cargo races (fixed): a quick put-down and pick-up left a stray copy, and identical items close
+together could be matched wrongly; the same race was then fixed for dismantled structures. Live: two-copy runs
 with state read from the processes, and an unattended one-copy regression with `coop-partner` that needs no input or
 focus (2026-11-07, about 3 minutes): the copy continues its last save by itself, the double stands within 0.3 m of the
 partner (read from the game's memory; 0.032 m measured), cargo goes both ways and each side's pick-up removes the
