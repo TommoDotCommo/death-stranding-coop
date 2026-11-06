@@ -902,4 +902,7 @@ apply froze the game, and so did removing it after the body was parked and aslee
 hang within 20 s). Next: find that removal (callers of 235b930 near the double's setup: the double's class is
 referenced at 26f329e, 26fb1d4 (vtable) and 2711a80, 291160c, 2922d5b, 2cc37b3 (type)), or avoid the second
 component altogether (replace the original's resource before the body is activated).
+Switching the original one-part `ArtPartsData`'s part off once after the body was shown made no measurable
+difference (15 scored frames before and after). Frame scoring with a fixed camera is confounded after about a minute:
+an idle porter sits down to rest and the camera moves. Clean measurements need the porter kept standing (input).
 
