@@ -16,17 +16,22 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 ## Not done
 
 - The partner's own body. Today the partner is drawn with the game's resident Sam double (below), which the game
-  takes back for the private room. The engine's own spawn path (`Spawnpoint`, the common entity creator) is mapped
-  in `mod/game_offsets.md`; an experiment that asks it for a second Sam (`puppet.body`) is built but has not run live.
-- Picking cargo up (placing it is shared), structures, BTs, vehicles, cutscenes, death and voidouts, saves of a
-  shared world, the partner's gear and outfit, and the partner's own controller input.
+  takes back for the private room. Calling the engine's common entity creator directly with the double's resource
+  did not return a second Sam live (2026-11-07, `mod/game_offsets.md`); the remaining engine route is a registered
+  `Spawnpoint`.
+- Structures, BTs, vehicles, cutscenes, death and voidouts, saves of a shared world, the partner's gear and outfit,
+  and the partner's own controller input. Cargo the porter himself picks up or puts down is detected by the logic
+  below but has not yet been driven live (the run had no keyboard focus).
 - Networking beyond one PC (partners' addresses can already be allowed in the network policy; the mod itself still
   only talks to 127.0.0.1).
 
 ## QA level
 
-Game-free: simulator, fuzzer and mutants for the core and every proxy protection (`make test`). Live: supervised
-two-copy runs with state read from the processes; no automated in-game bot yet.
+Game-free: simulator, fuzzer and mutants for the core and every proxy protection (`make test`). Live: two-copy runs
+with state read from the processes, and an unattended one-copy regression with `coop-partner` that needs no input or
+focus (2026-11-07, 138 s): the copy continues its last save by itself, the double stands within 0.3 m of the
+partner (read from the game's memory; 0.032 m measured), cargo goes both ways and each side's pick-up removes the
+other's copy, and the real saves are unchanged. A partner built without the wire identity fails it.
 
 ### Guarded callback and failed Sam clone (2026-11-02)
 
@@ -89,15 +94,26 @@ Not done: the partner has no backpack or hood (the porter's gear is about 30 att
 private-room entry is untested, because the test save carries a corpse bag and the game refuses entry with one.
 Shared cargo works in a first version: cargo one porter places appears in the partner's world at the same spot. It
 travels as reliable CARGO events, at most once even across reconnects; the core's fuzz tests run them through loss,
-duplicates and an outage. The partner's mod creates the item with the game's own `CreateBaggage`. Picking cargo up
-is not synchronised yet (`mod/game_offsets.md`, "Cargo").
+duplicates and an outage. The partner's mod creates the item with the game's own `CreateBaggage`.
+Picking up (2026-11-07): a shared item has one id in both worlds. When a porter picks it up (the cargo record's
+location byte goes from world to porter) or it vanishes near him, his mod sends "taken" and the partner's mod deletes
+its copy with the game's `DeleteBaggage` (which takes the record's index). Putting it down again is a new placement.
+Live with `coop-partner`: the partner picking up the game's crate removed it from the game, and the partner's own
+crate, created in the game, was removed when the partner picked it up (`mod/game_offsets.md`, "Cargo").
 
 Unattended testing: live tests drive the focused copy with synthetic keyboard input and capture background
 copies with PrintWindow. The proxy's opt-in virtual gamepad (`COOP_VIRTUAL_PAD=1`, the mod's `virtual_pad`,
 a stamp-guarded `pad.script`) works on Windows without the game, but the game never polls it. A connected
 controller holds pad slot 0 through Windows.Gaming.Input, and the game only checks XInput for unassigned slots.
 
-## Testing aids, built but not yet run live (2026-11-03)
+## Testing aids (built 2026-11-03, first run live 2026-11-07)
+
+Live 2026-11-07, one copy, unattended: `auto_continue` reached gameplay from the title with no input (62 s cold,
+8 s warm); `coop-partner` connected once it spoke the mod's wire identity, and the game drew it with the double.
+Not yet measured live: the background frame cap with two copies (it held a lone background copy at its 2 fps, as
+designed, so one-copy runs now turn it off). A driver installed since 2026-11-03 loads its main DLL through a
+`\\?\` path; the proxy now checks such a request in its plain form.
+
 
 - `COOP_BACKGROUND_FPS` (proxy): with two copies on one GPU, the copy that is not in front is held to a few frames
   per second so the one being played keeps its full frame rate. Measured before the cap existed: suspending the
