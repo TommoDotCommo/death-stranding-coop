@@ -83,6 +83,9 @@ int main(){
     // With the location byte, standing next to an item and walking away is not a put-down (no announcement).
     { Sync s;s.observe({world(9,90,1)},porter,0);std::array<double,3> away{10,0,100};
       CHECK(s.observe({world(9,90,1)},porter,500).empty()&&s.observe({world(9,90,1)},away,2000).empty()&&s.observe({world(9,90,1)},away,4000).empty()); }
+    // A cancelled expectation whose copy never appears is dropped with the expectation (nothing kept for good).
+    { Sync s;s.observe({},porter,0);s.expect({60,{2,0,100},333},100);s.partnerTook(333);CHECK(s.pending()==2);
+      s.observe({},porter,100+Sync::ExpectFor+1);CHECK(s.pending()==0&&s.takeDoomed().empty()); }
     if(!failures)std::puts("cargo placement, settle, held, mirror, far, pick-up, put-down and taken checks passed");
     return failures?1:0;
 }

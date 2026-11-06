@@ -49,6 +49,7 @@ public:
     // Ids for this porter's placements: base + 1, base + 2, ... (keep below 2^53: they travel as a wire t-field).
     void setIdBase(uint64_t base){nextId_=base;}
     size_t mirrored() const;
+    size_t pending() const {return expected_.size()+cancelled_.size();}   // expectations and cancellations still held
     size_t shared() const;
 private:
     struct Track { uint32_t hash=0,index=0; std::array<double,3> position{}; uint64_t stillSince=0, heldAt=0, id=0; uint8_t where=0;

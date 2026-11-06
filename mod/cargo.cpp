@@ -51,6 +51,9 @@ std::optional<uint32_t> Sync::partnerTook(uint64_t id,uint32_t hash,const std::a
 std::vector<Placement> Sync::observe(const std::vector<Record>& records,const std::array<double,3>& porter,uint64_t now){
     std::vector<Placement> out;
     expected_.erase(std::remove_if(expected_.begin(),expected_.end(),[&](auto& e){return now-e.second>ExpectFor;}),expected_.end());
+    // A cancelled expectation goes with its expectation (its copy never appeared: nothing to delete).
+    cancelled_.erase(std::remove_if(cancelled_.begin(),cancelled_.end(),[&](uint64_t id){
+        return std::none_of(expected_.begin(),expected_.end(),[&](auto& e){return e.first.id==id;});}),cancelled_.end());
     std::map<uint32_t,Track> next;
     for(auto& r:records){
         auto old=tracks_.find(r.slot);bool same=old!=tracks_.end()&&old->second.hash==r.hash;
