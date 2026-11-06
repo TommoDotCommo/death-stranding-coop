@@ -70,6 +70,10 @@ std::function<void(uint32_t)> nativeCargoDelete(discovery::Sampler&);
 // lock); asynchronous. Types: Stage/Player/Net variants, e.g. 24..26 Ladder, 27..29 FieldRope, 30..32 Bridge30m
 // (game_offsets.md, "Structures"). The bool is stored at request +640; its meaning is unknown.
 std::function<void(uint8_t,const Transform&,bool)> nativeConstruct(discovery::Sampler&);
+// DSConstructionPointManager_sExportedRemoveConstructionsInArea (2cd1bf0 -> 2cd9760), read statically: (const float4*
+// box min, const float4* box max, const world transform*, bool, bool, bool). It collects the structures in the box and
+// marks for removal those whose owner byte (+b2) is 1 (first bool), 0 (second) or 2 (third). Unverified live.
+std::function<void(const std::array<float,4>&,const std::array<float,4>&,const Transform&,bool,bool,bool)> nativeRemoveConstructions(discovery::Sampler&);
 class Double {
 public:
     enum class Stage {Off,Parked,Driving,Hidden,Yielded,Failed};

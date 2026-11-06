@@ -12,7 +12,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('padscript',['BOUNDS','STAMP','TIMING'],['pad_test.cpp','pad.cpp']),
           ('cargo',['ECHO','HELD','TAKEN','TOOK_ECHO'],['cargo_test.cpp','cargo.cpp','discovery.cpp']),
           ('partner',['TELEPORT','ACCEL','WIRE','WIRE_ANY'],['partner_test.cpp','partner_logic.cpp','../core/core.cpp']),
-          ('structure',['PACK','NET'],['structures_test.cpp','structures.cpp','discovery.cpp']),
+          ('structure',['PACK','NET','REMOVED'],['structures_test.cpp','structures.cpp','discovery.cpp']),
           ('body',['ANY_CLASS'],['body_test.cpp','body.cpp','discovery.cpp']),
           ('auto',['ONCE_IN_GAME'],['auto_continue_test.cpp'])]
 with tempfile.TemporaryDirectory() as directory:

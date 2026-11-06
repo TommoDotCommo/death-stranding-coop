@@ -142,6 +142,7 @@ struct Runtime final:ds::Transport {
     std::filesystem::path cargoCommand;std::function<void(uint32_t,const mod::puppet::Transform&)> cargoCreate;
     std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
     std::function<void(uint32_t)> cargoGive,cargoDelete;std::function<void(uint8_t,const mod::puppet::Transform&,bool)> construct;
+    std::function<void(const std::array<float,4>&,const std::array<float,4>&,const mod::puppet::Transform&,bool,bool,bool)> unconstruct;
     std::function<void()> continueLastSave;mod::AutoContinue autoContinue;bool autoNoted=false;
     std::function<bool()> gameEvent;bool inEvent=false;std::atomic<bool> fakeEvent{false};
     // Shared cargo (cargo.h): placements read from the game's cargo map go to the partner; theirs are created here.
@@ -156,6 +157,7 @@ struct Runtime final:ds::Transport {
         for(auto& e:incoming) {
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(!coop){note("CARGO partner event ignored (not in peer mode)\n");continue;}
+            if(e.type==2&&structMirrors.count(e.ref)){structGone.push_back(e.ref);continue;}   // a dismantled structure
             if(e.type==2) {
                 // The partner picked up (or used) a shared item: remove our copy if it lies in the world here.
                 auto index=cargoSync.partnerTook(e.ref);std::ostringstream o;
@@ -189,28 +191,51 @@ struct Runtime final:ds::Transport {
         if(!core||!core->connected()||!sampler)return;
         bool coop=twinMode==TwinMode::Peer&&construct;
         // Incoming structures arrive with the cargo events (type 3); tickCargo hands them over in structIn.
+        uint64_t manager=0;std::vector<mod::structures::Record> records;
+        auto table=[&]()->const std::vector<mod::structures::Record>&{
+            if(records.empty()&&sampler->read(sampler->base+0x7bf4960,&manager,8)&&manager){
+                if(!imageSize)for(auto& sec:sampler->sections)imageSize=std::max(imageSize,sec.address+sec.size-sampler->base);
+                records=mod::structures::readTable(*sampler,manager,sampler->base,imageSize);}
+            return records;};
         for(auto& e:structIn) {
             if(!coop){note("STRUCT partner structure ignored (not in peer mode)\n");continue;}
             std::array<double,3> game{e.position[0],e.position[2],e.position[1]};   // adapter -> game axes
             auto b=mod::structures::unpack(e.item,game,e.yaw);auto net=mod::structures::netVariant(b.type);
             if(!net){note(("STRUCT partner type "+std::to_string(b.type)+" has no Net variant; ignored\n").c_str());continue;}
+            structMirrors[e.ref]=b.position;
+#ifndef MOD_MUTANT_STRUCTURE_TWICE
+            if(mod::structures::standing(table(),*net,b.position)){note(("STRUCT partner structure ref "+std::to_string(e.ref)+" already stands here\n").c_str());continue;}
+#endif
             mod::puppet::Transform t;t.position=b.position;t.rotation=mod::structures::rotation(b.yaw,b.pitch,b.roll);
             construct(*net,t,false);++structMade;
             std::ostringstream o;o<<"STRUCT created partner type "<<int(b.type)<<" as "<<int(*net)<<" ref "<<e.ref<<" at "<<b.position[0]<<","<<b.position[1]<<","<<b.position[2]<<"\n";note(o.str().c_str());
         }
         structIn.clear();
+        // The partner dismantled a structure: remove our Net copy (owner 2 only, a 3 m box around where it stands).
+        for(auto ref:structGone) {
+            auto at=structMirrors.find(ref);if(at==structMirrors.end()||!unconstruct)continue;
+            mod::puppet::Transform t;t.position=at->second;t.rotation={1,0,0,0,1,0,0,0,1};
+            unconstruct({-1.5f,-1.5f,-3,0},{1.5f,1.5f,3,0},t,false,false,true);++structRemoved;
+            std::ostringstream o;o<<"STRUCT partner removed ref "<<ref<<" at "<<t.position[0]<<","<<t.position[1]<<","<<t.position[2]<<"\n";note(o.str().c_str());
+            structMirrors.erase(at);
+        }
+        structGone.clear();
         if(!coop||now-structReadAt<500)return;
-        structReadAt=now;uint64_t manager=0;if(!sampler->read(sampler->base+0x7bf4960,&manager,8)||!manager)return;
-        if(!imageSize)for(auto& sec:sampler->sections)imageSize=std::max(imageSize,sec.address+sec.size-sampler->base);
+        structReadAt=now;
         if(!structIdBase)structIdBase=(nonce()>>32)<<20;
-        auto records=mod::structures::readTable(*sampler,manager,sampler->base,imageSize);if(records.empty())return;
+        records.clear();if(table().empty())return;
         for(auto& b:structSync.observe(records)) {
             ds::CargoEvent e;e.type=3;e.item=mod::structures::pack(b);e.ref=structIdBase+b.id;e.yaw=b.yaw;
             e.position={b.position[0],b.position[2],b.position[1]};   // game -> adapter axes
             core->queueCargo(e);++structSent;
             std::ostringstream o;o<<"STRUCT built type "<<int(b.type)<<" id "<<b.id<<" at "<<b.position[0]<<","<<b.position[1]<<","<<b.position[2]<<" -> partner\n";note(o.str().c_str());
         }
+        for(auto id:structSync.takeRemoved()) {
+            ds::CargoEvent e;e.type=2;e.ref=structIdBase+id;core->queueCargo(e);
+            note(("STRUCT dismantled id "+std::to_string(id)+" -> partner\n").c_str());
+        }
     }
+    std::map<uint64_t,std::array<double,3>> structMirrors;std::vector<uint64_t> structGone;uint64_t structRemoved=0;
     std::vector<ds::CargoEvent> structIn;
     std::deque<std::pair<uint64_t,ds::State>> echo;
     mod::puppet::ActionCache actionCache;uint64_t animatorVtable=0;
@@ -413,7 +438,7 @@ struct Runtime final:ds::Transport {
                 twinApi.effects=[](uint64_t,bool){};
 #else
                 auto twinApi=mod::puppet::nativeDoubleApi(*sampler);
-                cargoCreate=mod::puppet::nativeCargoCreate(*sampler);cargoGive=mod::puppet::nativeCargoGive(*sampler);cargoDelete=mod::puppet::nativeCargoDelete(*sampler);construct=mod::puppet::nativeConstruct(*sampler);
+                cargoCreate=mod::puppet::nativeCargoCreate(*sampler);cargoGive=mod::puppet::nativeCargoGive(*sampler);cargoDelete=mod::puppet::nativeCargoDelete(*sampler);construct=mod::puppet::nativeConstruct(*sampler);unconstruct=mod::puppet::nativeRemoveConstructions(*sampler);
                 gameEvent=mod::puppet::nativeGameEvent(*sampler);
                 if(config.autoContinue){continueLastSave=mod::puppet::nativeContinueLastSave(*sampler);autoContinue=mod::AutoContinue(true);}
                 body=std::make_unique<mod::body::Probe>(mod::body::nativeApi(*sampler),sampler->base+0x3d7de48,[this](const std::string& row){note(row.c_str());});
@@ -607,6 +632,14 @@ struct Runtime final:ds::Transport {
                 auto list=mod::puppet::parseCargoCommand(text,mod::runStamp(),"list");
                 if(give&&cargoGive){cargoGive(*give);note(("CARGO give id="+std::to_string(*give)+"\n").c_str());}
                 else if(erase&&cargoDelete){cargoDelete(*erase);note(("CARGO delete id="+std::to_string(*erase)+"\n").c_str());}
+                else if(auto mask=mod::puppet::parseCargoCommand(text,mod::runStamp(),"unbuild");mask&&unconstruct&&anchor.entity&&anchor.pose.available) {
+                    // Removal experiment: "unbuild <mask> <stamp>", a 6 x 6 x 10 m box around the point 4 m in front of the
+                    // porter; mask bit 1 = owner 1, bit 2 = owner 0, bit 4 = owner 2.
+                    auto t=mod::puppet::transform(anchor.pose);double fx=t.rotation[3],fy=t.rotation[4],l=std::hypot(fx,fy);
+                    if(l>.5){t.position[0]+=4*fx/l;t.position[1]+=4*fy/l;}
+                    unconstruct({-3,-3,-5,0},{3,3,5,0},t,*mask&1,*mask&2,*mask&4);
+                    note(("UNBUILD mask "+std::to_string(*mask)+"\n").c_str());
+                }
                 else if(auto type=mod::puppet::parseCargoCommand(text,mod::runStamp(),"construct");type&&construct&&anchor.entity&&anchor.pose.available) {
                     // Structure experiment: "construct <type> <stamp>" (type < 46; +100 sets the flag) 4 m in front of the porter.
                     bool flag=*type>=100;uint32_t kind=flag?*type-100:*type;

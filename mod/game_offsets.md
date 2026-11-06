@@ -819,3 +819,12 @@ Live, early Episode 1 (Capital Knot City, before the chiral network): `CreateCon
 `(25)` (Player ladder) built a ladder lying across the road (state 2; ids 100001 and 10002). Post, rain shelter,
 watchtower, bridge and zipline requests made records in state 0 and nothing visible, probably because this area
 does not allow them yet. 155 records were in the table, mostly the game's delivery bases and shelters.
+
+Removal: `DSConstructionPointManager_sExportedRemoveConstructionsInArea` (thunk 2cd1bf0 -> 2cd9760) takes `(const
+float4* box min, const float4* box max, const WorldTransform* box placement, bool, bool, bool)`. It collects the
+structures in the box (2ce0260 on manager+56a258) and marks for removal (`+aa |= 0x40`, `+ab |= 1`) those whose owner
+byte `+b2` is selected: the first bool selects owner 1, the second owner 0, the third owner 2. Live: the third bool
+removed a Net ladder and the first removed a ladder built by this porter, so **owner 1 = built by this porter,
+2 = Net, 0 = the game's own**. A ladder saved from an earlier session came back after loading (its record
+reached state 2 only after the mod's first look), so a receiver checks for an existing built copy before building.
+

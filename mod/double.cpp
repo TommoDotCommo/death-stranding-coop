@@ -328,6 +328,23 @@ std::function<void(uint8_t,const Transform&,bool)> nativeConstruct(discovery::Sa
     return [make](uint8_t type,const Transform& t,bool flag){make(type,&t,flag);};
 #endif
 }
+std::function<void(const std::array<float,4>&,const std::array<float,4>&,const Transform&,bool,bool,bool)> nativeRemoveConstructions(discovery::Sampler& s){
+#ifndef _WIN32
+    (void)s;throw std::runtime_error("native construction API requires Windows");
+#else
+    const std::vector<uint8_t> sig={0x4c,0x8b,0xdc,0x56,0x48,0x81,0xec,0xa0,0x00,0x00,0x00,0x48,0x8b,0x05,0xbe,0x78,0x28,0x02,0x48,0x33};
+    unsigned count=0;
+    for(auto section:s.sections)if(section.executable){
+        std::vector<uint8_t> code(section.size);require(s.read(section.address,code.data(),code.size()),"construction code unreadable");
+        for(auto at=code.begin();(at=std::search(at,code.end(),sig.begin(),sig.end()))!=code.end();++at){
+            ++count;require(section.address+size_t(at-code.begin())==s.base+0x2cd9760,"construction removal signature moved/duplicated");}
+    }
+    require(count==1,"construction removal signature missing/ambiguous");
+    using RemoveFn=void(*)(const float*,const float*,const Transform*,bool,bool,bool);auto erase=reinterpret_cast<RemoveFn>(s.base+0x2cd9760);
+    return [erase](const std::array<float,4>& lo,const std::array<float,4>& hi,const Transform& t,bool a,bool b,bool c){
+        alignas(16) float l[4]={lo[0],lo[1],lo[2],lo[3]},h[4]={hi[0],hi[1],hi[2],hi[3]};erase(l,h,&t,a,b,c);};
+#endif
+}
 std::function<void()> nativeContinueLastSave(discovery::Sampler& s){
 #ifndef _WIN32
     (void)s;throw std::runtime_error("native continue API requires Windows");

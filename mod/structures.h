@@ -30,12 +30,18 @@ std::array<float,9> rotation(double yaw,double pitch,double roll);
 void angles(const std::array<float,9>&,double& yaw,double& pitch,double& roll);
 uint32_t pack(const Built&);
 Built unpack(uint32_t item,const std::array<double,3>& position,double yaw);
+// True when a built structure of `type` already stands within `range` metres of `position` (the partner's structure
+// was created here in an earlier session and saved: do not build it twice).
+bool standing(const std::vector<Record>&,uint8_t type,const std::array<double,3>& position,double range=.5);
 class Sync {
 public:
     // One call per observation. The first call only learns what exists. Returns structures this porter built since.
     std::vector<Built> observe(const std::vector<Record>&);
+    // Ids of announced structures that are gone since (dismantled or destroyed): the partner removes its copy.
+    std::vector<uint32_t> takeRemoved();
     size_t known() const {return seen_.size();}
 private:
     std::map<uint32_t,uint8_t> seen_; bool primed_=false;
+    std::map<uint32_t,bool> announced_; std::vector<uint32_t> removed_;
 };
 }
