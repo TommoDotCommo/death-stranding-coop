@@ -877,6 +877,9 @@ from **part 20 of the porter's 52-part set**, a cable-like part whose far end is
 lacks. Switching it off once after the body was shown removed the line for that run. Switching it off at
 creation did not last (it was on again a few seconds after the body was shown), and enforcing it once a second while
 the body was shown made the drawing much worse (very large flat polygons across the view, distant buildings gone).
-Not fixed yet; leads: what re-enables the part (show? streaming?), and whether the cable's anchor can be given to
-the body instead.
+Correction from two more runs: switched off once, 3 s after the body was shown, part 20 stayed off for 40 s and two
+screenshots were clean; but with part 20 confirmed off from memory (+2c 0x0c) a later run still showed the long
+line. The line is intermittent, so a three-screenshot search cannot pin it to one part; part 20 is at most part of
+it. Not fixed. Next: detect the line from the game's state rather than screenshots (the model's bone or cable
+positions), or count dark thin lines in many frames, before blaming a part.
 
