@@ -46,6 +46,7 @@ constexpr int INVALID_SOCKET=-1;
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <chrono>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -124,7 +125,10 @@ struct Runtime final:ds::Transport {
     uint64_t observedClockStep=0;double measuredRtt=-1;
 
     SOCKET socket=INVALID_SOCKET;sockaddr_in peer{};
-    std::mutex mutex;std::atomic<bool> running{false};std::thread worker;
+    std::timed_mutex mutex;std::atomic<bool> running{false};std::thread worker;
+    // Where the game-thread tick is, for a stall report: a native game call that faults is resumed by the game's own
+    // exception handling above the mod, so the mod's lock stays held and the mod stops (live 2026-11-07).
+    std::atomic<const char*> stage{"idle"};bool stallNoted=false;
 #ifdef MOD_FAKE_NETWORK
     std::unique_ptr<fakemem::Fake> fake;   // declared before the sampler that reads it
 #endif
@@ -332,7 +336,14 @@ struct Runtime final:ds::Transport {
         try {
             mod::Cadence cadence(2000);
             while(running) {
-                {std::lock_guard<std::mutex> guard(mutex);auto clock=mod::nowUs();auto now=clock/1000;
+                {std::unique_lock<std::timed_mutex> guard(mutex,std::chrono::seconds(5));
+                if(!guard.owns_lock()){
+#ifndef MOD_MUTANT_NO_STALL_REPORT
+                    if(!stallNoted){stallNoted=true;std::string m=std::string("STALL the game thread has held the mod for over 5 s in '")+stage.load()+"'; the mod has stopped\n";try{note(m.c_str());}catch(...){}}
+#endif
+                    continue;
+                }
+                auto clock=mod::nowUs();auto now=clock/1000;
                 if(lastNetwork)networkTick.add(clock-lastNetwork);
                 lastNetwork=clock;
                 #ifndef MOD_FAKE_NETWORK
@@ -368,7 +379,7 @@ struct Runtime final:ds::Transport {
                 core->tick(now);paired|=core->connected();}
                 cadence.wait();
             }
-        } catch(const std::exception& e) {std::lock_guard<std::mutex> guard(mutex);failed=true;failure=e.what();try{note(failure.c_str());}catch(...){}running=false;}
+        } catch(const std::exception& e) {std::lock_guard<std::timed_mutex> guard(mutex);failed=true;failure=e.what();try{note(failure.c_str());}catch(...){}running=false;}
     }
     void init(const std::filesystem::path& path) {
         config=mod::parseConfig(readConfig(path));
@@ -609,7 +620,7 @@ struct Runtime final:ds::Transport {
         twin->tick(true,(target&&!event)?&*target:nullptr,speed,actions,twinMode!=TwinMode::None&&!event);
     }
     bool tickOnce(std::string& err,bool gameContext=false) {
-        std::lock_guard<std::mutex> guard(mutex);
+        std::lock_guard<std::timed_mutex> guard(mutex);
         if(failed) {err=failure;return false;}
         try {
             auto clock=mod::nowUs();auto now=clock/1000;
@@ -642,9 +653,13 @@ struct Runtime final:ds::Transport {
                 }
                 puppet->tick(now,true);
             }
+            stage="double";
             if(twin&&gameContext)tickTwin(now);
+            stage="cargo";
             if(twin&&gameContext)tickCargo(now);
+            stage="structures";
             if(twin&&gameContext)tickStructures(now);
+            stage="cargo command";
             if(cargoCreate&&gameContext&&std::filesystem::exists(cargoCommand)) {
                 auto text=readConfig(cargoCommand);
                 if(!std::filesystem::remove(cargoCommand))throw std::runtime_error("cannot consume cargo command");
@@ -697,12 +712,16 @@ struct Runtime final:ds::Transport {
                     note(("CARGO create id="+std::to_string(*id)+"\n").c_str());
                 }
             }
+            stage="continue";
             if(continueLastSave&&gameContext) {
                 if(autoContinue.tick(now-startedAt,cache.available)){continueLastSave();if(autoContinue.calls()==1)note("AUTO continue: asking the game to load the last save\n");}
                 if(autoContinue.done()&&!autoNoted){autoNoted=true;note(("AUTO in game after "+std::to_string((now-startedAt)/1000)+" s, "+std::to_string(autoContinue.calls())+" requests\n").c_str());}
             }
+            stage="body";
             if(body&&gameContext)tickBody();
+            stage="pad";
             tickPad();notePose();
+            stage="idle";
             if(unappliedReceive) {receiveApply.add(clock-unappliedReceive);unappliedReceive=0;}
             if(!cache.available && !game) {err="provider unavailable during tick";note(err.c_str());return false;}
             if(now-startedAt>1000 && config.provider=="synthetic" && cache.remote.visible && core->connected()) {
@@ -720,7 +739,7 @@ struct Runtime final:ds::Transport {
             auto now=mod::nowUs();
             if(schedule.due(now)) {
                 std::string err;
-                if(!tickOnce(err)) {std::lock_guard<std::mutex> guard(mutex);if(!failed){failed=true;failure=err;}running=false;try{note(err.c_str());}catch(...){}break;}
+                if(!tickOnce(err)) {std::lock_guard<std::timed_mutex> guard(mutex);if(!failed){failed=true;failure=err;}running=false;try{note(err.c_str());}catch(...){}break;}
             }
             auto wait=schedule.deadline>mod::nowUs()?schedule.deadline-mod::nowUs():0;
             std::this_thread::sleep_for(std::chrono::microseconds(std::min<uint64_t>(std::max<uint64_t>(wait,500),5000)));
@@ -759,14 +778,14 @@ MOD_API void mod_test_set_pose(const double* position,const float* rotation,int 
 }
 MOD_API int mod_test_drain(unsigned char* bytes) {
     std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return 0;
-    auto& r=*runtime;std::lock_guard<std::mutex> guard(r.mutex);
+    auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
     if(r.discovery) {if(r.discovery->failed()){error="read-only discovery failed; inspect discovery JSONL and debug output";return 0;}return 1;}
     if(r.outgoing.empty())return 0;
     memcpy(bytes,r.outgoing.front().data(),ds::WireSize);r.outgoing.pop_front();return 1;
 }
 MOD_API void mod_test_deliver(const unsigned char* bytes) {
     std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return;
-    auto& r=*runtime;std::lock_guard<std::mutex> guard(r.mutex);++r.received;
+    auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);++r.received;
     if(r.pending.size()>=256){++r.dropped;return;}
     ds::Bytes b;memcpy(b.data(),bytes,b.size());
     uint64_t delay=r.config.impairment&&b[6]==uint8_t(ds::Kind::Presence)?15+(r.received*17)%51:0;
@@ -794,7 +813,7 @@ int mod_tick(double dt) {
     if(!runtime || !std::isfinite(dt)||dt<0||dt>1) {error="invalid tick or uninitialized mod";return 0;}
     auto& r=*runtime;
     if(r.config.selfTick||r.config.gameThread) {   // the mod ticks itself; an external tick is a validated no-op, never a second tick source
-        std::lock_guard<std::mutex> guard(r.mutex);
+        std::lock_guard<std::timed_mutex> guard(r.mutex);
         if(r.failed) {error=r.failure;return 0;}
         return 1;
     }
@@ -818,7 +837,7 @@ int mod_game_thread_tick(const mod_game_thread_context* context) {
     if(!r.gameGate.accept(*context,currentThread())){++r.gameRejected;return 0;}
     std::string err;
     if(!r.tickOnce(err,true)) {
-        std::lock_guard<std::mutex> guard(r.mutex);r.failed=true;r.failure=err;r.running=false;error=err;
+        std::lock_guard<std::timed_mutex> guard(r.mutex);r.failed=true;r.failure=err;r.running=false;error=err;
         try{r.note(err.c_str());}catch(...){}return -1;
     }
     return 1;
@@ -827,14 +846,14 @@ void mod_shutdown() {std::lock_guard<std::mutex> lock(lifecycle);auto* r=runtime
 const char* mod_last_error() {
     thread_local std::string copy;
     std::lock_guard<std::mutex> lock(lifecycle);
-    if(runtime) {std::lock_guard<std::mutex> guard(runtime->mutex);copy=runtime->discovery&&runtime->discovery->failed()?"read-only discovery failed; inspect discovery JSONL and debug output":runtime->failed?runtime->failure:error;} else copy=error;
+    if(runtime) {std::lock_guard<std::timed_mutex> guard(runtime->mutex);copy=runtime->discovery&&runtime->discovery->failed()?"read-only discovery failed; inspect discovery JSONL and debug output":runtime->failed?runtime->failure:error;} else copy=error;
     return copy.c_str();
 }
 unsigned mod_status(char* out,unsigned cap) {
     std::lock_guard<std::mutex> lock(lifecycle);std::string s="{}";
     if(runtime && runtime->discovery) {
         s=std::string("{\"discovery\":true,\"failed\":")+(runtime->discovery->failed()?"true":"false")+"}";
-    } else if(runtime) {auto& r=*runtime;std::lock_guard<std::mutex> guard(r.mutex);auto errors=r.errors;std::sort(errors.begin(),errors.end());
+    } else if(runtime) {auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);auto errors=r.errors;std::sort(errors.begin(),errors.end());
         auto p=[&](double q){return errors.empty()?-1.:errors[size_t((errors.size()-1)*q)];};
         std::ostringstream o;o<<"{\"handshake\":"<<(r.paired?"true":"false")<<",\"connected\":"<<(r.core->connected()?"true":"false")<<",\"sent\":"<<r.sent<<",\"received\":"<<r.received<<",\"dropped\":"<<r.dropped<<",\"accepted\":"<<r.core->accepted()<<",\"wrong_accepted\":"<<r.wrongAccepted<<",\"build_refused\":"<<r.buildRefused<<",\"version_refused\":"<<r.versionRefused<<",\"session_refused\":"<<r.sessionRefused<<",\"rtt_ms\":"<<r.measuredRtt<<",\"current_rtt_ms\":"<<r.core->rttMs()<<",\"samples\":"<<errors.size()<<",\"error_p50\":"<<p(.5)<<",\"error_p95\":"<<p(.95)<<",\"error_p99\":"<<p(.99)<<",\"error_max\":"<<p(1)<<",\"failed\":"<<(r.failed?"true":"false")<<",\"self_tick\":{\"enabled\":"<<(r.config.selfTick?"true":"false")<<",\"ticks\":"<<r.ticks<<"},\"pose\":{\"available\":"<<(r.poseAvailable?"true":"false")<<",\"reason\":\""<<r.poseReason<<"\"}";
         o<<",\"game_thread\":{\"enabled\":"<<(r.config.gameThread?"true":"false")<<",\"verified\":"<<(r.dispatchVerified?"true":"false")<<",\"thread_id\":"<<r.gameGate.thread()<<",\"rejected\":"<<r.gameRejected<<"},\"puppet\":{\"enabled\":"<<(r.puppet?"true":"false")<<",\"stage\":\""<<(r.puppet?r.puppet->stage():"disabled")<<"\",\"actor\":"<<(r.puppet?r.puppet->actor():0)<<"}";

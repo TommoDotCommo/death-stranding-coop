@@ -117,7 +117,7 @@ int main(int argc,char** argv) {
             mod::GameProvider g([&]{return PoseReader(m).read();},[&]{return clock;},&log);ds::State s;
             for(int i=0;i<100;++i){clock=5000000+uint64_t(i)*10000;g.readLocal(s);ds::Render r;r.visible=true;r.stale=false;r.state.position={1,2,3};r.state.yaw=1;g.applyRemote(r);}
             check(lines.size()==4,"presence oracle: 100 calls over 1 s log at most 4 lines");
-            check(lines[0].find("\"remote\":{\"visible\":true,\"stale\":false,\"snapped\":false,\"x\":1,\"y\":2,\"z\":3")!=std::string::npos&&lines[0].find("\"local\":{\"available\":true")!=std::string::npos&&lines[0].back()=='\n',"presence oracle: line content (visible, stale, snapped, position, yaw, local pose)");});
+            check(lines[0].find("\"remote\":{\"visible\":true,\"stale\":false,\"snapped\":false,\"flags\":0,\"gated\":false,\"x\":1,\"y\":2,\"z\":3")!=std::string::npos&&lines[0].find("\"local\":{\"available\":true")!=std::string::npos&&lines[0].back()=='\n',"presence oracle: line content (visible, stale, snapped, flags, gate, position, yaw, local pose)");});
         run("presence_cap",[]{
             std::vector<std::string> lines;size_t total=0;std::string noted;
             mod::PresenceLog log([&](const std::string& l){lines.push_back(l);total+=l.size();return true;},500,[&](const char* s){noted=s;});
