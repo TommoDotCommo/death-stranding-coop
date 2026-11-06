@@ -28,7 +28,7 @@ struct Placement { uint32_t hash=0; std::array<double,3> position{}; uint64_t id
 class Sync {
 public:
     // Constants in metres and milliseconds.
-    static constexpr double HeldRange=2.5, AwayRange=3.0, NearRange=15.0, Still=0.05, MatchRange=2.0;
+    static constexpr double HeldRange=2.5, AwayRange=3.0, NearRange=15.0, Still=0.05, MatchRange=0.5;
     static constexpr uint64_t Settle=1000, HeldMemory=30000, ExpectFor=10000;
     // One call per observation. The first call only learns what already exists (nothing is announced for it).
     std::vector<Placement> observe(const std::vector<Record>&, const std::array<double,3>& porter, uint64_t now);
@@ -39,6 +39,9 @@ public:
     // The partner took shared item `id`: forget it here (its removal is never sent back). Returns the record index to
     // delete when it lies in the world here; nothing when it is unknown or this porter carries it too.
     std::optional<uint32_t> partnerTook(uint64_t id);
+    // Copies of partner items that were taken before they appeared here (placement and pick-up close together): record
+    // indexes to delete now that they exist.
+    std::vector<uint32_t> takeDoomed();
     // Ids for this porter's placements: base + 1, base + 2, ... (keep below 2^53: they travel as a wire t-field).
     void setIdBase(uint64_t base){nextId_=base;}
     size_t mirrored() const;
@@ -47,6 +50,6 @@ private:
     struct Track { uint32_t hash=0,index=0; std::array<double,3> position{}; uint64_t stillSince=0, heldAt=0, id=0; uint8_t where=0;
                    bool fresh=false, announced=false, mirror=false, putDown=false; };
     std::map<uint32_t,Track> tracks_; bool primed_=false; uint64_t nextId_=0;
-    std::vector<std::pair<Placement,uint64_t>> expected_; std::vector<uint64_t> taken_;
+    std::vector<std::pair<Placement,uint64_t>> expected_; std::vector<uint64_t> taken_,cancelled_; std::vector<uint32_t> doomed_;
 };
 }

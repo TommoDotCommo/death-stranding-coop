@@ -44,7 +44,8 @@ void cargoRun(unsigned seed){
             CHECK(p.hash!=9||!partnerCarried.empty());   // a partner's item goes back only after this porter carried it
         }
         for(auto id:s.takeTaken()){CHECK(!taken.count(id));CHECK(announced.count(id)||expectedIds.count(id));CHECK(!removedOnce.count(id));taken.insert(id);gone.insert(id);}
-        for(auto id:mustTake)CHECK(taken.count(id));mustTake.clear();
+        for(auto id:mustTake){CHECK(taken.count(id));}
+        mustTake.clear();
         for(auto& [k,i]:world){(void)i;seenSlots.insert(k);}
     }
 }

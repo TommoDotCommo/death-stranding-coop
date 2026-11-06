@@ -187,6 +187,10 @@ struct Runtime final:ds::Transport {
             core->queueCargo(e);++cargoSent;
             std::ostringstream o;o<<"CARGO placed item "<<p.hash<<" ref "<<p.id<<" at "<<p.position[0]<<","<<p.position[1]<<","<<p.position[2]<<" -> partner\n";note(o.str().c_str());
         }
+        for(auto index:cargoSync.takeDoomed()) {
+            // The partner took this item before our copy of it appeared: remove the copy now.
+            if(cargoDelete){cargoDelete(index);++cargoRemoved;note(("CARGO removed a copy taken before it appeared (record "+std::to_string(index)+")\n").c_str());}
+        }
         for(auto id:cargoSync.takeTaken()) {
             ds::CargoEvent e;e.type=2;e.ref=id;e.position=core?std::array<double,3>{anchor.pose.position[0],anchor.pose.position[2],anchor.pose.position[1]}:std::array<double,3>{};
             core->queueCargo(e);++cargoTaken;

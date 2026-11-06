@@ -24,8 +24,13 @@ void Sync::expect(const Placement& p,uint64_t now){expected_.push_back({p,now});
 size_t Sync::mirrored() const {return size_t(std::count_if(tracks_.begin(),tracks_.end(),[](auto& t){return t.second.mirror;}));}
 size_t Sync::shared() const {return size_t(std::count_if(tracks_.begin(),tracks_.end(),[](auto& t){return t.second.id!=0;}));}
 std::vector<uint64_t> Sync::takeTaken(){std::vector<uint64_t> out;out.swap(taken_);return out;}
+std::vector<uint32_t> Sync::takeDoomed(){std::vector<uint32_t> out;out.swap(doomed_);return out;}
 std::optional<uint32_t> Sync::partnerTook(uint64_t id){
     if(!id)return std::nullopt;
+#ifndef MUTANT_CARGO_DOOM
+    // Taken before its copy appeared here: the copy is deleted when it appears.
+    for(auto& e:expected_)if(e.first.id==id){cancelled_.push_back(id);return std::nullopt;}
+#endif
     for(auto& [slot,t]:tracks_)if(t.id==id){
 #ifndef MUTANT_CARGO_TOOK_ECHO
         (void)slot;t.id=0;t.mirror=false;t.announced=true;   // never announced or reported again
@@ -62,7 +67,11 @@ std::vector<Placement> Sync::observe(const std::vector<Record>& records,const st
             // partner's item may already exist then; found by the sync fuzz).
             for(auto it=expected_.begin();it!=expected_.end();++it)
 #ifndef MUTANT_CARGO_ECHO
-                if(it->first.hash==r.hash&&distance(it->first.position,r.position)<=MatchRange){t.mirror=true;t.id=it->first.id;expected_.erase(it);break;}
+                if(it->first.hash==r.hash&&distance(it->first.position,r.position)<=MatchRange){
+                    t.mirror=true;t.id=it->first.id;
+                    auto c=std::find(cancelled_.begin(),cancelled_.end(),t.id);
+                    if(c!=cancelled_.end()){cancelled_.erase(c);doomed_.push_back(r.index);t.id=0;t.announced=true;}
+                    expected_.erase(it);break;}
 #else
                 {(void)it;break;}
 #endif

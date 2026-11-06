@@ -69,6 +69,10 @@ int main(){
     // A partner item that already exists at the first look is still recognised as theirs (its pick-up is reported).
     { Sync s;s.expect({60,{2,0,100},555},0);s.observe({world(6,60,2.3)},porter,100);CHECK(s.mirrored()==1);
       s.observe({carried(6,60,0.2)},porter,200);auto t=s.takeTaken();CHECK(t.size()==1&&t[0]==555); }
+    // Placement and pick-up close together: the copy that appears after the "taken" is deleted, and never reported.
+    { Sync s;s.observe({},porter,0);s.expect({60,{2,0,100},444},100);CHECK(!s.partnerTook(444));
+      s.observe({world(6,60,2.3)},porter,200);auto d=s.takeDoomed();CHECK(d.size()==1&&d[0]==106);
+      s.observe({},porter,300);CHECK(s.takeTaken().empty()&&s.takeDoomed().empty()); }
     if(!failures)std::puts("cargo placement, settle, held, mirror, far, pick-up, put-down and taken checks passed");
     return failures?1:0;
 }
