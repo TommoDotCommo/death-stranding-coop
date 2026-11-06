@@ -157,7 +157,9 @@ struct Runtime final:ds::Transport {
     mod::cargo::Sync cargoSync;uint64_t cargoReadAt=0,cargoManagerSlot=0,cargoManagerVtable=0,cargoSent=0,cargoMade=0,cargoTaken=0,cargoRemoved=0;
     bool cargoIdsSet=false;
     void tickCargo(uint64_t now) {
-        if(!core||!core->connected())return;
+        // Watch the world even while the partner is away: what is placed or taken meanwhile is queued by the core and
+        // sent when the partner connects (the core keeps undelivered events across reconnects).
+        if(!core)return;
         // Shared ids below 2^53 (a wire t-field): 32 random bits above a 20-bit counter.
         if(!cargoIdsSet){cargoSync.setIdBase((nonce()>>32)<<20);cargoIdsSet=true;}
         auto incoming=core->takeCargo();
@@ -205,7 +207,7 @@ struct Runtime final:ds::Transport {
     // Shared structures (structures.h): what this porter builds goes to the partner; theirs appear here as Net structures.
     mod::structures::Sync structSync;uint64_t structReadAt=0,structSent=0,structMade=0,structIdBase=0,imageSize=0;
     void tickStructures(uint64_t now) {
-        if(!core||!core->connected()||!sampler)return;
+        if(!core||!sampler)return;   // like tickCargo: watched while the partner is away, sent when it connects
         bool coop=partnerMode()&&construct;
         // Incoming structures arrive with the cargo events (type 3); tickCargo hands them over in structIn.
         uint64_t manager=0;std::vector<mod::structures::Record> records;
