@@ -168,7 +168,8 @@ struct Runtime final:ds::Transport {
             if(e.type==2&&netCopies.known(e.ref)){netCopies.dismantled(e.ref,now);continue;}   // a dismantled structure
             if(e.type==2) {
                 // The partner picked up (or used) a shared item: remove our copy if it lies in the world here.
-                auto index=cargoSync.partnerTook(e.ref);std::ostringstream o;
+                std::array<double,3> at{e.position[0],e.position[2],e.position[1]};   // adapter -> game axes
+                auto index=cargoSync.partnerTook(e.ref,e.item,at);std::ostringstream o;
                 if(index&&cargoDelete){cargoDelete(*index);++cargoRemoved;o<<"CARGO partner took "<<e.ref<<": removed record "<<*index<<"\n";}
                 else o<<"CARGO partner took "<<e.ref<<": nothing to remove here\n";
                 note(o.str().c_str());continue;
@@ -191,10 +192,10 @@ struct Runtime final:ds::Transport {
             // The partner took this item before our copy of it appeared: remove the copy now.
             if(cargoDelete){cargoDelete(index);++cargoRemoved;note(("CARGO removed a copy taken before it appeared (record "+std::to_string(index)+")\n").c_str());}
         }
-        for(auto id:cargoSync.takeTaken()) {
-            ds::CargoEvent e;e.type=2;e.ref=id;e.position=core?std::array<double,3>{anchor.pose.position[0],anchor.pose.position[2],anchor.pose.position[1]}:std::array<double,3>{};
+        for(auto& tk:cargoSync.takeTaken()) {
+            ds::CargoEvent e;e.type=2;e.ref=tk.id;e.item=tk.hash;e.position={tk.position[0],tk.position[2],tk.position[1]};   // game -> adapter axes
             core->queueCargo(e);++cargoTaken;
-            note(("CARGO took shared "+std::to_string(id)+" -> partner\n").c_str());
+            note(("CARGO took item "+std::to_string(tk.hash)+(tk.id?" shared "+std::to_string(tk.id):std::string(" (no shared id)"))+" -> partner\n").c_str());
         }
     }
     // Shared structures (structures.h): what this porter builds goes to the partner; theirs appear here as Net structures.

@@ -45,13 +45,13 @@ int main(){
     { Sync s;s.setIdBase(50);s.observe({},porter,0);s.observe({world(4,40,1)},porter,100);
       auto a=s.observe({world(4,40,1)},porter,1200);CHECK(a.size()==1&&a[0].id==51);
       CHECK(s.takeTaken().empty());
-      s.observe({carried(4,40,0.2)},porter,1300);auto t=s.takeTaken();CHECK(t.size()==1&&t[0]==51);
+      s.observe({carried(4,40,0.2)},porter,1300);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==51);
       s.observe({carried(4,40,0.2)},porter,1400);CHECK(s.takeTaken().empty()&&s.shared()==0);   // once
       s.observe({world(4,40,2)},porter,1500);auto b=s.observe({world(4,40,2)},porter,2600);CHECK(b.size()==1&&b[0].id==52); }
     // The partner's item (mirror) picked up here: taken with the partner's id.
     { Sync s;s.observe({},porter,0);s.expect({60,{2,0,100},777},100);
       s.observe({world(6,60,2.3)},porter,200);CHECK(s.observe({world(6,60,2.3)},porter,2000).empty()&&s.mirrored()==1&&s.shared()==1);
-      s.observe({carried(6,60,0.2)},porter,2100);auto t=s.takeTaken();CHECK(t.size()==1&&t[0]==777&&s.mirrored()==0); }
+      s.observe({carried(6,60,0.2)},porter,2100);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==777&&s.mirrored()==0); }
     // The partner took an item: its record index here, once; never reported back when it disappears.
     { Sync s;s.observe({},porter,0);s.expect({60,{2,0,100},888},100);
       s.observe({world(6,60,2.3)},porter,200);s.observe({world(6,60,2.3)},porter,2000);
@@ -63,16 +63,26 @@ int main(){
       s.observe({carried(7,70,0.1)},porter,1300);s.takeTaken();CHECK(!s.partnerTook(71)); }
     // A shared item that vanishes near the porter (used here) is taken; far away it is not.
     { Sync s;s.setIdBase(80);s.observe({},porter,0);s.observe({world(8,80,1)},porter,100);s.observe({world(8,80,1)},porter,1200);
-      s.observe({},porter,1300);auto t=s.takeTaken();CHECK(t.size()==1&&t[0]==81);
+      s.observe({},porter,1300);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==81);
       Sync u;u.setIdBase(90);u.observe({},porter,0);u.observe({world(9,90,1)},porter,100);u.observe({world(9,90,1)},porter,1200);
       std::array<double,3> far{500,0,100};u.observe({},far,1300);CHECK(u.takeTaken().empty()); }
     // A partner item that already exists at the first look is still recognised as theirs (its pick-up is reported).
     { Sync s;s.expect({60,{2,0,100},555},0);s.observe({world(6,60,2.3)},porter,100);CHECK(s.mirrored()==1);
-      s.observe({carried(6,60,0.2)},porter,200);auto t=s.takeTaken();CHECK(t.size()==1&&t[0]==555); }
+      s.observe({carried(6,60,0.2)},porter,200);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==555); }
     // Placement and pick-up close together: the copy that appears after the "taken" is deleted, and never reported.
     { Sync s;s.observe({},porter,0);s.expect({60,{2,0,100},444},100);CHECK(!s.partnerTook(444));
       s.observe({world(6,60,2.3)},porter,200);auto d=s.takeDoomed();CHECK(d.size()==1&&d[0]==106);
       s.observe({},porter,300);CHECK(s.takeTaken().empty()&&s.takeDoomed().empty()); }
+    // After a restart (no shared ids known here): a pick-up from the ground is still reported with item and place, and
+    // the partner's report finds the nearest same item on the ground within 0.5 m.
+    { Sync s;s.observe({world(1,10,1),world(2,10,3)},porter,0);
+      s.observe({carried(1,10,0.2),world(2,10,3)},porter,100);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==0&&t[0].hash==10&&t[0].position[0]==1);
+      Sync r;r.observe({world(5,10,1.2),world(6,10,3),world(7,11,1)},porter,0);
+      auto i=r.partnerTook(0,10,{1,0,100});CHECK(i&&*i==105);CHECK(!r.partnerTook(0,10,{1,0,100}));   // once
+      CHECK(!r.partnerTook(0,10,{9,0,100})&&!r.partnerTook(0,12,{3,0,100})); }
+    // With the location byte, standing next to an item and walking away is not a put-down (no announcement).
+    { Sync s;s.observe({world(9,90,1)},porter,0);std::array<double,3> away{10,0,100};
+      CHECK(s.observe({world(9,90,1)},porter,500).empty()&&s.observe({world(9,90,1)},away,2000).empty()&&s.observe({world(9,90,1)},away,4000).empty()); }
     if(!failures)std::puts("cargo placement, settle, held, mirror, far, pick-up, put-down and taken checks passed");
     return failures?1:0;
 }

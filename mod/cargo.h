@@ -24,21 +24,25 @@ inline uint8_t location(const Record& r){return uint8_t(r.state>>8);}
 // Every record in use. Empty when the manager is absent or does not look like one (wrong vtable).
 std::vector<Record> readRecords(const discovery::Sampler&, uint64_t manager, uint64_t managerVtable);
 struct Placement { uint32_t hash=0; std::array<double,3> position{}; uint64_t id=0; };   // game axes; id = shared id
+// A pick-up (or a shared item gone) to report: the shared id when there is one, and the item and its last place on the
+// ground, so the partner can find its copy even when the id is not known there (after a restart of either mod).
+struct Taken { uint64_t id=0; uint32_t hash=0; std::array<double,3> position{}; };
 // Decides what this porter has placed, and remembers what the partner placed here so it is never sent back.
 class Sync {
 public:
     // Constants in metres and milliseconds.
-    static constexpr double HeldRange=2.5, AwayRange=3.0, NearRange=15.0, Still=0.05, MatchRange=0.5;
+    static constexpr double HeldRange=2.5, AwayRange=3.0, NearRange=15.0, Still=0.05, MatchRange=0.5, FindRange=0.5;
     static constexpr uint64_t Settle=1000, HeldMemory=30000, ExpectFor=10000;
     // One call per observation. The first call only learns what already exists (nothing is announced for it).
     std::vector<Placement> observe(const std::vector<Record>&, const std::array<double,3>& porter, uint64_t now);
     // A partner placement about to be created here: the record that appears for it is the partner's, not ours.
     void expect(const Placement&, uint64_t now);
-    // Shared items this porter took (picked up, or gone while he was near) since the last call: send each as "taken".
-    std::vector<uint64_t> takeTaken();
-    // The partner took shared item `id`: forget it here (its removal is never sent back). Returns the record index to
-    // delete when it lies in the world here; nothing when it is unknown or this porter carries it too.
-    std::optional<uint32_t> partnerTook(uint64_t id);
+    // Items this porter took since the last call (any pick-up from the ground; a shared item gone near him): send each.
+    std::vector<Taken> takeTaken();
+    // The partner took an item: forget it here (its removal is never sent back). Returns the record index to delete when
+    // it lies in the world here. Found by shared id, or else as the nearest same item on the ground within FindRange of
+    // where the partner picked it up; nothing when not found or this porter carries it too.
+    std::optional<uint32_t> partnerTook(uint64_t id,uint32_t hash=0,const std::array<double,3>& at={});
     // Copies of partner items that were taken before they appeared here (placement and pick-up close together): record
     // indexes to delete now that they exist.
     std::vector<uint32_t> takeDoomed();
@@ -48,8 +52,8 @@ public:
     size_t shared() const;
 private:
     struct Track { uint32_t hash=0,index=0; std::array<double,3> position{}; uint64_t stillSince=0, heldAt=0, id=0; uint8_t where=0;
-                   bool fresh=false, announced=false, mirror=false, putDown=false; };
+                   bool fresh=false, announced=false, mirror=false, putDown=false, learned=false, removed=false; };
     std::map<uint32_t,Track> tracks_; bool primed_=false; uint64_t nextId_=0;
-    std::vector<std::pair<Placement,uint64_t>> expected_; std::vector<uint64_t> taken_,cancelled_; std::vector<uint32_t> doomed_;
+    std::vector<std::pair<Placement,uint64_t>> expected_; std::vector<Taken> taken_;std::vector<uint64_t> cancelled_; std::vector<uint32_t> doomed_;
 };
 }
