@@ -887,4 +887,8 @@ path; clean frames score about 500 to 1000, frames with the line 4000 to 16000) 
 after switching parts 0-25 off and 0-19 back on with the toggle worker, the body drew as huge flat polygons across
 the view. Switching parts back on this way corrupts the drawing, so part toggling cannot locate the line, and the
 earlier one-part conclusions are void. The research command stays for reading states, not for fixes.
+The artifact also appears while the body stands still (2026-11-07, n52: a large dark flat polygon from the hand
+of the standing body). `Application_sExportedContinueLastSave` called during gameplay does nothing (it works from
+the title screen), so a world-change test of the own body needs the pause menu. With `own`, the one-copy regression
+passes (the body driven is the made one, 0.032 m from the partner, cargo and structures both ways).
 
