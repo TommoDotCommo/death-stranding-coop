@@ -165,7 +165,7 @@ struct Runtime final:ds::Transport {
         for(auto& e:incoming) {
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(!coop){note("CARGO partner event ignored (not in peer mode)\n");continue;}
-            if(e.type==2&&structMirrors.count(e.ref)){structGone.push_back(e.ref);continue;}   // a dismantled structure
+            if(e.type==2&&netCopies.known(e.ref)){netCopies.dismantled(e.ref,now);continue;}   // a dismantled structure
             if(e.type==2) {
                 // The partner picked up (or used) a shared item: remove our copy if it lies in the world here.
                 auto index=cargoSync.partnerTook(e.ref);std::ostringstream o;
@@ -214,7 +214,7 @@ struct Runtime final:ds::Transport {
             std::array<double,3> game{e.position[0],e.position[2],e.position[1]};   // adapter -> game axes
             auto b=mod::structures::unpack(e.item,game,e.yaw);auto net=mod::structures::netVariant(b.type);
             if(!net){note(("STRUCT partner type "+std::to_string(b.type)+" has no Net variant; ignored\n").c_str());continue;}
-            structMirrors[e.ref]=b.position;
+            netCopies.built(e.ref,*net,b.position);
 #ifndef MOD_MUTANT_STRUCTURE_TWICE
             if(mod::structures::standing(table(),*net,b.position)){note(("STRUCT partner structure ref "+std::to_string(e.ref)+" already stands here\n").c_str());continue;}
 #endif
@@ -223,15 +223,6 @@ struct Runtime final:ds::Transport {
             std::ostringstream o;o<<"STRUCT created partner type "<<int(b.type)<<" as "<<int(*net)<<" ref "<<e.ref<<" at "<<b.position[0]<<","<<b.position[1]<<","<<b.position[2]<<"\n";note(o.str().c_str());
         }
         structIn.clear();
-        // The partner dismantled a structure: remove our Net copy (owner 2 only, a 3 m box around where it stands).
-        for(auto ref:structGone) {
-            auto at=structMirrors.find(ref);if(at==structMirrors.end()||!unconstruct)continue;
-            mod::puppet::Transform t;t.position=at->second;t.rotation={1,0,0,0,1,0,0,0,1};
-            unconstruct({-1.5f,-1.5f,-3,0},{1.5f,1.5f,3,0},t,false,false,true);++structRemoved;
-            std::ostringstream o;o<<"STRUCT partner removed ref "<<ref<<" at "<<t.position[0]<<","<<t.position[1]<<","<<t.position[2]<<"\n";note(o.str().c_str());
-            structMirrors.erase(at);
-        }
-        structGone.clear();
         if(!coop||now-structReadAt<500)return;
         structReadAt=now;
         if(!structIdBase)structIdBase=(nonce()>>32)<<20;
@@ -242,12 +233,19 @@ struct Runtime final:ds::Transport {
             core->queueCargo(e);++structSent;
             std::ostringstream o;o<<"STRUCT built type "<<int(b.type)<<" id "<<b.id<<" at "<<b.position[0]<<","<<b.position[1]<<","<<b.position[2]<<" -> partner\n";note(o.str().c_str());
         }
+        // The partner dismantled a structure: once our Net copy stands, remove it (Net only, a 3 m box around it).
+        for(auto& at:netCopies.due(records,now)) {
+            if(!unconstruct)break;
+            mod::puppet::Transform t;t.position=at;t.rotation={1,0,0,0,1,0,0,0,1};
+            unconstruct({-1.5f,-1.5f,-3,0},{1.5f,1.5f,3,0},t,false,false,true);++structRemoved;
+            std::ostringstream o;o<<"STRUCT partner removed at "<<at[0]<<","<<at[1]<<","<<at[2]<<"\n";note(o.str().c_str());
+        }
         for(auto id:structSync.takeRemoved()) {
             ds::CargoEvent e;e.type=2;e.ref=structIdBase+id;core->queueCargo(e);
             note(("STRUCT dismantled id "+std::to_string(id)+" -> partner\n").c_str());
         }
     }
-    std::map<uint64_t,std::array<double,3>> structMirrors;std::vector<uint64_t> structGone;uint64_t structRemoved=0;
+    mod::structures::NetCopies netCopies;uint64_t structRemoved=0;
     std::vector<ds::CargoEvent> structIn;
     std::deque<std::pair<uint64_t,ds::State>> echo;
     mod::puppet::ActionCache actionCache;uint64_t animatorVtable=0;

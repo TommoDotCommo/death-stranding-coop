@@ -33,6 +33,21 @@ Built unpack(uint32_t item,const std::array<double,3>& position,double yaw);
 // True when a built structure of `type` already stands within `range` metres of `position` (the partner's structure
 // was created here in an earlier session and saved: do not build it twice).
 bool standing(const std::vector<Record>&,uint8_t type,const std::array<double,3>& position,double range=.5);
+// The partner's structures built here as Net copies: a dismantle may arrive before the game has built the copy
+// (construction is asynchronous), so it waits until a built Net structure of that type stands at the place, then is
+// due (remove it there); it gives up after GiveUp ms.
+class NetCopies {
+public:
+    static constexpr uint64_t GiveUp=30000;
+    void built(uint64_t ref,uint8_t netType,const std::array<double,3>& at){copies_[ref]={netType,at,0};}
+    bool known(uint64_t ref) const {return copies_.count(ref)!=0;}
+    void dismantled(uint64_t ref,uint64_t now){auto it=copies_.find(ref);if(it!=copies_.end()&&!it->second.goneAt)it->second.goneAt=now?now:1;}
+    // Places to clear now: dismantled copies that stand built here. Each is returned once.
+    std::vector<std::array<double,3>> due(const std::vector<Record>&,uint64_t now);
+private:
+    struct Copy{uint8_t type=0;std::array<double,3> at{};uint64_t goneAt=0;};
+    std::map<uint64_t,Copy> copies_;
+};
 class Sync {
 public:
     // One call per observation. The first call only learns what exists. Returns structures this porter built since.

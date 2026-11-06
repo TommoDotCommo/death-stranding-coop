@@ -82,4 +82,22 @@ bool standing(const std::vector<Record>& records,uint8_t type,const std::array<d
     }
     return false;
 }
+std::vector<std::array<double,3>> NetCopies::due(const std::vector<Record>& records,uint64_t now){
+    std::vector<std::array<double,3>> out;
+    for(auto it=copies_.begin();it!=copies_.end();){
+        auto& c=it->second;
+        if(!c.goneAt){++it;continue;}
+#ifndef MUTANT_STRUCTURE_EARLY
+        bool standing=false;for(auto& r:records)if(r.type==c.type&&r.state==2&&r.id>=NetFirst){
+            double dx=r.at.position[0]-c.at[0],dy=r.at.position[1]-c.at[1];if(dx*dx+dy*dy<=1.5*1.5)standing=true;}
+#else
+        bool standing=true;
+#endif
+        if(standing){out.push_back(c.at);it=copies_.erase(it);}
+        else if(now-c.goneAt>GiveUp)it=copies_.erase(it);
+        else ++it;
+    }
+    return out;
 }
+}
+

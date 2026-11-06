@@ -45,6 +45,12 @@ int main(){
     // A partner structure already standing here (saved from an earlier session) is not built twice.
     { auto a=rec(100009,26,2,10);CHECK(standing({a},26,{10.3,2,3})&&!standing({a},26,{11,2,3})&&!standing({a},29,{10,2,3}));
       auto b=rec(100010,26,0,10);CHECK(!standing({b},26,{10,2,3})); }
+    // A dismantle that arrives before the Net copy is built waits for it, then clears it once; unknown refs are ignored.
+    { NetCopies n;n.built(7,26,{10,2,3});n.dismantled(7,1000);n.dismantled(99,1000);
+      CHECK(n.due({},1500).empty());                                   // not built yet: wait
+      auto r=rec(100005,26,0,10);CHECK(n.due({r},2000).empty());       // pending, not built
+      r.state=2;auto d=n.due({r},2500);CHECK(d.size()==1&&d[0][0]==10);CHECK(n.due({r},3000).empty()&&!n.known(7));
+      NetCopies g;g.built(8,26,{10,2,3});g.dismantled(8,1000);CHECK(g.due({},1000+NetCopies::GiveUp+1).empty()&&!g.known(8)); }
     if(!failures)std::puts("structure rotation, packing, variants and sync checks passed");
     return failures?1:0;
 }
