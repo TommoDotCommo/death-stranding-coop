@@ -144,25 +144,41 @@ struct Runtime final:ds::Transport {
     std::function<void()> continueLastSave;mod::AutoContinue autoContinue;bool autoNoted=false;
     std::function<bool()> gameEvent;bool inEvent=false;std::atomic<bool> fakeEvent{false};
     // Shared cargo (cargo.h): placements read from the game's cargo map go to the partner; theirs are created here.
-    mod::cargo::Sync cargoSync;uint64_t cargoReadAt=0,cargoManagerSlot=0,cargoManagerVtable=0,cargoSent=0,cargoMade=0;
+    mod::cargo::Sync cargoSync;uint64_t cargoReadAt=0,cargoManagerSlot=0,cargoManagerVtable=0,cargoSent=0,cargoMade=0,cargoTaken=0,cargoRemoved=0;
+    bool cargoIdsSet=false;
     void tickCargo(uint64_t now) {
         if(!core||!core->connected())return;
+        // Shared ids below 2^53 (a wire t-field): 32 random bits above a 20-bit counter.
+        if(!cargoIdsSet){cargoSync.setIdBase((nonce()>>32)<<20);cargoIdsSet=true;}
         auto incoming=core->takeCargo();
         bool coop=twinMode==TwinMode::Peer&&cargoCreate&&cargoManagerSlot;
         for(auto& e:incoming) {
-            if(!coop){note("CARGO partner placement ignored (not in peer mode)\n");continue;}
+            if(!coop){note("CARGO partner event ignored (not in peer mode)\n");continue;}
+            if(e.type==2) {
+                // The partner picked up (or used) a shared item: remove our copy if it lies in the world here.
+                auto index=cargoSync.partnerTook(e.ref);std::ostringstream o;
+                if(index&&cargoDelete){cargoDelete(*index);++cargoRemoved;o<<"CARGO partner took "<<e.ref<<": removed record "<<*index<<"\n";}
+                else o<<"CARGO partner took "<<e.ref<<": nothing to remove here\n";
+                note(o.str().c_str());continue;
+            }
+            if(e.type!=1){note("CARGO unknown partner event type ignored\n");continue;}
             auto t=mod::puppet::fromState(e.position,e.yaw);
-            cargoSync.expect({e.item,t.position},now);cargoCreate(e.item,t);++cargoMade;
-            std::ostringstream o;o<<"CARGO created partner item "<<e.item<<" at "<<t.position[0]<<","<<t.position[1]<<","<<t.position[2]<<"\n";note(o.str().c_str());
+            cargoSync.expect({e.item,t.position,e.ref},now);cargoCreate(e.item,t);++cargoMade;
+            std::ostringstream o;o<<"CARGO created partner item "<<e.item<<" ref "<<e.ref<<" at "<<t.position[0]<<","<<t.position[1]<<","<<t.position[2]<<"\n";note(o.str().c_str());
         }
         if(!coop||now-cargoReadAt<250)return;
         cargoReadAt=now;uint64_t manager=0;if(!sampler->read(cargoManagerSlot,&manager,8))return;
         auto anchor=mod::puppet::readLocalAnchor(*sampler);if(!anchor.entity||!anchor.pose.available)return;
         auto records=mod::cargo::readRecords(*sampler,manager,cargoManagerVtable);if(records.empty())return;
         for(auto& p:cargoSync.observe(records,anchor.pose.position,now)) {
-            ds::CargoEvent e;e.type=1;e.item=p.hash;e.position={p.position[0],p.position[2],p.position[1]};   // game -> adapter axes
+            ds::CargoEvent e;e.type=1;e.item=p.hash;e.ref=p.id;e.position={p.position[0],p.position[2],p.position[1]};   // game -> adapter axes
             core->queueCargo(e);++cargoSent;
-            std::ostringstream o;o<<"CARGO placed item "<<p.hash<<" at "<<p.position[0]<<","<<p.position[1]<<","<<p.position[2]<<" -> partner\n";note(o.str().c_str());
+            std::ostringstream o;o<<"CARGO placed item "<<p.hash<<" ref "<<p.id<<" at "<<p.position[0]<<","<<p.position[1]<<","<<p.position[2]<<" -> partner\n";note(o.str().c_str());
+        }
+        for(auto id:cargoSync.takeTaken()) {
+            ds::CargoEvent e;e.type=2;e.ref=id;e.position=core?std::array<double,3>{anchor.pose.position[0],anchor.pose.position[2],anchor.pose.position[1]}:std::array<double,3>{};
+            core->queueCargo(e);++cargoTaken;
+            note(("CARGO took shared "+std::to_string(id)+" -> partner\n").c_str());
         }
     }
     std::deque<std::pair<uint64_t,ds::State>> echo;
@@ -720,7 +736,7 @@ unsigned mod_status(char* out,unsigned cap) {
         std::ostringstream o;o<<"{\"handshake\":"<<(r.paired?"true":"false")<<",\"connected\":"<<(r.core->connected()?"true":"false")<<",\"sent\":"<<r.sent<<",\"received\":"<<r.received<<",\"dropped\":"<<r.dropped<<",\"accepted\":"<<r.core->accepted()<<",\"wrong_accepted\":"<<r.wrongAccepted<<",\"build_refused\":"<<r.buildRefused<<",\"version_refused\":"<<r.versionRefused<<",\"session_refused\":"<<r.sessionRefused<<",\"rtt_ms\":"<<r.measuredRtt<<",\"current_rtt_ms\":"<<r.core->rttMs()<<",\"samples\":"<<errors.size()<<",\"error_p50\":"<<p(.5)<<",\"error_p95\":"<<p(.95)<<",\"error_p99\":"<<p(.99)<<",\"error_max\":"<<p(1)<<",\"failed\":"<<(r.failed?"true":"false")<<",\"self_tick\":{\"enabled\":"<<(r.config.selfTick?"true":"false")<<",\"ticks\":"<<r.ticks<<"},\"pose\":{\"available\":"<<(r.poseAvailable?"true":"false")<<",\"reason\":\""<<r.poseReason<<"\"}";
         o<<",\"game_thread\":{\"enabled\":"<<(r.config.gameThread?"true":"false")<<",\"verified\":"<<(r.dispatchVerified?"true":"false")<<",\"thread_id\":"<<r.gameGate.thread()<<",\"rejected\":"<<r.gameRejected<<"},\"puppet\":{\"enabled\":"<<(r.puppet?"true":"false")<<",\"stage\":\""<<(r.puppet?r.puppet->stage():"disabled")<<"\",\"actor\":"<<(r.puppet?r.puppet->actor():0)<<"}";
         o<<",\"pad\":{\"enabled\":"<<(r.config.virtualPad?"true":"false")<<",\"running\":"<<(r.padRunning?"true":"false")<<",\"calls\":"<<padShared.calls.load()<<",\"active_calls\":"<<padShared.active.load()<<"}";
-        o<<",\"event\":"<<(r.inEvent?"true":"false")<<",\"cargo\":{\"sent\":"<<r.cargoSent<<",\"created\":"<<r.cargoMade<<",\"mirrored\":"<<r.cargoSync.mirrored()<<",\"pending\":"<<(r.core?r.core->cargoPending():0)<<"}";
+        o<<",\"event\":"<<(r.inEvent?"true":"false")<<",\"cargo\":{\"sent\":"<<r.cargoSent<<",\"created\":"<<r.cargoMade<<",\"taken\":"<<r.cargoTaken<<",\"removed\":"<<r.cargoRemoved<<",\"shared\":"<<r.cargoSync.shared()<<",\"mirrored\":"<<r.cargoSync.mirrored()<<",\"pending\":"<<(r.core?r.core->cargoPending():0)<<"}";
         o<<",\"double\":{\"stage\":\""<<(r.twin?r.twin->name():"disabled")<<"\",\"mode\":\""<<(r.twinMode==Runtime::TwinMode::Echo?"echo":r.twinMode==Runtime::TwinMode::Lead?"lead":r.twinMode==Runtime::TwinMode::Peer?"peer":"none")<<"\",\"entity\":"<<(r.twin?r.twin->entity():0)<<"}";
         o<<",\"timing\":{\"clock\":\""
 #ifdef _WIN32

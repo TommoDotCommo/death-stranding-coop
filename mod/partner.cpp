@@ -1,11 +1,12 @@
 // coop-partner: a stand-in partner for one game copy (partner.h). It binds the partner slot's loopback port and runs the
 // real protocol core, so the game cannot tell it from a second copy.
 //   coop-partner --slot 1 --peer-slot 0 --role client --session N [--follow | --replay FILE [--where-recorded]]
-//                [--drop SECONDS ITEM]
+//                [--drop SECONDS ITEM] [--take-after SECONDS] [--take-own-after SECONDS]
 //                [--seconds N] [--stop FILE]
 // --where-recorded plays the walk where it was recorded (same save, same place) instead of beside the porter.
 // Prints one status line a second and every cargo event the game sends. --drop places one cargo item (the game's
-// item hash) where the partner stands, SECONDS after connecting.
+// item hash) where the partner stands, SECONDS after connecting. --take-after picks up (sends "taken" for) every item the
+// game places, SECONDS after it arrives; --take-own-after picks up the partner's own dropped item SECONDS after dropping.
 #include "partner.h"
 #include <chrono>
 #include <cstdio>
@@ -66,7 +67,7 @@ struct Shell final:ds::StateProvider,ds::Transport {
 [[noreturn]] void usage(const char* why){std::fprintf(stderr,"coop-partner: %s\n(see the comment at the top of partner.cpp)\n",why);std::exit(2);}
 }
 int main(int argc,char** argv){
-    unsigned slot=1,peerSlot=0;ds::Role role=ds::Role::Client;uint64_t session=0;double seconds=3600,dropAfter=-1;uint32_t dropItem=0;
+    unsigned slot=1,peerSlot=0;ds::Role role=ds::Role::Client;uint64_t session=0;double seconds=3600,dropAfter=-1,takeAfter=-1,takeOwnAfter=-1;uint32_t dropItem=0;
     std::string replayFile,stopFile;Shell shell;
     for(int i=1;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc)usage(("missing value after "+a).c_str());return std::string(argv[++i]);};
@@ -75,6 +76,7 @@ int main(int argc,char** argv){
         else if(a=="--session")session=std::stoull(next());else if(a=="--seconds")seconds=std::stod(next());
         else if(a=="--follow")replayFile.clear();else if(a=="--where-recorded")shell.whereRecorded=true;else if(a=="--replay")replayFile=next();else if(a=="--stop")stopFile=next();
         else if(a=="--drop"){dropAfter=std::stod(next());dropItem=uint32_t(std::stoul(next()));}
+        else if(a=="--take-after")takeAfter=std::stod(next());else if(a=="--take-own-after")takeOwnAfter=std::stod(next());
         else usage(("unknown option "+a).c_str());
     }
     if(!session)usage("--session is required (the game copy's mod.json session)");
@@ -98,7 +100,8 @@ int main(int argc,char** argv){
 #endif
     ds::Config config;config.role=role;config.session=session;config.nonce=(nowMs()<<8)|slot|1;
     ds::Core core(config,shell,shell);
-    auto start=nowMs();uint64_t nextStatus=start+1000,connectedAt=0,refused=0;bool dropped=false;
+    auto start=nowMs();uint64_t nextStatus=start+1000,connectedAt=0,refused=0,ownRef=0,droppedAt=0;bool dropped=false;
+    std::vector<std::pair<uint64_t,uint64_t>> toTake;   // (when, ref)
     std::printf("PARTNER slot %u -> %u session %llu mode %s\n",slot,peerSlot,(unsigned long long)session,shell.replay?"replay":"follow");std::fflush(stdout);
     while(nowMs()-start<seconds*1000){
         if(!stopFile.empty()&&std::ifstream(stopFile))break;
@@ -114,13 +117,22 @@ int main(int argc,char** argv){
         core.frame(now);shell.step(now);core.tick(now);
         if(core.connected()&&!connectedAt)connectedAt=now;
         if(!core.connected())connectedAt=0;
-        for(auto& e:core.takeCargo())
-            std::printf("CARGO received item %u at %.2f,%.2f,%.2f id %llu\n",e.item,e.position[0],e.position[1],e.position[2],(unsigned long long)e.id);
+        for(auto& e:core.takeCargo()){
+            std::printf("CARGO received type %u item %u ref %llu at %.2f,%.2f,%.2f id %llu\n",unsigned(e.type),e.item,(unsigned long long)e.ref,
+                        e.position[0],e.position[1],e.position[2],(unsigned long long)e.id);
+            if(e.type==1&&takeAfter>=0&&e.ref)toTake.push_back({now+uint64_t(takeAfter*1000),e.ref});
+        }
+        auto take=[&](uint64_t ref){
+            ds::CargoEvent e;e.type=2;e.ref=ref;if(shell.mine){e.position=shell.mine->position;e.yaw=shell.mine->yaw;}e.id=(nowMs()<<4)|slot|8;
+            core.queueCargo(e);std::printf("CARGO took ref %llu\n",(unsigned long long)ref);};
+        for(auto it=toTake.begin();it!=toTake.end();)if(now>=it->first){take(it->second);it=toTake.erase(it);}else ++it;
         if(dropAfter>=0&&!dropped&&connectedAt&&shell.mine&&now-connectedAt>=dropAfter*1000){
             ds::CargoEvent e;e.type=1;e.item=dropItem;e.position=shell.mine->position;e.yaw=shell.mine->yaw;e.id=(nowMs()<<4)|slot;
+            ownRef=(nowMs()<<4)|slot|4;e.ref=ownRef;droppedAt=now;
             core.queueCargo(e);dropped=true;
-            std::printf("CARGO dropped item %u at %.2f,%.2f,%.2f\n",dropItem,e.position[0],e.position[1],e.position[2]);
+            std::printf("CARGO dropped item %u ref %llu at %.2f,%.2f,%.2f\n",dropItem,(unsigned long long)ownRef,e.position[0],e.position[1],e.position[2]);
         }
+        if(dropped&&ownRef&&takeOwnAfter>=0&&now-droppedAt>=takeOwnAfter*1000){take(ownRef);ownRef=0;}
         if(now>=nextStatus){
             nextStatus+=1000;
             if(shell.porter&&shell.mine){

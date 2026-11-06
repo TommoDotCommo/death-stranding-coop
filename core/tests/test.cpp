@@ -68,9 +68,9 @@ void parserTests() {
 }
 void cargoTests() {
     // Wire: an event survives encode/decode with its item hash (t0), type (action), position and yaw.
-    { Fixture f; CargoEvent e; e.item=0x0782598d; e.position={1694.7,135.7,1056.4}; e.yaw=1.5; f.core.queueCargo(e); f.core.tick(10);
+    { Fixture f; CargoEvent e; e.item=0x0782598d; e.position={1694.7,135.7,1056.4}; e.yaw=1.5; e.ref=0x1234567; f.core.queueCargo(e); f.core.tick(10);
       Packet q; bool sent=false; for(auto& b:f.transport.packets) if(b[6]==uint8_t(Kind::Cargo)) { sent=decode(b.data(),b.size(),q)==Error::None; }
-      check(sent&&q.sequence==1&&q.t0==0x0782598d&&q.state.action==1&&std::abs(q.state.position[0]-1694.7)<.01&&std::abs(q.state.yaw-1.5)<.001,"cargo_wire");
+      check(sent&&q.sequence==1&&q.t0==0x0782598d&&q.state.action==1&&q.t2==0x1234567&&std::abs(q.state.position[0]-1694.7)<.01&&std::abs(q.state.yaw-1.5)<.001,"cargo_wire");
       // Repeated until acknowledged, then never again.
       f.transport.packets.clear(); f.core.tick(100); f.core.tick(220); unsigned repeats=0; for(auto& b:f.transport.packets) repeats+=b[6]==uint8_t(Kind::Cargo);
       check(repeats==1,"cargo_repeat");
@@ -78,10 +78,10 @@ void cargoTests() {
       ack.sequence=1; f.receive(ack,240); check(f.core.cargoPending()==0,"cargo_acked");
       f.transport.packets.clear(); f.core.tick(500); for(auto& b:f.transport.packets) check(b[6]!=uint8_t(Kind::Cargo),"cargo_acked"); }
     // Receiver: only the next sequence is taken, exactly once; repeats are acknowledged again but not delivered.
-    { Fixture f; auto cargo=[&](uint32_t seq,uint32_t item){ Packet p=f.presence(seq,0); p.kind=Kind::Cargo; p.state.action=1; p.t0=item; p.t1=1000+item; return p; };
+    { Fixture f; auto cargo=[&](uint32_t seq,uint32_t item){ Packet p=f.presence(seq,0); p.kind=Kind::Cargo; p.state.action=1; p.t0=item; p.t1=1000+item; p.t2=5000+item; return p; };
       f.receive(cargo(2,22),100); check(f.core.takeCargo().empty(),"cargoOrder");                       // gap: not delivered
       f.receive(cargo(1,11),110); f.receive(cargo(1,11),120); f.receive(cargo(2,22),130);
-      auto got=f.core.takeCargo(); check(got.size()==2&&got[0].item==11&&got[1].item==22,"cargoOrder");
+      auto got=f.core.takeCargo(); check(got.size()==2&&got[0].item==11&&got[1].item==22&&got[0].ref==5011,"cargoOrder");
       unsigned acks=0; for(auto& b:f.transport.packets) acks+=b[6]==uint8_t(Kind::CargoAck); check(acks==3,"cargo_ack_repeats");
       auto bad=cargo(3,33); bad.state.action=0; check(f.receive(bad,140)==Error::Range,"cargo_type_range");
       check(f.core.takeCargo().empty(),"cargo_taken_once");
@@ -92,6 +92,14 @@ void cargoTests() {
       f.core.tick(3200); Packet a; a.kind=Kind::Ack; a.role=Role::Client; a.session=42; a.nonce=201; a.echo=101; f.receive(a,3300);   // new connection
       p.nonce=201; p.echo=101; p.sequence=1; check(f.receive(p,3400)==Error::None,"cargo_after_reconnect");
       check(f.core.takeCargo().empty(),"cargoOnce"); }
+    // A real (random 64-bit) nonce: the sender's ids stay valid t-fields (below 2^53), distinct and nonzero.
+    for(uint64_t nonce:{0xdeadbeefcafef00dull,0xffffffffffffffffull,0x8000000000000001ull,1ull}) {
+      Fake provider; Queue transport; Core c({Role::Host,42,nonce,120},provider,transport); c.setProtections(protection);
+      CargoEvent e; e.item=9; c.queueCargo(e); c.queueCargo(e);
+      Packet ack; ack.role=Role::Client; ack.kind=Kind::Ack; ack.session=42; ack.nonce=200; ack.echo=nonce;
+      c.tick(0); auto b=encode(ack); c.receive(b.data(),b.size(),0); transport.packets.clear(); c.tick(10);
+      Packet q; bool ok=false; for(auto& w:transport.packets) if(w[6]==uint8_t(Kind::Cargo)) ok=decode(w.data(),w.size(),q)==Error::None&&q.t1&&q.t1<(1ull<<53);
+      check(ok,"cargo_id_fits_random_nonce"); }
     // A new connection renumbers undelivered events from 1.
     { Fixture f; CargoEvent e; e.item=5; f.core.queueCargo(e); f.core.queueCargo(e); f.core.tick(3001); check(!f.core.connected()&&f.core.cargoPending()==2,"cargo_kept_on_reset"); }
 }

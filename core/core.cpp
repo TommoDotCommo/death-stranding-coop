@@ -191,7 +191,7 @@ Error Core::receive(const uint8_t* b,size_t n,uint64_t now) {
         if(q.state.action<1||q.state.action>3||q.t0>0xffffffffull||!q.t1) return fail(Error::Range);
         bool next=q.sequence==cargoSeen_+1;
         if(next||!protections_.cargoOrder) {
-            CargoEvent e; e.sequence=q.sequence; e.type=q.state.action; e.item=uint32_t(q.t0); e.position=q.state.position; e.yaw=q.state.yaw; e.id=q.t1;
+            CargoEvent e; e.sequence=q.sequence; e.type=q.state.action; e.item=uint32_t(q.t0); e.position=q.state.position; e.yaw=q.state.yaw; e.id=q.t1; e.ref=q.t2;
             bool seen=std::find(deliveredIds_.begin(),deliveredIds_.end(),e.id)!=deliveredIds_.end();
             if(!seen||!protections_.cargoOnce) { cargoIn_.push_back(e); deliveredIds_.push_back(e.id); while(deliveredIds_.size()>4096) deliveredIds_.pop_front(); }
             cargoSeen_=q.sequence;
@@ -226,14 +226,16 @@ Error Core::receive(const uint8_t* b,size_t n,uint64_t now) {
     return fail(Error::None);
 }
 void Core::queueCargo(CargoEvent e) {
-    // Sender identity: this connection-independent counter, salted with the configured nonce at first use.
-    if(!e.id) e.id=(uint64_t(config_.nonce)<<20)^++cargoIds_;
+    // Sender identity: a per-process counter in the low 20 bits, salted with 33 bits mixed from the nonce. It must stay
+    // below 2^53 like every t-field (the receiver refuses larger values as invalid times): the old (nonce<<20)^n
+    // overflowed for any real (random 64-bit) nonce, so the game dropped every cargo event (live 2026-11-07).
+    if(!e.id) { uint64_t salt=(config_.nonce*0x9e3779b97f4a7c15ull)>>31; e.id=((salt<<20)|(++cargoIds_&0xfffff))&((1ull<<53)-1); if(!e.id) e.id=1; }
     e.sequence=++cargoNext_; cargoOut_.push_back(e);
 }
 std::vector<CargoEvent> Core::takeCargo() { std::vector<CargoEvent> out; out.swap(cargoIn_); return out; }
 void Core::sendCargo(const CargoEvent& e,uint64_t now) {
     Packet q; q.kind=Kind::Cargo; q.role=config_.role; q.session=config_.session; q.nonce=config_.nonce; q.echo=peer_; q.stamp=now;
-    q.sequence=e.sequence; q.state.action=e.type; q.t0=e.item; q.t1=e.id; q.state.position=e.position; q.state.yaw=e.yaw;
+    q.sequence=e.sequence; q.state.action=e.type; q.t0=e.item; q.t1=e.id; q.t2=e.ref; q.state.position=e.position; q.state.yaw=e.yaw;
     transport_.send(encode(q));
 }
 Render Core::render(uint64_t now) const { return sampling(snapshots_,now,protections_.delay?config_.delayMs:0,150,protections_); }

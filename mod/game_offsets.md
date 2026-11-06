@@ -701,6 +701,19 @@ Shared cargo, first version (`mod/cargo.{h,cpp}`, core CARGO events):
   picked up), a real put-down by the porter (the keyboard binding is still unknown), and cargo far from the
   partner.
 
+### Cargo, live 2026-11-07: where an item is, and deleting one
+
+- Record byte `+21` (bits 8..15 of the `+20` word) is where the item is: **1 in the world, 2 carried by the porter**.
+  The carried corpse read `0x205`; when Sam sat down to rest and put it down, the same record read `0x105` and its
+  position dropped to the ground. Equipped items read `0x200`.
+- Record `+84` is a persistent cargo id for game-placed cargo (`0x2003`, `0x202e`, `0x2061`...; repeated at `+f8`).
+  Cargo made by `CreateBaggage` has `0x1fffff` there (no id).
+- `DeleteBaggage` (2cd1460 -> 2cd6d40) queues a kind-2 request with its argument at request `+8`. The queue loop
+  (2c95540, branch at 2c95b2b, taken when request `+4` is -1) masks the argument with `0x1fff`, uses it as the
+  **index of the record in the manager's array** (`manager+20+index*0x240`) and goes on only when record byte `+21`
+  is 1, 2 or 8. Live: `delete 7` removed the crate in record index 7 (36 -> 35 records); its `+20` value (263),
+  its `+18` slot (65) and a `+84` id (8238) did nothing.
+
 ## Outfit (2026-11-03, read-only)
 
 The double has no backpack or hood. The porter's backpack, pouches and other gear are about 30 attached child
@@ -767,3 +780,14 @@ double's own, `double+58`) should be within a frame or two. Caller at `0x2373d6b
 object+60, unknown = object+80, id derived from object+8. First live step (one copy, owner away): call it once on the
 game thread with the double's resource, a transform 3 m beside the porter and a fresh id; log the request's fields
 for a few frames; look for a new DSPlayerAKukanEntity in the world. Remove it with `Entity_ExportedRemove`.
+
+### The common entity creator with the double's resource, live (2026-11-07)
+
+One call of `0x2380920` on the game thread with the double's own resource (`double+58`), a transform 3 m beside the
+porter and a fresh id never returned to the mod: no log line after the call. The game kept running, but the mod's
+runtime lock was still held, so the mod stopped ticking (commands not read, the partner disconnected). A thread
+snapshot found no thread inside the creator, and the mod's loop thread was waiting on that lock. Reading: the call
+faulted and the game's own structured exception handling resumed the main loop above the mod's frames. As with the
+local Sam's resource (2026-11-02), calling the creator directly does not give a second Sam. The remaining engine
+route is a registered `Spawnpoint`; until then the partner stays on the resident double.
+

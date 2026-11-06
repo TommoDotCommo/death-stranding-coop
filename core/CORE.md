@@ -264,10 +264,11 @@ nonce and build checks:
 | Field | CARGO | CARGO_ACK |
 |---|---|---|
 | 56 sequence | event number, 1, 2, 3... per connection | the event number acknowledged |
-| 62 action | event type 1..3 (1 = cargo placed in the world) | ignored |
+| 62 action | event type 1..3 (1 = cargo placed in the world, 2 = shared cargo taken: the partner removes its copy) | ignored |
 | 72 position, 90 yaw | where the cargo is, adapter axes | ignored |
 | 96 t0 | the game's cargo item hash, 0..2^32-1 | ignored |
-| 104 t1 | nonzero event id chosen by the sender, stable across reconnections | ignored |
+| 104 t1 | nonzero event id chosen by the sender, stable across reconnections, below 2^53 | ignored |
+| 112 t2 | the shared cargo's id (the same in both worlds, chosen by whoever placed it), below 2^53; 0 = none | ignored |
 
 Delivery is reliable, ordered and at most once per connection. The sender repeats the oldest unacknowledged event
 every 200 ms. The receiver takes only the next sequence and acknowledges it, and acknowledges any repeat of an older
@@ -277,3 +278,7 @@ each event id only once for the lifetime of the connection object (it remembers 
 whose acknowledgement was lost just before a reconnection is not delivered twice (mutant `cargoOnce`). Mutants `cargoOrder` and
 `cargoAck` remove ordering and acknowledgement matching. The lossy-link fuzz (500 seeds, 10% loss, 5% duplicates,
 an outage and reconnect) checks that every event is delivered exactly once and in order.
+
+Like every t-field, t1 and t2 must stay below 2^53 or the receiver refuses the frame as an invalid time. The core's own
+event ids are 33 bits mixed from the nonce above a 20-bit counter; the first version shifted the whole 64-bit nonce,
+which overflowed for any real (random) nonce, so live cargo events were refused (test `cargo_id_fits_random_nonce`).

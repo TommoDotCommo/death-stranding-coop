@@ -10,7 +10,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('double',['ANCHOR','STILL','NETWORK','ACTION_OWNER','ACTION_MASK','TRANSIENT','EFFECTS','SMOOTH','YIELD_ANCHOR','PRIVATE_ROOM','PERMISSION','PARKED','IDENTITY','YIELD','READBACK','LOCAL','RELEASE','WORLD','FIND_PARENT','FIND_UNIQUE','HOLD','HIDDEN_YIELD'],
            ['double_test.cpp','double.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
           ('padscript',['BOUNDS','STAMP','TIMING'],['pad_test.cpp','pad.cpp']),
-          ('cargo',['ECHO','HELD'],['cargo_test.cpp','cargo.cpp','discovery.cpp']),
+          ('cargo',['ECHO','HELD','TAKEN','TOOK_ECHO'],['cargo_test.cpp','cargo.cpp','discovery.cpp']),
           ('partner',['TELEPORT','ACCEL','WIRE','WIRE_ANY'],['partner_test.cpp','partner_logic.cpp','../core/core.cpp']),
           ('body',['ANY_CLASS'],['body_test.cpp','body.cpp','discovery.cpp']),
           ('auto',['ONCE_IN_GAME'],['auto_continue_test.cpp'])]

@@ -33,10 +33,11 @@ struct Packet {
 };
 // A shared-world cargo event (adapter axes, like State). Delivered reliably and in order, at most once per connection:
 // the sender repeats the oldest unacknowledged event, the receiver accepts only the next sequence and acknowledges
-// it and any repeat. item is the game's cargo item hash; type 1 = cargo placed in the world.
+// it and any repeat. item is the game's cargo item hash; type 1 = cargo placed in the world, 2 = shared cargo taken
+// (picked up or gone): the partner removes its copy. ref (t2, below 2^53) names the shared cargo across both worlds.
 // id is a stable nonzero identity chosen by the sender; the receiver delivers each id once for the lifetime of the
 // Core, so an event resent after a reconnection (its acknowledgement lost) is not delivered twice.
-struct CargoEvent { uint32_t sequence=0; uint8_t type=1; uint32_t item=0; std::array<double,3> position{}; double yaw=0; uint64_t id=0; };
+struct CargoEvent { uint32_t sequence=0; uint8_t type=1; uint32_t item=0; std::array<double,3> position{}; double yaw=0; uint64_t id=0, ref=0; };
 // Mutants exist only in test builds (-DDS_TESTING).
 struct Protection {
     bool version=true, range=true, teleport=true, duplicate=true, delay=true, session=true, build=true;
