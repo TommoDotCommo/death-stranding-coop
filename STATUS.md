@@ -19,8 +19,8 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
   takes back for the private room. Calling the engine's common entity creator directly with the double's resource
   did not return a second Sam live (2026-11-07, `mod/game_offsets.md`); the remaining engine route is a registered
   `Spawnpoint`.
-- Structures, BTs, vehicles, cutscenes, death and voidouts, saves of a shared world, the partner's gear and outfit,
-  and the partner's own controller input. Cargo the porter himself picks up or puts down is detected by the logic
+- Removing a shared structure (dismantling), BTs, vehicles, cutscenes, death and voidouts, saves of a shared world,
+  the partner's gear and outfit, and the partner's own controller input. Cargo the porter himself picks up or puts down is detected by the logic
   below but has not yet been driven live (the run had no keyboard focus).
 - Networking beyond one PC (partners' addresses can already be allowed in the network policy; the mod itself still
   only talks to 127.0.0.1).
@@ -31,7 +31,7 @@ Game-free: simulator, fuzzer and mutants for the core and every proxy protection
 with state read from the processes, and an unattended one-copy regression with `coop-partner` that needs no input or
 focus (2026-11-07, 138 s): the copy continues its last save by itself, the double stands within 0.3 m of the
 partner (read from the game's memory; 0.032 m measured), cargo goes both ways and each side's pick-up removes the
-other's copy, and the real saves are unchanged. A partner built without the wire identity fails it.
+other's copy, a ladder goes both ways, and the real saves are unchanged. A partner built without the wire identity fails it.
 
 ### Guarded callback and failed Sam clone (2026-11-02)
 
@@ -105,6 +105,18 @@ Unattended testing: live tests drive the focused copy with synthetic keyboard in
 copies with PrintWindow. The proxy's opt-in virtual gamepad (`COOP_VIRTUAL_PAD=1`, the mod's `virtual_pad`,
 a stamp-guarded `pad.script`) works on Windows without the game, but the game never polls it. A connected
 controller holds pad slot 0 through Windows.Gaming.Input, and the game only checks XInput for unassigned slots.
+
+## Shared structures (2026-11-07)
+
+A structure one porter builds appears in the partner's world as the game's own "Net" structure, the variant the
+game uses for other players' structures. The mod reads the construction manager's table (one record per structure:
+id, type, state, world transform; `mod/game_offsets.md`, "Structures"), sends each structure its porter builds, and
+the partner's mod builds the Net variant at the same transform with the game's `CreateConstruction`. Net structures
+have their own id range, so they are never sent back. Live with `coop-partner`, early Episode 1: a ladder built in
+the game reached the partner, and the partner's ladder was built in the game as a Net ladder (read back from the
+table, state "built"). Posts, shelters, watchtowers, bridges and ziplines were refused by the game in that area
+(before the chiral network); they are untested. Not done: dismantling, upgrades, and structures built through the
+game's own menu (the run had no keyboard focus; the test built them through the same export).
 
 ## Testing aids (built 2026-11-03, first run live 2026-11-07)
 
