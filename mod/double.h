@@ -73,6 +73,9 @@ std::function<void(uint8_t,const Transform&,bool)> nativeConstruct(discovery::Sa
 // ArtPartsData (component vtable 3cf2b18, entity+180) get-or-create accessors for the cover (22b2010, cached at +60),
 // cover+animation (22b1f80, +68) and facial-rig (22b20a0, +70) model components. Game thread. False when the body's
 // ArtPartsData is missing or not its own, or a component did not appear.
+// Research: switch art part `index` of the body's porter-derived ArtPartsData (the one with 52 parts) on or off with the
+// toggle worker 22b8fe0. False when there is no such component or index.
+std::function<bool(uint64_t body,unsigned index,bool on)> nativePartToggle(discovery::Sampler&);
 std::function<bool(uint64_t)> nativeDress(discovery::Sampler&,std::function<unsigned()> mask);   // bits: 1 cover, 2 cover+anim, 4 facial
 // DSConstructionPointManager_sExportedRemoveConstructionsInArea (2cd1bf0 -> 2cd9760), read statically: (const float4*
 // box min, const float4* box max, const world transform*, bool, bool, bool). It collects the structures in the box and

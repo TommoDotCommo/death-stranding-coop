@@ -46,6 +46,7 @@ constexpr int INVALID_SOCKET=-1;
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <cctype>
 #include <chrono>
 #include <mutex>
 #include <sstream>
@@ -148,7 +149,7 @@ struct Runtime final:ds::Transport {
     bool partnerMode() const {return twinMode==TwinMode::Peer||twinMode==TwinMode::Own;}
     std::filesystem::path cargoCommand;std::function<void(uint32_t,const mod::puppet::Transform&)> cargoCreate;
     std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
-    std::function<void(uint32_t)> cargoGive,cargoDelete;std::function<void(uint8_t,const mod::puppet::Transform&,bool)> construct;
+    std::function<void(uint32_t)> cargoGive,cargoDelete;std::function<void(uint8_t,const mod::puppet::Transform&,bool)> construct;std::function<bool(uint64_t,unsigned,bool)> partToggle;
     std::function<void(const std::array<float,4>&,const std::array<float,4>&,const mod::puppet::Transform&,bool,bool,bool)> unconstruct;
     std::function<void()> continueLastSave;mod::AutoContinue autoContinue;bool autoNoted=false;
     std::function<bool()> gameEvent;bool inEvent=false;std::atomic<bool> fakeEvent{false};
@@ -458,7 +459,7 @@ struct Runtime final:ds::Transport {
                 twinApi.effects=[](uint64_t,bool){};
 #else
                 auto twinApi=mod::puppet::nativeDoubleApi(*sampler);
-                cargoCreate=mod::puppet::nativeCargoCreate(*sampler);cargoGive=mod::puppet::nativeCargoGive(*sampler);cargoDelete=mod::puppet::nativeCargoDelete(*sampler);construct=mod::puppet::nativeConstruct(*sampler);unconstruct=mod::puppet::nativeRemoveConstructions(*sampler);
+                cargoCreate=mod::puppet::nativeCargoCreate(*sampler);cargoGive=mod::puppet::nativeCargoGive(*sampler);cargoDelete=mod::puppet::nativeCargoDelete(*sampler);construct=mod::puppet::nativeConstruct(*sampler);partToggle=mod::puppet::nativePartToggle(*sampler);unconstruct=mod::puppet::nativeRemoveConstructions(*sampler);
                 gameEvent=mod::puppet::nativeGameEvent(*sampler);
                 if(config.autoContinue){continueLastSave=mod::puppet::nativeContinueLastSave(*sampler);autoContinue=mod::AutoContinue(true);}
                 body=std::make_unique<mod::body::Probe>(mod::body::nativeApi(*sampler),sampler->base+0x3d7de48,[this](const std::string& row){note(row.c_str());});
@@ -617,12 +618,12 @@ struct Runtime final:ds::Transport {
             auto command=readConfig(twinCommand);auto stamp=" "+mod::runStamp()+"\n";
             if(!std::filesystem::remove(twinCommand))throw std::runtime_error("cannot consume double command");
             if(command=="echo"+stamp)twinMode=TwinMode::Echo;else if(command=="peer"+stamp)twinMode=TwinMode::Peer;
-            else if(command.rfind("own",0)==0&&command.size()==3+stamp.size()+1&&command.substr(4)==stamp&&command[3]>='0'&&command[3]<='9'
+            else if(command.rfind("own",0)==0&&command.size()==3+stamp.size()+1&&command.substr(4)==stamp&&std::isxdigit(static_cast<unsigned char>(command[3]))&&!std::isupper(static_cast<unsigned char>(command[3]))
                     ||command=="own"+stamp){
                 // own: the porter's art parts (mask 8: drawn, stable; stretched-polygon artifacts). ownN, research only:
                 // 1 cover, 2 cover+animation, 4 facial rig (lazy, empty components: 4 hangs the game), 9 = 8 and remove
                 // the body's own ArtPartsData (hangs the game). game_offsets.md, "Own-body mode".
-                dressMask=command=="own"+stamp?8u:unsigned(command[3]-'0');twinMode=TwinMode::Own;if(ownTwin)ownTwin->enable();}
+                dressMask=command=="own"+stamp?8u:unsigned(std::stoul(command.substr(3,1),nullptr,16));twinMode=TwinMode::Own;if(ownTwin)ownTwin->enable();}
             else if(command=="lead"+stamp)twinMode=TwinMode::Lead;
             else if(command=="still"+stamp){twin->walk(false);if(ownTwin)ownTwin->walk(false);note("DOUBLE own (private-room) network for the next acquire\n");return;}
             else if(command=="off"+stamp)twinMode=TwinMode::None;else {note("DOUBLE ignored command for another process\n");return;}
@@ -659,7 +660,9 @@ struct Runtime final:ds::Transport {
         // dropped while borrowed. Until the body exists, or if the game refuses to make one, the resident double is used.
         bool useOwn=twinMode==TwinMode::Own&&own&&ownTwin&&!own->exhausted();
         if(useOwn)ownEntity=own->tick(mod::puppet::readLocalAnchor(*sampler));
-        if(useOwn&&ownEntity){twin->tick(true,nullptr);ownTwin->tick(true,goal,speed,actions,hold);}
+        if(useOwn&&ownEntity){
+            twin->tick(true,nullptr);ownTwin->tick(true,goal,speed,actions,hold);
+        }
         else{twin->tick(true,goal,speed,actions,hold);if(ownTwin)ownTwin->tick(true,nullptr);}
     }
     bool tickOnce(std::string& err,bool gameContext=false) {
@@ -719,6 +722,11 @@ struct Runtime final:ds::Transport {
                 auto list=mod::puppet::parseCargoCommand(text,mod::runStamp(),"list");
                 if(give&&cargoGive){cargoGive(*give);note(("CARGO give id="+std::to_string(*give)+"\n").c_str());}
                 else if(erase&&cargoDelete){cargoDelete(*erase);note(("CARGO delete id="+std::to_string(*erase)+"\n").c_str());}
+                else if(auto code=mod::puppet::parseCargoCommand(text,mod::runStamp(),"part");code&&partToggle&&ownEntity) {
+                    // Research: "part <index*2+on> <stamp>" switches one art part of the own body.
+                    bool ok=partToggle(ownEntity,*code/2,*code&1);
+                    note(("PART "+std::to_string(*code/2)+(*code&1?" on":" off")+(ok?"\n":" failed\n")).c_str());
+                }
                 else if(auto mask=mod::puppet::parseCargoCommand(text,mod::runStamp(),"unbuild");mask&&unconstruct&&anchor.entity&&anchor.pose.available) {
                     // Removal experiment: "unbuild <mask> <stamp>", a 6 x 6 x 10 m box around the point 4 m in front of the
                     // porter; mask bit 1 = owner 1, bit 2 = owner 0, bit 4 = owner 2.

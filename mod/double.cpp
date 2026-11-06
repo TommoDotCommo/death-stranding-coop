@@ -370,6 +370,30 @@ std::function<void(const std::array<float,4>&,const std::array<float,4>&,const T
         alignas(16) float l[4]={lo[0],lo[1],lo[2],lo[3]},h[4]={hi[0],hi[1],hi[2],hi[3]};erase(l,h,&t,a,b,c);};
 #endif
 }
+std::function<bool(uint64_t,unsigned,bool)> nativePartToggle(discovery::Sampler& s){
+#ifndef _WIN32
+    (void)s;throw std::runtime_error("native part toggle requires Windows");
+#else
+    const std::vector<uint8_t> toggleSig={0x48,0x89,0x5c,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57,0x41,0x54,0x41,0x57,0x48,0x83,0xec,0x30,0x0f,0xb6,0x59,0x2c,0x4d};
+    {std::vector<uint8_t> at(toggleSig.size());require(s.read(s.base+0x22b8fe0,at.data(),at.size())&&at==toggleSig,"part toggle signature differs");}
+    using ToggleFn=void(*)(uint64_t,bool,uint64_t,uint64_t,uint64_t);auto toggle=reinterpret_cast<ToggleFn>(s.base+0x22b8fe0);
+    const uint64_t artParts=s.base+0x3cf2b18;
+    return [&s,toggle,artParts](uint64_t body,unsigned index,bool on){
+        uint32_t count=0;uint64_t list=0,model=0;
+        if(!s.read(body+0x90,&count,4)||count>4096||!q(s,body+0x98,list)||!q(s,body+0xb8,model))return false;
+        for(uint32_t i=0;i<count;++i){
+            uint64_t c=0,v=0,owner=0,arr=0,part=0;uint32_t parts=0;
+            if(!q(s,list+8*i,c)||!q(s,c,v)||v!=artParts||!q(s,c+0x48,owner)||owner!=body||!s.read(c+0x100,&parts,4)||parts<2)continue;
+            if(index>=parts||!q(s,c+0x108,arr)||!q(s,arr+8*index,part)||!part)return false;
+            // Part +2c bit 0 is the enabled request; the worker re-applies the part on every call, so only call it on a change.
+            uint8_t state=0;if(!s.read(part+0x2c,&state,1))return false;
+            if(bool(state&1)!=on)toggle(part,on,body,model,c);
+            return true;
+        }
+        return false;
+    };
+#endif
+}
 std::function<bool(uint64_t)> nativeDress(discovery::Sampler& s,std::function<unsigned()> mask){
 #ifndef _WIN32
     (void)s;throw std::runtime_error("native dress API requires Windows");
@@ -399,6 +423,17 @@ std::function<bool(uint64_t)> nativeDress(discovery::Sampler& s,std::function<un
             uint64_t rx=0,rv=0,res=0;
             if(!resident||resident==body||!q(s,resident+0x180,rx)||!q(s,rx,rv)||rv!=artParts||!q(s,rx+0x30,res)||!res)return false;
             uint64_t old=x;apply(body,res);
+            // Part 20 of the porter's set draws the long line (game_offsets.md); switching it off at this point does not
+            // last, and enforcing it while the body is shown corrupted the model's drawing, so it is left alone.
+            // Mask bit 2 with 8: switch off the leftover one-part ArtPartsData's part with the toggle worker 22b8fe0
+            // (part, enable, entity, entity model, ArtPartsData), the call EnableModelPartFromHash makes.
+            if(m&2){
+                const std::vector<uint8_t> toggleSig={0x48,0x89,0x5c,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57,0x41,0x54,0x41,0x57,0x48,0x83,0xec,0x30,0x0f,0xb6,0x59,0x2c,0x4d};
+                std::vector<uint8_t> at(toggleSig.size());if(!s.read(s.base+0x22b8fe0,at.data(),at.size())||at!=toggleSig)return false;
+                uint32_t count=0;uint64_t arr=0,part=0,model=0;
+                if(!s.read(old+0x100,&count,4)||count!=1||!q(s,old+0x108,arr)||!q(s,arr,part)||!part||!q(s,body+0xb8,model))return false;
+                using ToggleFn=void(*)(uint64_t,bool,uint64_t,uint64_t,uint64_t);reinterpret_cast<ToggleFn>(s.base+0x22b8fe0)(part,false,body,model,old);
+            }
             // The apply adds a second ArtPartsData (from the porter's resource) that builds the model components itself.
             // Mask 9 also removes the body's own one-part ArtPartsData (EntityComponent_ExportedRemove, 23618c0).
             if(m&1){

@@ -870,3 +870,13 @@ Drawing the own body (2026-11-07, live, one copy, 90 s hang watch per variant):
   The per-part state bytes (+2c) equal the double's. Removing the body's original `ArtPartsData` afterwards
   (EntityComponent_ExportedRemove, 23618c0) hangs the game. `own` now uses the apply step.
 
+The stretched polygons (2026-11-07, one run, parts switched one at a time with the research command
+`puppet.cargo "part <index*2+on>"`, which calls the toggle worker 22b8fe0 only when part +2c bit 0, the enabled
+request, differs): they appear while the body walks (also with no teleport, and not at distance as such) and come
+from **part 20 of the porter's 52-part set**, a cable-like part whose far end is anchored to something the made body
+lacks. Switching it off once after the body was shown removed the line for that run. Switching it off at
+creation did not last (it was on again a few seconds after the body was shown), and enforcing it once a second while
+the body was shown made the drawing much worse (very large flat polygons across the view, distant buildings gone).
+Not fixed yet; leads: what re-enables the part (show? streaming?), and whether the cable's anchor can be given to
+the body instead.
+
