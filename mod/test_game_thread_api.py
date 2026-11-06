@@ -94,6 +94,15 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(rows[1]['readback'],[0,0,0]);self.assertEqual(int(rows[1]['flags'],16)&0x102,0x100)
                 self.assertIn('DOUBLE game event: double handed back',log);self.assertIn('DOUBLE game event over',log)
                 self.assertIn('DOUBLE ignored command for another process',log)
+                # Own body: the mod makes its body (dressed, parked) and leaves the resident double alone.
+                twin.write_text('own '+stamp+'\n');self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1)
+                self.assertEqual(status()['double']['mode'],'own');self.assertEqual(status()['double']['stage'],'parked')
+                self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1)
+                log=next(root.glob('mod-*.log')).read_text()
+                self.assertEqual(log.count('made and parked'),1);self.assertIn('BODY model components built',log)
+                self.assertEqual(status()['double']['stage'],'parked')   # no partner yet: nothing borrowed
+                twin.write_text('off '+stamp+'\n');self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1)
+                self.assertEqual(status()['double']['mode'],'none')
                 # Scripted pad: refused foreign script, then press A for 300 ms; never blocks, size-checked.
                 pad=Pad(c.sizeof(Pad));self.assertEqual(c.sizeof(Pad),16)
                 self.assertEqual(lib.mod_pad(c.byref(pad)),0);self.assertEqual(pad.buttons,0)

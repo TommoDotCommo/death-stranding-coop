@@ -467,6 +467,22 @@ struct Runtime final:ds::Transport {
                 body=std::make_unique<mod::body::Probe>(mod::body::nativeApi(*sampler),sampler->base+0x3d7de48,[this](const std::string& row){note(row.c_str());});
 #endif
 #ifdef MOD_FAKE_NETWORK
+                {
+                    // Own body in the fake world: made at 0xc800 (the double's class), visible and awake, as the game makes it.
+                    mod::puppet::OwnBodyApi oa;
+                    oa.resource=[this](uint64_t porter){return mod::puppet::findDouble(*sampler,porter,fake->base+0xff00,fake->base+0xff10)?fake->base+0x9000:0;};
+                    oa.create=[this](uint64_t,const mod::puppet::Transform& t){fake->mutate([&]{fake->put<uint64_t>(0xc800,fake->base+0xff10);
+                        fake->put<uint64_t>(0xc888,mod::puppet::FlagVisible|0x453);});fake->setEntityPose(0xc800,t.position.data(),t.rotation.data());return fake->base+0xc800;};
+                    oa.alive=[this](uint64_t b){uint64_t v=0;return sampler->read(b,&v,8)&&v==fake->base+0xff10;};
+                    oa.park=[this](uint64_t){fake->mutate([&]{uint64_t f=0;memcpy(&f,fake->data.data()+0xc888,8);fake->put<uint64_t>(0xc888,(f|mod::puppet::FlagSleeping)&~uint64_t(mod::puppet::FlagVisible));});};
+                    oa.dress=[](uint64_t){return true;};oa.remove=[this](uint64_t){fake->mutate([&]{fake->put<uint64_t>(0xc800,0);});};
+                    own=std::make_unique<mod::puppet::OwnBody>(std::move(oa),[this](const std::string& row){note(row.c_str());});
+                    mod::puppet::DoubleApi oapi=twinApi;oapi.find=[this](uint64_t){return ownEntity;};
+                    auto flag=[this](uint64_t bit,bool on){fake->mutate([&]{uint64_t f=0;memcpy(&f,fake->data.data()+0xc888,8);fake->put<uint64_t>(0xc888,on?f|bit:f&~bit);});};
+                    oapi.sleep=[flag](uint64_t,bool b){flag(mod::puppet::FlagSleeping,b);};oapi.visible=[flag](uint64_t,bool b){flag(mod::puppet::FlagVisible,b);};
+                    oapi.place=[this](uint64_t,const mod::puppet::Transform& t){fake->setEntityPose(0xc800,t.position.data(),t.rotation.data());};
+                    ownTwin=std::make_unique<mod::puppet::Double>(std::move(oapi),[this](const std::string& row){note(row.c_str());});
+                }
                 gameEvent=[this]{return fakeEvent.load();};
 #endif
 #if defined(MOD_PUPPET_DOUBLE_RESOURCE) && !defined(MOD_FAKE_NETWORK)
