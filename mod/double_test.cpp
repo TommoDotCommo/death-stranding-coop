@@ -106,6 +106,7 @@ void cargoCommand(){
     for(const char* bad:{"create 519 S2\n","create 519\n","create -1 S1\n","create 4294967296 S1\n","create 5x S1\n","delete 519 S1\n","create 519 S1 x\n",""})
         CHECK(!parseCargoCommand(bad,"S1"));
     CHECK(parseCargoCommand("delete 519 S1\n","S1","delete")==519u);CHECK(!parseCargoCommand("create 519 S1\n","S1","delete"));
+    CHECK(parseCargoCommand("construct 26 S1\n","S1","construct")==26u);
     CHECK(parseCargoCommand("list 0 S1\n","S1","list")==0u);CHECK(!parseCargoCommand("list 0 S2\n","S1","list"));
 }
 void privateRoom(){

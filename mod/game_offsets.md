@@ -791,3 +791,31 @@ faulted and the game's own structured exception handling resumed the main loop a
 local Sam's resource (2026-11-02), calling the creator directly does not give a second Sam. The remaining engine
 route is a registered `Spawnpoint`; until then the partner stays on the resident double.
 
+
+## Structures (2026-11-07, static and live)
+
+`DSConstructionPointManager_sExportedCreateConstruction` (thunk 2cd1870 -> 2cd6c00) takes `(u8 type, const
+WorldTransform*, bool)`. It returns at once when the manager global (image+7bf4960) is null, otherwise it fills a
+0x6c8-byte request (type at +0, the transform at +8, the bool at +640, +665 = 1) and queues it on the manager
+(+56a278, under the lock at +56a5b8). The type is `EDSConstructionPointType` (enum descriptor in RTTI, 0x31 values),
+in Stage / Player / Net triples: 2-4 safe house, 5-7 post, 8-10 watchtower, 14-16 charger, 17-19 rain shelter,
+21-23 zipline, 24-26 ladder, 27-29 climbing rope, 30-32 bridge 30 m, 33-35 bridge 45 m; 0 delivery base,
+1 preppers' shelter, 20 MULE post, 36 road rebuilder. "Net" is the variant the game uses for structures that came
+from other players.
+
+The manager keeps one 0x710-byte record per structure, in a table that ends at manager+0x5699c8 and grows
+downwards (a new record took the slot below the lowest one):
+
+| Offset | Field |
+|---|---|
+| +0, +10 | a pointer to the record class in the image, and the same pointer + 0x10 (+8 is zero) |
+| +18 | id (u32): below 10000 the game's own, 10001.. built by this porter, 100001.. Net |
+| +1c, +1d | type, category |
+| +1e | state: 2 built, 1 the game's existing structure, 0 refused or pending |
+| +28 | world position (3 x f64); the game snaps the height of what it builds |
+| +40 | rotation (9 x f32, rows: right, forward, up) |
+
+Live, early Episode 1 (Capital Knot City, before the chiral network): `CreateConstruction(26)` (Net ladder) and
+`(25)` (Player ladder) built a ladder lying across the road (state 2; ids 100001 and 10002). Post, rain shelter,
+watchtower, bridge and zipline requests made records in state 0 and nothing visible, probably because this area
+does not allow them yet. 155 records were in the table, mostly the game's delivery bases and shelters.

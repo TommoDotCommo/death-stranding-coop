@@ -1,0 +1,70 @@
+#include "structures.h"
+#include <cmath>
+#include <cstring>
+namespace mod::structures {
+namespace {
+constexpr double Pi=3.14159265358979323846;
+using M3=std::array<std::array<double,3>,3>;
+M3 mul(const M3& a,const M3& b){M3 r{};for(int i=0;i<3;++i)for(int j=0;j<3;++j)for(int k=0;k<3;++k)r[i][j]+=a[i][k]*b[k][j];return r;}
+uint32_t quantize(double a){double t=std::remainder(a,2*Pi)/(2*Pi)+.5;return uint32_t(std::lround(t*4096))&0xfff;}   // [-pi,pi) -> 12 bits
+double dequantize(uint32_t q){return (double(q&0xfff)/4096-.5)*2*Pi;}
+}
+std::vector<Record> readTable(const discovery::Sampler& s,uint64_t manager,uint64_t base,uint64_t imageSize){
+    std::vector<Record> out;if(!manager)return out;
+    std::vector<uint8_t> block(0x68);
+    for(unsigned i=1;i<=MaxRecords;++i){
+        uint64_t at=manager+TableEnd-i*Stride;
+        if(!s.read(at,block.data(),block.size()))break;
+        uint64_t q0,q1,q2;std::memcpy(&q0,block.data(),8);std::memcpy(&q1,block.data()+8,8);std::memcpy(&q2,block.data()+16,8);
+        if(!(q0>=base&&q0<base+imageSize&&q1==0&&q2==q0+0x10))continue;
+        Record r;std::memcpy(&r.id,block.data()+0x18,4);r.type=block[0x1c];r.category=block[0x1d];r.state=block[0x1e];
+        std::memcpy(r.at.position.data(),block.data()+0x28,24);std::memcpy(r.at.rotation.data(),block.data()+0x40,36);
+        if(r.id)out.push_back(r);
+    }
+    return out;
+}
+std::optional<uint8_t> netVariant(uint8_t t){
+    // Stage/Player/Net triples (EDSConstructionPointType): safe house 2-4, post 5-7, watchtower 8-10, charger 14-16,
+    // rain shelter 17-19, zipline 21-23, ladder 24-26, climbing rope 27-29, bridges 30-32 and 33-35.
+    for(uint8_t p:{3,6,9,15,18,22,25,28,31,34})if(t==p)return uint8_t(t+1);
+    return std::nullopt;
+}
+std::array<float,9> rotation(double yaw,double pitch,double roll){
+    double cy=std::cos(yaw),sy=std::sin(yaw),cp=std::cos(pitch),sp=std::sin(pitch),cr=std::cos(roll),sr=std::sin(roll);
+    M3 z{{{cy,-sy,0},{sy,cy,0},{0,0,1}}},x{{{1,0,0},{0,cp,-sp},{0,sp,cp}}},y{{{cr,0,sr},{0,1,0},{-sr,0,cr}}};
+    auto m=mul(mul(z,x),y);std::array<float,9> r{};
+    for(int row=0;row<3;++row)for(int k=0;k<3;++k)r[row*3+k]=float(m[k][row]);   // rows: images of right, forward, up
+    return r;
+}
+void angles(const std::array<float,9>& r,double& yaw,double& pitch,double& roll){
+    double fx=r[3],fy=r[4],fz=r[5];
+    pitch=std::asin(std::fmax(-1.,std::fmin(1.,fz)));yaw=std::atan2(-fx,fy);roll=std::atan2(-double(r[2]),double(r[8]));
+}
+uint32_t pack(const Built& b){
+#ifndef MUTANT_STRUCTURE_PACK
+    return uint32_t(b.type)|quantize(b.pitch)<<8|quantize(b.roll)<<20;
+#else
+    return b.type;
+#endif
+}
+Built unpack(uint32_t item,const std::array<double,3>& position,double yaw){
+    Built b;b.type=uint8_t(item&0xff);b.pitch=dequantize(item>>8);b.roll=dequantize(item>>20);b.position=position;b.yaw=yaw;return b;
+}
+std::vector<Built> Sync::observe(const std::vector<Record>& records){
+    std::vector<Built> out;std::map<uint32_t,uint8_t> next;
+    for(auto& r:records){
+        next[r.id]=r.state;
+#ifndef MUTANT_STRUCTURE_NET
+        bool mine=r.id>=PlayerFirst&&r.id<NetFirst;
+#else
+        bool mine=r.id>=PlayerFirst;   // would send the partner's structures back to them
+#endif
+        auto old=seen_.find(r.id);bool newlyBuilt=r.state==2&&(old==seen_.end()||old->second!=2);
+        if(primed_&&mine&&newlyBuilt&&netVariant(r.type)){
+            Built b;b.type=r.type;b.position=r.at.position;angles(r.at.rotation,b.yaw,b.pitch,b.roll);b.id=r.id;out.push_back(b);
+        }
+    }
+    seen_.swap(next);primed_=true;
+    return out;
+}
+}

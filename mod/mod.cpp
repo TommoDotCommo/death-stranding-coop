@@ -31,6 +31,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "auto_continue.h"
 #include "pad.h"
 #include "cargo.h"
+#include "structures.h"
 #ifdef MOD_FAKE_NETWORK
 #include "fake_memory.h"
 #endif
@@ -140,7 +141,7 @@ struct Runtime final:ds::Transport {
     std::filesystem::path twinCommand;std::unique_ptr<mod::puppet::Double> twin;TwinMode twinMode=TwinMode::None;
     std::filesystem::path cargoCommand;std::function<void(uint32_t,const mod::puppet::Transform&)> cargoCreate;
     std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
-    std::function<void(uint32_t)> cargoGive,cargoDelete;
+    std::function<void(uint32_t)> cargoGive,cargoDelete;std::function<void(uint8_t,const mod::puppet::Transform&,bool)> construct;
     std::function<void()> continueLastSave;mod::AutoContinue autoContinue;bool autoNoted=false;
     std::function<bool()> gameEvent;bool inEvent=false;std::atomic<bool> fakeEvent{false};
     // Shared cargo (cargo.h): placements read from the game's cargo map go to the partner; theirs are created here.
@@ -153,6 +154,7 @@ struct Runtime final:ds::Transport {
         auto incoming=core->takeCargo();
         bool coop=twinMode==TwinMode::Peer&&cargoCreate&&cargoManagerSlot;
         for(auto& e:incoming) {
+            if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(!coop){note("CARGO partner event ignored (not in peer mode)\n");continue;}
             if(e.type==2) {
                 // The partner picked up (or used) a shared item: remove our copy if it lies in the world here.
@@ -181,6 +183,35 @@ struct Runtime final:ds::Transport {
             note(("CARGO took shared "+std::to_string(id)+" -> partner\n").c_str());
         }
     }
+    // Shared structures (structures.h): what this porter builds goes to the partner; theirs appear here as Net structures.
+    mod::structures::Sync structSync;uint64_t structReadAt=0,structSent=0,structMade=0,structIdBase=0,imageSize=0;
+    void tickStructures(uint64_t now) {
+        if(!core||!core->connected()||!sampler)return;
+        bool coop=twinMode==TwinMode::Peer&&construct;
+        // Incoming structures arrive with the cargo events (type 3); tickCargo hands them over in structIn.
+        for(auto& e:structIn) {
+            if(!coop){note("STRUCT partner structure ignored (not in peer mode)\n");continue;}
+            std::array<double,3> game{e.position[0],e.position[2],e.position[1]};   // adapter -> game axes
+            auto b=mod::structures::unpack(e.item,game,e.yaw);auto net=mod::structures::netVariant(b.type);
+            if(!net){note(("STRUCT partner type "+std::to_string(b.type)+" has no Net variant; ignored\n").c_str());continue;}
+            mod::puppet::Transform t;t.position=b.position;t.rotation=mod::structures::rotation(b.yaw,b.pitch,b.roll);
+            construct(*net,t,false);++structMade;
+            std::ostringstream o;o<<"STRUCT created partner type "<<int(b.type)<<" as "<<int(*net)<<" ref "<<e.ref<<" at "<<b.position[0]<<","<<b.position[1]<<","<<b.position[2]<<"\n";note(o.str().c_str());
+        }
+        structIn.clear();
+        if(!coop||now-structReadAt<500)return;
+        structReadAt=now;uint64_t manager=0;if(!sampler->read(sampler->base+0x7bf4960,&manager,8)||!manager)return;
+        if(!imageSize)for(auto& sec:sampler->sections)imageSize=std::max(imageSize,sec.address+sec.size-sampler->base);
+        if(!structIdBase)structIdBase=(nonce()>>32)<<20;
+        auto records=mod::structures::readTable(*sampler,manager,sampler->base,imageSize);if(records.empty())return;
+        for(auto& b:structSync.observe(records)) {
+            ds::CargoEvent e;e.type=3;e.item=mod::structures::pack(b);e.ref=structIdBase+b.id;e.yaw=b.yaw;
+            e.position={b.position[0],b.position[2],b.position[1]};   // game -> adapter axes
+            core->queueCargo(e);++structSent;
+            std::ostringstream o;o<<"STRUCT built type "<<int(b.type)<<" id "<<b.id<<" at "<<b.position[0]<<","<<b.position[1]<<","<<b.position[2]<<" -> partner\n";note(o.str().c_str());
+        }
+    }
+    std::vector<ds::CargoEvent> structIn;
     std::deque<std::pair<uint64_t,ds::State>> echo;
     mod::puppet::ActionCache actionCache;uint64_t animatorVtable=0;
     std::filesystem::path padCommand;bool padRunning=false,posePublished=false,poseLogged=false;
@@ -382,7 +413,7 @@ struct Runtime final:ds::Transport {
                 twinApi.effects=[](uint64_t,bool){};
 #else
                 auto twinApi=mod::puppet::nativeDoubleApi(*sampler);
-                cargoCreate=mod::puppet::nativeCargoCreate(*sampler);cargoGive=mod::puppet::nativeCargoGive(*sampler);cargoDelete=mod::puppet::nativeCargoDelete(*sampler);
+                cargoCreate=mod::puppet::nativeCargoCreate(*sampler);cargoGive=mod::puppet::nativeCargoGive(*sampler);cargoDelete=mod::puppet::nativeCargoDelete(*sampler);construct=mod::puppet::nativeConstruct(*sampler);
                 gameEvent=mod::puppet::nativeGameEvent(*sampler);
                 if(config.autoContinue){continueLastSave=mod::puppet::nativeContinueLastSave(*sampler);autoContinue=mod::AutoContinue(true);}
                 body=std::make_unique<mod::body::Probe>(mod::body::nativeApi(*sampler),sampler->base+0x3d7de48,[this](const std::string& row){note(row.c_str());});
@@ -473,6 +504,11 @@ struct Runtime final:ds::Transport {
             auto command=readConfig(bodyCommand);auto stamp=" "+mod::runStamp()+"\n";
             if(!std::filesystem::remove(bodyCommand))throw std::runtime_error("cannot consume body command");
             if(command=="create"+stamp) {
+#ifndef MOD_BODY_CREATE_EXPERIMENT
+                // Live 2026-11-07 the creator call never returned and froze the mod (game_offsets.md); refused by default.
+                note("BODY refused: the direct creator route froze the mod live (build with MOD_BODY_CREATE_EXPERIMENT to retry)\n");
+                return;
+#endif
                 auto anchor=mod::puppet::readLocalAnchor(*sampler);
                 auto twinEntity=anchor.entity?mod::puppet::findDouble(*sampler,anchor.entity,sampler->base+0x3d198e8,sampler->base+0x3d7de48):0;
                 if(!anchor.entity||!anchor.pose.available||!twinEntity)note("BODY refused: no porter or no double\n");
@@ -561,6 +597,7 @@ struct Runtime final:ds::Transport {
             }
             if(twin&&gameContext)tickTwin(now);
             if(twin&&gameContext)tickCargo(now);
+            if(twin&&gameContext)tickStructures(now);
             if(cargoCreate&&gameContext&&std::filesystem::exists(cargoCommand)) {
                 auto text=readConfig(cargoCommand);
                 if(!std::filesystem::remove(cargoCommand))throw std::runtime_error("cannot consume cargo command");
@@ -570,6 +607,17 @@ struct Runtime final:ds::Transport {
                 auto list=mod::puppet::parseCargoCommand(text,mod::runStamp(),"list");
                 if(give&&cargoGive){cargoGive(*give);note(("CARGO give id="+std::to_string(*give)+"\n").c_str());}
                 else if(erase&&cargoDelete){cargoDelete(*erase);note(("CARGO delete id="+std::to_string(*erase)+"\n").c_str());}
+                else if(auto type=mod::puppet::parseCargoCommand(text,mod::runStamp(),"construct");type&&construct&&anchor.entity&&anchor.pose.available) {
+                    // Structure experiment: "construct <type> <stamp>" (type < 46; +100 sets the flag) 4 m in front of the porter.
+                    bool flag=*type>=100;uint32_t kind=flag?*type-100:*type;
+                    if(kind>=46)note("CONSTRUCT refused: type out of range\n");
+                    else {
+                        auto t=mod::puppet::transform(anchor.pose);double fx=t.rotation[3],fy=t.rotation[4],l=std::hypot(fx,fy);
+                        if(l>.5){t.position[0]+=4*fx/l;t.position[1]+=4*fy/l;}
+                        construct(uint8_t(kind),t,flag);
+                        std::ostringstream o;o<<"CONSTRUCT type "<<kind<<" flag "<<flag<<" at "<<t.position[0]<<","<<t.position[1]<<","<<t.position[2]<<"\n";note(o.str().c_str());
+                    }
+                }
                 else if(list) {
                     // Every record in use within `list` metres of the porter (0 = all): slot, +1c, +20, hash, position.
                     uint64_t manager=0;std::vector<mod::cargo::Record> records;
@@ -736,7 +784,7 @@ unsigned mod_status(char* out,unsigned cap) {
         std::ostringstream o;o<<"{\"handshake\":"<<(r.paired?"true":"false")<<",\"connected\":"<<(r.core->connected()?"true":"false")<<",\"sent\":"<<r.sent<<",\"received\":"<<r.received<<",\"dropped\":"<<r.dropped<<",\"accepted\":"<<r.core->accepted()<<",\"wrong_accepted\":"<<r.wrongAccepted<<",\"build_refused\":"<<r.buildRefused<<",\"version_refused\":"<<r.versionRefused<<",\"session_refused\":"<<r.sessionRefused<<",\"rtt_ms\":"<<r.measuredRtt<<",\"current_rtt_ms\":"<<r.core->rttMs()<<",\"samples\":"<<errors.size()<<",\"error_p50\":"<<p(.5)<<",\"error_p95\":"<<p(.95)<<",\"error_p99\":"<<p(.99)<<",\"error_max\":"<<p(1)<<",\"failed\":"<<(r.failed?"true":"false")<<",\"self_tick\":{\"enabled\":"<<(r.config.selfTick?"true":"false")<<",\"ticks\":"<<r.ticks<<"},\"pose\":{\"available\":"<<(r.poseAvailable?"true":"false")<<",\"reason\":\""<<r.poseReason<<"\"}";
         o<<",\"game_thread\":{\"enabled\":"<<(r.config.gameThread?"true":"false")<<",\"verified\":"<<(r.dispatchVerified?"true":"false")<<",\"thread_id\":"<<r.gameGate.thread()<<",\"rejected\":"<<r.gameRejected<<"},\"puppet\":{\"enabled\":"<<(r.puppet?"true":"false")<<",\"stage\":\""<<(r.puppet?r.puppet->stage():"disabled")<<"\",\"actor\":"<<(r.puppet?r.puppet->actor():0)<<"}";
         o<<",\"pad\":{\"enabled\":"<<(r.config.virtualPad?"true":"false")<<",\"running\":"<<(r.padRunning?"true":"false")<<",\"calls\":"<<padShared.calls.load()<<",\"active_calls\":"<<padShared.active.load()<<"}";
-        o<<",\"event\":"<<(r.inEvent?"true":"false")<<",\"cargo\":{\"sent\":"<<r.cargoSent<<",\"created\":"<<r.cargoMade<<",\"taken\":"<<r.cargoTaken<<",\"removed\":"<<r.cargoRemoved<<",\"shared\":"<<r.cargoSync.shared()<<",\"mirrored\":"<<r.cargoSync.mirrored()<<",\"pending\":"<<(r.core?r.core->cargoPending():0)<<"}";
+        o<<",\"event\":"<<(r.inEvent?"true":"false")<<",\"cargo\":{\"sent\":"<<r.cargoSent<<",\"created\":"<<r.cargoMade<<",\"taken\":"<<r.cargoTaken<<",\"removed\":"<<r.cargoRemoved<<",\"shared\":"<<r.cargoSync.shared()<<",\"mirrored\":"<<r.cargoSync.mirrored()<<",\"structures_sent\":"<<r.structSent<<",\"structures_created\":"<<r.structMade<<",\"pending\":"<<(r.core?r.core->cargoPending():0)<<"}";
         o<<",\"double\":{\"stage\":\""<<(r.twin?r.twin->name():"disabled")<<"\",\"mode\":\""<<(r.twinMode==Runtime::TwinMode::Echo?"echo":r.twinMode==Runtime::TwinMode::Lead?"lead":r.twinMode==Runtime::TwinMode::Peer?"peer":"none")<<"\",\"entity\":"<<(r.twin?r.twin->entity():0)<<"}";
         o<<",\"timing\":{\"clock\":\""
 #ifdef _WIN32

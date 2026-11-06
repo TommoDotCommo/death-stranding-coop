@@ -3,8 +3,8 @@ CXX ?= g++
 MINGW ?= x86_64-w64-mingw32-g++-posix
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = game_thread.cpp puppet.cpp double.cpp body.cpp pad.cpp cargo.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = game_thread.h puppet.h double.h body.h auto_continue.h pad.h cargo.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = game_thread.cpp puppet.cpp double.cpp body.cpp pad.cpp cargo.cpp structures.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = game_thread.h puppet.h double.h body.h auto_continue.h pad.h cargo.h structures.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -71,6 +71,8 @@ build/puppet-test: puppet_test.cpp puppet.cpp pose.cpp discovery.cpp puppet.h | 
 	$(CXX) $(FLAGS) puppet_test.cpp puppet.cpp pose.cpp discovery.cpp -o $@
 build/double-test: double_test.cpp double.cpp puppet.cpp pose.cpp discovery.cpp double.h puppet.h fake_memory.h | build
 	$(CXX) $(FLAGS) double_test.cpp double.cpp puppet.cpp pose.cpp discovery.cpp -o $@
+build/structures-test: structures_test.cpp structures.cpp structures.h discovery.cpp | build
+	$(CXX) $(FLAGS) structures_test.cpp structures.cpp discovery.cpp -o $@
 build/cargo-test: cargo_test.cpp cargo.cpp cargo.h discovery.cpp | build
 	$(CXX) $(FLAGS) cargo_test.cpp cargo.cpp discovery.cpp -o $@
 build/pad-test: pad_test.cpp pad.cpp pad.h | build
@@ -81,16 +83,17 @@ build/auto-continue-test: auto_continue_test.cpp auto_continue.h | build
 	$(CXX) $(FLAGS) auto_continue_test.cpp -o $@
 build/partner-test: partner_test.cpp partner_logic.cpp partner.h identity.h ../core/core.h ../core/core.cpp | build
 	$(CXX) $(FLAGS) partner_test.cpp partner_logic.cpp ../core/core.cpp -o $@
-build/coop-partner: partner.cpp partner_logic.cpp partner.h identity.h ../core/core.cpp ../core/core.h | build
-	$(CXX) $(FLAGS) partner.cpp partner_logic.cpp ../core/core.cpp -o $@
-build/coop-partner.exe: partner.cpp partner_logic.cpp partner.h identity.h ../core/core.cpp ../core/core.h | build
-	$(MINGW) $(WINFLAGS) partner.cpp partner_logic.cpp ../core/core.cpp -o $@ -lws2_32
-game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/partner-test build/coop-partner build/body-test build/auto-continue-test
+build/coop-partner: partner.cpp partner_logic.cpp partner.h identity.h structures.cpp structures.h discovery.cpp ../core/core.cpp ../core/core.h | build
+	$(CXX) $(FLAGS) partner.cpp partner_logic.cpp structures.cpp discovery.cpp ../core/core.cpp -o $@
+build/coop-partner.exe: partner.cpp partner_logic.cpp partner.h identity.h structures.cpp structures.h discovery.cpp ../core/core.cpp ../core/core.h | build
+	$(MINGW) $(WINFLAGS) partner.cpp partner_logic.cpp structures.cpp discovery.cpp ../core/core.cpp -o $@ -lws2_32 -lbcrypt
+game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/structures-test build/partner-test build/coop-partner build/body-test build/auto-continue-test
 	./build/game-thread-test
 	./build/puppet-test
 	./build/double-test
 	./build/pad-test
 	./build/cargo-test
+	./build/structures-test
 	./build/partner-test
 	./build/body-test
 	./build/auto-continue-test

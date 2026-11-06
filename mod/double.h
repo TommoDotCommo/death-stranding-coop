@@ -65,6 +65,11 @@ std::function<void(uint32_t)> nativeCargoGive(discovery::Sampler&);
 // DSBaggage2Manager_sExportedDeleteBaggage (2cd6d40): queues a kind-2 request whose +8 is the argument; the create
 // request keeps 0x1fffff there, so the argument is probably a 21-bit cargo id (record +20 & 0x1fffff). Unverified live.
 std::function<void(uint32_t)> nativeCargoDelete(discovery::Sampler&);
+// DSConstructionPointManager_sExportedCreateConstruction (2cd1870 -> 2cd6c00): (EDSConstructionPointType as u8, 60-byte
+// world transform, bool) queues a creation request on the construction manager (global 7bf4960 + 56a278, under its
+// lock); asynchronous. Types: Stage/Player/Net variants, e.g. 24..26 Ladder, 27..29 FieldRope, 30..32 Bridge30m
+// (game_offsets.md, "Structures"). The bool is stored at request +640; its meaning is unknown.
+std::function<void(uint8_t,const Transform&,bool)> nativeConstruct(discovery::Sampler&);
 class Double {
 public:
     enum class Stage {Off,Parked,Driving,Hidden,Yielded,Failed};

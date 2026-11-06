@@ -4,7 +4,7 @@ import hashlib
 import sys
 root = Path(__file__).resolve().parent
 names = ['../core/core.h', '../core/core.cpp', '../core/build_id.h',
-         'game_thread.h', 'game_thread.cpp', 'puppet.h', 'puppet.cpp', 'double.h', 'double.cpp', 'pad.h', 'pad.cpp', 'cargo.h', 'cargo.cpp', 'discovery_options.h', 'discovery.h', 'discovery.cpp', 'discovery_signatures.h', 'timing.h', 'mod.h', 'mod.cpp', 'config.h', 'config.cpp', 'providers.h', 'providers.cpp', 'pose.h', 'pose.cpp', 'signature.h']
+         'game_thread.h', 'game_thread.cpp', 'puppet.h', 'puppet.cpp', 'double.h', 'double.cpp', 'pad.h', 'pad.cpp', 'cargo.h', 'cargo.cpp', 'structures.h', 'structures.cpp', 'discovery_options.h', 'discovery.h', 'discovery.cpp', 'discovery_signatures.h', 'timing.h', 'mod.h', 'mod.cpp', 'config.h', 'config.cpp', 'providers.h', 'providers.cpp', 'pose.h', 'pose.cpp', 'signature.h']
 h = hashlib.sha256()
 for name in names:
     b = (root/name).read_bytes()

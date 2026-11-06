@@ -312,6 +312,22 @@ std::function<void(uint32_t)> nativeCargoDelete(discovery::Sampler& s){
     return [erase](uint32_t id){erase(id);};
 #endif
 }
+std::function<void(uint8_t,const Transform&,bool)> nativeConstruct(discovery::Sampler& s){
+#ifndef _WIN32
+    (void)s;throw std::runtime_error("native construction API requires Windows");
+#else
+    const std::vector<uint8_t> sig={0x40,0x53,0x56,0x57,0x48,0x81,0xec,0x00,0x07,0x00,0x00,0x48,0x8b,0x05,0x1e,0xa4,0x28,0x02,0x48,0x33};
+    unsigned count=0;
+    for(auto section:s.sections)if(section.executable){
+        std::vector<uint8_t> code(section.size);require(s.read(section.address,code.data(),code.size()),"construction code unreadable");
+        for(auto at=code.begin();(at=std::search(at,code.end(),sig.begin(),sig.end()))!=code.end();++at){
+            ++count;require(section.address+size_t(at-code.begin())==s.base+0x2cd6c00,"construction signature moved/duplicated");}
+    }
+    require(count==1,"construction signature missing/ambiguous");
+    using ConstructFn=void(*)(uint8_t,const Transform*,bool);auto make=reinterpret_cast<ConstructFn>(s.base+0x2cd6c00);
+    return [make](uint8_t type,const Transform& t,bool flag){make(type,&t,flag);};
+#endif
+}
 std::function<void()> nativeContinueLastSave(discovery::Sampler& s){
 #ifndef _WIN32
     (void)s;throw std::runtime_error("native continue API requires Windows");
