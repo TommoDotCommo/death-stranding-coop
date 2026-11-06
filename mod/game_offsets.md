@@ -905,4 +905,9 @@ component altogether (replace the original's resource before the body is activat
 Switching the original one-part `ArtPartsData`'s part off once after the body was shown made no measurable
 difference (15 scored frames before and after). Frame scoring with a fixed camera is confounded after about a minute:
 an idle porter sits down to rest and the camera moves. Clean measurements need the porter kept standing (input).
+The double's class code does not set its model: 26f3270 is its constructor, 26fb1c0 its destructor, and the other
+type references (291160c, 2922d5b, 2cc37b3) are is-this-the-double checks followed by component lookups. The
+porter's art parts reach the double from outside, most likely from the private-room or outfit system that copies
+the porter's look; that system is the next place to look (callers of ApplyArtPartsVariation's registration
+22ba011 from scripts, and the outfit/ArtPartsVariation resources it uses).
 
