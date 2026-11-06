@@ -3,8 +3,9 @@
 Work in progress: real-time co-op for DEATH STRANDING DIRECTOR'S CUT on PC (Steam, build 13300582), built from zero.
 **Not playable yet; there is no release.** What works today, on one PC with two copies of the game: each copy is
 isolated and kept offline, each player sees the other as a second Sam walking, running, crouching and jumping
-beside them, and cargo one player puts down appears in the other's world. Picking cargo up, the partner's gear,
-networking between two PCs and everything about a shared story are still to do. See [STATUS.md](STATUS.md).
+beside them, cargo one player puts down or picks up is put down or taken away in the other's world, and a structure
+one player builds or dismantles (tested with ladders) is built or removed in the other's. The partner's gear, a
+two-PC session tried for real, and everything about a shared story are still to do. See [STATUS.md](STATUS.md).
 
 This repository contains only original mod code. It contains no game files, assets, saves or anything copied from
 the game, and it never will. You need your own copy of the game.
@@ -26,6 +27,15 @@ Needs `g++`, the MinGW-w64 cross-compiler, Python 3 and a checkout of
 make test     # every game-free test and mutant
 make all      # Windows binaries (proxy, mod, probes)
 ```
+
+## Two PCs (built, not yet tried live)
+
+Each player's `mod.json` names the other PC as `peer` (a numeric IPv4 address: a LAN address, or a VPN address
+such as Tailscale's 100.x.y.z; host names are refused), and the proxy's network policy must list the same address
+(`COOP_NETWORK_PEERS=a.b.c.d`), or the copy may not reach it. The mod binds only the local address that routes to
+the peer (or `bind`, if set), never all interfaces, and accepts datagrams only from the peer's address and port.
+Ports: UDP `49000 + slot`, so give the two players different slots (host 0, client 1) and allow that UDP port in the
+firewall. Windows asks once whether `ds.exe` may use the network.
 
 ## Rules this project keeps
 

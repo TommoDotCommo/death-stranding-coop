@@ -19,13 +19,20 @@ Config parseConfig(const std::string& s) {
         ws();if(at==s.size() || s[at]!=',') break;++at;
     }
     take('}');ws();if(at!=s.size()) throw std::runtime_error("trailing JSON");
-    for(auto& kv:values) if(!std::set<std::string>{"slot","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
+    for(auto& kv:values) if(!std::set<std::string>{"slot","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
     auto text=[&](const char* k){if(!strings.count(k)) throw std::runtime_error(std::string("missing/string expected: ")+k);return values.at(k);};
     auto number=[&](const char* k){auto v=values[k];if(strings.count(k)||v.empty()||v.size()>15||v.find_first_not_of("0123456789")!=std::string::npos||(v.size()>1&&v[0]=='0')) throw std::runtime_error(std::string("invalid integer: ")+k);return std::stoull(v);};
     auto boolean=[&](const char* k,bool d){if(!values.count(k)) return d;auto v=values[k];if(strings.count(k)||(v!="true"&&v!="false")) throw std::runtime_error("boolean expected");return v=="true";};
     Config c; auto slot=number("slot"),peer=number("peer_slot");if(slot>=16||peer>=16||slot==peer) throw std::runtime_error("distinct slots 0..15 required");c.slot=slot;c.peerSlot=peer;
     c.session=number("session");if(!c.session) throw std::runtime_error("nonzero session required");
     c.role=text("role");c.peer=text("peer");c.nickname=text("nickname");c.provider=text("provider");
+    {auto a=peerAddress(c.peer);if(!a)throw std::runtime_error("peer must be a numeric unicast IPv4 address");c.peerAddress=*a;}
+    if(values.count("bind")){
+        c.bind=text("bind");auto b=peerAddress(c.bind);
+        if(!b)throw std::runtime_error("bind must be a numeric unicast IPv4 address");
+        if((c.peerAddress>>24)==127&&(*b>>24)!=127)throw std::runtime_error("a loopback peer needs a loopback bind");
+        c.bindAddress=*b;
+    }
     if((c.role!="host"&&c.role!="client")||(c.provider!="synthetic"&&c.provider!="game")||c.nickname.empty()||c.nickname.size()>32) throw std::runtime_error("invalid role/provider/nickname");
     c.logging=boolean("logging",true);c.required=boolean("required",false);c.impairment=boolean("impairment",false);
     if(values.count("fault")) c.fault=text("fault");
@@ -65,5 +72,22 @@ Config parseConfig(const std::string& s) {
         if(values.count(key))c.discoveryOptions.roots[name]=number(key.c_str());
     }
     return c;
+}
+std::optional<uint32_t> peerAddress(const std::string& t){
+    if(t.empty()||t.size()>15)return std::nullopt;
+    uint32_t a=0;unsigned parts=0;size_t at=0;
+    while(at<=t.size()){
+        size_t end=t.find('.',at);if(end==std::string::npos)end=t.size();
+        auto p=t.substr(at,end-at);
+        if(p.empty()||p.size()>3||p.find_first_not_of("0123456789")!=std::string::npos||(p.size()>1&&p[0]=='0'))return std::nullopt;
+        auto v=std::stoul(p);if(v>255)return std::nullopt;
+        a=a<<8|uint32_t(v);++parts;at=end+1;if(end==t.size())break;
+    }
+    if(parts!=4)return std::nullopt;
+    uint8_t first=uint8_t(a>>24);
+#ifndef MUTANT_PEER_ANY
+    if(first==0||first>=224)return std::nullopt;   // 0/8, multicast 224/4, reserved 240/4 and broadcast
+#endif
+    return a;
 }
 }

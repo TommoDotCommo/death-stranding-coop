@@ -13,7 +13,16 @@ int main() {
     assert(!uniqueSignature({1,2,3},{2,4}));
     for(auto p:std::vector<std::vector<int>>{{},{-1,-1},{256},{-2}}) {bool threw=false;try{uniqueSignature({},p);}catch(const std::invalid_argument&){threw=true;}assert(threw);}
     std::string good=R"({"role":"host","peer":"127.0.0.1","slot":0,"peer_slot":1,"nickname":"test","provider":"synthetic","session":123})";
-    auto c=mod::parseConfig(good);assert(c.slot==0&&c.peerSlot==1&&c.logging);
+    auto c=mod::parseConfig(good);assert(c.slot==0&&c.peerSlot==1&&c.logging&&c.peerAddress==0x7f000001&&!c.bindAddress);
+    // Peers: loopback or any unicast IPv4 (LAN, VPN, public); never names, 0/8, multicast, reserved or broadcast.
+    for(auto a:{"127.0.0.1","192.168.1.20","10.0.0.5","100.101.102.103","8.8.4.4","223.255.255.254"})assert(mod::peerAddress(a));
+    assert(*mod::peerAddress("192.168.1.20")==0xc0a80114u);
+    for(auto a:{"","localhost","0.0.0.0","0.1.2.3","255.255.255.255","224.0.0.1","239.1.1.1","240.0.0.1","1.2.3","1.2.3.4.5","1.2.3.256","01.2.3.4","1..2.3"," 1.2.3.4","1.2.3.4 ","a.b.c.d"})assert(!mod::peerAddress(a));
+    auto lan=good;lan.replace(lan.find("127.0.0.1"),9,"100.64.0.7");
+    assert(mod::parseConfig(lan).peerAddress==0x64400007u);
+    {auto b=lan;b.pop_back();b+=",\"bind\":\"100.64.0.2\"}";assert(mod::parseConfig(b).bindAddress==0x64400002u);}
+    {auto b=good;b.pop_back();b+=",\"bind\":\"192.168.1.2\"}";bool threw=false;try{mod::parseConfig(b);}catch(const std::exception&){threw=true;}assert(threw);}   // loopback peer, LAN bind
+    {auto b=lan;b.replace(b.find("100.64.0.7"),10,"224.0.0.9");bool threw=false;try{mod::parseConfig(b);}catch(const std::exception&){threw=true;}assert(threw);}
     for(auto s:{"{}", "[]", "{\"slot\":01}", "{\"slot\":0,\"slot\":1}", "{\"role\":true}", "{\"x\":0}"}) {bool threw=false;try{mod::parseConfig(s);}catch(const std::exception&){threw=true;}assert(threw);}
     for(auto replacement: {std::pair<std::string,std::string>{"\"peer_slot\":1","\"peer_slot\":16"},{"\"peer_slot\":1","\"peer_slot\":0"},{"\"session\":123","\"session\":0"},{"\"synthetic\"","\"unknown\""}}) {auto s=good;s.replace(s.find(replacement.first),replacement.first.size(),replacement.second);bool threw=false;try{mod::parseConfig(s);}catch(const std::exception&){threw=true;}assert(threw);}
     auto discovery=good;discovery.replace(discovery.find("synthetic"),9,"game");discovery.pop_back();

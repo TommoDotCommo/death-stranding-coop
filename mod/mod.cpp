@@ -468,10 +468,32 @@ struct Runtime final:ds::Transport {
         WSADATA data;if(WSAStartup(MAKEWORD(2,2),&data)) throw std::runtime_error("WSAStartup failed");wsa=true;
 #endif
         socket=::socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);if(socket==INVALID_SOCKET) throw std::runtime_error("UDP socket failed");
-        sockaddr_in local{};local.sin_family=AF_INET;local.sin_port=htons(ds::portForSlot(config.slot));local.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
+        peer.sin_family=AF_INET;peer.sin_port=htons(ds::portForSlot(config.peerSlot));peer.sin_addr.s_addr=htonl(config.peerAddress);
+        // Local address: loopback for a loopback peer; otherwise the configured bind address, or the address of the
+        // interface that routes to the peer (a connected UDP socket's name; nothing is sent). Never all interfaces.
+        uint32_t localAddress=(config.peerAddress>>24)==127?(config.bindAddress?config.bindAddress:0x7f000001):config.bindAddress;
+        if(!localAddress) {
+            auto probe=::socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);sockaddr_in route{};
+#ifdef _WIN32
+            int size=sizeof(route);
+#else
+            socklen_t size=sizeof(route);
+#endif
+            bool ok=probe!=INVALID_SOCKET&&connect(probe,reinterpret_cast<sockaddr*>(&peer),sizeof(peer))==0&&getsockname(probe,reinterpret_cast<sockaddr*>(&route),&size)==0;
+            if(probe!=INVALID_SOCKET){
+#ifdef _WIN32
+                closesocket(probe);
+#else
+                close(probe);
+#endif
+            }
+            if(!ok||!route.sin_addr.s_addr) throw std::runtime_error("no local address routes to the peer");
+            localAddress=ntohl(route.sin_addr.s_addr);
+        }
+        sockaddr_in local{};local.sin_family=AF_INET;local.sin_port=htons(ds::portForSlot(config.slot));local.sin_addr.s_addr=htonl(localAddress);
         if(bind(socket,reinterpret_cast<sockaddr*>(&local),sizeof(local))) throw std::runtime_error("slot UDP bind failed (busy?)");
-        peer.sin_family=AF_INET;peer.sin_port=htons(ds::portForSlot(config.peerSlot));
-        if(inet_pton(AF_INET,config.peer.c_str(),&peer.sin_addr)!=1 || peer.sin_addr.s_addr!=htonl(INADDR_LOOPBACK)) throw std::runtime_error("skeleton restricts peer to numeric 127.0.0.1");
+        {std::ostringstream o;o<<"NET local "<<(localAddress>>24)<<'.'<<((localAddress>>16)&255)<<'.'<<((localAddress>>8)&255)<<'.'<<(localAddress&255)
+                              <<':'<<ds::portForSlot(config.slot)<<" peer "<<config.peer<<':'<<ds::portForSlot(config.peerSlot)<<"\n";note(o.str().c_str());}
 #ifdef _WIN32
         u_long nonblock=1;if(ioctlsocket(socket,FIONBIO,&nonblock)) throw std::runtime_error("nonblocking UDP failed");
 #else
