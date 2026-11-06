@@ -72,6 +72,8 @@ build/puppet-test: puppet_test.cpp puppet.cpp pose.cpp discovery.cpp puppet.h | 
 	$(CXX) $(FLAGS) puppet_test.cpp puppet.cpp pose.cpp discovery.cpp -o $@
 build/double-test: double_test.cpp double.cpp puppet.cpp pose.cpp discovery.cpp double.h puppet.h fake_memory.h | build
 	$(CXX) $(FLAGS) double_test.cpp double.cpp puppet.cpp pose.cpp discovery.cpp -o $@
+build/structures-fuzz: structures_fuzz.cpp structures.cpp structures.h discovery.cpp | build
+	$(CXX) $(FLAGS) structures_fuzz.cpp structures.cpp discovery.cpp -o $@
 build/world-fuzz: world_fuzz.cpp cargo.cpp cargo.h discovery.cpp | build
 	$(CXX) $(FLAGS) world_fuzz.cpp cargo.cpp discovery.cpp -o $@
 build/sync-fuzz: sync_fuzz.cpp cargo.cpp cargo.h structures.cpp structures.h discovery.cpp | build
@@ -92,7 +94,7 @@ build/coop-partner: partner.cpp partner_logic.cpp partner.h identity.h structure
 	$(CXX) $(FLAGS) partner.cpp partner_logic.cpp structures.cpp discovery.cpp ../core/core.cpp -o $@
 build/coop-partner.exe: partner.cpp partner_logic.cpp partner.h identity.h structures.cpp structures.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(MINGW) $(WINFLAGS) partner.cpp partner_logic.cpp structures.cpp discovery.cpp ../core/core.cpp -o $@ -lws2_32 -lbcrypt
-game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/structures-test build/sync-fuzz build/world-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test
+game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test
 	./build/game-thread-test
 	./build/puppet-test
 	./build/double-test
@@ -101,6 +103,7 @@ game-thread-test: build/game-thread-test build/puppet-test build/double-test bui
 	./build/structures-test
 	./build/sync-fuzz
 	./build/world-fuzz
+	./build/structures-fuzz
 	./build/partner-test
 	./build/body-test
 	./build/auto-continue-test
