@@ -74,6 +74,7 @@ void GameProvider::applyRemote(const ds::Render& r) {
     if(available_) o<<",\"x\":"<<local_.position[0]<<",\"y\":"<<local_.position[1]<<",\"z\":"<<local_.position[2]<<",\"yaw_deg\":"<<deg(local_.yaw)<<",\"speed\":"<<std::hypot(local_.velocity[0],local_.velocity[2]);
     else o<<",\"reason\":\""<<reason_<<'"';
     o<<"},\"remote\":{\"visible\":"<<(r.visible?"true":"false")<<",\"stale\":"<<(r.stale?"true":"false")<<",\"snapped\":"<<(r.snapped?"true":"false");
+    o<<",\"flags\":"<<r.state.flags<<",\"gated\":"<<(isInCutsceneOrLoading()?"true":"false");   // partner's flags; our gate
     if(r.visible) o<<",\"x\":"<<r.state.position[0]<<",\"y\":"<<r.state.position[1]<<",\"z\":"<<r.state.position[2]<<",\"yaw_deg\":"<<deg(r.state.yaw);
     o<<"}}";
     log_->record(us,o.str());
