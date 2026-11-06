@@ -917,4 +917,7 @@ DSPlayerAKukanInventoryComponent, DSBaggage2CarrierComponent, DSCustomSoundCompo
 outfit system's exports (`PlayerOutfitComponent_sExportedApplyPlayerOutfit`, `...SetPlayerOutfit`,
 `...ApplyPlayerOutfitPart`) and the double's own `NodeGraphComponent` script are the candidates for how its look
 is set at load. A made body has the same graph component but is not dressed.
+`PlayerOutfitComponent_sExportedApplyPlayerOutfit` (34ef380 -> 34ef670) and `...SetPlayerOutfit` (34ef400 -> 34efaf0)
+look up a `PlayerOutfitComponent` (type 4e07de0) on the given entity and do nothing without one; the double and a
+made body have none, so these cannot dress them. Remaining candidate: the double's `NodeGraphComponent` script.
 
