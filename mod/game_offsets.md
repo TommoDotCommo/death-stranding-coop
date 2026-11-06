@@ -882,4 +882,9 @@ screenshots were clean; but with part 20 confirmed off from memory (+2c 0x0c) a 
 line. The line is intermittent, so a three-screenshot search cannot pin it to one part; part 20 is at most part of
 it. Not fixed. Next: detect the line from the game's state rather than screenshots (the model's bone or cable
 positions), or count dark thin lines in many frames, before blaming a part.
+A measured scan (fixed camera, changed pixels against a reference frame outside the porter, HUD and the partner's
+path; clean frames score about 500 to 1000, frames with the line 4000 to 16000) failed for a different reason:
+after switching parts 0-25 off and 0-19 back on with the toggle worker, the body drew as huge flat polygons across
+the view. Switching parts back on this way corrupts the drawing, so part toggling cannot locate the line, and the
+earlier one-part conclusions are void. The research command stays for reading states, not for fixes.
 
