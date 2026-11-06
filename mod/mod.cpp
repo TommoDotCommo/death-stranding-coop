@@ -141,8 +141,11 @@ struct Runtime final:ds::Transport {
     std::filesystem::path puppetCommand;
     std::unique_ptr<mod::puppet::Probe> puppet;
     // The game's resident Sam double, borrowed as the partner's body (double.h). Armed only by a command for this process.
-    enum class TwinMode {None,Echo,Lead,Peer};
+    enum class TwinMode {None,Echo,Lead,Peer,Own};
     std::filesystem::path twinCommand;std::unique_ptr<mod::puppet::Double> twin;TwinMode twinMode=TwinMode::None;
+    // Own-body mode: the partner is drawn with a Sam the mod made (OwnBody), driven by a second Double backend.
+    std::unique_ptr<mod::puppet::OwnBody> own;std::unique_ptr<mod::puppet::Double> ownTwin;uint64_t ownEntity=0;
+    bool partnerMode() const {return twinMode==TwinMode::Peer||twinMode==TwinMode::Own;}
     std::filesystem::path cargoCommand;std::function<void(uint32_t,const mod::puppet::Transform&)> cargoCreate;
     std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
     std::function<void(uint32_t)> cargoGive,cargoDelete;std::function<void(uint8_t,const mod::puppet::Transform&,bool)> construct;
@@ -157,7 +160,7 @@ struct Runtime final:ds::Transport {
         // Shared ids below 2^53 (a wire t-field): 32 random bits above a 20-bit counter.
         if(!cargoIdsSet){cargoSync.setIdBase((nonce()>>32)<<20);cargoIdsSet=true;}
         auto incoming=core->takeCargo();
-        bool coop=twinMode==TwinMode::Peer&&cargoCreate&&cargoManagerSlot;
+        bool coop=partnerMode()&&cargoCreate&&cargoManagerSlot;
         for(auto& e:incoming) {
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(!coop){note("CARGO partner event ignored (not in peer mode)\n");continue;}
@@ -193,7 +196,7 @@ struct Runtime final:ds::Transport {
     mod::structures::Sync structSync;uint64_t structReadAt=0,structSent=0,structMade=0,structIdBase=0,imageSize=0;
     void tickStructures(uint64_t now) {
         if(!core||!core->connected()||!sampler)return;
-        bool coop=twinMode==TwinMode::Peer&&construct;
+        bool coop=partnerMode()&&construct;
         // Incoming structures arrive with the cargo events (type 3); tickCargo hands them over in structIn.
         uint64_t manager=0;std::vector<mod::structures::Record> records;
         auto table=[&]()->const std::vector<mod::structures::Record>&{
@@ -471,6 +474,21 @@ struct Runtime final:ds::Transport {
 #endif
                 twin=std::make_unique<mod::puppet::Double>(std::move(twinApi),[this](const std::string& row){note(row.c_str());});
                 twin->walk(true);   // borrow the porter's animation network so the partner walks (game_offsets.md)
+#ifndef MOD_FAKE_NETWORK
+                {
+                    auto made=mod::puppet::nativeApi(*sampler);auto driver=mod::puppet::nativeDoubleApi(*sampler);
+                    auto* sp=&*sampler;uint64_t camera=sampler->base+0x3d198e8,akukan=sampler->base+0x3d7de48;
+                    mod::puppet::OwnBodyApi oa;auto resourceOf=made.resource;
+                    oa.resource=[resourceOf,sp,camera,akukan](uint64_t porter){auto d=mod::puppet::findDouble(*sp,porter,camera,akukan);return d?resourceOf(d):0;};
+                    oa.create=made.create;oa.remove=made.remove;
+                    oa.alive=[sp,akukan](uint64_t b){uint64_t v=0;return sp->read(b,&v,8)&&v==akukan;};
+                    auto hide=driver.visible;auto rest=driver.sleep;oa.park=[hide,rest](uint64_t b){hide(b,false);rest(b,true);};
+                    own=std::make_unique<mod::puppet::OwnBody>(std::move(oa),[this](const std::string& row){note(row.c_str());});
+                    driver.find=[this](uint64_t){return ownEntity;};
+                    ownTwin=std::make_unique<mod::puppet::Double>(std::move(driver),[this](const std::string& row){note(row.c_str());});
+                    ownTwin->walk(true);
+                }
+#endif
             }
             presence=std::make_unique<mod::PresenceLog>([this](const std::string& line){return writePresence(line);},uint64_t(config.presenceLogMaxMiB)*1024*1024,[this](const char* s){note(s);});
             auto* raw=sampler.get();
@@ -598,6 +616,7 @@ struct Runtime final:ds::Transport {
             auto command=readConfig(twinCommand);auto stamp=" "+mod::runStamp()+"\n";
             if(!std::filesystem::remove(twinCommand))throw std::runtime_error("cannot consume double command");
             if(command=="echo"+stamp)twinMode=TwinMode::Echo;else if(command=="peer"+stamp)twinMode=TwinMode::Peer;
+            else if(command=="own"+stamp){twinMode=TwinMode::Own;if(ownTwin)ownTwin->enable();}
             else if(command=="lead"+stamp)twinMode=TwinMode::Lead;
             else if(command=="still"+stamp){twin->walk(false);note("DOUBLE own (private-room) network for the next acquire\n");return;}
             else if(command=="off"+stamp)twinMode=TwinMode::None;else {note("DOUBLE ignored command for another process\n");return;}
@@ -606,7 +625,7 @@ struct Runtime final:ds::Transport {
         std::optional<mod::puppet::Transform> target;double speed=0;uint32_t actions=0;
         auto packed=[](const ds::State& s){return uint32_t(s.flags)|(uint32_t(s.action&31)<<16);};
         auto horizontal=[](const ds::State& s){return std::hypot(s.velocity[0],s.velocity[2]);};
-        if(twinMode==TwinMode::Peer&&cache.remote.visible){target=mod::puppet::fromState(cache.remote.state.position,cache.remote.state.yaw);speed=horizontal(cache.remote.state);actions=packed(cache.remote.state);}
+        if(partnerMode()&&cache.remote.visible){target=mod::puppet::fromState(cache.remote.state.position,cache.remote.state.yaw);speed=horizontal(cache.remote.state);actions=packed(cache.remote.state);}
         if(twinMode==TwinMode::Echo&&cache.available) {
             echo.emplace_back(now,cache.local);
             while(echo.size()>1&&now-echo[1].first>=1000)echo.pop_front();
@@ -629,7 +648,13 @@ struct Runtime final:ds::Transport {
         if(event!=inEvent){inEvent=event;note(event?"DOUBLE game event: double handed back\n":"DOUBLE game event over\n");}
         // A partner who is only missing for now (late packets, private room) is hidden, not handed back; a game event
         // or the mode switched off hands the double back.
-        twin->tick(true,(target&&!event)?&*target:nullptr,speed,actions,twinMode!=TwinMode::None&&!event);
+        const mod::puppet::Transform* goal=(target&&!event)?&*target:nullptr;bool hold=twinMode!=TwinMode::None&&!event;
+        // Own body: made (once per world) and driven by its own backend; the resident double is released, never
+        // dropped while borrowed. Until the body exists, or if the game refuses to make one, the resident double is used.
+        bool useOwn=twinMode==TwinMode::Own&&own&&ownTwin&&!own->exhausted();
+        if(useOwn)ownEntity=own->tick(mod::puppet::readLocalAnchor(*sampler));
+        if(useOwn&&ownEntity){twin->tick(true,nullptr);ownTwin->tick(true,goal,speed,actions,hold);}
+        else{twin->tick(true,goal,speed,actions,hold);if(ownTwin)ownTwin->tick(true,nullptr);}
     }
     bool tickOnce(std::string& err,bool gameContext=false) {
         std::lock_guard<std::timed_mutex> guard(mutex);
@@ -878,7 +903,7 @@ unsigned mod_status(char* out,unsigned cap) {
         o<<",\"game_thread\":{\"enabled\":"<<(r.config.gameThread?"true":"false")<<",\"verified\":"<<(r.dispatchVerified?"true":"false")<<",\"thread_id\":"<<r.gameGate.thread()<<",\"rejected\":"<<r.gameRejected<<"},\"puppet\":{\"enabled\":"<<(r.puppet?"true":"false")<<",\"stage\":\""<<(r.puppet?r.puppet->stage():"disabled")<<"\",\"actor\":"<<(r.puppet?r.puppet->actor():0)<<"}";
         o<<",\"pad\":{\"enabled\":"<<(r.config.virtualPad?"true":"false")<<",\"running\":"<<(r.padRunning?"true":"false")<<",\"calls\":"<<padShared.calls.load()<<",\"active_calls\":"<<padShared.active.load()<<"}";
         o<<",\"event\":"<<(r.inEvent?"true":"false")<<",\"cargo\":{\"sent\":"<<r.cargoSent<<",\"created\":"<<r.cargoMade<<",\"taken\":"<<r.cargoTaken<<",\"removed\":"<<r.cargoRemoved<<",\"shared\":"<<r.cargoSync.shared()<<",\"mirrored\":"<<r.cargoSync.mirrored()<<",\"structures_sent\":"<<r.structSent<<",\"structures_created\":"<<r.structMade<<",\"pending\":"<<(r.core?r.core->cargoPending():0)<<"}";
-        o<<",\"double\":{\"stage\":\""<<(r.twin?r.twin->name():"disabled")<<"\",\"mode\":\""<<(r.twinMode==Runtime::TwinMode::Echo?"echo":r.twinMode==Runtime::TwinMode::Lead?"lead":r.twinMode==Runtime::TwinMode::Peer?"peer":"none")<<"\",\"entity\":"<<(r.twin?r.twin->entity():0)<<"}";
+        o<<",\"double\":{\"stage\":\""<<(r.twin?r.twin->name():"disabled")<<"\",\"mode\":\""<<(r.twinMode==Runtime::TwinMode::Echo?"echo":r.twinMode==Runtime::TwinMode::Lead?"lead":r.twinMode==Runtime::TwinMode::Peer?"peer":r.twinMode==Runtime::TwinMode::Own?"own":"none")<<"\",\"entity\":"<<(r.twin?r.twin->entity():0)<<"}";
         o<<",\"timing\":{\"clock\":\""
 #ifdef _WIN32
         <<"QueryPerformanceCounter"

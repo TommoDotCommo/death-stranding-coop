@@ -109,6 +109,27 @@ void cargoCommand(){
     CHECK(parseCargoCommand("construct 26 S1\n","S1","construct")==26u);
     CHECK(parseCargoCommand("list 0 S1\n","S1","list")==0u);CHECK(!parseCargoCommand("list 0 S2\n","S1","list"));
 }
+void ownBody(){
+    struct World{uint64_t made=0;unsigned creates=0,parks=0,removes=0;bool refuse=false,dead=false;uint64_t resource=0x500;};
+    auto w=std::make_shared<World>();
+    OwnBodyApi api;api.resource=[w](uint64_t){return w->resource;};
+    api.create=[w](uint64_t r,const Transform&){CHECK(r==0x500);++w->creates;if(w->refuse)return uint64_t(0);w->dead=false;return w->made=0x9000+w->creates;};
+    api.alive=[w](uint64_t b){return b==w->made&&!w->dead;};api.park=[w](uint64_t){++w->parks;};api.remove=[w](uint64_t){++w->removes;};
+    std::vector<std::string> rows;OwnBody o(api,[&](const std::string& r){rows.push_back(r);});
+    Anchor porter;porter.entity=0x100;porter.pose.available=true;porter.pose.coherent=true;porter.pose.rotation={1,0,0,0,1,0,0,0,1};
+    Anchor none;CHECK(o.tick(none)==0&&w->creates==0);                                   // no world yet: nothing made
+    auto b=o.tick(porter);CHECK(b==0x9001&&w->creates==1&&w->parks==1);                  // made once, and parked
+    CHECK(o.tick(porter)==b&&w->creates==1&&w->parks==1);                                // kept
+    w->dead=true;CHECK(o.tick(porter)==0x9002&&w->creates==2&&w->parks==2);              // lost: made again
+    Anchor next=porter;next.entity=0x200;CHECK(o.tick(next)==0x9003&&w->creates==3);     // new world: made again
+    o.remove();CHECK(w->removes==1&&o.body()==0);
+    // Refusals: given up after MaxFailures; the caller falls back to the resident double.
+    w->refuse=true;OwnBody r(api,[&](const std::string&){});Anchor p2=porter;p2.entity=0x300;
+    for(unsigned i=0;i<10;++i)CHECK(r.tick(p2)==0);CHECK(r.exhausted()&&w->creates==3+OwnBody::MaxFailures);
+    // No resident double resource (yet): not counted as a failure.
+    auto x=std::make_shared<World>();x->resource=0;OwnBodyApi a2=api;a2.resource=[x](uint64_t){return x->resource;};
+    OwnBody n(a2,[&](const std::string&){});for(unsigned i=0;i<5;++i)CHECK(n.tick(porter)==0);CHECK(!n.exhausted());
+}
 void privateRoom(){
     Scene s;auto d=s.make();
     CHECK(!d.gameUsesDouble(s.anchor.entity));                                       // parked: no
@@ -209,7 +230,7 @@ void hold(){
     c.found=0x7100;f.tick(true,&t,0,0,true);CHECK(f.stage()==Double::Stage::Parked&&c.calls.size()==n&&c.last("double_changed"));
 }
 int main(){
-    lifecycle();mover();animation();network();refusedUpgrade();actions();effects();releasedByGame();cargoCommand();privateRoom();
+    lifecycle();mover();animation();network();refusedUpgrade();actions();effects();releasedByGame();cargoCommand();privateRoom();ownBody();
     try{transient();}catch(const std::exception& e){std::fprintf(stderr,"double oracle: transient threw %s\n",e.what());++failures;}
     hold();busy();yields(true);yields(false);identity();unconfirmed();tree();conversion();
     if(!failures)std::puts("double borrow, yield, release and pointer-path checks passed");

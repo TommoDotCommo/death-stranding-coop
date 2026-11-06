@@ -74,6 +74,30 @@ std::function<void(uint8_t,const Transform&,bool)> nativeConstruct(discovery::Sa
 // box min, const float4* box max, const world transform*, bool, bool, bool). It collects the structures in the box and
 // marks for removal those whose owner byte (+b2) is 1 (first bool), 0 (second) or 2 (third). Unverified live.
 std::function<void(const std::array<float,4>&,const std::array<float,4>&,const Transform&,bool,bool,bool)> nativeRemoveConstructions(discovery::Sampler&);
+// The partner's own body: a second Sam the mod creates from the resident double's resource with the script export
+// EntityResource_ExportedCreateEntity (game_offsets.md, "The partner's own body, live"), so the game's own double is
+// never borrowed. The body is created visible and awake; it is parked (hidden, asleep) so a Double backend can take it.
+struct OwnBodyApi {
+    std::function<uint64_t(uint64_t porter)> resource;                   // the resident double's resource, 0 if none
+    std::function<uint64_t(uint64_t resource,const Transform&)> create;  // 0 when the game refused
+    std::function<bool(uint64_t body)> alive;                            // still the body class with the same resource
+    std::function<void(uint64_t body)> park;                             // hide and put to sleep
+    std::function<void(uint64_t body)> remove;                           // the game's queued removal
+};
+class OwnBody {
+public:
+    static constexpr unsigned MaxFailures=3;
+    explicit OwnBody(OwnBodyApi api,std::function<void(const std::string&)> record):api_(std::move(api)),record_(std::move(record)) {}
+    // One call per game-thread tick while own-body mode is wanted. Returns the body to drive (0: none yet, or given
+    // up after MaxFailures refusals: the caller falls back to the resident double). A new porter entity means a new
+    // world: the old body went with it and a new one is made.
+    uint64_t tick(const Anchor& porter);
+    void remove();   // leaving own-body mode: the game removes the body
+    bool exhausted() const {return failures_>=MaxFailures;}
+    uint64_t body() const {return body_;}
+private:
+    OwnBodyApi api_;std::function<void(const std::string&)> record_;uint64_t porter_=0,body_=0;unsigned failures_=0;
+};
 class Double {
 public:
     enum class Stage {Off,Parked,Driving,Hidden,Yielded,Failed};

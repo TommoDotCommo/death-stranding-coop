@@ -843,3 +843,14 @@ resident double. Open: one run showed only a small signal icon where the new bod
 (unexplained), switching bodies while the resident double is borrowed left the resident double standing (it must
 be handed back first), and the body's lifetime across loads is untested.
 
+Own-body mode (`puppet.double` command `own`, default build, 2026-11-07): the mod makes the body once per world,
+parks it, and drives it with a second Double backend; the resident double is handed back (parked flags, resting
+transform) and left to the game. Live: the body was made, taken and held exactly at the partner's position
+(memory readback), with the resident double parked. **But only the body's Odradek renders, not Sam.** The made body
+has 12 components where the resident double has 15: it lacks `DSFacialRigComponent` (vtable 3cf6050),
+`DSCoverAndAnimModelComponent` (3cf5e80) and `DSCoverModelComponent` (3cf55d0), the visible model, and its art-parts
+table is empty. On the resident double those three components have no resource pointer (+30 is 0), so the game
+builds them in code, probably while it sets the double up for the private room. Finding that step (or adding the
+three components another way) is what remains before the partner can use its own body. `peer` (the resident
+double) stays the default.
+

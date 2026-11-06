@@ -257,6 +257,28 @@ void Double::tick(bool permitted,const Transform* target,double speed,uint32_t f
         }
     } catch(...) {stage_=Stage::Failed;note("failed",0,{});throw;}
 }
+uint64_t OwnBody::tick(const Anchor& porter){
+    if(!porter.entity||!porter.pose.available)return 0;
+#ifndef MUTANT_OWNBODY_WORLD
+    if(porter.entity!=porter_){if(body_)record_("BODY world changed: a new body will be made\n");porter_=porter.entity;body_=0;}
+#endif
+#ifndef MUTANT_OWNBODY_ALIVE
+    if(body_&&!api_.alive(body_)){record_("BODY lost: a new body will be made\n");body_=0;}
+#endif
+    if(body_||exhausted())return body_;
+    auto resource=api_.resource(porter.entity);if(!resource)return 0;
+    // Made 3 m in front of the porter (the placement tried live), then parked at once.
+    auto t=transform(porter.pose);double l=std::hypot(t.rotation[3],t.rotation[4]);
+    if(l>.5){t.position[0]+=3*t.rotation[3]/l;t.position[1]+=3*t.rotation[4]/l;}
+    body_=api_.create(resource,t);
+    if(!body_){++failures_;record_(exhausted()?"BODY creation refused; giving up, the resident double is used\n":"BODY creation refused\n");return 0;}
+#ifndef MUTANT_OWNBODY_PARK
+    api_.park(body_);
+#endif
+    std::ostringstream o;o<<"BODY own body 0x"<<std::hex<<body_<<" made and parked\n";record_(o.str());
+    return body_;
+}
+void OwnBody::remove(){if(body_){api_.remove(body_);record_("BODY own body removed\n");body_=0;}}
 std::optional<uint32_t> parseCargoCommand(const std::string& text,const std::string& stamp,const char* expected){
     std::istringstream in(text);std::string verb,id,tail,extra;
     if(!(in>>verb>>id>>tail)||(in>>extra)||verb!=expected||tail!=stamp)return std::nullopt;
