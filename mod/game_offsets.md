@@ -854,3 +854,17 @@ builds them in code, probably while it sets the double up for the private room. 
 three components another way) is what remains before the partner can use its own body. `peer` (the resident
 double) stays the default.
 
+Drawing the own body (2026-11-07, live, one copy, 90 s hang watch per variant):
+- The body's `ArtPartsData` (entity+180, vtable 3cf2b18) has get-or-create accessors for the three model components:
+  22b2010 (cover, cached at +60), 22b1f80 (cover+animation, +68) and 22b20a0 (facial rig, +70); each builds the
+  component with the generic constructor (22b4fc0) and attaches it (2348210). Built this way they are empty (no
+  model or resource pointers, unlike the double's). Cover, or cover and cover+animation: not drawn, stable. Any mask
+  with the facial rig: drawn, then the game hangs within about 20 s (main thread waiting in ds.exe+1a0873b).
+- The real difference: the double's `ArtPartsData` uses the porter's art-parts resource (+30 = the 52-part
+  resource); a made body keeps the one-part resource of its entity resource. `ApplyArtPartsVariation` (22bc100) with
+  the double's art-parts resource adds a second `ArtPartsData` from it, which builds all three model components
+  properly: **the body is drawn and walks, with no hang over 90 s.** It shows stretched-polygon artifacts (long
+  lines and a large flat triangle reaching away from the body), with or without the borrowed animation network.
+  The per-part state bytes (+2c) equal the double's. Removing the body's original `ArtPartsData` afterwards
+  (EntityComponent_ExportedRemove, 23618c0) hangs the game. `own` now uses the apply step.
+

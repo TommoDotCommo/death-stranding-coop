@@ -272,6 +272,9 @@ uint64_t OwnBody::tick(const Anchor& porter){
     if(l>.5){t.position[0]+=3*t.rotation[3]/l;t.position[1]+=3*t.rotation[4]/l;}
     body_=api_.create(resource,t);
     if(!body_){++failures_;record_(exhausted()?"BODY creation refused; giving up, the resident double is used\n":"BODY creation refused\n");return 0;}
+#ifndef MUTANT_OWNBODY_DRESS
+    if(api_.dress)record_(api_.dress(body_)?"BODY model components built\n":"BODY model components could not be built\n");
+#endif
 #ifndef MUTANT_OWNBODY_PARK
     api_.park(body_);
 #endif
@@ -365,6 +368,50 @@ std::function<void(const std::array<float,4>&,const std::array<float,4>&,const T
     using RemoveFn=void(*)(const float*,const float*,const Transform*,bool,bool,bool);auto erase=reinterpret_cast<RemoveFn>(s.base+0x2cd9760);
     return [erase](const std::array<float,4>& lo,const std::array<float,4>& hi,const Transform& t,bool a,bool b,bool c){
         alignas(16) float l[4]={lo[0],lo[1],lo[2],lo[3]},h[4]={hi[0],hi[1],hi[2],hi[3]};erase(l,h,&t,a,b,c);};
+#endif
+}
+std::function<bool(uint64_t)> nativeDress(discovery::Sampler& s,std::function<unsigned()> mask){
+#ifndef _WIN32
+    (void)s;throw std::runtime_error("native dress API requires Windows");
+#else
+    struct Entry{uint64_t rva;uint8_t slot;};const std::array<Entry,3> entries={{{0x22b2010,0x60},{0x22b1f80,0x68},{0x22b20a0,0x70}}};
+    for(auto& e:entries){
+        const std::vector<uint8_t> sig={0x40,0x56,0x48,0x83,0xec,0x40,0x48,0x8b,0x05};
+        std::vector<uint8_t> tail={0x48,0x33,0xc4,0x48,0x89,0x44,0x24,0x30,0x48,0x8b,0x41,e.slot,0x48,0x8b,0xf1,0x48,0x85,0xc0,0x75};
+        std::vector<uint8_t> head(sig.size()+4+tail.size());require(s.read(s.base+e.rva,head.data(),head.size()),"dress code unreadable");
+        require(std::equal(sig.begin(),sig.end(),head.begin())&&std::equal(tail.begin(),tail.end(),head.begin()+sig.size()+4),"dress function signature differs");
+    }
+    const uint64_t artParts=s.base+0x3cf2b18;
+    // ArtPartsVariation_sExportedApplyArtPartsVariation (22bc100): adds a component built from a resource and applies
+    // it. Mask bit 8 gives the body the resident double's art-parts resource (the porter's, 52 parts) this way.
+    const std::vector<uint8_t> applySig={0x48,0x83,0xec,0x28,0x48,0x85,0xc9,0x74,0x19,0x48,0x85,0xd2,0x74,0x14,0x41,0xb0,0x01,0xe8,0x7a,0xed,0x08,0x00};
+    {std::vector<uint8_t> at(applySig.size());require(s.read(s.base+0x22bc100,at.data(),at.size())&&at==applySig,"apply variation signature differs");}
+    using ApplyFn=void(*)(uint64_t,uint64_t);auto apply=reinterpret_cast<ApplyFn>(s.base+0x22bc100);
+    const uint64_t camera=s.base+0x3d198e8,twin=s.base+0x3d7de48;
+    using MakeFn=uint64_t(*)(uint64_t);
+    std::array<MakeFn,3> make;for(unsigned i=0;i<3;++i)make[i]=reinterpret_cast<MakeFn>(s.base+entries[i].rva);
+    return [&s,artParts,make,entries,mask,apply,camera,twin](uint64_t body){
+        uint64_t x=0,v=0,owner=0;
+        if(!q(s,body+0x180,x)||!x||!q(s,x,v)||v!=artParts||!q(s,x+0x48,owner)||owner!=body)return false;
+        unsigned m=mask?mask():7;
+        if(m&8){
+            auto porter=readLocalAnchor(s);auto resident=porter.entity?findDouble(s,porter.entity,camera,twin):0;
+            uint64_t rx=0,rv=0,res=0;
+            if(!resident||resident==body||!q(s,resident+0x180,rx)||!q(s,rx,rv)||rv!=artParts||!q(s,rx+0x30,res)||!res)return false;
+            uint64_t old=x;apply(body,res);
+            // The apply adds a second ArtPartsData (from the porter's resource) that builds the model components itself.
+            // Mask 9 also removes the body's own one-part ArtPartsData (EntityComponent_ExportedRemove, 23618c0).
+            if(m&1){
+                const std::vector<uint8_t> removeSig={0x48,0x85,0xc9,0x74,0x0c,0x48,0x8b,0xd1,0x48,0x8b,0x49,0x48,0xe9};
+                std::vector<uint8_t> at(removeSig.size());
+                if(!s.read(s.base+0x23618c0,at.data(),at.size())||at!=removeSig)return false;
+                using RemoveFn=void(*)(uint64_t);reinterpret_cast<RemoveFn>(s.base+0x23618c0)(old);
+            }
+            return true;
+        }
+        for(unsigned i=0;i<3;++i){if(!(m&(1u<<i)))continue;make[i](x);uint64_t c=0;if(!q(s,x+entries[i].slot,c)||!c)return false;}
+        return true;
+    };
 #endif
 }
 std::function<void()> nativeContinueLastSave(discovery::Sampler& s){

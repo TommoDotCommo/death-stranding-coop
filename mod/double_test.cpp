@@ -115,11 +115,12 @@ void ownBody(){
     OwnBodyApi api;api.resource=[w](uint64_t){return w->resource;};
     api.create=[w](uint64_t r,const Transform&){CHECK(r==0x500);++w->creates;if(w->refuse)return uint64_t(0);w->dead=false;return w->made=0x9000+w->creates;};
     api.alive=[w](uint64_t b){return b==w->made&&!w->dead;};api.park=[w](uint64_t){++w->parks;};api.remove=[w](uint64_t){++w->removes;};
+    auto dressed=std::make_shared<unsigned>(0);api.dress=[w,dressed](uint64_t b){CHECK(b==w->made&&w->parks<w->creates);++*dressed;return true;};   // before parking
     std::vector<std::string> rows;OwnBody o(api,[&](const std::string& r){rows.push_back(r);});
     Anchor porter;porter.entity=0x100;porter.pose.available=true;porter.pose.coherent=true;porter.pose.rotation={1,0,0,0,1,0,0,0,1};
     Anchor none;CHECK(o.tick(none)==0&&w->creates==0);                                   // no world yet: nothing made
-    auto b=o.tick(porter);CHECK(b==0x9001&&w->creates==1&&w->parks==1);                  // made once, and parked
-    CHECK(o.tick(porter)==b&&w->creates==1&&w->parks==1);                                // kept
+    auto b=o.tick(porter);CHECK(b==0x9001&&w->creates==1&&w->parks==1&&*dressed==1);     // made once, dressed, parked
+    CHECK(o.tick(porter)==b&&w->creates==1&&w->parks==1&&*dressed==1);                   // kept
     w->dead=true;CHECK(o.tick(porter)==0x9002&&w->creates==2&&w->parks==2);              // lost: made again
     Anchor next=porter;next.entity=0x200;CHECK(o.tick(next)==0x9003&&w->creates==3);     // new world: made again
     o.remove();CHECK(w->removes==1&&o.body()==0);

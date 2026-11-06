@@ -70,6 +70,10 @@ std::function<void(uint32_t)> nativeCargoDelete(discovery::Sampler&);
 // lock); asynchronous. Types: Stage/Player/Net variants, e.g. 24..26 Ladder, 27..29 FieldRope, 30..32 Bridge30m
 // (game_offsets.md, "Structures"). The bool is stored at request +640; its meaning is unknown.
 std::function<void(uint8_t,const Transform&,bool)> nativeConstruct(discovery::Sampler&);
+// ArtPartsData (component vtable 3cf2b18, entity+180) get-or-create accessors for the cover (22b2010, cached at +60),
+// cover+animation (22b1f80, +68) and facial-rig (22b20a0, +70) model components. Game thread. False when the body's
+// ArtPartsData is missing or not its own, or a component did not appear.
+std::function<bool(uint64_t)> nativeDress(discovery::Sampler&,std::function<unsigned()> mask);   // bits: 1 cover, 2 cover+anim, 4 facial
 // DSConstructionPointManager_sExportedRemoveConstructionsInArea (2cd1bf0 -> 2cd9760), read statically: (const float4*
 // box min, const float4* box max, const world transform*, bool, bool, bool). It collects the structures in the box and
 // marks for removal those whose owner byte (+b2) is 1 (first bool), 0 (second) or 2 (third). Unverified live.
@@ -82,6 +86,9 @@ struct OwnBodyApi {
     std::function<uint64_t(uint64_t resource,const Transform&)> create;  // 0 when the game refused
     std::function<bool(uint64_t body)> alive;                            // still the body class with the same resource
     std::function<void(uint64_t body)> park;                             // hide and put to sleep
+    // Build the visible model: a made body lacks the cover, cover+animation and facial-rig components the game gives
+    // its double; the body's ArtPartsData component (entity+180) creates them on request. Optional; true when done.
+    std::function<bool(uint64_t body)> dress;
     std::function<void(uint64_t body)> remove;                           // the game's queued removal
 };
 class OwnBody {

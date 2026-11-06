@@ -19,9 +19,9 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
   which the game takes back for the private room. Live on 2026-11-07, an experiment build created a second Sam
   with the script export `EntityResource_ExportedCreateEntity` from the double's own resource and drove it as the
   partner with the double backend. The mod now has an `own` mode that makes, parks and drives that body (resident
-  double handed back), and it holds the partner's exact position, but the body renders only its Odradek: three
-  model components the game adds to its double in code are missing (`mod/game_offsets.md`). `peer` stays the
-  default.
+  double handed back) and holds the partner's exact position. With the porter's art parts applied to it, the body
+  is drawn and walks, stable over 90 s, but with stretched-polygon artifacts still to fix (`mod/game_offsets.md`,
+  "Drawing the own body"). `peer` stays the default.
 - BTs, vehicles, cutscenes, death and voidouts, saves of a shared world,
   the partner's gear and outfit, and the partner's own controller input. Cargo the porter himself picks up or puts down is detected by the logic
   below but has not yet been driven live (the run had no keyboard focus).
