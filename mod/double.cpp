@@ -296,6 +296,22 @@ std::function<void(uint32_t)> nativeCargoGive(discovery::Sampler& s){
     return [give](uint32_t id){give(id,false);};
 #endif
 }
+std::function<void(uint32_t)> nativeCargoDelete(discovery::Sampler& s){
+#ifndef _WIN32
+    (void)s;throw std::runtime_error("native cargo API requires Windows");
+#else
+    const std::vector<uint8_t> sig={0x4c,0x8b,0xdc,0x48,0x81,0xec,0xe8,0,0,0,0x48,0x8b,0x05,0xdf,0xa2,0x28};
+    unsigned count=0;
+    for(auto section:s.sections)if(section.executable){
+        std::vector<uint8_t> code(section.size);require(s.read(section.address,code.data(),code.size()),"cargo code unreadable");
+        for(auto at=code.begin();(at=std::search(at,code.end(),sig.begin(),sig.end()))!=code.end();++at){
+            ++count;require(section.address+size_t(at-code.begin())==s.base+0x2cd6d40,"cargo delete signature moved/duplicated");}
+    }
+    require(count==1,"cargo delete signature missing/ambiguous");
+    using DeleteFn=void(*)(uint32_t);auto erase=reinterpret_cast<DeleteFn>(s.base+0x2cd6d40);
+    return [erase](uint32_t id){erase(id);};
+#endif
+}
 std::function<void()> nativeContinueLastSave(discovery::Sampler& s){
 #ifndef _WIN32
     (void)s;throw std::runtime_error("native continue API requires Windows");

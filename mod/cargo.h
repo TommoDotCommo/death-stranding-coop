@@ -10,7 +10,7 @@
 #include <map>
 #include <vector>
 namespace mod::cargo {
-struct Record { uint32_t slot=0, state=0, hash=0; std::array<double,3> position{}; };   // game axes, z up
+struct Record { uint32_t slot=0, state=0, hash=0; std::array<double,3> position{}; uint32_t holder=0; };   // game axes, z up; holder = +1c (candidate)
 // Every record in use. Empty when the manager is absent or does not look like one (wrong vtable).
 std::vector<Record> readRecords(const discovery::Sampler&, uint64_t manager, uint64_t managerVtable);
 struct Placement { uint32_t hash=0; std::array<double,3> position{}; };                  // game axes

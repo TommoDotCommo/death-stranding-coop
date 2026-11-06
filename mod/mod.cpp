@@ -37,6 +37,7 @@ constexpr int INVALID_SOCKET=-1;
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <iomanip>
 #include <cstring>
 #include <deque>
 #include <optional>
@@ -139,7 +140,7 @@ struct Runtime final:ds::Transport {
     std::filesystem::path twinCommand;std::unique_ptr<mod::puppet::Double> twin;TwinMode twinMode=TwinMode::None;
     std::filesystem::path cargoCommand;std::function<void(uint32_t,const mod::puppet::Transform&)> cargoCreate;
     std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
-    std::function<void(uint32_t)> cargoGive;
+    std::function<void(uint32_t)> cargoGive,cargoDelete;
     std::function<void()> continueLastSave;mod::AutoContinue autoContinue;bool autoNoted=false;
     std::function<bool()> gameEvent;bool inEvent=false;std::atomic<bool> fakeEvent{false};
     // Shared cargo (cargo.h): placements read from the game's cargo map go to the partner; theirs are created here.
@@ -365,7 +366,7 @@ struct Runtime final:ds::Transport {
                 twinApi.effects=[](uint64_t,bool){};
 #else
                 auto twinApi=mod::puppet::nativeDoubleApi(*sampler);
-                cargoCreate=mod::puppet::nativeCargoCreate(*sampler);cargoGive=mod::puppet::nativeCargoGive(*sampler);
+                cargoCreate=mod::puppet::nativeCargoCreate(*sampler);cargoGive=mod::puppet::nativeCargoGive(*sampler);cargoDelete=mod::puppet::nativeCargoDelete(*sampler);
                 gameEvent=mod::puppet::nativeGameEvent(*sampler);
                 if(config.autoContinue){continueLastSave=mod::puppet::nativeContinueLastSave(*sampler);autoContinue=mod::AutoContinue(true);}
                 body=std::make_unique<mod::body::Probe>(mod::body::nativeApi(*sampler),sampler->base+0x3d7de48,[this](const std::string& row){note(row.c_str());});
@@ -549,7 +550,23 @@ struct Runtime final:ds::Transport {
                 if(!std::filesystem::remove(cargoCommand))throw std::runtime_error("cannot consume cargo command");
                 auto id=mod::puppet::parseCargoCommand(text,mod::runStamp());auto anchor=mod::puppet::readLocalAnchor(*sampler);
                 auto give=mod::puppet::parseCargoCommand(text,mod::runStamp(),"give");
+                auto erase=mod::puppet::parseCargoCommand(text,mod::runStamp(),"delete");
+                auto list=mod::puppet::parseCargoCommand(text,mod::runStamp(),"list");
                 if(give&&cargoGive){cargoGive(*give);note(("CARGO give id="+std::to_string(*give)+"\n").c_str());}
+                else if(erase&&cargoDelete){cargoDelete(*erase);note(("CARGO delete id="+std::to_string(*erase)+"\n").c_str());}
+                else if(list) {
+                    // Every record in use within `list` metres of the porter (0 = all): slot, +1c, +20, hash, position.
+                    uint64_t manager=0;std::vector<mod::cargo::Record> records;
+                    if(cargoManagerSlot&&sampler->read(cargoManagerSlot,&manager,8))records=mod::cargo::readRecords(*sampler,manager,cargoManagerVtable);
+                    std::ostringstream o;o<<"CARGO list "<<records.size()<<" records"<<std::hex;
+                    for(auto& r:records){
+                        double d=anchor.pose.available?std::hypot(r.position[0]-anchor.pose.position[0],r.position[1]-anchor.pose.position[1]):0;
+                        if(*list&&(!anchor.pose.available||d>*list))continue;
+                        o<<" | slot="<<r.slot<<" h=0x"<<r.holder<<" s=0x"<<r.state<<" item=0x"<<r.hash<<std::dec<<" at="<<std::setprecision(7)
+                         <<r.position[0]<<","<<r.position[1]<<","<<r.position[2]<<std::hex;
+                    }
+                    note((o.str()+"\n").c_str());
+                }
                 else if(!id||!anchor.entity||!anchor.pose.available)note("CARGO refused command\n");
                 else {
                     // Two metres behind the porter (the side he just came from is free), half a metre up, upright.

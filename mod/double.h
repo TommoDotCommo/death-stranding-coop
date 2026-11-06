@@ -62,6 +62,9 @@ std::function<bool()> nativeGameEvent(discovery::Sampler&);
 std::function<void()> nativeContinueLastSave(discovery::Sampler&);
 // DSBaggage2Manager_sExportedCreateAndAddBaggageToPlayer (2cd6a60): queues cargo of that id into the porter's load.
 std::function<void(uint32_t)> nativeCargoGive(discovery::Sampler&);
+// DSBaggage2Manager_sExportedDeleteBaggage (2cd6d40): queues a kind-2 request whose +8 is the argument; the create
+// request keeps 0x1fffff there, so the argument is probably a 21-bit cargo id (record +20 & 0x1fffff). Unverified live.
+std::function<void(uint32_t)> nativeCargoDelete(discovery::Sampler&);
 class Double {
 public:
     enum class Stage {Off,Parked,Driving,Hidden,Yielded,Failed};

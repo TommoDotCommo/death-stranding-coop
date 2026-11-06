@@ -16,7 +16,7 @@ std::vector<Record> readRecords(const discovery::Sampler& s,uint64_t manager,uin
         if(!s.read(manager+Records+Stride*i,block.data(),block.size()))break;
         uint64_t item=0;std::memcpy(&item,block.data()+0x28,8);if(!item)continue;
         Record r;std::memcpy(&r.slot,block.data()+0x18,4);std::memcpy(&r.state,block.data()+0x20,4);std::memcpy(&r.hash,block.data()+0xc8,4);
-        std::memcpy(r.position.data(),block.data()+0x38,24);out.push_back(r);
+        std::memcpy(r.position.data(),block.data()+0x38,24);std::memcpy(&r.holder,block.data()+0x1c,4);out.push_back(r);
     }
     return out;
 }
