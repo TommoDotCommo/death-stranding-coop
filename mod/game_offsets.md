@@ -910,4 +910,11 @@ type references (291160c, 2922d5b, 2cc37b3) are is-this-the-double checks follow
 porter's art parts reach the double from outside, most likely from the private-room or outfit system that copies
 the porter's look; that system is the next place to look (callers of ApplyArtPartsVariation's registration
 22ba011 from scripts, and the outfit/ArtPartsVariation resources it uses).
+The double's 15 components by RTTI name: ArtPartsData, DSCoverModelComponent, DSCoverAndAnimModelComponent,
+DSFacialRigComponent, DSFacialRigManagerComponent, DSTalkComponent, VoiceComponent, MorphemeAnimationManager,
+SkinnedModel, FixedPositionMover, NodeGraphComponent, DSPlayerAKukanConfigComponent,
+DSPlayerAKukanInventoryComponent, DSBaggage2CarrierComponent, DSCustomSoundComponent. No outfit component; the
+outfit system's exports (`PlayerOutfitComponent_sExportedApplyPlayerOutfit`, `...SetPlayerOutfit`,
+`...ApplyPlayerOutfitPart`) and the double's own `NodeGraphComponent` script are the candidates for how its look
+is set at load. A made body has the same graph component but is not dressed.
 
