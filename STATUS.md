@@ -15,10 +15,11 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 
 ## Not done
 
-- The partner's own body. Today the partner is drawn with the game's resident Sam double (below), which the game
-  takes back for the private room. Calling the engine's common entity creator directly with the double's resource
-  did not return a second Sam live (2026-11-07, `mod/game_offsets.md`); the remaining engine route is a registered
-  `Spawnpoint`.
+- The partner's own body in the default build. The partner is drawn with the game's resident Sam double (below),
+  which the game takes back for the private room. Live on 2026-11-07, an experiment build created a second Sam
+  with the script export `EntityResource_ExportedCreateEntity` from the double's own resource and drove it as the
+  partner with the double backend (`mod/game_offsets.md`, "The partner's own body, live"); making that the default
+  (lifetime, loads, fallback) is next.
 - BTs, vehicles, cutscenes, death and voidouts, saves of a shared world,
   the partner's gear and outfit, and the partner's own controller input. Cargo the porter himself picks up or puts down is detected by the logic
   below but has not yet been driven live (the run had no keyboard focus).
@@ -115,8 +116,8 @@ id, type, state, world transform; `mod/game_offsets.md`, "Structures"), sends ea
 the partner's mod builds the Net variant at the same transform with the game's `CreateConstruction`. Net structures
 have their own id range, so they are never sent back. Live with `coop-partner`, early Episode 1: a ladder built in
 the game reached the partner, and the partner's ladder was built in the game as a Net ladder (read back from the
-table, state "built"). Posts, shelters, watchtowers, bridges and ziplines were refused by the game in that area
-(before the chiral network); they are untested. Dismantling is shared too: when a porter's structure disappears, the partner's mod removes its Net copy with the
+table, state "built"). Posts, shelters, watchtowers, bridges and ziplines requested the same way stayed pending
+during that run and were standing after the next load; syncing them is untested. Dismantling is shared too: when a porter's structure disappears, the partner's mod removes its Net copy with the
 game's `RemoveConstructionsInArea`, limited to Net structures in a 3 m box; both directions ran live. A partner's
 structure that already stands here (saved from an earlier session) is not built twice. Not done: upgrades, and
 structures built or dismantled through the game's own menus (the run had no keyboard focus; the test used the

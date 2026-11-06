@@ -100,7 +100,10 @@ void Probe::tick(uint64_t now,bool permitted){
 #ifndef MUTANT_PUPPET_LIFETIME
         if(source.entity!=local_){stage_=5;record("world_changed_no_further_calls",{});return;}
 #endif
-        if(now<at_||now-at_<1000)return;
+#ifndef MOD_PUPPET_STEP_MS
+#define MOD_PUPPET_STEP_MS 1000
+#endif
+        if(now<at_||now-at_<MOD_PUPPET_STEP_MS)return;
         auto observed=api_.read(actor_);require(valid(observed),"puppet entity no longer readable");
         if(stage_==2){
             target_.position[0]+=target_.rotation[0];target_.position[1]+=target_.rotation[1];

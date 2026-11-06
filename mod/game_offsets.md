@@ -816,9 +816,9 @@ downwards (a new record took the slot below the lowest one):
 | +40 | rotation (9 x f32, rows: right, forward, up) |
 
 Live, early Episode 1 (Capital Knot City, before the chiral network): `CreateConstruction(26)` (Net ladder) and
-`(25)` (Player ladder) built a ladder lying across the road (state 2; ids 100001 and 10002). Post, rain shelter,
-watchtower, bridge and zipline requests made records in state 0 and nothing visible, probably because this area
-does not allow them yet. 155 records were in the table, mostly the game's delivery bases and shelters.
+`(25)` (Player ladder) built a ladder lying across the road at once (state 2; ids 100001 and 10002). Post, rain
+shelter, watchtower, bridge and zipline requests stayed in state 0 with nothing visible during that run, and were
+standing, in state 2, after the next load (the game saved them pending). 155 records were in the table, mostly the game's delivery bases and shelters.
 
 Removal: `DSConstructionPointManager_sExportedRemoveConstructionsInArea` (thunk 2cd1bf0 -> 2cd9760) takes `(const
 float4* box min, const float4* box max, const WorldTransform* box placement, bool, bool, bool)`. It collects the
@@ -827,4 +827,19 @@ byte `+b2` is selected: the first bool selects owner 1, the second owner 0, the 
 removed a Net ladder and the first removed a ladder built by this porter, so **owner 1 = built by this porter,
 2 = Net, 0 = the game's own**. A ladder saved from an earlier session came back after loading (its record
 reached state 2 only after the mod's first look), so a receiver checks for an existing built copy before building.
+
+### The partner's own body, live (2026-11-07)
+
+`EntityResource_ExportedCreateEntity` (0x23806a0; the existing puppet probe's signature-checked call) **does** create
+a second Sam when given the resident double's own resource (`double+58`, read with 0x2362ba0) instead of the
+porter's: a new `DSPlayerAKukanEntity` (vtable 3d7de48) at the requested transform (readback exact), which also moved
+exactly and was removed on request, with the porter unchanged and the game running. Unlike the parked double it
+starts visible and awake (flags `0x232854453`). After parking it (SetVisible false, SetSleeping true) the double
+backend took it like the resident double: shown, woken, its mover target set, the porter's animation network
+borrowed, driven to the partner (memory readback equal to the partner's position), released and taken again. So
+the partner can have a body that belongs to the mod, and the game's own double (private room, cutscenes) can be left
+alone. Built only into experiment DLLs so far (`MOD_PUPPET_DOUBLE_RESOURCE`); the default build still borrows the
+resident double. Open: one run showed only a small signal icon where the new body stood without being driven
+(unexplained), switching bodies while the resident double is borrowed left the resident double standing (it must
+be handed back first), and the body's lifetime across loads is untested.
 

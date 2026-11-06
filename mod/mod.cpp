@@ -128,7 +128,7 @@ struct Runtime final:ds::Transport {
     std::timed_mutex mutex;std::atomic<bool> running{false};std::thread worker;
     // Where the game-thread tick is, for a stall report: a native game call that faults is resumed by the game's own
     // exception handling above the mod, so the mod's lock stays held and the mod stops (live 2026-11-07).
-    std::atomic<const char*> stage{"idle"};bool stallNoted=false;
+    std::atomic<const char*> stage{"idle"};bool stallNoted=false;uint64_t ownedBody=0;std::function<void(uint64_t,bool)> parkSleep,parkVisible;
 #ifdef MOD_FAKE_NETWORK
     std::unique_ptr<fakemem::Fake> fake;   // declared before the sampler that reads it
 #endif
@@ -424,6 +424,12 @@ struct Runtime final:ds::Transport {
                 api.remove=[this](uint64_t){fake->mutate([&]{fake->blocked=fake->base+0x80c8;});};
 #else
                 auto api=mod::puppet::nativeApi(*sampler);
+#ifdef MOD_PUPPET_DOUBLE_RESOURCE
+                // Experiment builds only: create from the resident double's resource, which has no player controller.
+                {auto getResource=api.resource;auto* sp=&*sampler;uint64_t camera=sampler->base+0x3d198e8,akukan=sampler->base+0x3d7de48;
+                 api.resource=[getResource,sp,camera,akukan](uint64_t porter){auto d=mod::puppet::findDouble(*sp,porter,camera,akukan);return d?getResource(d):0;};
+                 api.canCreate=[](uint64_t r){return r!=0;};}
+#endif
 #endif
                 puppet=std::make_unique<mod::puppet::Probe>(std::move(api),[this](const std::string& row){note(row.c_str());});
                 twinCommand=path.parent_path()/"puppet.double";cargoCommand=path.parent_path()/"puppet.cargo";bodyCommand=path.parent_path()/"puppet.body";
@@ -456,6 +462,12 @@ struct Runtime final:ds::Transport {
 #endif
 #ifdef MOD_FAKE_NETWORK
                 gameEvent=[this]{return fakeEvent.load();};
+#endif
+#if defined(MOD_PUPPET_DOUBLE_RESOURCE) && !defined(MOD_FAKE_NETWORK)
+                // Experiment builds only: once the probe has created our own body, the double backend drives it
+                // instead of the game's resident double.
+                {auto origFind=twinApi.find;twinApi.find=[this,origFind](uint64_t player){return ownedBody?ownedBody:origFind(player);};
+                 parkSleep=twinApi.sleep;parkVisible=twinApi.visible;}
 #endif
                 twin=std::make_unique<mod::puppet::Double>(std::move(twinApi),[this](const std::string& row){note(row.c_str());});
                 twin->walk(true);   // borrow the porter's animation network so the partner walks (game_offsets.md)
@@ -643,6 +655,7 @@ struct Runtime final:ds::Transport {
             if(game){poseAvailable=cache.available;poseReason=game->reason();}
             // Render at the actual apply time, not the preceding network iteration.
             core->frame(now);provider->applyRemote(cache.remote);
+            stage="puppet";
             if(puppet&&gameContext) {
                 if(!puppet->armed()&&std::filesystem::exists(puppetCommand)) {
                     auto command=readConfig(puppetCommand);
@@ -652,6 +665,12 @@ struct Runtime final:ds::Transport {
                     } else if(!staleCommandNoted){note("PUPPET ignored command for another process\n");staleCommandNoted=true;}
                 }
                 puppet->tick(now,true);
+#ifdef MOD_PUPPET_DOUBLE_RESOURCE
+                if(puppet->actor()&&!ownedBody){
+                    // Created visible and awake; the double backend takes only a parked body, so park it first.
+                    ownedBody=puppet->actor();if(parkVisible)parkVisible(ownedBody,false);if(parkSleep)parkSleep(ownedBody,true);
+                    note("BODY own body parked and ready for the double backend\n");}
+#endif
             }
             stage="double";
             if(twin&&gameContext)tickTwin(now);
