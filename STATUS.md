@@ -35,7 +35,9 @@ Game-free: simulator, fuzzer and mutants for the core and every proxy protection
 for the shared world: one runs the cargo and structure logic through random worlds and checks its invariants, one
 runs two simulated worlds against each other and checks that they hold the same cargo after every quiet period.
 They found two cargo races (fixed): a quick put-down and pick-up left a stray copy, and identical items close
-together could be matched wrongly; the same race was then fixed for dismantled structures. Live: two-copy runs
+together could be matched wrongly; the same race was then fixed for dismantled structures. With restarts added, the two-world fuzz
+showed shared cargo falling out of step after either mod restarted (the shared ids live in memory); a pick-up now
+also names the item and its place, so the partner finds its copy without the id. Live: two-copy runs
 with state read from the processes, and an unattended one-copy regression with `coop-partner` that needs no input or
 focus (2026-11-07, about 3 minutes): the copy continues its last save by itself, the double stands within 0.3 m of the
 partner (read from the game's memory; 0.032 m measured), cargo goes both ways and each side's pick-up removes the
