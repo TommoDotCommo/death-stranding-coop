@@ -32,7 +32,7 @@ uint32_t pack(const Built&);
 Built unpack(uint32_t item,const std::array<double,3>& position,double yaw);
 // True when a built structure of `type` already stands within `range` metres of `position` (the partner's structure
 // was created here in an earlier session and saved: do not build it twice).
-bool standing(const std::vector<Record>&,uint8_t type,const std::array<double,3>& position,double range=.5);
+bool standing(const std::vector<Record>&,uint8_t type,const std::array<double,3>& position,double range=1.0);
 // The partner's structures built here as Net copies: a dismantle may arrive before the game has built the copy
 // (construction is asynchronous), so it waits until a built Net structure of that type stands at the place, then is
 // due (remove it there); it gives up after GiveUp ms.

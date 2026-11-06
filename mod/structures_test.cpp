@@ -43,7 +43,7 @@ int main(){
       s.observe({});CHECK(s.takeRemoved().empty()); }
     { Sync s;s.observe({rec(10007,25,2)});s.observe({});CHECK(s.takeRemoved().empty()); }   // existed before: never announced
     // A partner structure already standing here (saved from an earlier session) is not built twice.
-    { auto a=rec(100009,26,2,10);CHECK(standing({a},26,{10.3,2,3})&&!standing({a},26,{11,2,3})&&!standing({a},29,{10,2,3}));
+    { auto a=rec(100009,26,2,10);CHECK(standing({a},26,{10.3,2,3})&&standing({a},26,{10.9,2,3})&&!standing({a},26,{11.5,2,3})&&!standing({a},29,{10,2,3}));   // the game may move what it builds by about 0.6 m
       auto b=rec(100010,26,0,10);CHECK(!standing({b},26,{10,2,3})); }
     // A dismantle that arrives before the Net copy is built waits for it, then clears it once; unknown refs are ignored.
     { NetCopies n;n.built(7,26,{10,2,3});n.dismantled(7,1000);n.dismantled(99,1000);
