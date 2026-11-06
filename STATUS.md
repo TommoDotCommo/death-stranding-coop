@@ -22,8 +22,9 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 - BTs, vehicles, cutscenes, death and voidouts, saves of a shared world,
   the partner's gear and outfit, and the partner's own controller input. Cargo the porter himself picks up or puts down is detected by the logic
   below but has not yet been driven live (the run had no keyboard focus).
-- Networking beyond one PC (partners' addresses can already be allowed in the network policy; the mod itself still
-  only talks to 127.0.0.1).
+- A real two-PC session. The mod now accepts any unicast IPv4 peer (LAN or VPN) and binds only the address that
+  routes to it (README, "Two PCs"); it has only run over loopback so far. No NAT traversal: across the internet use
+  a VPN such as Tailscale.
 
 ## QA level
 
