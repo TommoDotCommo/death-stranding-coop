@@ -898,7 +898,8 @@ resource's component type that were built from the same resource (resource+30 eq
 new one (22b5970, 2348220). It never removes a component built from another resource, which is why a made body ends
 up with two `ArtPartsData` (its own one-part one and the porter's). The game's double, made from the same entity
 resource, has only the porter's, so the game removes the original somewhere else; removing it right after the
-apply froze the game. Next: find that removal (callers of 235b930 near the double's setup: the double's class is
-referenced at 26f329e, 26fb1d4 (vtable) and 2711a80, 291160c, 2922d5b, 2cc37b3 (type)), and try the removal while
-the body is parked and asleep instead.
+apply froze the game, and so did removing it after the body was parked and asleep (before it was shown; live,
+hang within 20 s). Next: find that removal (callers of 235b930 near the double's setup: the double's class is
+referenced at 26f329e, 26fb1d4 (vtable) and 2711a80, 291160c, 2922d5b, 2cc37b3 (type)), or avoid the second
+component altogether (replace the original's resource before the body is activated).
 
