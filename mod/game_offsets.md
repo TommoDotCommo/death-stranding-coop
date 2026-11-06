@@ -864,7 +864,9 @@ Drawing the own body (2026-11-07, live, one copy, 90 s hang watch per variant):
   resource); a made body keeps the one-part resource of its entity resource. `ApplyArtPartsVariation` (22bc100) with
   the double's art-parts resource adds a second `ArtPartsData` from it, which builds all three model components
   properly: **the body is drawn and walks, with no hang over 90 s.** It shows stretched-polygon artifacts (long
-  lines and a large flat triangle reaching away from the body), with or without the borrowed animation network.
+  lines and a large flat triangle reaching away from the body) at a distance and while walking, with or without
+  the borrowed animation network; standing 4 m from the camera it looked clean over 18 s (gear on its back, no
+  stretched polygons).
   The per-part state bytes (+2c) equal the double's. Removing the body's original `ArtPartsData` afterwards
   (EntityComponent_ExportedRemove, 23618c0) hangs the game. `own` now uses the apply step.
 
