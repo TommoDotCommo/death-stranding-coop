@@ -514,7 +514,9 @@ std::wstring wide(LPCSTR p) {
 }
 HMODULE checked_module(LPCWSTR name,HANDLE file,DWORD flags,const wchar_t* origin) {
     const wchar_t* previous=load_origin;load_origin=origin;
-    std::wstring requested=name?name:L"<null>", path=requested;
+    // The policy checks the plain form of a \\?\X:\ request (module_request_path); the log keeps what was asked.
+    const std::wstring raw_request=name?name:L"<null>";
+    std::wstring requested=redirect::module_request_path(raw_request), path=requested;
     HMODULE existing=name?GetModuleHandleW(name):nullptr;
     wchar_t resolved[32768];
     if(existing) {
@@ -536,7 +538,7 @@ HMODULE checked_module(LPCWSTR name,HANDLE file,DWORD flags,const wchar_t* origi
         DWORD n=GetFullPathNameW(name,32768,resolved,nullptr);
         if(n && n<32768) path=resolved;
     }
-    note(L"MODULE_REQUEST",path,std::wstring(L"requested=")+requested+L" via="+origin+L" tid="+std::to_wstring(GetCurrentThreadId()));
+    note(L"MODULE_REQUEST",path,std::wstring(L"requested=")+raw_request+L" via="+origin+L" tid="+std::to_wstring(GetCurrentThreadId()));
     DWORD attributes=GetFileAttributesW(path.c_str());
     bool file_exists=attributes!=INVALID_FILE_ATTRIBUTES && !(attributes&FILE_ATTRIBUTE_DIRECTORY);
     auto action=redirect::classify_request(modules,requested,existing!=nullptr,file_exists);

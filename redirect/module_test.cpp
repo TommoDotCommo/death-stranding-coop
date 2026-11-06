@@ -17,6 +17,19 @@ int main(int argc,char** argv) {
                 L"c:\\lab\\s0\\..\\evil.dll",L"c:\\lab\\S0~1\\x.dll",L"\\\\server\\s0\\x.dll",
                 L"x.dll",L"c:x.dll",L"\\\\?\\c:\\windows\\system32\\x.dll"}) check(!module_allowed(c,p,true));
     check(!module_allowed(c,L"c:\\windows\\system32\\junction\\x.dll",false));
+    // Prefixed requests (live 2026-11-07: the new NVIDIA driver loads nvwgf2um.dll as \\?\C:\...): checked in plain form.
+    {
+        auto nv=module_request_path(L"\\\\?\\C:\\WINDOWS\\System32\\DriverStore\\FileRepository\\nvmdi.inf_amd64_c8fe3aa22cae8673\\nvwgf2um.dll");
+        check(nv==L"C:\\WINDOWS\\System32\\DriverStore\\FileRepository\\nvmdi.inf_amd64_c8fe3aa22cae8673\\nvwgf2um.dll");
+        check(module_allowed(c,nv,true));
+        check(!module_allowed(c,module_request_path(L"\\\\?\\c:\\steam\\bin\\evil.dll"),true));     // stripped, still refused
+        check(!module_allowed(c,module_request_path(L"\\\\?\\c:\\lab\\s0\\..\\evil.dll"),true));  // traversal after the prefix
+        for(auto p:{L"\\\\.\\c:\\windows\\system32\\x.dll",L"\\\\?\\UNC\\server\\share\\x.dll",
+                    L"\\\\?\\GLOBALROOT\\Device\\HarddiskVolume1\\windows\\system32\\x.dll",L"\\\\?\\c:"}) {
+            check(module_request_path(p)==p);check(!module_allowed(c,module_request_path(p),true));
+        }
+        check(module_request_path(L"c:\\windows\\system32\\x.dll")==L"c:\\windows\\system32\\x.dll");
+    }
     // Defender platform module: exactly <ProgramData>\Microsoft\Windows Defender\Platform\<version>\MpOav.dll.
     check(module_allowed(c,L"C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.26100.4-0\\MpOav.dll",true));
     for(auto p:{L"c:\\programdata\\evil\\mpoav.dll",L"c:\\programdata\\x.dll",

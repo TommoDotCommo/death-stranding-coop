@@ -13,6 +13,10 @@ bool module_allowed(const ModulePolicy&, const std::wstring&, bool evidence);
 // `api-ms-win-*` / `ext-ms-win-*` are virtual API-set names the loader maps to a host
 // DLL; they never name a file. The host module is checked after the load.
 bool is_api_set_name(const std::wstring& requested);
+// The path the policy checks for a LoadLibrary request. `\\?\X:\...` names the same local file as `X:\...` (the NVIDIA
+// driver installed in 2026-11 asks for nvwgf2um.dll this way), so it is checked in the plain form. Everything else,
+// including `\\.\X:\`, UNC, GLOBALROOT and volume names, is returned unchanged and fails the policy as before.
+std::wstring module_request_path(const std::wstring& requested);
 // What to do with a LoadLibrary request BEFORE the policy runs, outside log-only mode.
 enum class RequestAction { policy, api_set_forward, not_found };
 RequestAction classify_request(const ModulePolicy&, const std::wstring& requested, bool already_loaded, bool file_exists);

@@ -51,6 +51,17 @@ bool loader_flags_allowed(const ModulePolicy& c,unsigned long flags) {
     (void)flags; return true;
 #endif
 }
+std::wstring module_request_path(const std::wstring& requested) {
+#ifdef MUTANT_MODULE_NO_PREFIX
+    return requested;   // the old behaviour: a prefixed driver request is refused and the game ends
+#else
+#ifndef MUTANT_MODULE_ANY_PREFIX
+    if(requested.size()<4 || requested.compare(0,4,L"\\\\?\\")!=0) return requested;
+#endif
+    auto split=split_namespace(requested);
+    return split.kind==PathKind::drive?split.path:requested;
+#endif
+}
 bool is_api_set_name(const std::wstring& r) {
     if(r.find_first_of(L"\\/:")!=std::wstring::npos) return false;
     std::wstring l; for(auto ch:r) l+=(ch>=L'A'&&ch<=L'Z')?wchar_t(ch+32):ch;
