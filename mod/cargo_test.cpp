@@ -66,6 +66,9 @@ int main(){
       s.observe({},porter,1300);auto t=s.takeTaken();CHECK(t.size()==1&&t[0]==81);
       Sync u;u.setIdBase(90);u.observe({},porter,0);u.observe({world(9,90,1)},porter,100);u.observe({world(9,90,1)},porter,1200);
       std::array<double,3> far{500,0,100};u.observe({},far,1300);CHECK(u.takeTaken().empty()); }
+    // A partner item that already exists at the first look is still recognised as theirs (its pick-up is reported).
+    { Sync s;s.expect({60,{2,0,100},555},0);s.observe({world(6,60,2.3)},porter,100);CHECK(s.mirrored()==1);
+      s.observe({carried(6,60,0.2)},porter,200);auto t=s.takeTaken();CHECK(t.size()==1&&t[0]==555); }
     if(!failures)std::puts("cargo placement, settle, held, mirror, far, pick-up, put-down and taken checks passed");
     return failures?1:0;
 }

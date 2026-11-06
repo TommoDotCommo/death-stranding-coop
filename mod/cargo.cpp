@@ -57,8 +57,9 @@ std::vector<Placement> Sync::observe(const std::vector<Record>& records,const st
         // Moved: not settled.
         if(distance(t.position,r.position)>Still){t.position=r.position;t.stillSince=now;}
         if(placed(r.position)&&distance(r.position,porter)<=HeldRange)t.heldAt=now;
-        if(!same&&primed_){
-            // Created for a partner placement: same item, appearing where it was asked for.
+        if(!same){
+            // Created for a partner placement: same item, appearing where it was asked for (also on the first look: the
+            // partner's item may already exist then; found by the sync fuzz).
             for(auto it=expected_.begin();it!=expected_.end();++it)
 #ifndef MUTANT_CARGO_ECHO
                 if(it->first.hash==r.hash&&distance(it->first.position,r.position)<=MatchRange){t.mirror=true;t.id=it->first.id;expected_.erase(it);break;}
