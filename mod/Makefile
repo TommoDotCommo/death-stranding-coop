@@ -79,11 +79,11 @@ build/body-test: body_test.cpp body.cpp body.h discovery.cpp | build
 	$(CXX) $(FLAGS) body_test.cpp body.cpp discovery.cpp -o $@
 build/auto-continue-test: auto_continue_test.cpp auto_continue.h | build
 	$(CXX) $(FLAGS) auto_continue_test.cpp -o $@
-build/partner-test: partner_test.cpp partner_logic.cpp partner.h ../core/core.h | build
-	$(CXX) $(FLAGS) partner_test.cpp partner_logic.cpp -o $@
-build/coop-partner: partner.cpp partner_logic.cpp partner.h ../core/core.cpp ../core/core.h | build
+build/partner-test: partner_test.cpp partner_logic.cpp partner.h identity.h ../core/core.h ../core/core.cpp | build
+	$(CXX) $(FLAGS) partner_test.cpp partner_logic.cpp ../core/core.cpp -o $@
+build/coop-partner: partner.cpp partner_logic.cpp partner.h identity.h ../core/core.cpp ../core/core.h | build
 	$(CXX) $(FLAGS) partner.cpp partner_logic.cpp ../core/core.cpp -o $@
-build/coop-partner.exe: partner.cpp partner_logic.cpp partner.h ../core/core.cpp ../core/core.h | build
+build/coop-partner.exe: partner.cpp partner_logic.cpp partner.h identity.h ../core/core.cpp ../core/core.h | build
 	$(MINGW) $(WINFLAGS) partner.cpp partner_logic.cpp ../core/core.cpp -o $@ -lws2_32
 game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/partner-test build/coop-partner build/body-test build/auto-continue-test
 	./build/game-thread-test

@@ -1,4 +1,6 @@
 #include "partner.h"
+#include "identity.h"
+#include <algorithm>
 #include <cstdlib>
 #include <sstream>
 namespace mod::partner {
@@ -43,5 +45,30 @@ ds::State Replay::at(double ms,const std::array<double,3>& origin) const {
     double dy=std::remainder(b.yaw-a.yaw,2*Pi);s.yaw=std::remainder(a.yaw+dy*f,2*Pi);
     if(std::hypot(s.velocity[0],s.velocity[2])>Run+.1)s.flags|=ds::Sprint;
     return s;
+}
+namespace {
+void rechecksum(uint8_t* b){
+    uint32_t h=2166136261u;for(size_t i=0;i<ds::WireSize;++i){h^=i>=120&&i<124?0:b[i];h*=16777619u;}
+    for(unsigned i=0;i<4;++i)b[120+i]=uint8_t(h>>(8*i));
+}
+bool checksumOK(const uint8_t* b){
+    ds::Bytes c;std::copy(b,b+ds::WireSize,c.begin());rechecksum(c.data());return std::equal(c.begin()+120,c.begin()+124,b+120);
+}
+}
+void toWire(ds::Bytes& b){
+#ifndef MUTANT_PARTNER_WIRE
+    std::copy(mod::WireBuild.begin(),mod::WireBuild.end(),b.begin()+16);rechecksum(b.data());
+#else
+    (void)b;
+#endif
+}
+bool fromWire(uint8_t* b,size_t n){
+    if(n!=ds::WireSize)return false;
+#ifndef MUTANT_PARTNER_WIRE_ANY
+    if(!std::equal(mod::WireBuild.begin(),mod::WireBuild.end(),b+16))return false;
+#endif
+    // Like the mod: rewrite only checksum-valid frames, so a damaged frame still fails the core's checksum.
+    if(checksumOK(b)){std::copy(ds::ModBuild.begin(),ds::ModBuild.end(),b+16);rechecksum(b);}
+    return true;
 }
 }

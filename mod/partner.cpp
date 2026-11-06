@@ -45,7 +45,8 @@ struct Shell final:ds::StateProvider,ds::Transport {
     void applyRemote(const ds::Render& r) override {if(r.visible)porter=r.state;}
     void send(const ds::Bytes& b) override {
         if(b[60]&ds::Teleport)stickyTeleport=false;   // the jump has been sent
-        sendto(socket,reinterpret_cast<const char*>(b.data()),int(b.size()),0,reinterpret_cast<const sockaddr*>(&peer),sizeof(peer));
+        auto w=b;toWire(w);
+        sendto(socket,reinterpret_cast<const char*>(w.data()),int(w.size()),0,reinterpret_cast<const sockaddr*>(&peer),sizeof(peer));
     }
     void step(uint64_t now){
         double dt=last?(now-last)/1000.:0;last=now;
@@ -97,7 +98,7 @@ int main(int argc,char** argv){
 #endif
     ds::Config config;config.role=role;config.session=session;config.nonce=(nowMs()<<8)|slot|1;
     ds::Core core(config,shell,shell);
-    auto start=nowMs();uint64_t nextStatus=start+1000,connectedAt=0;bool dropped=false;
+    auto start=nowMs();uint64_t nextStatus=start+1000,connectedAt=0,refused=0;bool dropped=false;
     std::printf("PARTNER slot %u -> %u session %llu mode %s\n",slot,peerSlot,(unsigned long long)session,shell.replay?"replay":"follow");std::fflush(stdout);
     while(nowMs()-start<seconds*1000){
         if(!stopFile.empty()&&std::ifstream(stopFile))break;
@@ -107,6 +108,7 @@ int main(int argc,char** argv){
             auto n=recvfrom(shell.socket,reinterpret_cast<char*>(raw),sizeof(raw),0,reinterpret_cast<sockaddr*>(&from),&size);
             if(n<0){if(wouldBlock())break;break;}
             if(n!=int(ds::WireSize)||from.sin_addr.s_addr!=shell.peer.sin_addr.s_addr||from.sin_port!=shell.peer.sin_port)continue;
+            if(!fromWire(raw,size_t(n))){++refused;continue;}
             core.receive(raw,size_t(n),now);
         }
         core.frame(now);shell.step(now);core.tick(now);
@@ -126,7 +128,7 @@ int main(int argc,char** argv){
                 std::printf("STATUS connected=%d porter=%.1f,%.1f,%.1f partner=%.1f,%.1f,%.1f distance=%.1f speed=%.1f rtt=%.0f cargo_pending=%zu\n",
                     core.connected(),p[0],p[1],p[2],m[0],m[1],m[2],std::hypot(p[0]-m[0],p[2]-m[2]),
                     std::hypot(shell.mine->velocity[0],shell.mine->velocity[2]),core.rttMs(),core.cargoPending());
-            } else std::printf("STATUS connected=%d waiting for the porter\n",core.connected());
+            } else std::printf("STATUS connected=%d waiting for the porter (refused %llu frames of another identity)\n",core.connected(),(unsigned long long)refused);
             std::fflush(stdout);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));

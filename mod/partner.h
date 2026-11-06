@@ -59,6 +59,11 @@ struct Sample {double t=0;std::array<double,3> position{};double yaw=0;};
 // Reads presence-*.jsonl lines ({"t_us":..,"local":{"available":true,"x":..,"y":..,"z":..,"yaw_deg":..}}); rows without
 // an available local pose are skipped. Minimal parser for this one known shape.
 std::vector<Sample> parseRecording(const std::string& text);
+// Wire identity. The mod in the game sends its adapter identity (identity.h, WireBuild) in bytes 16..31 of every
+// frame, accepts only frames that carry it, and gives the core the core's own ModBuild (mod.cpp send/accept). The
+// partner does the same, or the game drops every partner frame (live 2026-11-07: the partner stayed "waiting").
+void toWire(ds::Bytes&);                     // core frame -> wire frame (WireBuild, checksum redone)
+bool fromWire(uint8_t* frame,size_t size);   // wire frame -> core frame; false (unchanged) for another identity
 class Replay {
 public:
     explicit Replay(std::vector<Sample> s):samples_(std::move(s)){}

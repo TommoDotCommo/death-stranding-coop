@@ -1,4 +1,6 @@
 #include "partner.h"
+#include "identity.h"
+#include <algorithm>
 #include <cstdio>
 using namespace mod::partner;
 unsigned failures=0;
@@ -54,6 +56,16 @@ int main(){
         auto a=r.at(500,{0,0,0});CHECK(std::fabs(a.position[0]-1)<1e-9&&std::fabs(a.velocity[0]-2)<1e-9&&std::fabs(a.yaw-Pi/2)<1e-9);
         auto b=r.at(2500,{100,0,0});CHECK(std::fabs(b.position[0]-101)<1e-9);   // looped
         auto c=r.at(1500,{0,0,0});CHECK(std::fabs(c.position[2]-2)<1e-9&&std::fabs(c.yaw-Pi/4)<1e-9);
+    }
+    {   // wire identity: what the partner sends carries the mod's adapter identity; what it accepts is turned back
+        ds::Packet q;q.kind=ds::Kind::Hello;q.session=7;auto core=ds::encode(q);
+        auto wire=core;toWire(wire);
+        CHECK(std::equal(mod::WireBuild.begin(),mod::WireBuild.end(),wire.begin()+16));
+        auto back=wire;CHECK(fromWire(back.data(),back.size())&&back==core);           // the mod's frames reach the core intact
+        auto plain=core;CHECK(!fromWire(plain.data(),plain.size())&&plain==core);       // a core-identity frame is refused
+        auto broken=wire;broken[40]^=1;CHECK(fromWire(broken.data(),broken.size()));
+        CHECK(std::equal(mod::WireBuild.begin(),mod::WireBuild.end(),broken.begin()+16)); // damaged frames are not repaired
+        CHECK(!fromWire(wire.data(),wire.size()-1));
     }
     if(!failures)std::puts("partner follow and replay checks passed");
     return failures?1:0;
