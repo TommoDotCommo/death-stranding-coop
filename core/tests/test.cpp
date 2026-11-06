@@ -83,7 +83,7 @@ void cargoTests() {
       f.receive(cargo(1,11),110); f.receive(cargo(1,11),120); f.receive(cargo(2,22),130);
       auto got=f.core.takeCargo(); check(got.size()==2&&got[0].item==11&&got[1].item==22&&got[0].ref==5011,"cargoOrder");
       unsigned acks=0; for(auto& b:f.transport.packets) acks+=b[6]==uint8_t(Kind::CargoAck); check(acks==3,"cargo_ack_repeats");
-      auto bad=cargo(3,33); bad.state.action=0; check(f.receive(bad,140)==Error::Range,"cargo_type_range");
+      auto bad=cargo(3,33); bad.state.action=0; check(f.receive(bad,140)==Error::Range,"cargo_type_range"); bad.state.action=5; check(f.receive(bad,140)==Error::Range,"cargo_type_range");
       check(f.core.takeCargo().empty(),"cargo_taken_once");
       auto noid=cargo(3,33); noid.t1=0; check(f.receive(noid,150)==Error::Range,"cargo_id_required"); }
     // Acknowledgement lost, then a reconnection: the sender renumbers and repeats the event; it is not delivered twice.

@@ -42,21 +42,28 @@ public:
     void built(uint64_t ref,uint8_t netType,const std::array<double,3>& at){copies_[ref]={netType,at,0};}
     bool known(uint64_t ref) const {return copies_.count(ref)!=0;}
     void dismantled(uint64_t ref,uint64_t now){auto it=copies_.find(ref);if(it!=copies_.end()&&!it->second.goneAt)it->second.goneAt=now?now:1;}
+    // A dismantle whose ref is not known here (either mod restarted since it was built): the Net structure of that
+    // type at that place is cleared instead.
+    void dismantledAt(uint8_t netType,const std::array<double,3>& at,uint64_t now){copies_[(uint64_t(1)<<63)|++unknown_]={netType,at,now?now:1};}
     // Places to clear now: dismantled copies that stand built here. Each is returned once.
     std::vector<std::array<double,3>> due(const std::vector<Record>&,uint64_t now);
 private:
     struct Copy{uint8_t type=0;std::array<double,3> at{};uint64_t goneAt=0;};
-    std::map<uint64_t,Copy> copies_;
+    std::map<uint64_t,Copy> copies_;uint64_t unknown_=0;
 };
 class Sync {
 public:
     // One call per observation. The first call only learns what exists. Returns structures this porter built since.
     std::vector<Built> observe(const std::vector<Record>&);
-    // Ids of announced structures that are gone since (dismantled or destroyed): the partner removes its copy.
-    std::vector<uint32_t> takeRemoved();
+    // Structures this porter built that are gone since (dismantled or destroyed), with type and place: the partner
+    // removes its copy, by ref or, when the ref is not known there, by type and place. Includes structures that were
+    // already standing at the first look (built in an earlier session).
+    struct Removed { uint32_t id=0; uint8_t type=0; std::array<double,3> position{}; };
+    std::vector<Removed> takeRemoved();
     size_t known() const {return seen_.size();}
 private:
     std::map<uint32_t,uint8_t> seen_; bool primed_=false;
-    std::map<uint32_t,bool> announced_; std::vector<uint32_t> removed_;
+    struct Known { uint8_t type=0; std::array<double,3> position{}; };
+    std::map<uint32_t,Known> standing_; std::vector<Removed> removed_;
 };
 }

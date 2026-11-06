@@ -60,21 +60,21 @@ std::vector<Built> Sync::observe(const std::vector<Record>& records){
         bool mine=r.id>=PlayerFirst;   // would send the partner's structures back to them
 #endif
         auto old=seen_.find(r.id);bool newlyBuilt=r.state==2&&(old==seen_.end()||old->second!=2);
+        if(mine&&r.state==2&&netVariant(r.type))standing_[r.id]={r.type,r.at.position};   // known even from the first look
         if(primed_&&mine&&newlyBuilt&&netVariant(r.type)){
             Built b;b.type=r.type;b.position=r.at.position;angles(r.at.rotation,b.yaw,b.pitch,b.roll);b.id=r.id;out.push_back(b);
-            announced_[r.id]=true;
         }
     }
 #ifndef MUTANT_STRUCTURE_REMOVED
-    for(auto it=announced_.begin();it!=announced_.end();){
+    for(auto it=standing_.begin();it!=standing_.end();){
         auto now=next.find(it->first);
-        if(now==next.end()||now->second!=2){removed_.push_back(it->first);it=announced_.erase(it);}else ++it;
+        if(now==next.end()||now->second!=2){removed_.push_back({it->first,it->second.type,it->second.position});it=standing_.erase(it);}else ++it;
     }
 #endif
     seen_.swap(next);primed_=true;
     return out;
 }
-std::vector<uint32_t> Sync::takeRemoved(){std::vector<uint32_t> out;out.swap(removed_);return out;}
+std::vector<Sync::Removed> Sync::takeRemoved(){std::vector<Removed> out;out.swap(removed_);return out;}
 bool standing(const std::vector<Record>& records,uint8_t type,const std::array<double,3>& p,double range){
     for(auto& r:records)if(r.type==type&&r.state==2){
         double dx=r.at.position[0]-p[0],dy=r.at.position[1]-p[1],dz=r.at.position[2]-p[2];

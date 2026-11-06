@@ -165,7 +165,11 @@ struct Runtime final:ds::Transport {
         for(auto& e:incoming) {
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(!coop){note("CARGO partner event ignored (not in peer mode)\n");continue;}
-            if(e.type==2&&netCopies.known(e.ref)){netCopies.dismantled(e.ref,now);continue;}   // a dismantled structure
+            if(e.type==4) {   // the partner dismantled a structure: by ref, or by type and place when the ref is unknown here
+                if(netCopies.known(e.ref))netCopies.dismantled(e.ref,now);
+                else if(auto net=mod::structures::netVariant(uint8_t(e.item)))netCopies.dismantledAt(*net,{e.position[0],e.position[2],e.position[1]},now);
+                continue;
+            }
             if(e.type==2) {
                 // The partner picked up (or used) a shared item: remove our copy if it lies in the world here.
                 std::array<double,3> at{e.position[0],e.position[2],e.position[1]};   // adapter -> game axes
@@ -241,9 +245,10 @@ struct Runtime final:ds::Transport {
             unconstruct({-1.5f,-1.5f,-3,0},{1.5f,1.5f,3,0},t,false,false,true);++structRemoved;
             std::ostringstream o;o<<"STRUCT partner removed at "<<at[0]<<","<<at[1]<<","<<at[2]<<"\n";note(o.str().c_str());
         }
-        for(auto id:structSync.takeRemoved()) {
-            ds::CargoEvent e;e.type=2;e.ref=structIdBase+id;core->queueCargo(e);
-            note(("STRUCT dismantled id "+std::to_string(id)+" -> partner\n").c_str());
+        for(auto& rm:structSync.takeRemoved()) {
+            ds::CargoEvent e;e.type=4;e.ref=structIdBase+rm.id;e.item=rm.type;e.position={rm.position[0],rm.position[2],rm.position[1]};   // game -> adapter axes
+            core->queueCargo(e);
+            note(("STRUCT dismantled id "+std::to_string(rm.id)+" -> partner\n").c_str());
         }
     }
     mod::structures::NetCopies netCopies;uint64_t structRemoved=0;

@@ -264,7 +264,7 @@ nonce and build checks:
 | Field | CARGO | CARGO_ACK |
 |---|---|---|
 | 56 sequence | event number, 1, 2, 3... per connection | the event number acknowledged |
-| 62 action | event type 1..3 (1 = cargo placed in the world, 2 = shared cargo taken: the partner removes its copy) | ignored |
+| 62 action | event type 1..4 (1 = cargo placed in the world, 2 = shared cargo taken: the partner removes its copy, 3 = structure built, 4 = structure dismantled) | ignored |
 | 72 position, 90 yaw | where the cargo is, adapter axes | ignored |
 | 96 t0 | the game's cargo item hash, 0..2^32-1 | ignored |
 | 104 t1 | nonzero event id chosen by the sender, stable across reconnections, below 2^53 | ignored |

@@ -105,7 +105,7 @@ int main(int argc,char** argv){
 #endif
     ds::Config config;config.role=role;config.session=session;config.nonce=(nowMs()<<8)|slot|1;
     ds::Core core(config,shell,shell);
-    auto start=nowMs();uint64_t nextStatus=start+1000,connectedAt=0,refused=0,ownRef=0,droppedAt=0,builtRef=0,builtAt=0;bool dropped=false,built=false;
+    auto start=nowMs();uint64_t nextStatus=start+1000,connectedAt=0,refused=0,ownRef=0,droppedAt=0,builtRef=0,builtAt=0;bool dropped=false,built=false;std::array<double,3> builtAtPos{};
     std::vector<std::pair<uint64_t,uint64_t>> toTake;   // (when, ref)
     std::printf("PARTNER slot %u -> %u session %llu mode %s\n",slot,peerSlot,(unsigned long long)session,shell.replay?"replay":"follow");std::fflush(stdout);
     while(nowMs()-start<seconds*1000){
@@ -144,11 +144,11 @@ int main(int argc,char** argv){
         if(buildAfter>=0&&!built&&connectedAt&&shell.mine&&now-connectedAt>=buildAfter*1000){
             mod::structures::Built b;b.type=uint8_t(buildType);
             ds::CargoEvent e;e.type=3;e.item=mod::structures::pack(b);e.position=shell.mine->position;e.yaw=shell.mine->yaw;
-            e.id=(nowMs()<<4)|slot|2;e.ref=(nowMs()<<4)|slot|6;core.queueCargo(e);built=true;builtRef=e.ref;builtAt=now;
+            e.id=(nowMs()<<4)|slot|2;e.ref=(nowMs()<<4)|slot|6;core.queueCargo(e);built=true;builtRef=e.ref;builtAt=now;builtAtPos=e.position;
             std::printf("STRUCT built type %u ref %llu at %.2f,%.2f,%.2f\n",buildType,(unsigned long long)e.ref,e.position[0],e.position[1],e.position[2]);
         }
         if(builtRef&&unbuildAfter>=0&&now-builtAt>=unbuildAfter*1000){
-            ds::CargoEvent e;e.type=2;e.ref=builtRef;e.id=(nowMs()<<4)|slot|10;core.queueCargo(e);
+            ds::CargoEvent e;e.type=4;e.ref=builtRef;e.item=buildType;e.position=builtAtPos;e.id=(nowMs()<<4)|slot|10;core.queueCargo(e);
             std::printf("STRUCT dismantled ref %llu\n",(unsigned long long)builtRef);builtRef=0;
         }
         if(now>=nextStatus){

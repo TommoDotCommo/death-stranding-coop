@@ -38,10 +38,11 @@ int main(){
     // Dismantled: an announced structure that disappears (or stops being built) is reported once; others never.
     { Sync s;s.observe({});s.observe({rec(10005,25,2),rec(10006,28,2)});
       CHECK(s.takeRemoved().empty());
-      s.observe({rec(10006,28,2)});auto r=s.takeRemoved();CHECK(r.size()==1&&r[0]==10005);
-      s.observe({rec(10006,28,0)});r=s.takeRemoved();CHECK(r.size()==1&&r[0]==10006);
+      s.observe({rec(10006,28,2)});auto r=s.takeRemoved();CHECK(r.size()==1&&r[0].id==10005&&r[0].type==25);
+      s.observe({rec(10006,28,0)});r=s.takeRemoved();CHECK(r.size()==1&&r[0].id==10006);
       s.observe({});CHECK(s.takeRemoved().empty()); }
-    { Sync s;s.observe({rec(10007,25,2)});s.observe({});CHECK(s.takeRemoved().empty()); }   // existed before: never announced
+    { Sync s;s.observe({rec(10007,25,2,4)});s.observe({});auto r=s.takeRemoved();CHECK(r.size()==1&&r[0].id==10007&&r[0].type==25&&r[0].position[0]==4); }   // built in an earlier session: still reported, with type and place
+    { NetCopies n;n.dismantledAt(26,{10,2,3},1000);auto a=rec(100009,26,2,10);CHECK(n.due({a},1500).size()==1);CHECK(n.due({a},2000).empty()); }   // unknown ref: by type and place
     // A partner structure already standing here (saved from an earlier session) is not built twice.
     { auto a=rec(100009,26,2,10);CHECK(standing({a},26,{10.3,2,3})&&standing({a},26,{10.9,2,3})&&!standing({a},26,{11.5,2,3})&&!standing({a},29,{10,2,3}));   // the game may move what it builds by about 0.6 m
       auto b=rec(100010,26,0,10);CHECK(!standing({b},26,{10,2,3})); }

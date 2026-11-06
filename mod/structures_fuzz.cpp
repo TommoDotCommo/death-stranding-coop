@@ -20,7 +20,7 @@ struct World{
 };
 static double dist(const std::array<double,3>& a,const std::array<double,3>& b){return std::hypot(a[0]-b[0],a[1]-b[1]);}
 int main(){
-    for(unsigned seed=1;seed<=200;++seed){
+    for(int restarts=0;restarts<2;++restarts)for(unsigned seed=1;seed<=200;++seed){
         std::mt19937 rng(seed);World w[2];uint64_t now=0;const uint64_t base[2]={1ull<<40,2ull<<40};unsigned spot=0;
         auto tick=[&](){now+=500;
             for(int s=0;s<2;++s){auto& me=w[s];auto& other=w[1-s];
@@ -31,13 +31,14 @@ int main(){
                         if(standing(other.list(),*net,b.position))continue;
                         Record r;r.id=other.nextNet++;r.type=*net;r.state=2;r.at.position=b.position;r.at.rotation=rotation(0,0,0);
                         other.building.push_back({r,now+500+rng()%3000});}
-                    else if(other.copies.known(e.ref))other.copies.dismantled(e.ref,now);}
+                    else if(e.type==4){if(other.copies.known(e.ref))other.copies.dismantled(e.ref,now);
+                        else if(auto net=netVariant(uint8_t(e.item)))other.copies.dismantledAt(*net,e.at,now);}}
             }
             for(int s=0;s<2;++s){auto& me=w[s];auto recs=me.list();
                 for(auto& b:me.sync.observe(recs))me.out.push_back({3,pack(b),b.position,base[s]+b.id,now+500+rng()%2000});
                 for(auto at:me.copies.due(recs,now))for(auto it=me.table.begin();it!=me.table.end();)
                     if(it->second.id>=NetFirst&&dist(it->second.at.position,at)<=1.5)it=me.table.erase(it);else ++it;
-                for(auto id:me.sync.takeRemoved())me.out.push_back({2,0,{},base[s]+id,now+500+rng()%2000});}
+                for(auto& rm:me.sync.takeRemoved())me.out.push_back({4,rm.type,rm.position,base[s]+rm.id,now+500+rng()%2000});}
         };
         tick();
         for(int step=0;step<150;++step){
@@ -46,6 +47,7 @@ int main(){
                 ++spot;r.at.position={double(spot%50)*4,double(s*400+(spot/50)*4),100};r.at.rotation=rotation(0,0,0);me.building.push_back({r,now+500+rng()%2000});}
             else if(a==1){for(auto it=me.table.begin();it!=me.table.end();++it)if(it->second.id>=PlayerFirst&&it->second.id<NetFirst&&rng()%2){me.table.erase(it);break;}}   // dismantle own
             int quiet=1+int(rng()%3);for(int i=0;i<quiet;++i)tick();
+            if(restarts&&rng()%30==0){for(int i=0;i<40;++i)tick();int r=int(rng()%2);w[r].sync=Sync();w[r].copies=NetCopies();tick();}   // a mod restarts at a quiet moment
             if(step%25==24){
                 for(int i=0;i<80;++i)tick();   // quiet: everything delivered, built and cleared
                 for(int s=0;s<2;++s){
@@ -60,6 +62,6 @@ int main(){
             }
         }
     }
-    std::puts("two-world structure fuzz: 200 seeds x 150 steps, copies match originals after every quiet period");
+    std::puts("two-world structure fuzz: 200 seeds x 150 steps, with and without restarts, copies match originals after every quiet period");
     return 0;
 }

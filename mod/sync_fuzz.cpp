@@ -51,7 +51,7 @@ void cargoRun(unsigned seed){
 }
 void structuresRun(unsigned seed){
     std::mt19937 rng(seed^0x5eed);unsigned step=0;structures::Sync s;
-    std::map<uint32_t,structures::Record> world;std::map<uint32_t,bool> standing;   // id -> announced and not yet removed
+    std::map<uint32_t,structures::Record> world;std::map<uint32_t,bool> standing,announcedOpen;   // built and known; announced and not yet removed
     for(step=0;step<400;++step){
         int a=int(rng()%6);
         if(a<=1){structures::Record r;uint32_t band=rng()%3;r.id=band==0?uint32_t(rng()%5000):band==1?10000+uint32_t(rng()%200):100000+uint32_t(rng()%200);
@@ -61,9 +61,10 @@ void structuresRun(unsigned seed){
         std::vector<structures::Record> v;for(auto& [k,r]:world){(void)k;v.push_back(r);}
         for(auto& b:s.observe(v)){
             CHECK(b.id>=structures::PlayerFirst&&b.id<structures::NetFirst);CHECK(world.count(uint32_t(b.id))&&world[uint32_t(b.id)].state==2);
-            CHECK(structures::netVariant(b.type).has_value());CHECK(!standing[uint32_t(b.id)]);standing[uint32_t(b.id)]=true;
+            CHECK(structures::netVariant(b.type).has_value());CHECK(!announcedOpen[uint32_t(b.id)]);announcedOpen[uint32_t(b.id)]=true;
         }
-        for(auto id:s.takeRemoved()){CHECK(standing[id]);standing[id]=false;}
+        for(auto& rm:s.takeRemoved()){CHECK(standing[rm.id]);standing[rm.id]=false;announcedOpen[rm.id]=false;CHECK(structures::netVariant(rm.type).has_value());}
+        for(auto& r:v)if(r.id>=structures::PlayerFirst&&r.id<structures::NetFirst&&r.state==2&&structures::netVariant(r.type))standing[r.id]=true;
     }
 }
 int main(){
