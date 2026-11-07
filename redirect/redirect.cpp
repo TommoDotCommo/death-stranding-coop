@@ -1074,3 +1074,25 @@ void* original_compiler_export(const char* name) {
     if(!InitOnceExecuteOnce(&once,load,nullptr,nullptr)) fatal("redirect: compiler bootstrap failed\n");
     auto f=real_gpa(original,name);if(!f) fatal("redirect: original compiler export missing\n");return reinterpret_cast<void*>(f);
 }
+
+// Proxy named after a system DLL the game imports but does not ship (avrt.dll): the real DLL is loaded from System32
+// by its full path, never from the game folder, so nothing in the game folder is renamed or replaced.
+void* original_system_export(const wchar_t* dll,const char* name) {
+    static INIT_ONCE once=INIT_ONCE_STATIC_INIT;
+    static HMODULE original=nullptr;
+    static const wchar_t* wanted=nullptr;
+    wanted=dll;
+    auto load=[](PINIT_ONCE,PVOID,PVOID*)->BOOL {
+        wchar_t dir[MAX_PATH];UINT n=GetSystemDirectoryW(dir,MAX_PATH);
+        if(!n||n>=MAX_PATH) fatal("redirect: system directory unavailable\n");
+        std::wstring p=std::wstring(dir)+L"\\"+wanted;
+        original=::LoadLibraryExW(p.c_str(),nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if(!original) fatal("redirect: system DLL load failed\n");
+        // The loader must have picked the System32 file, not this proxy (same base name).
+        wchar_t got[32768];DWORD g=GetModuleFileNameW(original,got,32768);
+        if(!g||g>=32768||original==own||_wcsicmp(got,p.c_str())) fatal("redirect: system DLL is not the System32 file\n");
+        drain_modules();patch(original);return TRUE;
+    };
+    if(!InitOnceExecuteOnce(&once,load,nullptr,nullptr)) fatal("redirect: system DLL bootstrap failed\n");
+    auto f=real_gpa(original,name);if(!f) fatal("redirect: system DLL export missing\n");return reinterpret_cast<void*>(f);
+}

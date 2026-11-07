@@ -1,0 +1,22 @@
+LIBRARY avrt
+EXPORTS
+  AvCreateTaskIndex=coop_fwd_0 @1
+  AvQuerySystemResponsiveness=coop_fwd_1 @2
+  AvQueryTaskIndexValue=coop_fwd_2 @3
+  AvRevertMmThreadCharacteristics=coop_fwd_3 @4
+  AvRtCreateThreadOrderingGroup=coop_fwd_4 @5
+  AvRtCreateThreadOrderingGroupExA=coop_fwd_5 @6
+  AvRtCreateThreadOrderingGroupExW=coop_fwd_6 @7
+  AvRtDeleteThreadOrderingGroup=coop_fwd_7 @8
+  AvRtJoinThreadOrderingGroup=coop_fwd_8 @9
+  AvRtLeaveThreadOrderingGroup=coop_fwd_9 @10
+  AvRtWaitOnThreadOrderingGroup=coop_fwd_10 @11
+  AvSetMmMaxThreadCharacteristicsA=coop_fwd_11 @12
+  AvSetMmMaxThreadCharacteristicsW=coop_fwd_12 @13
+  AvSetMmThreadCharacteristicsA=coop_fwd_13 @14
+  AvSetMmThreadCharacteristicsW=coop_fwd_14 @15
+  AvSetMmThreadPriority=coop_fwd_15 @16
+  AvSetMultimediaMode=coop_fwd_16 @17
+  AvTaskIndexYield=coop_fwd_17 @18
+  AvTaskIndexYieldCancel=coop_fwd_18 @19
+  AvThreadOpenTaskIndex=coop_fwd_19 @20

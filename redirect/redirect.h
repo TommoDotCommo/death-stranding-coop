@@ -43,4 +43,6 @@ void flush_redirect_log();
 // Only after loader return, on first compiler API call.
 int start_instance_mod();
 void* original_compiler_export(const char* name);
+// Export of the real System32 DLL (loaded by full path) that the proxy is named after.
+void* original_system_export(const wchar_t* dll,const char* name);
 #endif
