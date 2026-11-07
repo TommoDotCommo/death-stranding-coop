@@ -140,7 +140,11 @@ item put down from the menu keeps a carry-frame position for over a second (it w
 and continue while connected: the crate put down after the last save vanished with the reload and the partner was
 told to remove it. A third: the cargo menu stages the items next to the porter exactly like a pick-up, so opening it
 next to shared cargo made the partner's copies vanish and come back; a pick-up is now reported once the porter walks
-on, and opening and closing the menu sends nothing (live).
+on, and opening and closing the menu sends nothing (live). Then two real copies with the mod in both (no stand-in): the
+porter of one carried a crate off, put it down from the menu (the other game created it at the same place to the
+centimetre) and picked it up again (the other game removed it by its shared id). The other copy's idle porter sat
+down and put the corpse down meanwhile; it stayed local. While a porter's cargo menu is open the game uses the
+double for its preview, so the partner is hidden there and comes back when the menu closes.
 
 ## Testing aids (built 2026-11-03, first run live 2026-11-07)
 
