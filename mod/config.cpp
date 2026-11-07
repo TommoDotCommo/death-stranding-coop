@@ -19,7 +19,7 @@ Config parseConfig(const std::string& s) {
         ws();if(at==s.size() || s[at]!=',') break;++at;
     }
     take('}');ws();if(at!=s.size()) throw std::runtime_error("trailing JSON");
-    for(auto& kv:values) if(!std::set<std::string>{"slot","share_environment","join_move","carry_visual","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
+    for(auto& kv:values) if(!std::set<std::string>{"slot","share_environment","join_move","carry_visual","partner_gear","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
     auto text=[&](const char* k){if(!strings.count(k)) throw std::runtime_error(std::string("missing/string expected: ")+k);return values.at(k);};
     auto number=[&](const char* k){auto v=values[k];if(strings.count(k)||v.empty()||v.size()>15||v.find_first_not_of("0123456789")!=std::string::npos||(v.size()>1&&v[0]=='0')) throw std::runtime_error(std::string("invalid integer: ")+k);return std::stoull(v);};
     auto boolean=[&](const char* k,bool d){if(!values.count(k)) return d;auto v=values[k];if(strings.count(k)||(v!="true"&&v!="false")) throw std::runtime_error("boolean expected");return v=="true";};
@@ -62,6 +62,8 @@ Config parseConfig(const std::string& s) {
     c.virtualPad=boolean("virtual_pad",false);
     c.autoContinue=boolean("auto_continue",false);
     if(c.autoContinue&&!c.gameThread)throw std::runtime_error("auto_continue requires game_thread");
+    c.partnerGear=boolean("partner_gear",false);
+    if(c.partnerGear&&c.provider!="game")throw std::runtime_error("partner_gear requires game provider");
     c.carryVisual=boolean("carry_visual",false);
     if(c.carryVisual&&c.provider!="game")throw std::runtime_error("carry_visual requires game provider");
     if(c.virtualPad&&(c.discovery||!c.required||(!c.selfTick&&!c.gameThread)))throw std::runtime_error("virtual_pad requires a ticking mod (self_tick or game_thread), no discovery and required true");

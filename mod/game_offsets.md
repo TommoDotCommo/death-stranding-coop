@@ -799,8 +799,8 @@ chain, the stack order, and the slot types seen for a back carry and a hand carr
 
 ## Outfit (2026-11-03, read-only)
 
-The double has no backpack or hood. The porter's backpack, pouches and other gear are about 30 attached child
-entities (plain `Entity` and groups of `DSAttachOrPhysicsEntity`), not body art parts, so outfit parity means
+The double has no backpack or hood (the backpack is now copied onto the own body: "Gear on the partner body"). The
+porter's backpack, pouches and other gear are about 30 attached child entities (plain `Entity` and groups of `DSAttachOrPhysicsEntity`), not body art parts, so outfit parity means
 attaching gear entities to the double. Body art parts are switched by `ArtPartsData_sExportedEnableModelPartFromHash`
 (22b4f80 -> 22b5090: entity, part name, on). The name is hashed with CRC32C (190fe50) and looked up in the 52-entry
 table of the entity's `ArtPartsData` (entity+180, +100 count, +108 array). The porter and the double share that
@@ -813,6 +813,46 @@ release (`EntityComponent_ExportedRemove`, 23618c0) so the private room is uncha
 hood, but not the backpack. Live, though, the porter has no variation component: 68 components, including `ArtPartsData`,
 `ArtPartsShaderVariableComponent` and `BoostMeshStreamingForArtPartsDataComponent`. His look is the art-part states
 plus attached gear, so this route does not reproduce it.
+
+## Gear on the partner body (2026-11-08, live)
+
+The porter's gear, read live (`ds.exe` build 13300582, Episode 1 test save; Decima type names from each vtable's slot-0
+type getter and the descriptor name at +40): about 60 child entities. Direct children of the porter are plain `Entity`
+pieces (armour plates, power gloves, cuffs, ammo pouch, harmonica, head pieces, boot, BB cord), each moved by an
+`AttachToHelperMover` (entity +b0, vtable 3d0b140) whose helper name is a C string at mover +b0 (`HLP_Hcuf`,
+`HLP_Waist_l_armor`, `HLP_Head`, ...); a `DSBackpackEntity` (vtable 3dcb9e0, 0x5600 bytes) at `HLP_Backpack` with a
+`CustomizedAttachToHelperMover` (3ded730); the `DSOdradekArmEntity` (3da2ee8); and `DSAttachOrPhysicsEntity` groups
+(3df0420) with no helper. Gear the porter does not show is there too, hidden (entity flag bit 1 clear, usually asleep
+too): in the test save only the cuff, the backpack and the Odradek are visible. The backpack's own children are its
+pouches, rain cover, cylinder and item pieces and the carried cargo (`DSBaggage2Entity`, the corpse at
+`HLP_DeadBody_3rd`). `DSBackpackEntityResource` names its parts: `DreamCatcherEntity` +100, `ChiralCylinderEntity`
++108, `BBPodBagEntity` +110, `RainCoverEntity` +118, `GPCaseEntity` +120, `PouchSetEntity` +128, `BackpackBeltEntity`
++130, `ArtPartsVariations` +138. A backpack made from that resource builds them itself (0x2bdf942 stores the rain
+cover it creates at backpack +3a0), so a copy comes with its pouches in their default state.
+
+The resident double has only a harmonica, an Odradek and three private-room floor effects. While the porter's cargo
+menu is open the game does not make a second backpack: it re-parents the porter's own gear, backpack and cargo to
+the double (moved to the preview place, 100, 100, 20) and back afterwards. A partner seen at the same time as the
+porter cannot use that.
+
+Copying a piece: `EntityResource_ExportedCreateEntity` (23806a0) with the piece's resource (`Entity_ExportedGetResource`,
+2362ba0), then `Entity_ExportedSetParentAndAttachToHelper` (234ceb0: entity, parent, helper C string, bool; the bool
+sets entity +88 bit 9; it re-parents with 235e990, then installs a new `AttachToHelperMover` and sends a transform
+message). `EntityResource_ExportedCreateEntityWithParent` (2380630) takes the same arguments plus the parent (ninth);
+its creator (23745a0) sets the parent and bit 9 before the entity joins the world. Live, a plain `Entity` (the cuff)
+copied either way works.
+
+A copied backpack hung the game a frame after it was made, with or without a parent, attached or not. The main thread
+waited for a job counter; the crash recorder (`COOP_CRASH_RECORD=2`) showed the job had faulted reading address 0x18 at
+2c52010, called from the backpack's update at 2be3a84. The backpack's `DSBaggage2CarrierComponent` (vtable 3dd9750)
+keeps its carrier at component +50; the cargo manager fills it only for the porter's backpack, so a copy's is null.
+2c52010(carrier, slot type) returns the carrier's slot of that type (count +10, array +18, type at slot +1) or null,
+and the update writes slot +70 without a null check. A sleeping copy (`Entity_ExportedSetSleeping`) never runs that
+update and did not hang, but it stays where it was made instead of following the body. Given an empty carrier the mod
+owns (one slot for each of 32 slot types, no stacks or items), the next fault was a write to 0x24 inside
+`EnterCriticalSection` from 2c5ce00: the carrier's +a0 and each slot's +78 are Windows `CRITICAL_SECTION`s. With both
+initialised, a copied backpack follows the body while it walks and runs, and a two-minute soak, parking, hiding and
+removal ran without a fault (`mod/gear.h`).
 
 ## The partner's own body: the engine's spawn path, read from RTTI (static, 2026-11-03, nothing called)
 

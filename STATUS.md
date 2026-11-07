@@ -13,6 +13,7 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 | Exchange poses between two copies | Over loopback: median error 5 mm, all compared samples within 0.5 m and 10 degrees after excluding samples next to height-change snaps (`mod/analyse_presence.py --snap-window 2`). |
 | Modded copies stay offline | The game's config and online-server connections are refused; it switches to its own offline mode. |
 | The partner's own body (`own` mode, 2026-11-08) | The mod makes a second Sam with the game's entity creator and dresses it with the game's own in-place art-parts swap (the call the porter's streaming control makes on the resident double), after waiting until the game has dressed the porter. Close-ups over 8 frames: a clean porter-suit Sam; the earlier apply-a-second-outfit dress showed two outfits overlapping. Two copies in own mode: each body within 5 mm of the other porter, visible 100 % of the time, no hang. `peer` (borrow the resident double) stays the default mode. |
+| The partner's gear (opt-in, 2026-11-08) | `partner_gear` copies the porter's visible gear (backpack with its pouches, wrist cuff) onto the own body with the game's entity creator and attach call. Live, one copy and the stand-in: the backpack follows the body walking and running, hides with it, and a two-minute soak with park, return, removal and re-creation ran without a fault (crash recorder on). Carried cargo is not drawn; the gear is the local porter's. |
 | Story progress in the handshake | The episode is read from the game (read-only) and sent when the session starts (episode 1 in the test save); `progress_mismatch` warns (default) or refuses. |
 | Join at host (opt-in) | `join_at_host` with `join_move: "native"` moves a guest that is over 300 m away next to the host once per session with the game's own player teleport (the world map's fast-travel path). Live, one copy and the stand-in host 600 m away: moved, read back 1.6 m from the target, the game set Sam on the terrain there and he stayed; no fault. |
 | What the partner carries (opt-in) | `carry_visual` reads the porter's carried cargo read-only and sends a summary; the partner logs it (live: "1 entry ... x2", cleared on disconnect). Nothing is drawn yet. |
@@ -23,8 +24,8 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 ## Not done
 
 - Drawing the partner as anything other than a standing/walking/running Sam: no vehicles yet (a read-only bike/truck
-  reader is built and treats "no ride component" as on foot, but the test save has no vehicle), no carried cargo or
-  gear drawn on the partner, no cutscene sharing.
+  reader is built and treats "no ride component" as on foot, but the test save has no vehicle), no carried cargo drawn on
+  the partner (the backpack and cuff are, opt-in, and they are the local porter's), no cutscene sharing.
 - BTs, MULEs, death and voidouts, shared orders and deliveries, saves of a shared world, shared weather (time of day
   sync is built, off by default, untested live; the time setter can advance the day counter), the partner's own
   controller input.
@@ -106,7 +107,7 @@ Working live, unattended, in disposable copies with networking enforced:
 - An unreadable pose for one tick never makes the mod forget a borrowed double; only a new or missing porter
   entity does.
 
-Not done: the partner has no backpack or hood (the porter's gear is about 30 attached entities). A real
+The partner's backpack and cuff are copied onto the own body (opt-in, `partner_gear`); the hood is an art part and follows the dressing. A real
 private-room entry is untested, because the test save carries a corpse bag and the game refuses entry with one.
 Shared cargo works in a first version: cargo one porter places appears in the partner's world at the same spot. It
 travels as reliable CARGO events, at most once even across reconnects; the core's fuzz tests run them through loss,

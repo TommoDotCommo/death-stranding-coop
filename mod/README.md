@@ -643,6 +643,21 @@ game's porter carries is printed as `CARRY the porter carries ...`. Tests: `carr
 copies through the real core with loss and an outage, seven mutants in `test_game_thread_mutants.py`) and
 `test_partner_carry.py` (two stand-ins on loopback, one restarted).
 
+## The partner's gear (`partner_gear`, off by default)
+
+With `"partner_gear": true` in `mod.json` (requires the game provider), or the command `puppet.gear` `on <stamp>`, the
+body the mod makes for the partner in `own` mode wears the porter's visible gear: in the Episode 1 test save the
+backpack (with its pouches, rain cover and cylinder) and the wrist cuff. The mod reads the porter's direct children,
+copies each visible plain gear piece and the backpack from its own game resource, and attaches the copy to the body at
+the same helper with the game's attach call (`gear.h`; the evidence is in `game_offsets.md`, "Gear on the partner
+body"). A copied backpack gets an empty cargo carrier the mod owns, without which the game's backpack update faults.
+The copies are hidden whenever the body is, removed with `off <stamp>`, when `own` mode ends or when the body changes,
+and forgotten (never touched) when a new world loads. The source is the local porter, so the partner shows this
+porter's gear, not their own, and carried cargo is not drawn. The resident double (`peer` mode) is never given gear.
+Log lines start with `GEAR`. Tests: `gear_test.cpp` (the porter's tree in fake memory, the plan, the mirror in a fake
+world, the empty carrier and its slot lookup; six mutants in `test_game_thread_mutants.py`) and `make
+gear-windows-test` (the carrier's critical sections on Windows, with an uninitialised mutant).
+
 ## Live test commands (per process, stamp-guarded)
 
 Each command is a file in the mod folder. The mod consumes it and accepts it only for this process
@@ -662,6 +677,8 @@ Each command is a file in the mod folder. The mod consumes it and accepts it onl
   marker): `on <stamp>` shows the partner as a map pin (group 4) and arms pings on V; `off <stamp>` removes the mod's
   markers; `ping <stamp>` pings at the porter's position (group 3, here and, when connected, in the partner's world as a
   CARGO event of type 5); `key <virtual-key code> <stamp>` changes the ping key (0 = none). Log lines start with `MARKER`.
+- `puppet.gear`: `on <stamp>` copies the porter's visible gear onto the own body (`own` mode), `off <stamp>` removes
+  it (`gear.h`, the `partner_gear` section above).
 - `puppet.body`: `create <stamp>` asks the engine for a second Sam from the double's resource, 3 m to the porter's side,
   and logs what the request produces (`BODY ...` lines); `remove <stamp>` removes it (`body.h`, an experiment).
 - `puppet.vehicle`: `read <stamp>` logs one read-only vehicle observation; `watch <stamp>` logs at most four a second

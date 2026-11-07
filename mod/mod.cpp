@@ -36,6 +36,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "cargo.h"
 #include "marker.h"
 #include "carry_visual.h"
+#include "gear.h"
 #include "structures.h"
 #ifdef MOD_FAKE_NETWORK
 #include "fake_memory.h"
@@ -174,6 +175,8 @@ struct Runtime final:ds::Transport {
     bool partnerMode() const {return twinMode==TwinMode::Peer||twinMode==TwinMode::Own;}
     std::filesystem::path cargoCommand;std::function<void(uint32_t,const mod::puppet::Transform&)> cargoCreate;
     std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
+    // The porter's visible gear on the partner's own body (gear.h); config partner_gear or puppet.gear "on <stamp>".
+    std::filesystem::path gearCommand;std::unique_ptr<mod::gear::Mirror> gear;bool gearOn=false;
     // Read-only vehicle diagnostics. No changes to presence or actor control (vehicle.h).
     std::filesystem::path vehicleCommand;std::unique_ptr<mod::vehicle::Monitor> vehicleMonitor;
     // Optional environment sampling and host time setter. Only the verified callback can call the export.
@@ -560,7 +563,7 @@ struct Runtime final:ds::Transport {
 #endif
 #endif
                 puppet=std::make_unique<mod::puppet::Probe>(std::move(api),[this](const std::string& row){note(row.c_str());});
-                twinCommand=path.parent_path()/"puppet.double";cargoCommand=path.parent_path()/"puppet.cargo";bodyCommand=path.parent_path()/"puppet.body";
+                twinCommand=path.parent_path()/"puppet.double";cargoCommand=path.parent_path()/"puppet.cargo";bodyCommand=path.parent_path()/"puppet.body";gearCommand=path.parent_path()/"puppet.gear";
                 markerCommand=path.parent_path()/"puppet.marker";
 #ifdef MOD_FAKE_NETWORK
                 // Fake tree: player entity 0x6000 -> CameraEntity 0xa000 -> parked double 0xa800.
@@ -645,6 +648,8 @@ struct Runtime final:ds::Transport {
                     driver.find=[this](uint64_t){return ownEntity;};
                     ownTwin=std::make_unique<mod::puppet::Double>(std::move(driver),[this](const std::string& row){note(row.c_str());});
                     ownTwin->walk(true);
+                    gearOn=config.partnerGear;
+                    gear=std::make_unique<mod::gear::Mirror>(mod::gear::nativeApi(*sampler),[this](const std::string& row){note(row.c_str());});
                 }
 #endif
             }
@@ -770,6 +775,25 @@ struct Runtime final:ds::Transport {
         }
         body->tick();
     }
+    // The porter's visible gear on the own body only (never on the game's resident double). "on <stamp>" / "off
+    // <stamp>" in puppet.gear; off removes the copies. The copies are hidden whenever the body is.
+    void tickGear(uint64_t bodyEntity,const mod::puppet::Anchor& anchor) {
+        if(!gear)return;
+        if(std::filesystem::exists(gearCommand)) {
+            auto command=readConfig(gearCommand);auto stamp=" "+mod::runStamp()+"\n";
+            if(!std::filesystem::remove(gearCommand))throw std::runtime_error("cannot consume gear command");
+            if(command=="on"+stamp){gearOn=true;gear->start();note("GEAR on\n");}
+            else if(command=="off"+stamp){gearOn=false;gear->stop();note("GEAR off\n");}
+            else note("GEAR ignored command for another process\n");
+        }
+        if(!gearOn||!anchor.entity)return;
+        uint64_t flags=0;bool shown=bodyEntity&&sampler->read(bodyEntity+mod::gear::Flags,&flags,8)&&(flags&mod::gear::FlagVisible);
+        auto pose=bodyEntity?mod::puppet::readEntityPose(*sampler,bodyEntity):anchor.pose;
+        if(bodyEntity&&!(pose.available&&pose.coherent))return;   // never make pieces at an unreadable place
+        auto at=bodyEntity?mod::puppet::transform(pose):mod::puppet::Transform{};
+        auto* sp=&*sampler;uint64_t porter=anchor.entity;
+        gear->tick(bodyEntity,porter,[sp,porter]{return mod::gear::plan(mod::gear::snapshot(*sp,porter),sp->base);},at,shown);
+    }
     void tickTwin(uint64_t now) {
         if(std::filesystem::exists(twinCommand)) {
             auto command=readConfig(twinCommand);auto stamp=" "+mod::runStamp()+"\n";
@@ -817,11 +841,13 @@ struct Runtime final:ds::Transport {
         // Own body: made (once per world) and driven by its own backend; the resident double is released, never
         // dropped while borrowed. Until the body exists, or if the game refuses to make one, the resident double is used.
         bool useOwn=twinMode==TwinMode::Own&&own&&ownTwin&&!own->exhausted();
-        if(useOwn)ownEntity=own->tick(mod::puppet::readLocalAnchor(*sampler));
+        auto anchor=mod::puppet::readLocalAnchor(*sampler);
+        if(useOwn)ownEntity=own->tick(anchor);
         if(useOwn&&ownEntity){
             twin->tick(true,nullptr);ownTwin->tick(true,goal,speed,actions,hold);
         }
         else{twin->tick(true,goal,speed,actions,hold);if(ownTwin)ownTwin->tick(true,nullptr);}
+        tickGear(useOwn?ownEntity:0,anchor);
     }
     bool tickOnce(std::string& err,bool gameContext=false) {
         std::lock_guard<std::timed_mutex> guard(mutex);

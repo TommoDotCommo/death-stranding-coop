@@ -3,8 +3,8 @@ CXX ?= g++
 MINGW ?= x86_64-w64-mingw32-g++-posix
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = environment.h join.h game_thread.h puppet.h double.h body.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = environment.h join.h game_thread.h puppet.h double.h body.h gear.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -91,6 +91,16 @@ build/cargo-test: cargo_test.cpp cargo.cpp cargo.h discovery.cpp | build
 	$(CXX) $(FLAGS) cargo_test.cpp cargo.cpp discovery.cpp -o $@
 build/marker-test: marker_test.cpp marker.cpp marker.h discovery.cpp | build
 	$(CXX) $(FLAGS) marker_test.cpp marker.cpp discovery.cpp -o $@
+# The empty carrier's critical sections on Windows (WSL interop; skipped without it); the uninitialised mutant must fail.
+gear-windows-test: gear_test.cpp gear.cpp gear.h puppet.cpp pose.cpp discovery.cpp | build
+	$(MINGW) $(WINFLAGS) gear_test.cpp gear.cpp puppet.cpp pose.cpp discovery.cpp -o build/gear-test.exe -lbcrypt -lwinmm
+	$(MINGW) $(WINFLAGS) -DMUTANT_GEAR_LOCKS gear_test.cpp gear.cpp puppet.cpp pose.cpp discovery.cpp -o build/mutant-gear-locks.exe -lbcrypt -lwinmm
+	@./build/gear-test.exe >/dev/null 2>&1; code=$$?; if test $$code -eq 126 -o $$code -eq 127; then echo "gear-windows-test: no Windows interop, skipped"; exit 0; fi; \
+	 ./build/gear-test.exe || exit 1; \
+	 ./build/mutant-gear-locks.exe >/dev/null 2>build/gear-locks.err; code=$$?; if test $$code -ne 1 || ! grep -q oracle build/gear-locks.err; then echo "SURVIVED GEAR_LOCKS (exit $$code)"; exit 1; fi; echo KILLED MUTANT_GEAR_LOCKS
+.PHONY: gear-windows-test
+build/gear-test: gear_test.cpp gear.cpp gear.h puppet.cpp puppet.h pose.cpp discovery.cpp | build
+	$(CXX) $(FLAGS) gear_test.cpp gear.cpp puppet.cpp pose.cpp discovery.cpp -o $@
 build/carry-visual-test: carry_visual_test.cpp carry_visual.cpp carry_visual.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(CXX) $(FLAGS) carry_visual_test.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@
 build/pad-test: pad_test.cpp pad.cpp pad.h | build
@@ -105,7 +115,7 @@ build/coop-partner: environment.cpp environment.h partner.cpp partner_logic.cpp 
 	$(CXX) $(FLAGS) partner.cpp partner_logic.cpp environment.cpp structures.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@
 build/coop-partner.exe: environment.cpp environment.h partner.cpp partner_logic.cpp partner.h identity.h structures.cpp structures.h carry_visual.cpp carry_visual.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(MINGW) $(WINFLAGS) partner.cpp partner_logic.cpp environment.cpp structures.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@ -lws2_32 -lbcrypt
-game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test
+game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test
 	./build/game-thread-test
 	./build/puppet-test
 	./build/double-test
@@ -121,6 +131,8 @@ game-thread-test: build/game-thread-test build/puppet-test build/double-test bui
 	./build/body-test
 	./build/auto-continue-test
 	./build/marker-test
+	./build/gear-test
+	$(MAKE) gear-windows-test
 	python3 -B test_game_thread_mutants.py
 .PHONY: game-thread-test
 
