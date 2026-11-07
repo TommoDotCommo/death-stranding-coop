@@ -133,7 +133,7 @@ void ownBody(){
     OwnBody n(a2,[&](const std::string&){});for(unsigned i=0;i<5;++i)CHECK(n.tick(porter)==0);CHECK(!n.exhausted());
 }
 void ownCommand(){
-    CHECK(parseOwnCommand("own S1\n"," S1\n")==8u);CHECK(parseOwnCommand("own9 S1\n"," S1\n")==9u);
+    CHECK(parseOwnCommand("own S1\n"," S1\n")==DressArtPartsInPlace);CHECK(parseOwnCommand("own9 S1\n"," S1\n")==9u);
     CHECK(parseOwnCommand("own0 S1\n"," S1\n")==0u);CHECK(parseOwnCommand("own10 S1\n"," S1\n")==0x10u);
     CHECK(parseOwnCommand("own4a S1\n"," S1\n")==0x4au);
     for(const char* bad:{"ownA S1\n","own1A S1\n","own100 S1\n","own10 S2\n","owng S1\n","own S1","peer S1\n","own-1 S1\n",""})
@@ -210,7 +210,7 @@ void inPlaceSwap(){
      CHECK(readStreamingDouble(u,w.B+0xfffff0)==0);}
     // The new bit is its own: own80 and ownc0 parse, the default stays 8.
     CHECK(parseOwnCommand("own80 S1\n"," S1\n")==DressArtPartsInPlace);CHECK(parseOwnCommand("ownc0 S1\n"," S1\n")==(DressArtPartsInPlace|DressReport));
-    CHECK(parseOwnCommand("own S1\n"," S1\n")==8u&&!(8u&DressArtPartsInPlace));
+    CHECK(parseOwnCommand("own S1\n"," S1\n")==DressArtPartsInPlace);   // the default own dress is the in-place swap
 }
 void modelSwap(){
     {Wardrobe w;auto s=w.f.sampler();

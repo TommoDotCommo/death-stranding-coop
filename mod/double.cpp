@@ -284,7 +284,7 @@ uint64_t OwnBody::tick(const Anchor& porter){
 }
 void OwnBody::remove(){if(body_){api_.remove(body_);record_("BODY own body removed\n");body_=0;}}
 std::optional<unsigned> parseOwnCommand(const std::string& command,const std::string& stamp){
-    if(command=="own"+stamp)return 8u;
+    if(command=="own"+stamp)return DressArtPartsInPlace;   // live 2026-11-08: one ArtPartsData, drawn cleanly (was 8: apply, two sets)
     if(command.rfind("own",0)!=0||command.size()<=3+stamp.size()||command.compare(command.size()-stamp.size(),stamp.size(),stamp))return std::nullopt;
     auto digits=command.substr(3,command.size()-3-stamp.size());
     if(digits.empty()||digits.size()>2)return std::nullopt;

@@ -170,7 +170,7 @@ struct Runtime final:ds::Transport {
     enum class TwinMode {None,Echo,Lead,Peer,Own};
     std::filesystem::path twinCommand;std::unique_ptr<mod::puppet::Double> twin;TwinMode twinMode=TwinMode::None;
     // Own-body mode: the partner is drawn with a Sam the mod made (OwnBody), driven by a second Double backend.
-    std::unique_ptr<mod::puppet::OwnBody> own;std::unique_ptr<mod::puppet::Double> ownTwin;uint64_t ownEntity=0;unsigned dressMask=8;
+    std::unique_ptr<mod::puppet::OwnBody> own;std::unique_ptr<mod::puppet::Double> ownTwin;uint64_t ownEntity=0;unsigned dressMask=mod::puppet::DressArtPartsInPlace;
     bool partnerMode() const {return twinMode==TwinMode::Peer||twinMode==TwinMode::Own;}
     std::filesystem::path cargoCommand;std::function<void(uint32_t,const mod::puppet::Transform&)> cargoCreate;
     std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
