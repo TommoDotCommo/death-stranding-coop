@@ -17,6 +17,7 @@
 #include <vector>
 #include <cstring>
 #include "redirect.h"
+#include "iat_patch.h"
 #include "module_policy.h"
 #include "audit_throttle.h"
 #include "hook_list.h"
@@ -328,11 +329,13 @@ __attribute__((noinline)) BOOL WINAPI hook_GetMessageA(LPMSG msg,HWND hwnd,UINT 
     SetLastError(error);return result; // -1, 0 (WM_QUIT), and positive results stay distinct
 }
 void replace_import(ULONG_PTR* slot,FARPROC hook) {
-    DWORD old,ignored;
-    if(!VirtualProtect(slot,sizeof(void*),PAGE_READWRITE,&old)) fatal("redirect: IAT protect failed\n");
-    InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(slot),reinterpret_cast<PVOID>(hook));
-    if(*slot!=reinterpret_cast<ULONG_PTR>(hook)) fatal("redirect: IAT write failed\n");
-    if(!VirtualProtect(slot,sizeof(void*),old,&ignored)) fatal("redirect: IAT restore failed\n");
+    // Serialised with every other import write (iat_patch.h): unlocked, two patching threads crashed the game.
+    switch(redirect::write_import(slot,reinterpret_cast<ULONG_PTR>(hook))) {
+    case redirect::IatWrite::ok: return;
+    case redirect::IatWrite::protect_failed: fatal("redirect: IAT protect failed\n");
+    case redirect::IatWrite::write_failed: fatal("redirect: IAT write failed\n");
+    case redirect::IatWrite::restore_failed: fatal("redirect: IAT restore failed\n");
+    }
 }
 struct Entry {const char* name; FARPROC hook; FARPROC original; HMODULE skip=nullptr;};
 std::vector<Entry> entries;

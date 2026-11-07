@@ -2,7 +2,7 @@ CXX = x86_64-w64-mingw32-g++
 FLAGS = -std=c++17 -O2 -Wall -Wextra -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++
 LIBS = -lshell32 -lole32 -luuid -lws2_32 -lwinhttp -lbcrypt -lwinmm
 PROXY_SRC = path_map.cpp module_policy.cpp audit_throttle.cpp objects.cpp network_policy.cpp redirect.cpp proxy.cpp ../mod/config.cpp
-PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h virtual_pad.h frame_cap.h ../mod/game_thread.h ../mod/mod.h
+PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h virtual_pad.h frame_cap.h iat_patch.h ../mod/game_thread.h ../mod/mod.h
 all: build/thread_trace_probe_module.dll build/thread_trace_probe.exe build/d3dcompiler_47.dll build/redirect_probe.exe build/redirect_probe_module.dll build/hooks-disabled.dll build/mutant-queries-unmapped.dll build/mutant-find-unmapped.dll build/mutant-attributes-unmapped.dll build/mutant-net-unhooked.dll build/net_probe.exe build/pad_probe.exe
 build:
 	mkdir -p build
@@ -34,7 +34,16 @@ thread-trace-test: build/thread-trace-test
 	 if test $$code -ne 1 || ! rg -q 'trace oracle' build/mutant-$$mutant.log; then echo "SURVIVED or crashed $$mutant ($$code)"; exit 1; fi; done
 	python3 -B -m unittest -q test_read_thread_trace
 .PHONY: thread-trace-test
-test: thread-trace-test | build
+# Native Windows (WSL interop): concurrent import writes on one page; the unlocked mutant must fault.
+iat-race-test: iat_patch.h iat_race_test.cpp | build
+	$(CXX) $(FLAGS) iat_race_test.cpp -o build/iat-race-test.exe
+	$(CXX) $(FLAGS) -DMUTANT_IAT_UNLOCKED iat_race_test.cpp -o build/mutant-iat-unlocked.exe
+	@if ! ./build/iat-race-test.exe >/dev/null 2>&1 && test $$? -eq 126; then echo "iat-race-test: no Windows interop, skipped"; exit 0; fi; \
+	 ./build/iat-race-test.exe || exit 1; \
+	 for i in 1 2 3; do ./build/mutant-iat-unlocked.exe >/dev/null 2>&1; code=$$?; \
+	 if test $$code -ne 3 -a $$code -ne 1; then echo "SURVIVED IAT_UNLOCKED (exit $$code, run $$i)"; exit 1; fi; done
+.PHONY: iat-race-test
+test: thread-trace-test iat-race-test | build
 	g++ -std=c++17 -Wall -Wextra -Werror network_policy.cpp network_test.cpp -o build/network-test
 	./build/network-test
 	@for mutant in NET_ALLOW_ALL NET_EXACT_LOOPBACK NET_NO_PEERS NET_ANY_V6 NET_MAPPED_LOCAL NET_NAME_PREFIX NET_NEVER_REFUSE NET_REFUSE_LOG_ONLY; do \
