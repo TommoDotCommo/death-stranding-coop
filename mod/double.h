@@ -76,7 +76,45 @@ std::function<void(uint8_t,const Transform&,bool)> nativeConstruct(discovery::Sa
 // Research: switch art part `index` of the body's porter-derived ArtPartsData (the one with 52 parts) on or off with the
 // toggle worker 22b8fe0. False when there is no such component or index.
 std::function<bool(uint64_t body,unsigned index,bool on)> nativePartToggle(discovery::Sampler&);
-std::function<bool(uint64_t)> nativeDress(discovery::Sampler&,std::function<unsigned()> mask);   // bits: 1 cover, 2 cover+anim, 4 facial
+// Mask bits (one or two hex digits after `own`): without 8 or 0x30: 1 cover, 2 cover+anim, 4 facial (empty components).
+// 8: ApplyArtPartsVariation with the resident double's art-parts resource; with 8, 2 also switches the leftover one-part
+// ArtPartsData's part off and 1 removes it (hangs). Research bits (game_offsets.md, "Dressing the own body: the engine's
+// model swap"): 0x10 the engine's model swap (235e010) with the resident double's ModelResource, only when that resource
+// builds exactly the double's art-parts resource; 0x20 the same swap without that condition, then the variation apply
+// only when the body is still not dressed like the double; 0x40 a read-only report of both bodies. note receives rows.
+std::function<bool(uint64_t)> nativeDress(discovery::Sampler&,std::function<unsigned()> mask,std::function<void(const std::string&)> note={});
+// Own-mode mask from a `puppet.double` command: "own<stamp>" = 8, "own<h><stamp>" or "own<hh><stamp>" (lowercase hex;
+// own0 dresses nothing). Nothing for any other command.
+std::optional<unsigned> parseOwnCommand(const std::string& command,const std::string& stamp);
+constexpr unsigned DressModelExact=0x10,DressModelThenApply=0x20,DressReport=0x40;
+// Layout used by the model swap (game_offsets.md): entity+b8 Model component, entity+180 the primary ArtPartsData,
+// entity+90/+98 the component count and list; every component keeps its owner at +48 and its resource at +30; a
+// ModelResource keeps its ArtPartsDataResource at +30.
+constexpr uint64_t EntityModelOffset=0xb8,EntityArtPartsOffset=0x180,ComponentOwnerOffset=0x48,ComponentResourceOffset=0x30,ModelArtPartsOffset=0x30;
+struct ModelSwapPlan {
+    uint64_t model=0;      // the resident double's ModelResource to give the body; 0 = refused
+    uint64_t builds=0;     // the art-parts resource that model builds (ModelResource+30)
+    uint64_t wanted=0;     // the resident double's own art-parts resource (its entity+180 component's resource)
+    std::string refusal;   // why model is 0
+};
+// Reads only. exact: refuse unless the model builds exactly the double's art-parts resource.
+ModelSwapPlan planModelSwap(const discovery::Sampler&,uint64_t body,uint64_t resident,uint64_t artPartsVtable,bool exact);
+// Reads only: the body has exactly one ArtPartsData of its own, it is the primary one (entity+180) and built from wanted.
+bool dressedLike(const discovery::Sampler&,uint64_t body,uint64_t artPartsVtable,uint64_t wanted);
+// Reads only: one row per component (vtable as image offset, resource), the primary ArtPartsData, and for every
+// ArtPartsData its resource, part count and part `part`'s state byte (+2c) and name hash (CRC32C, from the resource's
+// name map at +e0: 12-byte entries {used, hash, index}, capacity at +ec).
+std::string describeBody(const discovery::Sampler&,const char* label,uint64_t entity,uint64_t artPartsVtable,unsigned part=20);
+// The game calls behind mask 0x10 / 0x20 (game thread): SetModel 235e010(entity, ModelResource, 0) and
+// ApplyArtPartsVariation 22bc100(entity, art-parts resource).
+struct ModelSwapCalls {
+    std::function<void(uint64_t body,uint64_t model)> setModel;
+    std::function<void(uint64_t body,uint64_t artParts)> apply;
+};
+// Mask 0x10 / 0x20 on a made body: plan, swap, then (0x20 only) apply when the body is still not dressed like the
+// double. True when the body ends dressed like the double (dressedLike). Rows go to note.
+bool dressByModel(const discovery::Sampler&,uint64_t body,uint64_t resident,uint64_t artPartsVtable,unsigned mask,
+                  const ModelSwapCalls&,const std::function<void(const std::string&)>& note);
 // DSConstructionPointManager_sExportedRemoveConstructionsInArea (2cd1bf0 -> 2cd9760), read statically: (const float4*
 // box min, const float4* box max, const world transform*, bool, bool, bool). It collects the structures in the box and
 // marks for removal those whose owner byte (+b2) is 1 (first bool), 0 (second) or 2 (third). Unverified live.

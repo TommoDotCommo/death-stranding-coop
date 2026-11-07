@@ -1008,3 +1008,80 @@ physics, streaming or respawn state is reset. NPC teleport is also not evidence
 for the local player's contract. **No safe local-porter relocation path was
 established.** Join-at-host therefore produces a game-thread decision and a
 `JOIN would move ...; native teleport unavailable; no move performed` log only.
+
+### Dressing the own body: the engine's model swap (static, 2026-11-07, nothing called)
+
+Read from `<game dir>/ds.exe` with the PE and name-reference method (objdump, `.pdata` bounds, rel32 call and
+RIP-relative scans, Decima type descriptors). Answers to the four questions about the own body's drawing, in order.
+
+**Where a made body's art parts come from.** The entity initialiser 234f3e0 builds one component per component
+resource in the entity resource (generic constructor 22b4fc0, attach 2348220) and caches the first `Model` at
+entity+b8 and the `ArtPartsData` (type 4adfe00) at entity+180 (234fb34; a default one at 234fe24 when there is none).
+So a body made from `ds_player_akukan_entity` wears that resource's own one-part `ArtPartsDataResource`. The double
+wears the 52-part one, so the game changes the double after it is made.
+
+**The engine's model swap, SetModel 235e010** `(Entity*, ModelResource*, float blend)`, not virtual, 13 game callers.
+`ModelResource` (type 4b13080, size 0x58) has `ArtPartsDataResource` at +30, `ModelPartResources` +20, `Helpers` +40.
+Every component keeps its resource at +30 and its owner at +48. The sequence:
+1. build the new model component from the resource (22b4fc0, with the resource's virtual +20/+28 type getters);
+2. take the entity lock (entity+288; 3b3a578 try, then 3b3a588);
+3. if entity+180 is set: calls that read as taking the entity out of its world lists (2376490 on entity+60's +208
+   and 23d4660 on the global 7bc7df8; 237c430 on entity+2b0; names unknown), then remove the old `ArtPartsData`
+   (235b930) and clear +180;
+4. if the entity is active (flags +88 bit 14) call its virtual +f0 with 0; unregister the old model (237bdf0 on +2b0);
+5. store and attach the new model (+b8, 2348220); if `ModelResource+30` is set, build an `ArtPartsData` from it
+   (22b5970), attach it, cache it at +180 and send two messages (235c990, message types 3d03bc0 and 3d03f00);
+6. 2360400(entity); with blend > 0 the new model takes the old pose (model virtual +c8); model virtual +60;
+7. virtual +f0 with 1 when it was active; register again (236e260, 2376490, 237c430); 235bf60 (transform changed);
+8. release the lock, then remove the old model component (235b930).
+
+Game code calls it the way the mod would: 2cfb570 checks a resource is a `ModelResource` (type 4b13080), compares it
+with the owner's model resource (owner+b8, +30) and, if they differ, calls `235e010(owner, resource, 0.0)`.
+
+**Why removing the one-part `ArtPartsData` hangs.** `EntityComponent_ExportedRemove` (23618c0) is a jump to
+235b930(owner, component), the same removal SetModel uses, but without steps 2-4 and 7: the entity stays in its world
+lists with the removed component still cached at +180. The hang site 1a0873b is in 1a086a0, the job system's counter
+wait: it spins (pause, then a yield 1a04200 after 50 rounds) running other jobs (1a07fa0) until a job counter reaches
+zero. The other addresses on the hung main thread fit that: 363ef34 is the return from 1cd4890 (global 578c148) in the
+large per-frame function 363eb40, and 3649124 follows a release of a job handle (refcount +28, then 1a08060) in
+3649060. Reading, unverified: a frame job still uses the removed component (or the stale +180) and never finishes, so
+the main thread waits forever. The engine's own removal of a primary `ArtPartsData` is SetModel.
+`AddComponentFromResource` (234ae90) in replace mode also uses the plain 235b930. That removal is used only for
+same-resource variation components, which are not at +180.
+
+**Who dresses the resident double.** Not found. `ApplyArtPartsVariation` (22bc100) has no direct callers (script
+only); the art-parts apply (22bae20) is called from 22bb6c0, 32e1730 and the porter's update 2cc2ea0 (a component of
+type 4ae3af0 on the porter). None of the six code references to the double's type (2711a83, 29115fc/291160f,
+2922d49/2922d5e, 2cc37a3/2cc37b6) dresses it. Of SetModel's 13 callers, 2cb7f10 is the cargo manager (entities with a
+pending-model byte at +33c), 2bd54d0 sets a model right after initialising an entity (234f3e0), and 37b7490, 2cfb570 and
+2e38130 set the model of a component's owner (component+48). The rest were not read. The porter's
+`DSPlayerStreamingControlComponent` (vtable 3d815d8, resource type 4bd0560: `DefaultBodyModelResource` +20,
+`DefaultShoesModelResource` +28, `DefaultArtPartsVariations` +30, `Variants` +48 of `DSPlayerBodyVariant` (type
+4bd03e0: `SkinnedModelResource` +38, `BootsSkinnedModelResource` +40, `ArtPartsVariations` +48, `ShoesArtPartsVariation`
++58)) is the porter's body-model switch and the best candidate for also dressing the double. Whether it does is
+unknown. The mod can replay the result without finding the caller. The double's own model component (double+b8)
+holds the `ModelResource` it was given, so SetModel with that resource should rebuild the made body like the double.
+
+**Part 20.** Part names are not in the executable. The art-parts resource's name map (`ModelNameHandleMap`, resource
++e0, 12-byte entries {used, CRC32C name hash, part index}, capacity at +ec) maps names to indices. The reverse lookup
+is 22b6a00(resource, index) -> hash, and 22b69b0 is the forward lookup used by `EnableModelPartFromHash` (22b5090).
+Part 20's name, and what it is anchored to, are unknown. Mask 0x40 logs its hash; match it against CRC32C of the
+archive's part names.
+
+**A body built dressed (question 4).** SetModel is that path: called right after `EntityResource_ExportedCreateEntity`
+with the double's `ModelResource`, the body would get the double's model and one `ArtPartsData` built from its 52-part
+resource, with the one-part one removed the engine's way. A different entity resource is not needed.
+
+Research mask bits (`puppet.double` command `own<hex> <stamp>`, one or two lowercase hex digits; default `own` = 8
+is unchanged). The body is made once per world, so send the command before the first `own` of a game process.
+Host-tested in `double_test.cpp` (`modelSwap`, `bodyReport`, `ownCommand`). Mutants that must fail:
+`MUTANT_OWNBODY_{OWN_PARSE,MODEL_OWNER,MODEL_EXACT,DRESSED_COUNT,APPLY_ALWAYS}`.
+- `0x10`, ranked first: SetModel(body, double's `ModelResource`, 0) before parking, only when the double's model is
+  its own and its `ModelResource+30` is exactly the double's art-parts resource. Success leaves one `ArtPartsData` of
+  the body's own at +180, built from the 52-part resource (checked by reading).
+- `0x20`: the same swap without the exact condition (the model must still build some art parts), then the variation
+  apply only if the body is still not dressed like the double. The apply is never repeated with the same resource:
+  its replace mode would remove the swap's component with the plain removal.
+- `0x40`, read-only: after dressing, one log row per component of the made body and the resident double (vtable as an
+  image offset, owner, resource), the primary `ArtPartsData`, each `ArtPartsData`'s part count and part 20's state
+  byte and name hash. Combine it with the other bits (`50`, `60`, `48`).

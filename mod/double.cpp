@@ -1,5 +1,6 @@
 #include "double.h"
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #ifdef _WIN32
 #include <windows.h>
@@ -282,6 +283,113 @@ uint64_t OwnBody::tick(const Anchor& porter){
     return body_;
 }
 void OwnBody::remove(){if(body_){api_.remove(body_);record_("BODY own body removed\n");body_=0;}}
+std::optional<unsigned> parseOwnCommand(const std::string& command,const std::string& stamp){
+    if(command=="own"+stamp)return 8u;
+    if(command.rfind("own",0)!=0||command.size()<=3+stamp.size()||command.compare(command.size()-stamp.size(),stamp.size(),stamp))return std::nullopt;
+    auto digits=command.substr(3,command.size()-3-stamp.size());
+    if(digits.empty()||digits.size()>2)return std::nullopt;
+    for(char c:digits)
+#ifndef MUTANT_OWNBODY_OWN_PARSE
+        if(!std::isxdigit(static_cast<unsigned char>(c))||std::isupper(static_cast<unsigned char>(c)))return std::nullopt;
+#else
+        if(!std::isxdigit(static_cast<unsigned char>(c)))return std::nullopt;
+#endif
+    return unsigned(std::stoul(digits,nullptr,16));
+}
+namespace {
+// The entity's own components of one class (vtable), in list order; false when the list is unreadable.
+bool ownComponents(const discovery::Sampler& s,uint64_t entity,uint64_t vtable,std::vector<uint64_t>& out){
+    uint32_t count=0;uint64_t list=0;
+    if(!s.read(entity+0x90,&count,4)||count>4096||!q(s,entity+0x98,list))return false;
+    for(uint32_t i=0;i<count;++i){uint64_t c=0,v=0,owner=0;
+        if(!q(s,list+8*i,c))return false;
+        if(q(s,c,v)&&v==vtable&&q(s,c+ComponentOwnerOffset,owner)&&owner==entity)out.push_back(c);}
+    return true;
+}
+// The entity's component at a cached slot when it is its own and of the class; 0 otherwise.
+uint64_t ownSlot(const discovery::Sampler& s,uint64_t entity,uint64_t slot,uint64_t vtable){
+    uint64_t c=0,v=0,owner=0;
+    if(!q(s,entity+slot,c)||!c||!q(s,c+ComponentOwnerOffset,owner)||owner!=entity)return 0;
+    if(vtable&&(!q(s,c,v)||v!=vtable))return 0;
+    return c;
+}
+std::string hex(uint64_t v){std::ostringstream o;o<<"0x"<<std::hex<<v;return o.str();}
+}
+ModelSwapPlan planModelSwap(const discovery::Sampler& s,uint64_t body,uint64_t resident,uint64_t artParts,bool exact){
+    ModelSwapPlan p;
+    if(!body||!resident||body==resident){p.refusal="no resident double";return p;}
+    if(!ownSlot(s,body,EntityModelOffset,0)){p.refusal="body has no model of its own";return p;}
+#ifndef MUTANT_OWNBODY_MODEL_OWNER
+    uint64_t model=ownSlot(s,resident,EntityModelOffset,0);
+#else
+    uint64_t model=0;q(s,resident+EntityModelOffset,model);
+#endif
+    uint64_t resource=0,builds=0,primary=ownSlot(s,resident,EntityArtPartsOffset,artParts),wanted=0;
+    if(!model||!q(s,model+ComponentResourceOffset,resource)||!resource){p.refusal="double's model unreadable";return p;}
+    if(!primary||!q(s,primary+ComponentResourceOffset,wanted)||!wanted){p.refusal="double's art parts unreadable";return p;}
+    if(!q(s,resource+ModelArtPartsOffset,builds)){p.refusal="double's model resource unreadable";return p;}
+    p.builds=builds;p.wanted=wanted;
+    if(!builds){p.refusal="double's model builds no art parts";return p;}
+#ifndef MUTANT_OWNBODY_MODEL_EXACT
+    if(exact&&builds!=wanted){p.refusal="double's model builds other art parts than the double wears";return p;}
+#else
+    (void)exact;
+#endif
+    p.model=resource;return p;
+}
+bool dressedLike(const discovery::Sampler& s,uint64_t body,uint64_t artParts,uint64_t wanted){
+    std::vector<uint64_t> all;if(!ownComponents(s,body,artParts,all))return false;
+    uint64_t primary=ownSlot(s,body,EntityArtPartsOffset,artParts),resource=0;
+    if(!primary||!q(s,primary+ComponentResourceOffset,resource)||resource!=wanted)return false;
+#ifndef MUTANT_OWNBODY_DRESSED_COUNT
+    return all.size()==1&&all[0]==primary;
+#else
+    return std::find(all.begin(),all.end(),primary)!=all.end();
+#endif
+}
+std::string describeBody(const discovery::Sampler& s,const char* label,uint64_t entity,uint64_t artParts,unsigned part){
+    std::ostringstream o;uint32_t count=0;uint64_t list=0;
+    if(!entity||!s.read(entity+0x90,&count,4)||count>4096||!q(s,entity+0x98,list)){o<<"BODY report "<<label<<" unreadable\n";return o.str();}
+    o<<"BODY report "<<label<<" "<<hex(entity)<<" components "<<count<<" model "<<hex(ownSlot(s,entity,EntityModelOffset,0))
+     <<" artparts "<<hex(ownSlot(s,entity,EntityArtPartsOffset,artParts))<<"\n";
+    for(uint32_t i=0;i<count;++i){
+        uint64_t c=0,v=0,owner=0,resource=0;if(!q(s,list+8*i,c)){o<<"BODY report "<<label<<" component "<<i<<" unreadable\n";continue;}
+        q(s,c,v);q(s,c+ComponentOwnerOffset,owner);q(s,c+ComponentResourceOffset,resource);
+        o<<"BODY report "<<label<<" component "<<i<<" vtable +"<<hex(v>=s.base?v-s.base:v)<<(owner==entity?"":" foreign")<<" resource "<<hex(resource);
+        if(v==artParts){
+            uint32_t parts=0;uint64_t array=0,p=0;uint8_t state=0;s.read(c+0x100,&parts,4);
+            o<<" parts "<<parts;
+            if(part<parts&&parts<=4096&&q(s,c+0x108,array)&&q(s,array+8ull*part,p)&&p&&s.read(p+0x2c,&state,1))o<<" part"<<part<<" state "<<hex(state);
+            // The resource's name map: hash -> index (12-byte entries {used, hash, index}, capacity at +ec).
+            int32_t capacity=0;uint64_t map=0;
+            if(resource&&s.read(resource+0xec,&capacity,4)&&capacity>0&&capacity<=4096&&q(s,resource+0xe0,map))
+                for(int32_t k=0;k<capacity;++k){uint32_t e[3]{};if(!s.read(map+12ull*unsigned(k),e,12))break;
+                    if(e[0]&&e[2]==part){o<<" part"<<part<<" hash "<<hex(e[1]);break;}}
+        }
+        o<<"\n";
+    }
+    return o.str();
+}
+bool dressByModel(const discovery::Sampler& s,uint64_t body,uint64_t resident,uint64_t artParts,unsigned mask,
+                  const ModelSwapCalls& calls,const std::function<void(const std::string&)>& note){
+    auto say=[&](const std::string& row){if(note)note(row);};
+    bool exact=mask&DressModelExact;
+    auto plan=planModelSwap(s,body,resident,artParts,exact);
+    if(!plan.model){say("BODY model swap refused: "+plan.refusal+" (builds "+hex(plan.builds)+", wears "+hex(plan.wanted)+")\n");return false;}
+    say("BODY model swap: SetModel with the double's model resource "+hex(plan.model)+" (builds "+hex(plan.builds)+", wears "+hex(plan.wanted)+")\n");
+    calls.setModel(body,plan.model);
+    bool done=dressedLike(s,body,artParts,plan.wanted);
+#ifndef MUTANT_OWNBODY_APPLY_ALWAYS
+    if(!done&&!exact&&(mask&DressModelThenApply)){
+#else
+    if(!exact&&(mask&DressModelThenApply)){
+#endif
+        say("BODY model swap left the body unlike the double: applying the double's art parts\n");
+        calls.apply(body,plan.wanted);done=dressedLike(s,body,artParts,plan.wanted);
+    }
+    say(done?"BODY dressed like the double: one ArtPartsData, the double's\n":"BODY not dressed like the double after the model swap\n");
+    return done;
+}
 std::optional<uint32_t> parseCargoCommand(const std::string& text,const std::string& stamp,const char* expected){
     std::istringstream in(text);std::string verb,id,tail,extra;
     if(!(in>>verb>>id>>tail)||(in>>extra)||verb!=expected||tail!=stamp)return std::nullopt;
@@ -394,9 +502,9 @@ std::function<bool(uint64_t,unsigned,bool)> nativePartToggle(discovery::Sampler&
     };
 #endif
 }
-std::function<bool(uint64_t)> nativeDress(discovery::Sampler& s,std::function<unsigned()> mask){
+std::function<bool(uint64_t)> nativeDress(discovery::Sampler& s,std::function<unsigned()> mask,std::function<void(const std::string&)> note){
 #ifndef _WIN32
-    (void)s;throw std::runtime_error("native dress API requires Windows");
+    (void)s;(void)mask;(void)note;throw std::runtime_error("native dress API requires Windows");
 #else
     struct Entry{uint64_t rva;uint8_t slot;};const std::array<Entry,3> entries={{{0x22b2010,0x60},{0x22b1f80,0x68},{0x22b20a0,0x70}}};
     for(auto& e:entries){
@@ -414,14 +522,33 @@ std::function<bool(uint64_t)> nativeDress(discovery::Sampler& s,std::function<un
     const uint64_t camera=s.base+0x3d198e8,twin=s.base+0x3d7de48;
     using MakeFn=uint64_t(*)(uint64_t);
     std::array<MakeFn,3> make;for(unsigned i=0;i<3;++i)make[i]=reinterpret_cast<MakeFn>(s.base+entries[i].rva);
-    return [&s,artParts,make,entries,mask,apply,camera,twin](uint64_t body){
-        uint64_t x=0,v=0,owner=0;
-        if(!q(s,body+0x180,x)||!x||!q(s,x,v)||v!=artParts||!q(s,x+0x48,owner)||owner!=body)return false;
+    // Entity SetModel (235e010: entity, ModelResource, blend): the engine's own model swap. Under the entity lock it takes
+    // the entity out of the scene, removes the primary ArtPartsData (entity+180) and the old model, builds the new model
+    // and an ArtPartsData from ModelResource+30, then puts the entity back (game_offsets.md). Mask 0x10 / 0x20 only.
+    const std::vector<uint8_t> setModelSig={0x48,0x89,0x5c,0x24,0x20,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x8d,0x6c,0x24,0xd9,
+        0x48,0x81,0xec,0xd0,0x00,0x00,0x00,0xc5,0xf8,0x29,0xb4,0x24,0xc0,0x00,0x00,0x00,0x48,0x8b,0x05,0xf4,0x2f,0xc0,0x02,0x48,0x33,0xc4,0x48,0x89,0x45,0x0f,
+        0x4c,0x8b,0xb1,0xb8,0x00,0x00,0x00};
+    bool setModelOk=false;{std::vector<uint8_t> at(setModelSig.size());setModelOk=s.read(s.base+0x235e010,at.data(),at.size())&&at==setModelSig;}
+    using SetModelFn=void(*)(uint64_t,uint64_t,float);auto setModel=reinterpret_cast<SetModelFn>(s.base+0x235e010);
+    return [&s,artParts,make,entries,mask,apply,camera,twin,note,setModelOk,setModel](uint64_t body){
         unsigned m=mask?mask():7;
+        auto say=[&note](const std::string& row){if(note)note(row);};
+        auto resident=[&]{auto porter=readLocalAnchor(s);return porter.entity?findDouble(s,porter.entity,camera,twin):uint64_t(0);};
+        auto report=[&](bool result){
+            if(m&DressReport){say(describeBody(s,"made",body,artParts));auto r=resident();if(r&&r!=body)say(describeBody(s,"double",r,artParts));}
+            return result;};
+        if(m&(DressModelExact|DressModelThenApply)){
+            if(!setModelOk){say("BODY model swap refused: SetModel signature differs\n");return report(false);}
+            ModelSwapCalls calls;calls.setModel=[setModel](uint64_t b,uint64_t model){setModel(b,model,0.f);};
+            calls.apply=[apply](uint64_t b,uint64_t res){apply(b,res);};
+            return report(dressByModel(s,body,resident(),artParts,m,calls,say));
+        }
+        uint64_t x=0,v=0,owner=0;
+        if(!q(s,body+0x180,x)||!x||!q(s,x,v)||v!=artParts||!q(s,x+0x48,owner)||owner!=body)return report(false);
         if(m&8){
-            auto porter=readLocalAnchor(s);auto resident=porter.entity?findDouble(s,porter.entity,camera,twin):0;
+            auto res0=resident();
             uint64_t rx=0,rv=0,res=0;
-            if(!resident||resident==body||!q(s,resident+0x180,rx)||!q(s,rx,rv)||rv!=artParts||!q(s,rx+0x30,res)||!res)return false;
+            if(!res0||res0==body||!q(s,res0+0x180,rx)||!q(s,rx,rv)||rv!=artParts||!q(s,rx+0x30,res)||!res)return report(false);
             uint64_t old=x;apply(body,res);
             // Part 20 of the porter's set draws the long line (game_offsets.md); switching it off at this point does not
             // last, and enforcing it while the body is shown corrupted the model's drawing, so it is left alone.
@@ -429,9 +556,9 @@ std::function<bool(uint64_t)> nativeDress(discovery::Sampler& s,std::function<un
             // (part, enable, entity, entity model, ArtPartsData), the call EnableModelPartFromHash makes.
             if(m&2){
                 const std::vector<uint8_t> toggleSig={0x48,0x89,0x5c,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57,0x41,0x54,0x41,0x57,0x48,0x83,0xec,0x30,0x0f,0xb6,0x59,0x2c,0x4d};
-                std::vector<uint8_t> at(toggleSig.size());if(!s.read(s.base+0x22b8fe0,at.data(),at.size())||at!=toggleSig)return false;
+                std::vector<uint8_t> at(toggleSig.size());if(!s.read(s.base+0x22b8fe0,at.data(),at.size())||at!=toggleSig)return report(false);
                 uint32_t count=0;uint64_t arr=0,part=0,model=0;
-                if(!s.read(old+0x100,&count,4)||count!=1||!q(s,old+0x108,arr)||!q(s,arr,part)||!part||!q(s,body+0xb8,model))return false;
+                if(!s.read(old+0x100,&count,4)||count!=1||!q(s,old+0x108,arr)||!q(s,arr,part)||!part||!q(s,body+0xb8,model))return report(false);
                 using ToggleFn=void(*)(uint64_t,bool,uint64_t,uint64_t,uint64_t);reinterpret_cast<ToggleFn>(s.base+0x22b8fe0)(part,false,body,model,old);
             }
             // The apply adds a second ArtPartsData (from the porter's resource) that builds the model components itself.
@@ -439,13 +566,13 @@ std::function<bool(uint64_t)> nativeDress(discovery::Sampler& s,std::function<un
             if(m&1){
                 const std::vector<uint8_t> removeSig={0x48,0x85,0xc9,0x74,0x0c,0x48,0x8b,0xd1,0x48,0x8b,0x49,0x48,0xe9};
                 std::vector<uint8_t> at(removeSig.size());
-                if(!s.read(s.base+0x23618c0,at.data(),at.size())||at!=removeSig)return false;
+                if(!s.read(s.base+0x23618c0,at.data(),at.size())||at!=removeSig)return report(false);
                 using RemoveFn=void(*)(uint64_t);reinterpret_cast<RemoveFn>(s.base+0x23618c0)(old);
             }
-            return true;
+            return report(true);
         }
-        for(unsigned i=0;i<3;++i){if(!(m&(1u<<i)))continue;make[i](x);uint64_t c=0;if(!q(s,x+entries[i].slot,c)||!c)return false;}
-        return true;
+        for(unsigned i=0;i<3;++i){if(!(m&(1u<<i)))continue;make[i](x);uint64_t c=0;if(!q(s,x+entries[i].slot,c)||!c)return report(false);}
+        return report(true);
     };
 #endif
 }

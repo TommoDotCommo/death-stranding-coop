@@ -536,7 +536,7 @@ struct Runtime final:ds::Transport {
                     oa.create=made.create;oa.remove=made.remove;
                     oa.alive=[sp,akukan](uint64_t b){uint64_t v=0;return sp->read(b,&v,8)&&v==akukan;};
                     auto hide=driver.visible;auto rest=driver.sleep;oa.park=[hide,rest](uint64_t b){hide(b,false);rest(b,true);};
-                    oa.dress=mod::puppet::nativeDress(*sampler,[this]{return dressMask;});
+                    oa.dress=mod::puppet::nativeDress(*sampler,[this]{return dressMask;},[this](const std::string& row){note(row.c_str());});
                     own=std::make_unique<mod::puppet::OwnBody>(std::move(oa),[this](const std::string& row){note(row.c_str());});
                     driver.find=[this](uint64_t){return ownEntity;};
                     ownTwin=std::make_unique<mod::puppet::Double>(std::move(driver),[this](const std::string& row){note(row.c_str());});
@@ -671,12 +671,13 @@ struct Runtime final:ds::Transport {
             auto command=readConfig(twinCommand);auto stamp=" "+mod::runStamp()+"\n";
             if(!std::filesystem::remove(twinCommand))throw std::runtime_error("cannot consume double command");
             if(command=="echo"+stamp)twinMode=TwinMode::Echo;else if(command=="peer"+stamp)twinMode=TwinMode::Peer;
-            else if(command.rfind("own",0)==0&&command.size()==3+stamp.size()+1&&command.substr(4)==stamp&&std::isxdigit(static_cast<unsigned char>(command[3]))&&!std::isupper(static_cast<unsigned char>(command[3]))
-                    ||command=="own"+stamp){
-                // own: the porter's art parts (mask 8: drawn, stable; stretched-polygon artifacts). ownN, research only:
-                // 1 cover, 2 cover+animation, 4 facial rig (lazy, empty components: 4 hangs the game), 9 = 8 and remove
-                // the body's own ArtPartsData (hangs the game). game_offsets.md, "Own-body mode".
-                dressMask=command=="own"+stamp?8u:unsigned(std::stoul(command.substr(3,1),nullptr,16));twinMode=TwinMode::Own;if(ownTwin)ownTwin->enable();}
+            else if(auto ownMask=mod::puppet::parseOwnCommand(command,stamp)){
+                // own: the porter's art parts (mask 8: drawn, stable; stretched-polygon artifacts). ownN / ownNN (hex),
+                // research only: 1 cover, 2 cover+animation, 4 facial rig (lazy, empty components: 4 hangs the game),
+                // 9 = 8 and remove the body's own ArtPartsData (hangs the game); 10 the engine's model swap, 20 the swap
+                // then the apply if needed, 40 a read-only report (double.h). game_offsets.md, "Own-body mode".
+                dressMask=*ownMask;twinMode=TwinMode::Own;if(ownTwin)ownTwin->enable();
+                note(("DOUBLE own dress mask 0x"+[](unsigned m){std::ostringstream o;o<<std::hex<<m;return o.str();}(dressMask)+"\n").c_str());}
             else if(command=="lead"+stamp)twinMode=TwinMode::Lead;
             else if(command=="still"+stamp){twin->walk(false);if(ownTwin)ownTwin->walk(false);note("DOUBLE own (private-room) network for the next acquire\n");return;}
             else if(command=="off"+stamp)twinMode=TwinMode::None;else {note("DOUBLE ignored command for another process\n");return;}

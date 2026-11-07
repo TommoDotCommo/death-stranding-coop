@@ -1,6 +1,7 @@
 #include "double.h"
 #include "fake_memory.h"
 #include <cmath>
+#include <cstring>
 #include <cstdio>
 #include <stdexcept>
 #include <vector>
@@ -131,6 +132,88 @@ void ownBody(){
     auto x=std::make_shared<World>();x->resource=0;OwnBodyApi a2=api;a2.resource=[x](uint64_t){return x->resource;};
     OwnBody n(a2,[&](const std::string&){});for(unsigned i=0;i<5;++i)CHECK(n.tick(porter)==0);CHECK(!n.exhausted());
 }
+void ownCommand(){
+    CHECK(parseOwnCommand("own S1\n"," S1\n")==8u);CHECK(parseOwnCommand("own9 S1\n"," S1\n")==9u);
+    CHECK(parseOwnCommand("own0 S1\n"," S1\n")==0u);CHECK(parseOwnCommand("own10 S1\n"," S1\n")==0x10u);
+    CHECK(parseOwnCommand("own4a S1\n"," S1\n")==0x4au);
+    for(const char* bad:{"ownA S1\n","own1A S1\n","own100 S1\n","own10 S2\n","owng S1\n","own S1","peer S1\n","own-1 S1\n",""})
+        CHECK(!parseOwnCommand(bad," S1\n"));
+}
+// A made body (0xb000) and the resident double (0xa000) in fake memory; the double wears the 52-part art-parts resource
+// 0xa400, which its model resource 0xa200 builds; the made body wears its entity resource's one-part 0xb400.
+struct Wardrobe {
+    fakemem::Fake f;uint64_t B=f.base,art=B+0x1f40;unsigned setModels=0,applies=0;
+    void component(size_t at,uint64_t vt,size_t owner,uint64_t resource){f.put<uint64_t>(at,vt);f.put<uint64_t>(at+0x48,B+owner);f.put<uint64_t>(at+0x30,resource);}
+    void list(size_t entity,size_t at,std::vector<size_t> items){f.put<uint32_t>(entity+0x90,uint32_t(items.size()));f.put<uint64_t>(entity+0x98,B+at);
+        for(size_t i=0;i<items.size();++i)f.put<uint64_t>(at+8*i,B+items[i]);}
+    void artParts(size_t at,size_t owner,size_t resource,uint32_t parts,size_t array){component(at,art,owner,B+resource);f.put<uint32_t>(at+0x100,parts);f.put<uint64_t>(at+0x108,B+array);}
+    Wardrobe(){
+        component(0xa100,B+0x1f50,0xa000,B+0xa200);f.put<uint64_t>(0xa200+0x30,B+0xa400);            // double: model -> model resource -> 52 parts
+        artParts(0xa300,0xa000,0xa400,52,0xa600);f.put<uint64_t>(0xa000+0xb8,B+0xa100);f.put<uint64_t>(0xa000+0x180,B+0xa300);
+        list(0xa000,0xa900,{0xa100,0xa300});
+        for(unsigned i=0;i<52;++i)f.put<uint64_t>(0xa600+8*i,B+0xa800+0x40*(i==20));
+        f.data[0xa840+0x2c]=0x0d;
+        f.put<uint64_t>(0xa400+0xe0,B+0xa500);f.put<int32_t>(0xa400+0xec,3);                        // name map {used, hash, index}
+        f.put<uint32_t>(0xa500,0);f.put<uint32_t>(0xa50c,1);f.put<uint32_t>(0xa510,0x11111111);f.put<uint32_t>(0xa514,7);
+        f.put<uint32_t>(0xa518,1);f.put<uint32_t>(0xa51c,0x2020abcd);f.put<uint32_t>(0xa520,20);
+        f.put<uint32_t>(0xa500+8,20);                                                                // an unused slot naming 20: ignored
+        component(0xb100,B+0x1f50,0xb000,B+0xb200);artParts(0xb300,0xb000,0xb400,1,0xb680);             // made body
+        f.put<uint64_t>(0xb000+0xb8,B+0xb100);f.put<uint64_t>(0xb000+0x180,B+0xb300);list(0xb000,0xb800,{0xb100,0xb300});
+    }
+    // The engine's SetModel as read statically: old ArtPartsData and model removed, a new model and an ArtPartsData built
+    // from ModelResource+30 attached and cached at +b8 / +180.
+    ModelSwapCalls calls(){
+        ModelSwapCalls c;
+        c.setModel=[this](uint64_t body,uint64_t model){CHECK(body==B+0xb000);++setModels;uint64_t builds=0;std::memcpy(&builds,f.data.data()+(model-B)+0x30,8);
+            component(0xb500,B+0x1f50,0xb000,model);f.put<uint64_t>(0xb000+0xb8,B+0xb500);
+            artParts(0xb600,0xb000,builds-B,builds==B+0xa400?52:1,0xa600);f.put<uint64_t>(0xb000+0x180,B+0xb600);list(0xb000,0xb800,{0xb500,0xb600});};
+        c.apply=[this](uint64_t body,uint64_t resource){CHECK(body==B+0xb000&&resource==B+0xa400);++applies;
+            artParts(0xb700,0xb000,0xa400,52,0xa600);list(0xb000,0xb800,{0xb500,0xb600,0xb700});};
+        return c;
+    }
+    bool dress(unsigned mask,std::vector<std::string>* rows=nullptr){auto s=f.sampler();
+        return dressByModel(s,B+0xb000,B+0xa000,art,mask,calls(),[rows](const std::string& r){if(rows)rows->push_back(r);});}
+};
+void modelSwap(){
+    {Wardrobe w;auto s=w.f.sampler();
+     auto p=planModelSwap(s,w.B+0xb000,w.B+0xa000,w.art,true);CHECK(p.model==w.B+0xa200&&p.builds==w.B+0xa400&&p.wanted==w.B+0xa400);
+     CHECK(!dressedLike(s,w.B+0xb000,w.art,w.B+0xa400));CHECK(dressedLike(s,w.B+0xa000,w.art,w.B+0xa400));
+     CHECK(!planModelSwap(s,w.B+0xa000,w.B+0xa000,w.art,true).model);                                // the double itself: no
+     CHECK(!planModelSwap(s,w.B+0xb000,0,w.art,true).model);}
+    // 0x10: one SetModel, never an apply; the body ends with one ArtPartsData, the double's.
+    {Wardrobe w;std::vector<std::string> rows;CHECK(w.dress(DressModelExact,&rows)&&w.setModels==1&&w.applies==0);
+     auto s=w.f.sampler();CHECK(dressedLike(s,w.B+0xb000,w.art,w.B+0xa400));CHECK(!rows.empty()&&rows.back().find("dressed like the double")!=std::string::npos);}
+    // 0x10 when the double's model builds other art parts than it wears: nothing called.
+    {Wardrobe w;w.f.put<uint64_t>(0xa200+0x30,w.B+0xb400);CHECK(!w.dress(DressModelExact)&&w.setModels==0&&w.applies==0);
+     auto s=w.f.sampler();CHECK(planModelSwap(s,w.B+0xb000,w.B+0xa000,w.art,false).model==w.B+0xa200);}
+    // The double's model must be its own: a foreign model component refuses.
+    {Wardrobe w;w.f.put<uint64_t>(0xa100+0x48,w.B+0xb000);CHECK(!w.dress(DressModelExact)&&w.setModels==0);
+     CHECK(!w.dress(DressModelThenApply)&&w.setModels==0);}
+    // The double's model builds no art parts: refused in both modes.
+    {Wardrobe w;w.f.put<uint64_t>(0xa200+0x30,0);CHECK(!w.dress(DressModelThenApply)&&w.setModels==0&&w.applies==0);}
+    // 0x20 when the swap already dresses the body: no apply (a second same-resource apply would remove the swap's
+    // ArtPartsData with the plain removal that hangs).
+    {Wardrobe w;CHECK(w.dress(DressModelThenApply)&&w.setModels==1&&w.applies==0);}
+    // 0x20 when the model builds other art parts: swap, then apply; two ArtPartsData remain, so not dressed like the double.
+    {Wardrobe w;w.f.put<uint64_t>(0xa200+0x30,w.B+0xb400);CHECK(!w.dress(DressModelThenApply)&&w.setModels==1&&w.applies==1);}
+    // Both bits: the exact rule wins.
+    {Wardrobe w;w.f.put<uint64_t>(0xa200+0x30,w.B+0xb400);CHECK(!w.dress(DressModelExact|DressModelThenApply)&&w.setModels==0&&w.applies==0);}
+    // dressedLike: the double's ArtPartsData cached at +180 but the one-part one still attached (mask 8 then a removal
+    // that did not happen): not dressed.
+    {Wardrobe w;w.artParts(0xb600,0xb000,0xa400,52,0xa600);w.f.put<uint64_t>(0xb000+0x180,w.B+0xb600);w.list(0xb000,0xb800,{0xb100,0xb300,0xb600});
+     auto s=w.f.sampler();CHECK(!dressedLike(s,w.B+0xb000,w.art,w.B+0xa400));
+     w.list(0xb000,0xb800,{0xb100,0xb600});auto t=w.f.sampler();CHECK(dressedLike(t,w.B+0xb000,w.art,w.B+0xa400));
+     w.f.put<uint64_t>(0xb600+0x48,w.B+0xa000);auto u=w.f.sampler();CHECK(!dressedLike(u,w.B+0xb000,w.art,w.B+0xa400));}   // not its own
+}
+void bodyReport(){
+    Wardrobe w;auto s=w.f.sampler();auto text=describeBody(s,"double",w.B+0xa000,w.art);
+    CHECK(text.find("components 2")!=std::string::npos&&text.find("parts 52")!=std::string::npos);
+    CHECK(text.find("part20 state 0xd")!=std::string::npos&&text.find("part20 hash 0x2020abcd")!=std::string::npos);
+    CHECK(text.find("vtable +0x1f40")!=std::string::npos&&text.find("foreign")==std::string::npos);
+    w.f.put<uint64_t>(0xa100+0x48,w.B+0xb000);auto t=w.f.sampler();CHECK(describeBody(t,"double",w.B+0xa000,w.art).find("foreign")!=std::string::npos);
+    auto made=describeBody(s,"made",w.B+0xb000,w.art);CHECK(made.find("parts 1")!=std::string::npos&&made.find("part20")==std::string::npos);
+    CHECK(describeBody(s,"none",0,w.art).find("unreadable")!=std::string::npos);
+}
 void privateRoom(){
     Scene s;auto d=s.make();
     CHECK(!d.gameUsesDouble(s.anchor.entity));                                       // parked: no
@@ -231,7 +314,7 @@ void hold(){
     c.found=0x7100;f.tick(true,&t,0,0,true);CHECK(f.stage()==Double::Stage::Parked&&c.calls.size()==n&&c.last("double_changed"));
 }
 int main(){
-    lifecycle();mover();animation();network();refusedUpgrade();actions();effects();releasedByGame();cargoCommand();privateRoom();ownBody();
+    lifecycle();mover();animation();network();refusedUpgrade();actions();effects();releasedByGame();cargoCommand();privateRoom();ownBody();ownCommand();modelSwap();bodyReport();
     try{transient();}catch(const std::exception& e){std::fprintf(stderr,"double oracle: transient threw %s\n",e.what());++failures;}
     hold();busy();yields(true);yields(false);identity();unconfirmed();tree();conversion();
     if(!failures)std::puts("double borrow, yield, release and pointer-path checks passed");
