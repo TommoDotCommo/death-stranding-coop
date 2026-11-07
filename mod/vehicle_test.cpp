@@ -62,6 +62,7 @@ std::vector<Test> tests={
     {"bike",[]{World w;Reader r(w.sampler);auto o=r.read(1000000);CHECK(o.available&&o.coherent&&o.riding&&o.kind==Kind::Motorbike);CHECK(o.seat==Seat::Driver&&o.seatIndex==0);CHECK(o.vehicle==w.address(World::Vehicle));CHECK(o.position[0]==100&&o.position[1]==200&&o.position[2]==30);CHECK(o.rotation[1]==1&&o.rotation[3]==-1);CHECK(!o.speedAvailable);}},
     {"truck_passengers",[]{World w;w.put<uint64_t>(World::Vehicle,w.address(World::TruckTable));w.put<uint32_t>(World::Vehicle+0x4c4,2);Reader r(w.sampler);for(unsigned seat=0;seat<=4;++seat){w.put<uint32_t>(World::State,seat);auto o=r.read(1000000+seat*250000);CHECK(o.available&&o.kind==Kind::Truck&&o.seatIndex==int(seat));CHECK(o.seat==(seat?Seat::Passenger:Seat::Driver));}}},
     {"foot",[]{World w;w.foot();w.f.blocked=w.address(World::Vehicle);w.vehicleReads=0;Reader r(w.sampler);auto o=r.read(1000000);CHECK(o.available&&o.coherent&&!o.riding&&o.kind==Kind::None&&o.seat==Seat::None&&!o.speedAvailable&&o.vehicle==0);CHECK(w.vehicleReads==0);}},
+    {"no_ride",[]{World w;w.put<uint64_t>(World::Ride,0);Reader r(w.sampler);auto o=r.read(1000000);CHECK(o.available&&o.coherent&&!o.riding&&o.kind==Kind::None&&o.vehicle==0);CHECK(o.reason=="no ride component");}},
     {"sampler",[]{World w;w.sampler.signatures.pop_back();auto before=w.reads;w.refuse("sampler not validated");CHECK(w.reads==before);}},
     {"menu",[]{World w;w.f.menu();w.refuse();}},
     {"selection",[]{World w;w.f.select(2,0);w.refuse();}},
@@ -71,7 +72,7 @@ std::vector<Test> tests={
     {"getter_identity",[]{World w;w.code<uint8_t>(0x2dbbe70+7,0x90);w.refuse();}},
     {"count",[]{World w;w.put<uint32_t>(World::Porter+0x90,Reader::MaxComponents+1);w.refuse("component count invalid");}},
     {"list",[]{World w;w.put<uint64_t>(World::Porter+0x98,0);w.refuse("component list invalid");}},
-    {"missing_component",[]{World w;w.put<uint64_t>(World::Ride,w.address(World::PorterTable));w.refuse();}},
+    {"missing_component",[]{World w;w.put<uint64_t>(World::Ride,w.address(World::PorterTable));Reader r(w.sampler);auto o=r.read(1000000);CHECK(o.available&&!o.riding&&o.reason=="no ride component");}},   // no ride component = not riding (live, Episode 1)
     {"duplicate_component",[]{World w;w.put<uint32_t>(World::Porter+0x90,2);w.put<uint64_t>(World::List+8,w.address(World::Ride));w.refuse();}},
     {"owner",[]{World w;w.put<uint64_t>(World::Ride+0x48,w.address(World::Vehicle));w.refuse();}},
     {"activation",[]{World w;w.put<uint64_t>(World::Porter+0xb0,w.address(World::OtherMover));w.refuse();}},

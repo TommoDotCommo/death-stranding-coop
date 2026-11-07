@@ -836,7 +836,12 @@ struct Runtime final:ds::Transport {
                 // Hold the first handshake until the episode is known (the first reads, before the world has loaded,
                 // return unknown), but never more than 20 s after the first read.
                 if(!firstProgressRead)firstProgressRead=now;
-                cache.progressReady=progress.value.episode!=ds::UnknownProgress||now-firstProgressRead>=20000;
+#ifdef MOD_FAKE_NETWORK
+                constexpr uint64_t progressWaitMs=0;      // the fake world carries no story data: nothing to wait for
+#else
+                constexpr uint64_t progressWaitMs=20000;
+#endif
+                cache.progressReady=progress.value.episode!=ds::UnknownProgress||now-firstProgressRead>=progressWaitMs;
                 if(progress.reason!=progressReason){progressReason=progress.reason;   // why an episode is (not) known, once per change
                     note(("PROGRESS episode="+(progress.value.episode==ds::UnknownProgress?std::string("unknown"):std::to_string(progress.value.episode))+" reason="+progress.reason+"\n").c_str());}
             }

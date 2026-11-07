@@ -5,6 +5,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent
 MUTANTS = [
+    ('absent ride component is unknown', 'no_ride', 'o.riding=false;o.kind=Kind::None;o.seat=Seat::None;', 'require(false,"ride component absent");'),
     ('unvalidated sampler', 'sampler', 'require(s.signatures.size()==6,"sampler not validated");', ''),
     ('not local human', 'human', 'require(c.value<uint16_t>(add(player,0x78))==1,"not local human");', ''),
     ('porter class', 'porter_type', 'require(c.type(o.porter,Porter),"porter type unverified");', ''),

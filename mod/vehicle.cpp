@@ -97,7 +97,15 @@ Observation Reader::read(uint64_t us) {
             require(c.value<uint64_t>(add(component,0x48))==o.porter,"ride owner differs");
             o.component=component;
         }
-        require(o.component!=0,"ride component absent");
+        if(!o.component) {
+            // No ride component at all (early in the story, before any vehicle: live 2026-11-08, Episode 1): the porter
+            // cannot be riding. Still only after every other check and an unchanged, re-selected observation.
+            o.riding=false;o.kind=Kind::None;o.seat=Seat::None;
+            require(c.unchanged(),"observation changed (no ride component)");
+            auto again=s.selectPlayer(manager);
+            require(!*again.reason&&again.player==player&&again.slot==selected.slot,"player selection changed (no ride component)");
+            o.available=o.coherent=true;o.reason="no ride component";reset();return o;
+        }
         auto active=c.value<uint8_t>(add(o.component,0x60));
         auto mover=c.value<uint64_t>(add(o.porter,0xb0));
         require(pointer(mover),"active mover unavailable");
