@@ -26,6 +26,7 @@
 #include "thread_trace.h"
 #include "virtual_pad.h"
 #include "frame_cap.h"
+#include "crash_record.h"
 #include <set>
 #include <winternl.h>
 #include <atomic>
@@ -313,6 +314,7 @@ redirect::trace::Call trace_enter(redirect::trace::Api api,void* caller) noexcep
 __attribute__((noinline)) BOOL WINAPI hook_PeekMessageA(LPMSG msg,HWND hwnd,UINT lo,UINT hi,UINT remove) {
     auto incoming=GetLastError();
     auto call=trace_enter(redirect::trace::Api::peek,__builtin_return_address(0));
+    redirect::crash::heartbeat(call.tid);   // no-op unless COOP_CRASH_RECORD (main thread only, one atomic store)
     SetLastError(incoming);
     auto result=real_peek(msg,hwnd,lo,hi,remove);auto error=GetLastError();
     dispatch_game_thread(call,result);
@@ -323,8 +325,10 @@ __attribute__((noinline)) BOOL WINAPI hook_PeekMessageA(LPMSG msg,HWND hwnd,UINT
 __attribute__((noinline)) BOOL WINAPI hook_GetMessageA(LPMSG msg,HWND hwnd,UINT lo,UINT hi) {
     auto incoming=GetLastError();
     auto call=trace_enter(redirect::trace::Api::get,__builtin_return_address(0));
+    redirect::crash::pump_blocking(call.tid,true);   // waiting for input is not a hang
     SetLastError(incoming);
     auto result=real_get(msg,hwnd,lo,hi);auto error=GetLastError();
+    redirect::crash::pump_blocking(call.tid,false);
     thread_trace.finish(call,GetTickCount64(),result);
     SetLastError(error);return result; // -1, 0 (WM_QUIT), and positive results stay distinct
 }
@@ -508,6 +512,23 @@ void register_notifications() {
     auto f=reinterpret_cast<Register>(real_gpa(GetModuleHandleW(L"ntdll.dll"),"LdrRegisterDllNotification"));
     static void* cookie=nullptr;
     if(!f || f(0,dll_notice,nullptr,&cookie)<0) fatal("redirect: loader notification registration failed\n");
+}
+// Crash recorder (crash_record.h): System32's dbghelp.dll by full path, on the recorder's watchdog thread, only when
+// the module policy admits it (allowlist and log-only do; strict refuses every late module, so no dump there).
+// The load is audited and its imports patched like any other module.
+HMODULE crash_dbghelp(wchar_t* reason,size_t capacity) {
+    auto path=modules.windows+L"\\system32\\dbghelp.dll";
+    if(!redirect::module_allowed(modules,path,module_evidence(path))) {
+        lstrcpynW(reason,L"module policy does not admit System32 dbghelp.dll (strict); no dump",int(capacity));
+        note(L"CRASH_DUMP_OFF",path,L"not loaded: the module policy does not admit it; tid="+std::to_wstring(GetCurrentThreadId()));
+        return nullptr;
+    }
+    note(L"MODULE_REQUEST",path,L"requested=crash recorder via=LoadLibraryExW (proxy, System32 only) tid="+std::to_wstring(GetCurrentThreadId()));
+    HMODULE m=::LoadLibraryExW(path.c_str(),nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
+    DWORD error=GetLastError();
+    drain_modules();
+    if(!m) {lstrcpynW(reason,(L"dbghelp load failed error="+std::to_wstring(error)).c_str(),int(capacity));return nullptr;}
+    return m;
 }
 std::wstring wide(LPCSTR p) {
     if(!p) return L"";
@@ -974,6 +995,28 @@ void install_redirect(void* self) {
         if(fps && !trace_enabled) fatal("redirect: background frame cap requires COOP_THREAD_TRACE=1\n");
         if(fps) {QueryPerformanceFrequency(&cap_frequency);background_cap=redirect::frame_cap::Cap(fps);
                  wchar_t detail[48];swprintf(detail,48,L"%u fps while not in the foreground",fps);note(L"BACKGROUND_FPS",L"enabled",detail);}
+    }
+    {   // Opt-in crash and hang recorder (crash_record.h). It records; it never handles an exception.
+        wchar_t value[16]{};auto n=::GetEnvironmentVariableW(L"COOP_CRASH_RECORD",value,16);unsigned level=0;
+        if(n>=16 || !redirect::crash::parse(n?value:L"",level)) fatal("redirect: invalid crash record option\n");
+        wchar_t hang[16]{};n=::GetEnvironmentVariableW(L"COOP_CRASH_HANG_SECONDS",hang,16);uint32_t hang_seconds=0;
+        if(n>=16 || !redirect::crash::parse_hang_seconds(n?hang:L"",hang_seconds)) fatal("redirect: invalid crash hang seconds\n");
+        if(level) {
+            // The hang note needs the main thread's message-pump heartbeat, which only the thread-trace hooks see.
+            if(!trace_enabled) hang_seconds=0;
+            auto stem=L"crash-"+std::to_wstring(GetCurrentProcessId())+L"-"+stamp;
+            redirect::crash::Options o;o.level=level;o.hang_seconds=hang_seconds;
+            o.folder=policy.instance.c_str();o.stem=stem.c_str();o.load_dbghelp=crash_dbghelp;
+            if(!redirect::crash::install(o)) fatal("redirect: crash recorder failed to start\n");
+            // Keep the recorder in front of the handler and filter the game registers later (crash_record.h).
+            auto kernel=GetModuleHandleW(L"kernel32.dll");
+            auto veh=kernel?real_gpa(kernel,"AddVectoredExceptionHandler"):nullptr, uef=kernel?real_gpa(kernel,"SetUnhandledExceptionFilter"):nullptr;
+            if(!veh || !uef) fatal("redirect: exception registration APIs unavailable\n");
+            entries.push_back({"AddVectoredExceptionHandler",(FARPROC)redirect::crash::hook_AddVectoredExceptionHandler,veh});
+            entries.push_back({"SetUnhandledExceptionFilter",(FARPROC)redirect::crash::hook_SetUnhandledExceptionFilter,uef});
+            note(L"CRASH_RECORD",L"level="+std::to_wstring(level)+L" hang="+(hang_seconds?std::to_wstring(hang_seconds)+L"s":
+                 std::wstring(trace_enabled?L"off":L"off (needs COOP_THREAD_TRACE=1)")),redirect::crash::log_path());
+        }
     }
     // System DLLs often import API-set targets in KernelBase, whereas game
     // imports target Kernel32 wrappers. Cover both resolved addresses. Keep the

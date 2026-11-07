@@ -40,6 +40,8 @@ returned, never inside `DllMain`.
 | `COOP_VIRTUAL_PAD` | absent/`0`: off; `1`: wrap the game's by-name `XInputGetState` lookup in `xinput1_4.dll` so a mod pad script drives player 1 (requires enforced networking, the mod, and the mod's `virtual_pad`; a mismatch refuses startup) |
 | `COOP_BACKGROUND_FPS` | absent/`0`: off; `1`–`240`: for two copies on one PC, the copy whose window is not in the foreground holds its game thread in the frame's empty `PeekMessage` until 1/n s has passed since its last frame (requires `COOP_THREAD_TRACE=1`). The copy in front is never delayed and the mod's network worker is never held. Two copies on one GPU halve each other's frame rate or worse even with the GPU half idle; the copy you look at gets its full rate back only when the other one nearly stops (measured: about 2× when the background copy is held to under 1 frame per second, about 1.2× at a quarter of its speed) |
 | `COOP_NETWORK_PEERS` | `a.b.c.d|...` co-op partners (numeric IPv4, at most 16) |
+| `COOP_CRASH_RECORD` | absent/`0`: off; `1`: crash and hang recorder (below); `2`: as `1`, and the minidump is also written at the first recorded fault. Other values refuse startup |
+| `COOP_CRASH_HANG_SECONDS` | absent: 15; `0`: no hang note; `1`–`600`: seconds without the main thread's message pump before the hang note (needs `COOP_THREAD_TRACE=1`, which provides the heartbeat) |
 
 Use the proxy only in a disposable copy of the game, never in your real Steam install. Disable Steam Cloud for the
 game while testing: the Steam client syncs from its own process, which no in-game hook can stop.
@@ -176,6 +178,54 @@ provide the reviewed dispatch seam described in `../mod/README.md`. This require
 enforced networking and a matching `mod_game_thread_tick` export. `GAME_THREAD_ARMED`
 records the binding; defaults remain observation-only. A failed callback disarms
 the pointer and fails closed. The proxy retains its mod module for process lifetime.
+
+## Crash and hang recorder (opt-in)
+
+`COOP_CRASH_RECORD=1` makes the proxy write `redirect-data\crash-<pid>-<process start>.log` (UTF-16LE, tab-separated
+like the audit log; the audit log's `CRASH_RECORD` line names it). Why: the game's own ERROR dialog lists module names
+without their bases, so the fault address cannot be placed. The recorder writes every address as `module+0xoffset`:
+
+- `CRASH\tfirst chance 0xc0000005 access violation read 0x... at D3DCOMPILER_47.dll+0x1234\ttid=...`, followed by
+  `CRASH_STACK` (up to 32 frames, unwound from the exception's own context with the module's `.pdata`). Recorded
+  codes: access violation, in-page error, illegal and privileged instruction, stack overflow, integer divide by zero,
+  heap corruption (`0xc0000374`) and fail-fast (`0xc0000409`; Windows usually ends the process before any handler sees
+  it). "first chance" means the fault was seen before anyone handled it: the process may well go on. Each fault
+  address is recorded once (repeats are counted), at most 32 addresses; the file never passes 1 MiB.
+- `CRASH\tunhandled ...` and its stack when nothing handled it (from an unhandled-exception filter).
+- `CRASH_MODULE\t<name>\tbase=... size=...`: the module map, once at startup and again at the first record.
+- `CRASH_DUMP`: `crash-<pid>-<process start>.dmp`, a small minidump (stacks, threads, module list) written from the
+  unhandled filter (level 2: also at the first record). It needs `C:\Windows\System32\dbghelp.dll`, loaded by full
+  path on the recorder's own thread through the module policy: `allowlist` and `log-only` admit it (audited like any
+  module); `strict` does not, and then `CRASH_DUMP_READY\toff` says why and no dump is written.
+- `HANG` and `HANG_STACK`: when the main thread's message pump has not run for `COOP_CRASH_HANG_SECONDS` (default 15),
+  the main thread is suspended just long enough to read its stack, once per process; `HANG_END` when it pumps again.
+  A `GetMessage` call that waits for input is not a hang. Requires `COOP_THREAD_TRACE=1` (its hooks are the heartbeat).
+
+It never changes what happens to an exception: the vectored handler always continues the search, and the filter the
+game installs still runs after the recorder's. The game registers its own first-position vectored handler (it sends
+access violations, illegal instructions, stack overflows and a few others straight to its crash reporter) and its own
+unhandled filter after the proxy has loaded. So the recorder hooks `AddVectoredExceptionHandler` and
+`SetUnhandledExceptionFilter` in the import tables to stay in front. Inside a handler it does not allocate, takes no lock
+the faulting thread could hold (no heap, loader, CRT formatting or audit-log lock) and reads foreign memory only through
+`ReadProcessMemory` on its own process.
+
+Tests: `make -C redirect crash-record-test` (also part of `test`). The pure rules have a host test and three mutants. A
+Windows fixture (`crash_record_probe.exe`, run directly from WSL; skipped without interop) goes through these cases:
+- recorder off;
+- a handled access violation (recorded as first chance, deduplicated, the process continues);
+- 40 distinct faults (capped at 32);
+- a level-2 dump;
+- an unhandled access violation (record, module map, minidump, and the "game" filter still runs);
+- a hang (the main thread's stack shows where it waits).
+
+Four mutants must fail it: recorder not installed, recorder left behind the game's handler, game filter not chained,
+and hang note from the wrong thread.
+
+Research only: `make -C redirect build/research-crash-fault.dll` (deploy it as the copy's `d3dcompiler_47.dll`) adds a
+stamp-guarded command file `redirect-data\crash.fault`, polled once a second: `divide <pid>-<process start>` raises an
+integer-divide fault on a new thread and recovers it (the game's handler does not report that code), so the copy keeps
+running. `access <pid>-<process start>` writes to address 0 on a new thread: a real crash. The default proxy has no
+such code.
 
 ## Virtual gamepad (experimental)
 

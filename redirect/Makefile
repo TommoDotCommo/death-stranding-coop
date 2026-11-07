@@ -1,9 +1,9 @@
 CXX = x86_64-w64-mingw32-g++
 FLAGS = -std=c++17 -O2 -Wall -Wextra -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++
 LIBS = -lshell32 -lole32 -luuid -lws2_32 -lwinhttp -lbcrypt -lwinmm
-PROXY_SRC = path_map.cpp module_policy.cpp audit_throttle.cpp objects.cpp network_policy.cpp redirect.cpp proxy.cpp ../mod/config.cpp
-PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h virtual_pad.h frame_cap.h iat_patch.h ../mod/game_thread.h ../mod/mod.h
-all: build/thread_trace_probe_module.dll build/thread_trace_probe.exe build/d3dcompiler_47.dll build/avrt.dll build/mutant-avrt-forward-broken.dll build/proxy_fixture.exe build/redirect_probe.exe build/redirect_probe_module.dll build/hooks-disabled.dll build/mutant-queries-unmapped.dll build/mutant-find-unmapped.dll build/mutant-attributes-unmapped.dll build/mutant-net-unhooked.dll build/net_probe.exe build/pad_probe.exe
+PROXY_SRC = path_map.cpp module_policy.cpp audit_throttle.cpp objects.cpp network_policy.cpp crash_record.cpp redirect.cpp proxy.cpp ../mod/config.cpp
+PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h virtual_pad.h frame_cap.h iat_patch.h crash_record.h ../mod/game_thread.h ../mod/mod.h
+all: build/thread_trace_probe_module.dll build/thread_trace_probe.exe build/d3dcompiler_47.dll build/avrt.dll build/mutant-avrt-forward-broken.dll build/proxy_fixture.exe build/redirect_probe.exe build/redirect_probe_module.dll build/hooks-disabled.dll build/mutant-queries-unmapped.dll build/mutant-find-unmapped.dll build/mutant-attributes-unmapped.dll build/mutant-net-unhooked.dll build/net_probe.exe build/pad_probe.exe build/research-crash-fault.dll
 build:
 	mkdir -p build
 build/d3dcompiler_47.dll: $(PROXY_DEPS) d3dcompiler_47.def | build
@@ -16,6 +16,9 @@ build/mutant-avrt-forward-broken.dll: $(AVRT_DEPS) | build
 	$(CXX) $(FLAGS) -DCOOP_PROXY_AVRT -DMUTANT_FORWARD_BROKEN -shared $(PROXY_SRC) avrt.def -o $@ $(LIBS)
 build/proxy_fixture.exe: proxy_fixture.cpp | build
 	$(CXX) $(FLAGS) $< -o $@ -lavrt
+# Research only (never the default proxy): the crash recorder's stamp-guarded forced fault (crash_record.cpp).
+build/research-crash-fault.dll: $(PROXY_DEPS) d3dcompiler_47.def | build
+	$(CXX) $(FLAGS) -DCRASH_RECORD_RESEARCH -shared $(PROXY_SRC) d3dcompiler_47.def -o $@ $(LIBS)
 build/hooks-disabled.dll: $(PROXY_DEPS) | build
 	$(CXX) $(FLAGS) -DMUTANT_HOOKS_DISABLED -shared $(PROXY_SRC) -o $@ $(LIBS)
 build/mutant-queries-unmapped.dll: $(PROXY_DEPS) | build
@@ -46,7 +49,7 @@ thread-trace-test: build/thread-trace-test
 iat-race-test: iat_patch.h iat_race_test.cpp | build
 	$(CXX) $(FLAGS) iat_race_test.cpp -o build/iat-race-test.exe
 	$(CXX) $(FLAGS) -DMUTANT_IAT_UNLOCKED iat_race_test.cpp -o build/mutant-iat-unlocked.exe
-	@if ! ./build/iat-race-test.exe >/dev/null 2>&1 && test $$? -eq 126; then echo "iat-race-test: no Windows interop, skipped"; exit 0; fi; \
+	@./build/iat-race-test.exe >/dev/null 2>&1; code=$$?; if test $$code -eq 126 -o $$code -eq 127; then echo "iat-race-test: no Windows interop, skipped"; exit 0; fi; \
 	 ./build/iat-race-test.exe || exit 1; \
 	 for i in 1 2 3; do ./build/mutant-iat-unlocked.exe >/dev/null 2>&1; code=$$?; \
 	 if test $$code -ne 3 -a $$code -ne 1; then echo "SURVIVED IAT_UNLOCKED (exit $$code, run $$i)"; exit 1; fi; done
@@ -59,7 +62,31 @@ avrt-proxy-test: build/avrt.dll build/mutant-avrt-forward-broken.dll build/proxy
 	 w=$$(wslpath "$$(cmd.exe /c 'echo %TEMP%' 2>/dev/null | tr -d '\r')") && \
 	 python3 -B test_proxy_windows.py --work-dir "$$w" --fixture build/proxy_fixture.exe --proxy build/avrt.dll --mutant build/mutant-avrt-forward-broken.dll >build/avrt-proxy-test.log || { cat build/avrt-proxy-test.log; exit 1; }
 .PHONY: avrt-proxy-test
-test: thread-trace-test iat-race-test avrt-proxy-test | build
+# Crash and hang recorder (crash_record.h). Host: the pure rules and 3 mutants. Native Windows (WSL interop, no game):
+# the fixture exe drives off / handled / handled-dump / unhandled / hang / research (the default build must ignore
+# the research command; the research build must record a recovered fault); 4 mutant builds must fail the driver.
+CRASH_PROBE_DEPS = crash_record.h crash_record.cpp crash_record_probe.cpp
+build/crash_record_probe.exe: $(CRASH_PROBE_DEPS) | build
+	$(CXX) $(FLAGS) -municode crash_record_probe.cpp crash_record.cpp -o $@
+build/crash_record_probe_research.exe: $(CRASH_PROBE_DEPS) | build
+	$(CXX) $(FLAGS) -DCRASH_RECORD_RESEARCH -municode crash_record_probe.cpp crash_record.cpp -o $@
+build/mutant-crash-%.exe: $(CRASH_PROBE_DEPS) | build
+	$(CXX) $(FLAGS) -DMUTANT_CRASH_$* -municode crash_record_probe.cpp crash_record.cpp -o $@
+CRASH_WINDOWS_MUTANTS = UNINSTALLED BEHIND NO_CHAIN HANG_SELF
+crash-record-test: crash_record_test.cpp test_crash_record_windows.py build/crash_record_probe.exe build/crash_record_probe_research.exe $(CRASH_WINDOWS_MUTANTS:%=build/mutant-crash-%.exe) | build
+	g++ -std=c++17 -Wall -Wextra -Werror crash_record_test.cpp -o build/crash-record-test
+	./build/crash-record-test
+	@for mutant in CRASH_NO_DEDUPE CRASH_NO_CAP CRASH_FIND_EDGE; do \
+	 g++ -std=c++17 -DMUTANT_$$mutant crash_record_test.cpp -o build/mutant-$$mutant || exit 1; \
+	 if ./build/mutant-$$mutant >/dev/null 2>&1; then echo "SURVIVED $$mutant"; exit 1; fi; done
+	@./build/crash_record_probe.exe --interop-check >/dev/null 2>&1; code=$$?; if test $$code -eq 126 -o $$code -eq 127; then echo "crash-record-test: no Windows interop, Windows part skipped"; exit 0; fi; \
+	 test $$code -eq 0 || { echo "crash-record-test: probe does not start ($$code)"; exit 1; }; \
+	 python3 -B test_crash_record_windows.py --exe build/crash_record_probe.exe --work build/crash-fixture || exit 1; \
+	 python3 -B test_crash_record_windows.py --exe build/crash_record_probe_research.exe --research --case research --work build/crash-fixture-research || exit 1; \
+	 for mutant in $(CRASH_WINDOWS_MUTANTS); do \
+	 if python3 -B -u test_crash_record_windows.py --exe build/mutant-crash-$$mutant.exe --work build/crash-fixture-mutant >build/mutant-crash-$$mutant.log 2>&1; then echo "SURVIVED CRASH_$$mutant"; exit 1; fi; done
+.PHONY: crash-record-test
+test: thread-trace-test iat-race-test avrt-proxy-test crash-record-test | build
 	g++ -std=c++17 -Wall -Wextra -Werror network_policy.cpp network_test.cpp -o build/network-test
 	./build/network-test
 	@for mutant in NET_ALLOW_ALL NET_EXACT_LOOPBACK NET_NO_PEERS NET_ANY_V6 NET_MAPPED_LOCAL NET_NAME_PREFIX NET_NEVER_REFUSE NET_REFUSE_LOG_ONLY; do \
