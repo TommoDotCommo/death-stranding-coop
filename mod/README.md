@@ -642,6 +642,46 @@ Each command is a file in the mod folder. The mod consumes it and accepts it onl
 - `pad.script`: a virtual gamepad script (`pad.h`), requires `virtual_pad` and `COOP_VIRTUAL_PAD=1`.
 - `puppet.body`: `create <stamp>` asks the engine for a second Sam from the double's resource, 3 m to the porter's side,
   and logs what the request produces (`BODY ...` lines); `remove <stamp>` removes it (`body.h`, an experiment).
+- `puppet.vehicle`: `read <stamp>` logs one read-only vehicle observation; `watch <stamp>` logs at most four a second
+  for 60 seconds (240 observations); `off <stamp>` stops it. Requires the ordinary `provider:"game"` and `logging:true`,
+  with the pinned `discovery_sha256`. It works with either `self_tick` or the guarded `game_thread` callback and needs
+  no vehicle config key, environment variable, `puppet_probe`, or partner. It starts disabled and never creates or moves
+  anything. `discovery:true` uses the separate discovery worker and does not process this command.
+
+Vehicle observations are `VEHICLE {json}` rows in the process's mod log. The riding/seat interpretation is provisional
+static evidence for build 13300582; it has not been checked against a live mount. Expected on foot: `available:true`,
+`riding:false`, `kind:"none"`, `seat:"none"`, with null vehicle transform and speed. Seated on a bike: `riding:true`,
+`kind:"motorbike"`, `seat:"driver"`, `seat_index:0`, and the **bike's** position/rotation in game axes (z up). Trucks
+report `kind:"truck"`; raw seat indices 1..4 select passenger helpers, without an established left/right/front/back
+mapping. Unsupported seat values stay `seat:"unknown"`, `seat_index:-1`.
+
+`speed` is null on the first sample, then the magnitude of the vehicle's world-position delta per second
+(`speed_source:"position_delta"`), in game world units consistent with metres. A stationary mounted vehicle should
+report approximately zero; riding should change its transform and produce positive speed. Pauses over 500 ms,
+intervals below 10 ms, clock reversal, an unavailable read, mount/seat/vehicle changes, or a speed above 200 units/s
+discard the estimate. Missing/type-mismatched/changing pointers or an invalid transform yield `available:false`,
+`riding:null` and a reason, with no stale transform. Unknown is never logged as a successful on-foot observation.
+Every row has `provisional:true`; repeated reads cannot establish object lifetime or make a snapshot atomic.
+
+Read-only live check for a verifier: one disposable copy, networking enforced, normal loaded gameplay. With
+`logging:true`, write `watch <stamp>` plus a newline to `puppet.vehicle` beside `mod.json` using the current process's
+log stamp. Stand for five seconds, mount a bike, wait seated for five seconds, ride/turn/brake for ten seconds,
+then dismount and stand for five seconds. Record action times independently and compare the reported vehicle address
+and transform with query/read process observations; the porter's transform alone is insufficient. The expected
+transitions above, a positive ride speed agreeing with an independent position delta, and a return to on-foot state
+are the evidence to collect. A few changing-pointer refusals during mounting are inconclusive; sustained refusal,
+on-foot while seated, a wrong kind/seat, or a transform that follows the porter instead of the bike refutes the path.
+Send `off <stamp>` to finish early. Repeat for a truck and passenger seat when available. About 30 seconds per vehicle,
+60 seconds maximum per watch; no second game copy or stand-in is needed. No live vehicle check has run for this provider.
+
+For example, from native Windows Python, with the current log's run stamp substituted (write LF exactly):
+
+```sh
+python -c "from pathlib import Path; p=Path(r'<copy>/redirect-data/mod/puppet.vehicle'); t=p.with_name(p.name+'.tmp'); t.write_bytes(b'watch <stamp>\n'); t.replace(p)"
+```
+
+Replace `watch` with `read` or `off` for the other commands. The JSON `t_us` is the monotonic sample time; use it
+for independent position-delta comparisons rather than assuming the requested sampling rate was achieved.
 
 `auto_continue: true` in `mod.json` (requires `game_thread`) gets a test copy from the title screen into the last save
 without menu input or window focus: on the game thread, every 2 s from 5 s after start, the mod calls the game's

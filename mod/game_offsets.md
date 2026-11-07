@@ -1085,3 +1085,180 @@ Host-tested in `double_test.cpp` (`modelSwap`, `bodyReport`, `ownCommand`). Muta
 - `0x40`, read-only: after dressing, one log row per component of the made body and the resident double (vtable as an
   image offset, owner, resource), the primary `ArtPartsData`, each `ArtPartsData`'s part count and part 20's state
   byte and name hash. Combine it with the other bits (`50`, `60`, `48`).
+
+## Vehicles (static, 2026-11-07; read-only provider, no vehicle created or live vehicle checked)
+
+Scope: the pinned build/hash at the top of this file, opened read-only. The old
+37-match vehicle type-check window remains rejected: it is common Decima ancestry
+code, not a unique riding signature. This pass instead followed the exact export
+name references, `.pdata` ranges, compound descriptors and slot-zero type getters,
+then independently disassembled the relevant functions. Reproduce focused reads with
+`x86_64-w64-mingw32-objdump -d -M intel --start-address=<base+RVA> --stop-address=<base+end RVA> "<game dir>/ds.exe"`.
+Addresses below are RVAs, with image base `0x140000000`. No bytes, resources or
+other game content are distributed here.
+
+### Entity and resource identities
+
+The compound-descriptor method is the same as for the own body above: standalone
+name pointer at descriptor `+0x40`, kind 4 header, base descriptors at `+0x60`.
+Sizes and inheritance are metadata evidence, not a live allocation inventory.
+
+| Class | Descriptor | Size | Base | Primary table / slot-zero type getter |
+|---|---:|---:|---|---|
+| `VehicleEntity` | `0x4ca59a0` | `0xbe0` | `Entity` | `0x3e25580` / `0x2f6bda0` |
+| `DSVehicleMotorbike` | `0x4ca65a0` | `0xdb0` | `VehicleEntity` | `0x3e25db8` / `0x2f6bb60` |
+| `DSVehicleTruck` | `0x4ca6d60` | `0x1120` | `VehicleEntity` | `0x3e26790` / `0x2f6bcb0` |
+| `DSVehicleSpeedCar` | `0x4ca7660` | `0xd20` | `VehicleEntity` | `0x3e274d8` / `0x2f6bc10` |
+| `DSRideVehicleMovementComponent` | `0x4c6b160` | `0x330` | `DSMoverSupportComponent` | `0x3dfe930` / `0x2dbbe70` |
+| `VehicleMover` | `0x4ca7ed0` | `0x170` | `PhysicsMover` | `0x3e28010` / `0x2f6be60` |
+
+The getters are `lea rax,[rip+descriptor]; ret`, not engine calls made by the
+provider. `DSPlayerEntity` is checked too: table `0x3d7d0d8`, getter `0x2711b40`,
+descriptor `0x4bc6e00`. Constructors independently select the bike/truck tables
+at `0x2f61b9c` / `0x2f62470` and write vehicle `+0x4c4 = 3` / `2` at
+`0x2f61cfc` / `0x2f62571`. The speed car constructor writes 1 at `0x2f62201`.
+The provider supports bike/truck only; base vehicles, speed cars and subclasses
+with other tables are **unsupported**, never silently treated as a bike.
+
+| Resource | Descriptor / size | Base | Primary table / getter | Entity selector (slot `+0x68`) |
+|---|---|---|---|---|
+| `VehicleEntityResource` | `0x4ca5ca0` / `0x280` | `EntityResource` | not needed by the provider | not used |
+| `DSVehicleMotorbikeResource` | `0x4ca6420` / `0x330` | `VehicleEntityResource` | `0x3e246b8` / `0x2f5dba0` | `0x2f5dbb0` loads `0x4ca3508`, whose file pointer is the motorbike descriptor |
+| `DSVehicleTruckResource` | `0x4ca6be0` / `0x310` | `VehicleEntityResource` | `0x3e266b8` / `0x2f6bd30` | `0x2f6b050` loads `0x4ca1568`, whose file pointer is the truck descriptor |
+| `VehicleMoverResource` | `0x4ca7e10` / `0x58` | `PhysicsMoverResource` | not needed by the provider | not used |
+| `DSRideVehicleMovementComponentResource` | `0x4c6ac00` / `0x58` | `DSMoverSupportComponentResource` | not needed by the provider | not used |
+
+`VehicleEntityResource` has static `TopSpeed` at resource `+0x11c`, battery at
+`+0x130`, and inherited `EntityComponentResources` at `+0x90`; these are resource
+settings, **not instantaneous vehicle speed**. The motorbike resource names
+front-left, front-right and back wheels at `+0x2e8/+0x2ec/+0x2f0`. This is a lead
+for the reverse trike, not proof of a particular loaded variant. No separate
+compound descriptor exactly named `Vehicle`, `Bike`, `Motorbike`, `Truck`,
+`Trike` or `Ride` was found by this method; do not infer extra classes from the
+earlier `Vehicle` string alone. Resource instances/variants loaded by a later
+save remain unknown.
+
+### Porter -> ride component -> vehicle and seat
+
+The local root stays the reviewed manager -> selected Player -> `Player+0x70`
+entity chain. Entity components have count at `+0x90` and pointer array at
+`+0x98`. Static callers at `0x2af2b44..0x2af2b64` and
+`0x2b5f48f..0x2b5f4ab` ask the component lookup `0x22b2a60` for the
+`DSRideVehicleMovementComponent` descriptor. `0x22b2a60` looks up the associated
+sorted type IDs and returns the component pointer; the provider instead walks
+the bounded pointer array and checks the exact table/getter pair.
+
+The following are observed machine operations; riding semantics still require
+the live action sequence below:
+
+| Location | Observation and inference |
+|---|---|
+| Component `+0x48` | Owner entity; `0x2dbbedc` uses it to read the porter's transform. Require it to equal the local porter. |
+| Component byte `+0x60`, bit 0 | Active predicate `0x29aa8c0`; `0x2dbbe90` compares that predicate with requested activation. `0x2dae6b0` checks/changes the owner's active mover at entity `+0xb0`, then updates the bit. Require active bit and `entity+0xb0 == component` to agree. |
+| Component `+0x318` | Pointer to seat/ride state. Activation `0x2dc2696` reads it and `state+0xa68`. Exact state class and how this pointer is assigned remain unknown. |
+| State `+0xa68` | Vehicle reference, stored as vehicle primary address **plus `0x20`**. `0x2dc26a3..0x2dc26e4` converts it to/from the primary address and stores the reference in component `+0xe0`. The provider requires both references to agree and subtracts `0x20` once. |
+| State dword `+0` | Helper/seat selector: `0x2dc2706`, dispatch `0x2dc2761..0x2dc279b`; also `0x2dc27b7` and `0x2dc27da`. Selector 0 chooses `HLP_Driver`; 1..4 choose `HLP_Enemy_3`, `HLP_Enemy`, `HLP_Enemy_4`, `HLP_Enemy_2` respectively (`0x2dc8520` and its string initialization). Reading: driver vs numbered passenger helpers; physical seat positions and local passenger support unknown. Other values stay unknown. |
+| Vehicle `+0xc8` / `+0xe0` | Inherited Entity world position (3 f64) / rotation (9 f32). The common entity factory itself copies the 60-byte world transform to these offsets at `0x23739b6..0x23739eb`. This is the vehicle transform, not the seated porter's transform or a bone. |
+
+The generic `Entity_ExportedIsMounted` is a different predicate: registration
+at `0x2332e31..0x2332e59` points at `0x2362cf0`, which calls `0x2381780`.
+That function checks for `MounterComponent` (`0x4b40da0`) through the entity's
+component list. Its `+0x50` references `MountableComponent` (`0x4b409f0`), whose
+owner is `+0x48`; reflection also names its `Mounter` at `+0x58`. This generic
+mount path has not been established as the DS bike path, so the provider does
+not substitute it when the DS ride component is absent.
+
+`VehicleEntity_sExportedIsDriving` registration `0x2f5e337..0x2f5e35f` selects
+wrapper `0x2fa68c0` -> implementation `0x2fa7450..0x2fa7514`:
+mode true returns `vehicle+0x4cc` not in {0,5,6}; mode false requires
+`+0x63c != 0`, `+0x528 != null`, and `+0x4cc == 2`. This says nothing about
+**which porter** occupies the vehicle. In particular, `+0x528` is not a proven
+driver entity pointer: `0x2f66450` reads its `+8` as float control input. The
+provider neither calls this export nor equates its result with local riding.
+
+### Speed, creation and parking/driving proposal
+
+The existing Entity velocity path (`0x234c180`, mover `+0xb0`, virtual `+0xc8`,
+fallback model `+0xb8` / virtual `+0x130`) still requires engine calls; a stable
+vehicle-physics velocity storage offset was **not established**. The read-only
+provider therefore reports a separately marked finite-difference speed from
+successive vehicle positions and monotonic sample times, including vertical
+motion. First sample, identity/seat change, unavailable reads, 10 ms minimum /
+500 ms maximum interval, clock reversal, and discontinuities above 200 world
+units/s invalidate the estimate. It is never clamped to the 20 m/s walking
+provider limit or substituted with resource `TopSpeed`.
+
+Static creation route: both concrete vehicle-resource tables have factory slot
+`+0x80 = 0x2366570`, which jumps to `0x2373940`. At `0x2373973` that factory
+calls the resource's entity selector (`+0x68`), allocates through `0x1a8eee0`,
+sets the transform, and initializes using the supplied resource. The existing
+script creator `EntityResource_ExportedCreateEntity` (`0x23806a0`) forwards to
+`0x2374400`, which calls precisely this resource factory. Thus a **correctly
+loaded and retained concrete vehicle resource reaches the matching vehicle
+allocation path through the same creator as the own body**. This is static
+dispatch evidence, not a successful or approved spawn: activation dependencies,
+physics/world registration, save/game-actor ownership, resource lifetime and
+cleanup remain unknown. Nothing was created or removed in this pass.
+
+Vehicles have a `VehicleMover : PhysicsMover`, not the double's
+`FixedPositionMover`. As corroboration, the game's vehicle-creation path
+`0x2f534e0..0x2f5360e` looks up `VehicleMover` on a created vehicle at
+`0x2f53570`, sets mover dword `+0x128 = 2` at `0x2f53598`, then adds it to the
+world. The mover constructor `0x2f5da60..0x2f5da99` starts this mode at 0.
+A further static trace identifies its transform-playback path:
+
+| Mover operation | Evidence |
+|---|---|
+| Set a target transform | `0x2f801b0..0x2f801f5`: takes mover in RCX and a 60-byte world transform in RDX, sets dword `+0x128 = 1`, copies position to `+0x130..+0x147` and rotation to `+0x148..+0x16b`. |
+| Update transform | Primary mover table slot `+0x130` points at `0x2f899d0`. Mode 0 tail-calls normal PhysicsMover path `0x23b7060`; mode 1 tail-calls `0x22e97f0(mover, mover+0x130)`; other modes, including 2, return without this update. |
+| Apply target to owner | `0x22e97f0..0x22e98ef`: compares the full pose with owner `*(mover+0x48)`, locks owner `+0x288`, writes position at `+0xc8` and rotation at `+0xe0`, marks owner flag bit 0, and unlocks. |
+| Existing native caller | `0x2fa5a1f..0x2fa5a2d` loads `vehicle+0xb0`, passes `vehicle+0x8f8` as the transform, and calls `0x2f801b0`. This independently connects the setter to the vehicle's active mover, not an assumed component offset. |
+
+**Inference:** mode 1 supplies a candidate for parking at a fixed world pose
+or playing back successive partner transforms, analogous to the own body's
+mover target, with a different layout and setter. Mode 2 suppresses this
+transform callback only; its complete purpose and effect on simulation are
+unknown, so it is not a proven parking flag. `VehicleMover` velocity slot
+`+0xc8` is `0x23b3c90`, which obtains a physics-related object through the
+owner and calls its virtual `+0x130`; it does not expose a direct velocity
+storage field for read-only copying.
+
+A future partner experiment would first inventory the occupied vehicle's
+resource and mover read-only; then, separately authorized, create from a retained
+vehicle resource, prove ownership/removal, and test a stationary mode-1 target
+with independent entity **and physics-body** readbacks before attempting moving
+playback. This is still not a complete park/drive contract. Neither writing the
+double's mover layout into a VehicleMover nor driving via guessed input offsets
+is justified. Passenger attachment/animation, wheel animation, collision,
+steering, and preventing the vehicle's own simulation from fighting playback
+remain open. No vehicle write API or config option is added.
+
+### Provider and live evidence still needed
+
+`vehicle.cpp` uses the hash/signature-validated `discovery::Sampler`, exact
+loaded table/getter bytes, local-human/owner checks, a maximum of 256 components,
+unique ride-component membership, matching activation and vehicle references,
+finite proper world rotation, and post-copy dependency/selection rechecks. A
+missing/unsupported component or vehicle yields unavailable, never a fabricated
+on-foot result. Inactive components do not dereference cached vehicle/seat
+references. This is bounded guarded copying; stable freed memory or ABA reuse
+can still evade it. All interpretations remain provisional, even on available
+rows. It does not alter the presence wire or partner body.
+
+Host fake-memory oracles and independent mutants are in `vehicle_test.cpp` and
+`test_vehicle_mutants.py` (`make -C mod vehicle-test`, also in `make test`).
+They establish guard behavior only, not that this save contains a bike, that
+mounting uses this component in the pinned runtime, or that passenger selectors
+are available to the player.
+
+The stamp-guarded `puppet.vehicle` commands and exact 30-second stand/mount/ride/
+brake/dismount sequence are documented in `mod/README.md`, "Live test commands".
+One copy is sufficient. Record the process's `VEHICLE` rows (`t_us`, riding,
+kind, seat, vehicle address, full transform, speed and refusal reason) and
+independent read-only memory/action evidence. Expected: on foot -> bike driver
+at rest -> moving bike with positive derived speed -> on foot. Transitions may
+briefly be unavailable; sustained refusal or a mismatch with the observed
+vehicle refutes the candidate. Repeat for a truck and passenger seat; resource
+variants, reload/death, despawn/address reuse and scene changes need separate
+validation. No such live experiment ran for this provider.
+

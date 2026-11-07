@@ -3,8 +3,8 @@ CXX ?= g++
 MINGW ?= x86_64-w64-mingw32-g++-posix
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp pad.cpp cargo.cpp structures.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = join.h game_thread.h puppet.h double.h body.h auto_continue.h pad.h cargo.h structures.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp pad.cpp cargo.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = join.h game_thread.h puppet.h double.h body.h auto_continue.h pad.h cargo.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -37,13 +37,20 @@ build/fake-no-interpolation.so: $(SRC) $(HEADERS) | build
 build/unit: unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp $(HEADERS) | build
 	$(CXX) $(FLAGS) unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o $@
 host: identity build/mod.so build/mod-no-build.so build/mod-no-interpolation.so build/mod_probe build/unit
-test: join-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so
+test: join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so
 	./build/unit
 	@$(CXX) $(FLAGS) -DMUTANT_PEER_ANY unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-peer-any && if ./build/unit-peer-any >/dev/null 2>&1; then echo SURVIVED PEER_ANY; exit 1; else echo KILLED MUTANT_PEER_ANY; fi
 	python3 -B test_probe.py
 	python3 -B -m unittest -q test_game_thread_api test_probe_puppet test_actor_resources test_actor_reader_windows
 	python3 -B test_actor_resource_mutants.py
 .PHONY: all identity host test
+
+build/vehicle-test: vehicle_test.cpp vehicle.cpp vehicle.h discovery.cpp fake_memory.h discovery_signatures.h | build
+	$(CXX) $(FLAGS) vehicle_test.cpp vehicle.cpp discovery.cpp -o $@
+vehicle-test: build/vehicle-test
+	./build/vehicle-test
+	python3 -B test_vehicle_mutants.py
+.PHONY: vehicle-test
 
 
 build/timing-test: timing_test.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp $(HEADERS) | build

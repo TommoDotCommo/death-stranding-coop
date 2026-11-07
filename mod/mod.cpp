@@ -29,6 +29,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "puppet.h"
 #include "double.h"
 #include "body.h"
+#include "vehicle.h"
 #include "auto_continue.h"
 #include "pad.h"
 #include "cargo.h"
@@ -169,6 +170,8 @@ struct Runtime final:ds::Transport {
     bool partnerMode() const {return twinMode==TwinMode::Peer||twinMode==TwinMode::Own;}
     std::filesystem::path cargoCommand;std::function<void(uint32_t,const mod::puppet::Transform&)> cargoCreate;
     std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
+    // Read-only vehicle diagnostics. No changes to presence or actor control (vehicle.h).
+    std::filesystem::path vehicleCommand;std::unique_ptr<mod::vehicle::Monitor> vehicleMonitor;
     std::function<void(uint32_t)> cargoGive,cargoDelete;std::function<void(uint8_t,const mod::puppet::Transform&,bool)> construct;std::function<bool(uint64_t,unsigned,bool)> partToggle;
     std::function<void(const std::array<float,4>&,const std::array<float,4>&,const mod::puppet::Transform&,bool,bool,bool)> unconstruct;
     std::function<void()> continueLastSave;mod::AutoContinue autoContinue;bool autoNoted=false;
@@ -442,6 +445,8 @@ struct Runtime final:ds::Transport {
             // An unavailable pose (main menu, loading) is NORMAL: presence stays gated until a pose is available.
             openPresenceLog(path);
             sampler=openSampler();
+            vehicleCommand=path.parent_path()/"puppet.vehicle";
+            vehicleMonitor=std::make_unique<mod::vehicle::Monitor>(*sampler);
             if(config.gameThread) {
 #ifdef MOD_FAKE_NETWORK
                 const auto sites=mod::dispatch::FixtureSites;
@@ -745,6 +750,15 @@ struct Runtime final:ds::Transport {
                 if(cache.local.flags&ds::Teleport)cache.stickyTeleport=true;else if(cache.stickyTeleport)cache.local.flags|=ds::Teleport;
             }
             if(game){poseAvailable=cache.available;poseReason=game->reason();}
+            // Read-only, explicit per-process command; also usable with the ordinary self-tick provider.
+            if(vehicleMonitor) {
+                if(std::filesystem::exists(vehicleCommand)) {
+                    auto command=readConfig(vehicleCommand);
+                    if(!std::filesystem::remove(vehicleCommand))throw std::runtime_error("cannot consume vehicle command");
+                    note(vehicleMonitor->command(command,mod::runStamp(),clock)?"VEHICLE command accepted\n":"VEHICLE ignored command for another process or malformed command\n");
+                }
+                auto row=vehicleMonitor->tick(clock);if(!row.empty())note(row.c_str());
+            }
             // Render at the actual apply time, not the preceding network iteration.
             core->frame(now);provider->applyRemote(cache.remote);
             stage="puppet";
