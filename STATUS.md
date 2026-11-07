@@ -12,23 +12,26 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 | Read the local player's pose | Position (3 x float64) and rotation (3x3 float32) through the game's own local-player path; stable at rest, consistent while walking. |
 | Exchange poses between two copies | Over loopback: median error 5 mm, all compared samples within 0.5 m and 10 degrees after excluding samples next to height-change snaps (`mod/analyse_presence.py --snap-window 2`). |
 | Modded copies stay offline | The game's config and online-server connections are refused; it switches to its own offline mode. |
+| The partner's own body (`own` mode, 2026-11-08) | The mod makes a second Sam with the game's entity creator and dresses it with the game's own in-place art-parts swap (the call the porter's streaming control makes on the resident double), after waiting until the game has dressed the porter. Close-ups over 8 frames: a clean porter-suit Sam; the earlier apply-a-second-outfit dress showed two outfits overlapping. Two copies in own mode: each body within 5 mm of the other porter, visible 100 % of the time, no hang. `peer` (borrow the resident double) stays the default mode. |
+| Story progress in the handshake | The episode is read from the game (read-only) and sent when the session starts (episode 1 in the test save); `progress_mismatch` warns (default) or refuses. |
+| Join at host (opt-in) | `join_at_host` with `join_move: "native"` moves a guest that is over 300 m away next to the host once per session with the game's own player teleport (the world map's fast-travel path). Live, one copy and the stand-in host 600 m away: moved, read back 1.6 m from the target, the game set Sam on the terrain there and he stayed; no fault. |
+| What the partner carries (opt-in) | `carry_visual` reads the porter's carried cargo read-only and sends a summary; the partner logs it (live: "1 entry ... x2", cleared on disconnect). Nothing is drawn yet. |
+| The partner on the map, and pings (opt-in) | Live: a map pin follows the partner, a ping is sent and placed in both worlds, the pin is removed when the partner leaves. |
+| Crash and hang recorder (opt-in) | `COOP_CRASH_RECORD=1`: module map at start, a record with module+offset stack for fatal-class exceptions, a minidump on an unhandled one. A research build's forced divide fault on a worker thread was recorded, dumped and recovered live. It found tonight's first bug: the game's crash dialog of 2026-11-07 was the proxy itself (two threads patching import tables at once), fixed with one lock (`redirect/iat_patch.h`). |
+| Release proxy name `avrt.dll` | The proxy also builds as `avrt.dll`, a DLL the game imports but does not ship, so an install never replaces a game file. Live in a test copy (game's own `d3dcompiler_47.dll` untouched): loaded at startup, the mod started, the game reached gameplay. Without the launcher's ticket or an explicit test environment the release proxy does nothing, so a game started from Steam runs untouched. |
 
 ## Not done
 
-- The partner's own body in the default build. The partner is drawn with the game's resident Sam double (below),
-  which the game takes back for the private room. Live on 2026-11-07, an experiment build created a second Sam
-  with the script export `EntityResource_ExportedCreateEntity` from the double's own resource and drove it as the
-  partner with the double backend. The mod now has an `own` mode that makes, parks and drives that body (resident
-  double handed back) and holds the partner's exact position. With the porter's art parts applied to it, the body
-  is drawn and walks, stable over 90 s, but with stretched-polygon artifacts still to fix (`mod/game_offsets.md`,
-  "Drawing the own body"). Static follow-up (2026-11-08): the game dresses its own double with the in-place art-parts
-  replacement that the porter's body-variant streaming makes on the porter and the double; research mask `own80`
-  replays it on the made body (untested live). `peer` stays the default.
-- BTs, vehicles, cutscenes, death and voidouts, saves of a shared world,
-  the partner's gear and outfit, and the partner's own controller input.
-- A real two-PC session. The mod now accepts any unicast IPv4 peer (LAN or VPN) and binds only the address that
-  routes to it (README, "Two PCs"); it has only run over loopback so far. No NAT traversal: across the internet use
-  a VPN such as Tailscale.
+- Drawing the partner as anything other than a standing/walking/running Sam: no vehicles yet (a read-only bike/truck
+  reader is built and treats "no ride component" as on foot, but the test save has no vehicle), no carried cargo or
+  gear drawn on the partner, no cutscene sharing.
+- BTs, MULEs, death and voidouts, shared orders and deliveries, saves of a shared world, shared weather (time of day
+  sync is built, off by default, untested live; the time setter can advance the day counter), the partner's own
+  controller input.
+- Structures built from the game's own menus (the test save is in Episode 1, before the chiral network).
+- A real two-PC session. The mod accepts any unicast IPv4 peer (LAN or VPN) and binds only the address that routes
+  to it (README, "Two PCs"); it has only run over loopback so far. The launcher (`launcher/`, invite codes, LAN and
+  Tailscale discovery, `deathstranding-coop://` links) is built and tested game-free only.
 
 ## QA level
 
@@ -157,14 +160,16 @@ now carries the sender's run tag, so the receiver prefers items from before that
 stacked on one spot around a restart can still be matched the wrong way round (6 in 2000 fuzzed sessions with
 restarts and sliding; none without restarts).
 
-## The partner on the map, and pings (built 2026-11-08, not yet run live)
+## The partner on the map, and pings (built and run live 2026-11-08)
 
 Off by default (`mod/marker.h`, armed with the `puppet.marker` command). The partner is shown as one of the game's own
 map pins, moved at most once a second and removed when he disconnects or either porter is in an event or private room;
 a ping (V) puts a pin at the porter's position in both worlds through a reliable CARGO event of type 5, shown once per
 ping. The pins are the game's user markers, found statically (`mod/game_offsets.md`, "Map markers"); they are saved with
 the game, so the mod uses two groups of its own, never touches the player's pins and removes its own leftovers after a
-reload. Tested game-free with a fake marker table and four mutants. Default key bindings are not in the executable, so
+reload. Tested game-free with a fake marker table and four mutants, and live with one copy and the stand-in partner
+(pin follows the partner, a ping reaches both worlds, the pin goes when the partner leaves). Player-placed pins were
+not part of that run. Default key bindings are not in the executable, so
 whether V collides with a game key is unknown.
 
 ## Testing aids (built 2026-11-03, first run live 2026-11-07)
