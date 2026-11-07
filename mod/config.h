@@ -6,10 +6,10 @@
 namespace mod {
 struct Config {
     unsigned slot=0, peerSlot=1;
-    std::string role, peer, nickname, provider, fault="none", bind;   // bind: local IPv4 for a non-loopback peer (empty = the route's)
+    std::string role="none", progressMismatch="warn", peer, nickname, provider, fault="none", bind;   // bind: local IPv4 for a non-loopback peer (empty = the route's)
     uint32_t peerAddress=0x7f000001, bindAddress=0;                       // host byte order; 0 = choose the route's local address
     uint64_t session=0;
-    bool logging=true, required=false, impairment=false, discovery=false, selfTick=false, gameThread=false, puppetProbe=false, virtualPad=false, autoContinue=false;
+    bool logging=true, required=false, impairment=false, discovery=false, selfTick=false, gameThread=false, puppetProbe=false, virtualPad=false, autoContinue=false, joinAtHost=false;
     unsigned presenceLogMaxMiB=8;
     discovery::Options discoveryOptions;
 };

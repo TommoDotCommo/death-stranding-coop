@@ -3,6 +3,8 @@
 //   coop-partner --slot 1 --peer-slot 0 --role client --session N [--follow | --replay FILE [--where-recorded]]
 //                [--drop SECONDS ITEM] [--take-after SECONDS] [--take-own-after SECONDS] [--build SECONDS TYPE] [--unbuild-after SECONDS]
 //                [--seconds N] [--stop FILE]
+// --offset X Y Z shifts the follow target (adapter metres, Y up); --episode N|unknown and --progress-id N|unknown
+// set explicit handshake fixtures, --progress-mismatch warn|refuse chooses policy.
 // --where-recorded plays the walk where it was recorded (same save, same place) instead of beside the porter.
 // Prints one status line a second and every cargo event the game sends. --drop places one cargo item (the game's
 // item hash) where the partner stands, SECONDS after connecting. --take-after picks up (sends "taken" for) every item the
@@ -38,6 +40,8 @@ namespace {
 uint64_t nowMs(){return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());}
 struct Shell final:ds::StateProvider,ds::Transport {
     Socket socket{};sockaddr_in peer{};
+    ds::Progress progress{};std::array<double,3> offset{};
+    ds::Progress readProgress() const override {return progress;}
     Follower follower;std::optional<Replay> replay;std::optional<ds::State> porter,mine;
     uint64_t started=0,last=0;double replayLoop=0;bool stickyTeleport=false;std::array<double,3> replayOrigin{};bool replayPlaced=false,whereRecorded=false;
     bool readLocal(ds::State& s) override {
@@ -62,7 +66,7 @@ struct Shell final:ds::StateProvider,ds::Transport {
             if(loop!=replayLoop){replayLoop=loop;stickyTeleport=true;}
             mine=replay->at(ms,replayOrigin);
         } else {
-            auto s=follower.step(porter,dt);
+            auto s=follower.step(offsetTarget(porter,offset),dt);
             if(s){if(s->flags&ds::Teleport)stickyTeleport=true;s->flags&=uint16_t(~ds::Teleport);mine=s;}
         }
     }
@@ -71,13 +75,17 @@ struct Shell final:ds::StateProvider,ds::Transport {
 }
 int main(int argc,char** argv){
     unsigned slot=1,peerSlot=0;ds::Role role=ds::Role::Client;uint64_t session=0;double seconds=3600,dropAfter=-1,takeAfter=-1,takeOwnAfter=-1,buildAfter=-1,unbuildAfter=-1;uint32_t dropItem=0,buildType=0;
-    std::string replayFile,stopFile;Shell shell;
+    std::string replayFile,stopFile;Shell shell;ds::ProgressPolicy progressPolicy=ds::ProgressPolicy::Warn;
     for(int i=1;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc)usage(("missing value after "+a).c_str());return std::string(argv[++i]);};
         if(a=="--slot")slot=unsigned(std::stoul(next()));else if(a=="--peer-slot")peerSlot=unsigned(std::stoul(next()));
-        else if(a=="--role"){auto r=next();if(r=="host")role=ds::Role::Host;else if(r=="client")role=ds::Role::Client;else usage("role is host or client");}
+        else if(a=="--role"){auto r=next();if(r=="host")role=ds::Role::Host;else if(r=="client"||r=="guest")role=ds::Role::Client;else usage("role is host, guest or client");}
         else if(a=="--session")session=std::stoull(next());else if(a=="--seconds")seconds=std::stod(next());
         else if(a=="--follow")replayFile.clear();else if(a=="--where-recorded")shell.whereRecorded=true;else if(a=="--replay")replayFile=next();else if(a=="--stop")stopFile=next();
+        else if(a=="--offset"){for(auto& x:shell.offset)x=std::stod(next());offsetTarget({},shell.offset);}
+        else if(a=="--episode")shell.progress.episode=progressValue(next());
+        else if(a=="--progress-id")shell.progress.id=progressValue(next());
+        else if(a=="--progress-mismatch"){auto p=next();if(p=="warn")progressPolicy=ds::ProgressPolicy::Warn;else if(p=="refuse")progressPolicy=ds::ProgressPolicy::Refuse;else usage("progress-mismatch is warn or refuse");}
         else if(a=="--drop"){dropAfter=std::stod(next());dropItem=uint32_t(std::stoul(next()));}
         else if(a=="--build"){buildAfter=std::stod(next());buildType=uint32_t(std::stoul(next()));if(buildType>255)usage("structure type is 0..255");}
         else if(a=="--unbuild-after")unbuildAfter=std::stod(next());
@@ -103,9 +111,10 @@ int main(int argc,char** argv){
 #else
     fcntl(shell.socket,F_SETFL,fcntl(shell.socket,F_GETFL)|O_NONBLOCK);
 #endif
-    ds::Config config;config.role=role;config.session=session;config.nonce=(nowMs()<<8)|slot|1;
+    ds::Config config;config.role=role;config.session=session;config.nonce=(nowMs()<<8)|slot|1;config.progressPolicy=progressPolicy;
     ds::Core core(config,shell,shell);
     auto start=nowMs();uint64_t nextStatus=start+1000,connectedAt=0,refused=0,ownRef=0,droppedAt=0,builtRef=0,builtAt=0;bool dropped=false,built=false;std::array<double,3> builtAtPos{};
+    uint64_t handshakeSerial=0;bool progressRefused=false;
     std::vector<std::pair<uint64_t,uint64_t>> toTake;   // (when, ref)
     std::printf("PARTNER slot %u -> %u session %llu mode %s\n",slot,peerSlot,(unsigned long long)session,shell.replay?"replay":"follow");std::fflush(stdout);
     while(nowMs()-start<seconds*1000){
@@ -117,9 +126,16 @@ int main(int argc,char** argv){
             if(n<0){if(wouldBlock())break;break;}
             if(n!=int(ds::WireSize)||from.sin_addr.s_addr!=shell.peer.sin_addr.s_addr||from.sin_port!=shell.peer.sin_port)continue;
             if(!fromWire(raw,size_t(n))){++refused;continue;}
-            core.receive(raw,size_t(n),now);
+            auto error=core.receive(raw,size_t(n),now);
+            if(error==ds::Error::Progress&&!progressRefused){progressRefused=true;std::puts("HANDSHAKE refused: story progress mismatch");}
         }
         core.frame(now);shell.step(now);core.tick(now);
+        if(core.connected()&&handshakeSerial!=core.connectionSerial()){
+            handshakeSerial=core.connectionSerial();progressRefused=false;
+            auto text=[](uint32_t n){return n==ds::UnknownProgress?std::string("unknown"):std::to_string(n);};
+            std::printf("HANDSHAKE progress=%s local_episode=%s peer_episode=%s local_progress=%s peer_progress=%s\n",ds::progressReason(core.progressStatus()),
+                text(core.localProgress().episode).c_str(),text(core.peerProgress().episode).c_str(),text(core.localProgress().id).c_str(),text(core.peerProgress().id).c_str());
+        }
         if(core.connected()&&!connectedAt)connectedAt=now;
         if(!core.connected())connectedAt=0;
         for(auto& e:core.takeCargo()){

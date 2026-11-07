@@ -39,7 +39,15 @@ int main() {
     auto gameBase=good;gameBase.replace(gameBase.find("synthetic"),9,"game");
     auto game=withKeys(gameBase,"\"self_tick\":true,"+pin);
     auto parsed=mod::parseConfig(game);assert(parsed.selfTick&&!parsed.discovery&&parsed.presenceLogMaxMiB==8&&parsed.provider=="game");
+    assert(!mod::parseConfig(good).joinAtHost&&mod::parseConfig(good).progressMismatch=="warn");
+    assert(mod::parseConfig(withKeys(good,"\"progress_mismatch\":\"refuse\"")).progressMismatch=="refuse");
+    assert(refused(withKeys(good,"\"progress_mismatch\":\"ignore\"")));
+    assert(refused(withKeys(good,"\"progress_mismatch\":true")));
+    assert(refused(withKeys(good,"\"join_at_host\":true")));
+    auto noRole=good;noRole.erase(noRole.find("\"role\":\"host\","),14);assert(mod::parseConfig(noRole).role=="none");
+    auto guest=good;guest.replace(guest.find("host"),4,"guest");assert(mod::parseConfig(guest).role=="guest");
     auto threaded=withKeys(gameBase,"\"game_thread\":true,"+pin);
+    assert(mod::parseConfig(withKeys(threaded,"\"join_at_host\":true")).joinAtHost);
     assert(mod::parseConfig(threaded).gameThread&&!mod::parseConfig(threaded).selfTick);
     assert(refused(withKeys(threaded,"\"self_tick\":true")));
     assert(refused(withKeys(threaded,"\"discovery\":true")));

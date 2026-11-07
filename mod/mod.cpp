@@ -25,6 +25,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "identity.h"
 #include "pose.h"
 #include "game_thread.h"
+#include "join.h"
 #include "puppet.h"
 #include "double.h"
 #include "body.h"
@@ -109,6 +110,10 @@ uint32_t currentThread() {
 struct PadShared {std::mutex lock;mod::pad::Player player;std::atomic<bool> enabled{false};std::atomic<uint64_t> calls{0},active{0};};
 PadShared padShared;
 struct Cache final:ds::StateProvider {
+    // Game-thread progress discovery precedes the first game-provider handshake.
+    ds::Progress story{};bool progressReady=true;
+    ds::Progress readProgress() const override {return story;}
+    bool readyForSession() const override {return progressReady;}
     uint64_t sampledAt=0;
     uint64_t localSampleTime(uint64_t) const override {return sampledAt;}
     ds::State local; ds::Render remote;bool available=false, gated=true, stickyTeleport=false;
@@ -118,6 +123,21 @@ struct Cache final:ds::StateProvider {
 };
 struct Runtime final:ds::Transport {
     mod::Config config;
+    // Session progress and join-at-host: decision/logging only; no native porter move is approved.
+    mod::join::Decision joinDecision;uint64_t nextProgressRead=0,handshakeNoted=0;bool progressRefusalNoted=false;
+    void noteHandshake() {
+        if(!core->connected()||handshakeNoted==core->connectionSerial())return;
+        handshakeNoted=core->connectionSerial();progressRefusalNoted=false;
+        auto value=[](uint32_t v){return v==ds::UnknownProgress?std::string("unknown"):std::to_string(v);};
+        auto a=core->localProgress(),b=core->peerProgress();
+        std::ostringstream line;line<<"HANDSHAKE progress="<<ds::progressReason(core->progressStatus())
+            <<" policy="<<config.progressMismatch<<" local_episode="<<value(a.episode)<<" peer_episode="<<value(b.episode)
+            <<" local_progress="<<value(a.id)<<" peer_progress="<<value(b.id)<<" wire_build="<<std::hex<<std::setfill('0');
+        for(auto byte:mod::WireBuild)line<<std::setw(2)<<unsigned(byte);
+        line<<"; "<<(core->progressStatus()==ds::ProgressStatus::Mismatch?"WARNING presence allowed with progress-mismatch flag":"presence allowed")<<"\n";
+        note(line.str().c_str());
+    }
+    // End session progress block.
     std::unique_ptr<mod::discovery::Worker> discovery;
     mod::TimerResolution timerResolution;
     mod::Histogram networkTick, providerTick, sendInterval, sampleAge, receiveApply, deliveryLateness;
@@ -338,6 +358,8 @@ struct Runtime final:ds::Transport {
         if(checksumOK) {std::copy(ds::ModBuild.begin(),ds::ModBuild.end(),p.b.begin()+16);checksum(p.b);}
         auto before=core->accepted();
         auto e=core->receive(p.b.data(),p.size,now);
+        if(e==ds::Error::Progress&&!progressRefusalNoted){progressRefusalNoted=true;note("HANDSHAKE refused: story progress mismatch (progress_mismatch=refuse on one peer)\n");}
+        noteHandshake();
         deliveryLateness.add((now-p.due)*1000);
         if(core->accepted()>before && !unappliedReceive)unappliedReceive=p.receivedUs;
         if(e==ds::Error::None && p.b[6]==uint8_t(ds::Kind::Pong)) {
@@ -400,6 +422,7 @@ struct Runtime final:ds::Transport {
     }
     void init(const std::filesystem::path& path) {
         config=mod::parseConfig(readConfig(path));
+        cache.progressReady=config.provider!="game";
         if(config.logging) {
 #ifdef _WIN32
             auto filename=path.parent_path()/("mod-"+mod::runStamp()+".log");safePath(filename);
@@ -572,7 +595,8 @@ struct Runtime final:ds::Transport {
         if(fcntl(socket,F_SETFL,O_NONBLOCK)<0) throw std::runtime_error("nonblocking UDP failed");
 #endif
         #endif
-        ds::Config c;c.role=config.role=="host"?ds::Role::Host:ds::Role::Client;c.session=config.session;c.nonce=nonce();
+        ds::Config c;c.role=(config.role=="host"||(config.role=="none"&&config.slot<config.peerSlot))?ds::Role::Host:ds::Role::Client;
+        c.progressPolicy=config.progressMismatch=="refuse"?ds::ProgressPolicy::Refuse:ds::ProgressPolicy::Warn;c.session=config.session;c.nonce=nonce();
         core=std::make_unique<ds::Core>(c,cache,*this);
 #ifdef MOD_MUTANT_BUILD
         ds::Protection protections;protections.build=false;core->setProtections(protections);
@@ -702,6 +726,10 @@ struct Runtime final:ds::Transport {
             if(lastProvider)providerTick.add(clock-lastProvider);
             lastProvider=clock;++ticks;
             cache.sampledAt=now;cache.available=provider->readLocal(cache.local);cache.gated=provider->isInCutsceneOrLoading();
+            // A bounded, read-only observation; never writes story or save state.
+            if(game&&cache.available&&sampler&&now>=nextProgressRead){
+                auto progress=mod::join::ProgressReader(*sampler).read();cache.story=progress.value;cache.progressReady=true;nextProgressRead=now+1000;
+            }
             if(game&&cache.available&&gameContext) {
                 // What the porter is doing, from his own animation variables (read-only): sprint and crouch.
                 auto anchor=mod::puppet::readLocalAnchor(*sampler);
@@ -737,6 +765,15 @@ struct Runtime final:ds::Transport {
             }
             stage="double";
             if(twin&&gameContext)tickTwin(now);
+            // Join-at-host: runs only in the verified game callback. No engine relocation is called.
+            if(config.joinAtHost&&gameContext){
+                mod::join::Input input;input.enabled=true;input.gameThread=true;input.connected=core->connected();input.connection=core->connectionSerial();
+                input.role=(config.role=="guest"||config.role=="client")?mod::join::Role::Guest:config.role=="host"?mod::join::Role::Host:mod::join::Role::None;
+                input.localGameplay=cache.available&&!cache.gated&&twin&&gameEvent&&!inEvent;
+                input.local=cache.local;input.host=core->latestPresence(now);
+                if(auto plan=joinDecision.tick(input))note(mod::join::wouldMove(*plan).c_str());
+            }
+            // End join dispatch.
             stage="cargo";
             if(twin&&gameContext)tickCargo(now);
             stage="structures";

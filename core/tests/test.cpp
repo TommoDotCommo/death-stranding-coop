@@ -16,6 +16,10 @@ int failures=0;
 void check(bool ok,const char* name) { if(!ok) { std::fprintf(stderr,"FAIL %s\n",name); ++failures; } }
 void patch(Bytes& b,size_t offset,uint64_t value,size_t n) { for(size_t i=0;i<n;++i) b[offset+i]=uint8_t(value>>(i*8)); uint32_t h=2166136261u; for(size_t i=0;i<b.size();++i) { h^=(i>=120&&i<124)?0:b[i]; h*=16777619u; } for(int i=0;i<4;++i) b[120+i]=uint8_t(h>>(8*i)); }
 struct Fake : StateProvider {
+    bool ready=true;
+    bool readyForSession() const override {return ready;}
+    Progress progress{};
+    Progress readProgress() const override {return progress;}
     State local; Render remote; bool blocked=false, readable=true; unsigned applies=0;
     bool readLocal(State& s) override { s=local; return readable; }
     bool isInCutsceneOrLoading() const override { return blocked; }
@@ -54,9 +58,9 @@ void parserTests() {
     for(size_t at:{size_t(64),size_t(96),size_t(104),size_t(112)}) { bad=b; patch(bad,at,UINT64_MAX,8); check(parse(bad)==Error::Time,"clock_range"); }
     for(size_t at:{size_t(72),size_t(76),size_t(80)}) { bad=b; patch(bad,at,10000001,4); check(parse(bad)==Error::Range,"range"); }
     for(size_t at:{size_t(84),size_t(86),size_t(88)}) { bad=b; patch(bad,at,32767,2); check(parse(bad)==Error::Range,"range"); }
-    for(auto field:std::vector<std::pair<size_t,uint64_t>>{{90,32768},{60,64},{62,32},{94,4}}) { bad=b; patch(bad,field.first,field.second,field.first==90||field.first==60?2:1); check(parse(bad)==Error::Range,"range"); }
+    for(auto field:std::vector<std::pair<size_t,uint64_t>>{{90,32768},{60,128},{62,32},{94,4}}) { bad=b; patch(bad,field.first,field.second,field.first==90||field.first==60?2:1); check(parse(bad)==Error::Range,"range"); }
     State s; s.position={-1e20,1e20,0}; s.velocity={1e20,-1e20,1e20}; s.yaw=1000; s.phase=10; s.flags=65535; s.action=255;
-    check(sanitiseForTest(s,protection)&&s.position[0]==-100000&&s.position[1]==100000&&s.phase==1&&s.flags==63&&s.action==31,"clamp");
+    check(sanitiseForTest(s,protection)&&s.position[0]==-100000&&s.position[1]==100000&&s.phase==1&&s.flags==127&&s.action==31,"clamp");
     check(std::sqrt(s.velocity[0]*s.velocity[0]+s.velocity[1]*s.velocity[1]+s.velocity[2]*s.velocity[2])<=100.00001,"clamp");
     s.phase=-1; sanitiseForTest(s,protection); check(s.phase==0,"clamp");
     for(double value:{std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity(),-std::numeric_limits<double>::infinity()}) {
@@ -102,6 +106,51 @@ void cargoTests() {
       check(ok,"cargo_id_fits_random_nonce"); }
     // A new connection renumbers undelivered events from 1.
     { Fixture f; CargoEvent e; e.item=5; f.core.queueCargo(e); f.core.queueCargo(e); f.core.tick(3001); check(!f.core.connected()&&f.core.cargoPending()==2,"cargo_kept_on_reset"); }
+}
+void progressTests() {
+    auto send=[](Core& core,Packet p,uint64_t now=0){auto b=encode(p);return core.receive(b.data(),b.size(),now);};
+    {Fake f;f.ready=false;Queue q;Core c({Role::Host,42,100,120},f,q);c.setProtections(protection);c.tick(0);
+        check(q.packets.empty(),"progressReady");Packet p;p.kind=Kind::Hello;p.role=Role::Client;p.session=42;
+        check(send(c,p)==Error::NotConnected,"progressReady");f.ready=true;c.tick(100);check(!q.packets.empty(),"progress_ready_recovery");}
+    Packet hello;hello.role=Role::Client;hello.session=42;hello.nonce=200;hello.progress={2,11};
+    for(auto kind:{Kind::Hello,Kind::Ack}) {
+        auto p=hello;p.kind=kind;p.progressPolicy=ProgressPolicy::Refuse;
+        auto wire=encode(p);Packet q;
+        check(decode(wire.data(),wire.size(),q)==Error::None&&q.progress.episode==2&&q.progress.id==11&&q.progressPolicy==ProgressPolicy::Refuse,"progress_roundtrip");
+        patch(wire,104,2,1);check(decode(wire.data(),wire.size(),q)==Error::Range,"progress_policy_range");
+        wire=encode(p);patch(wire,105,1,1);check(decode(wire.data(),wire.size(),q)==Error::Reserved,"progress_reserved");
+    }
+    check(compareProgress({2,11},{2,11})==ProgressStatus::Equal,"progress_equal");
+    check(compareProgress({2,UnknownProgress},{3,UnknownProgress})==ProgressStatus::Mismatch,"progress_partial_mismatch");
+    check(compareProgress({2,UnknownProgress},{2,11})==ProgressStatus::Unknown,"progress_partial_unknown");
+    for(bool peerRefuses:{false,true})for(auto remote:{Progress{3,11},Progress{2,12}}) {
+        Fake f;f.progress={2,11};Queue q;Config cfg{Role::Host,42,100,120};
+        cfg.progressPolicy=peerRefuses?ProgressPolicy::Warn:ProgressPolicy::Refuse;
+        Core c(cfg,f,q);c.setProtections(protection);c.tick(0);
+        auto p=hello;p.progress=remote;p.progressPolicy=peerRefuses?ProgressPolicy::Refuse:ProgressPolicy::Warn;
+        auto before=q.packets.size();
+        check(send(c,p)==Error::Progress&&q.packets.size()==before,"progress");
+        if(peerRefuses)check(send(c,p)==Error::Progress,"progressPolicy");
+        p.kind=Kind::Ack;p.echo=100;
+        check(send(c,p)==Error::Progress&&!c.connected(),"progress");
+        if(peerRefuses)check(!c.connected(),"progressPolicy");
+    }
+    for(auto local:{Progress{},Progress{2,11}})for(auto remote:{Progress{},Progress{2,UnknownProgress}}) {
+        Fake f;f.progress=local;Queue q;Core c({Role::Host,42,100,120,ProgressPolicy::Refuse},f,q);c.setProtections(protection);c.tick(0);
+        auto p=hello;p.progress=remote;p.kind=Kind::Ack;p.echo=100;
+        check(send(c,p)==Error::None&&c.connected()&&c.progressStatus()==ProgressStatus::Unknown,"progressUnknown");
+    }
+    Fake f;f.progress={2,11};Queue q;Core c({Role::Host,42,100,120},f,q);c.setProtections(protection);c.tick(0);
+    auto p=hello;p.kind=Kind::Ack;p.echo=100;p.progress={3,11};
+    check(send(c,p)==Error::None&&c.connected()&&c.progressStatus()==ProgressStatus::Mismatch,"progress_warn");
+    check(c.peerProgress().episode==3&&c.localProgress().id==11&&c.connectionSerial()==1,"progress_metadata");
+    send(c,p);check(c.connectionSerial()==1,"progress_duplicate_ack");
+    q.packets.clear();c.tick(100);bool flagged=false;
+    for(auto& b:q.packets){Packet out;decode(b.data(),b.size(),out);if(out.kind==Kind::Presence)flagged=(out.state.flags&ProgressMismatch)!=0;}
+    check(flagged,"progressFlag");
+    p.kind=Kind::Presence;p.stamp=100;p.sequence=1;
+    check(send(c,p,100)==Error::None&&c.render(100).visible&&(c.render(100).state.flags&ProgressMismatch),"progressFlag");
+    c.disconnect(200);check(c.progressStatus()==ProgressStatus::Unknown,"progress_reset");
 }
 void sessionTests() {
     { Fixture f;f.core.tick(10);f.core.tick(110);
@@ -151,7 +200,10 @@ void fuzz() {
     std::vector<double> errors; double finalMax=0; uint64_t accepted=0, drops=0, duplicates=0;
     for(uint64_t seed=1;seed<=500;++seed) {
         coopfuzz::LossyLink link(2,seed); link.setLink({20,150,.10,.05,0});
-        Fake a,b; NetworkTransport at(link,0),bt(link,1); Core ac({Role::Host,seed+100,seed*10+1,120},a,at),bc({Role::Client,seed+100,seed*10+2,120},b,bt);
+        Fake a,b; a.progress={uint32_t(seed%15),uint32_t(seed)};
+        b.progress=seed%3==0?Progress{}:Progress{uint32_t(seed%15+(seed%3==1)),uint32_t(seed)};
+        auto wantProgress=compareProgress(a.progress,b.progress);
+        NetworkTransport at(link,0),bt(link,1); Core ac({Role::Host,seed+100,seed*10+1,120},a,at),bc({Role::Client,seed+100,seed*10+2,120},b,bt);
         std::vector<uint32_t> delivered;
         const uint64_t clocks[2]={10000,20000+seed*7};
         for(uint64_t now=0;now<=16000;now+=10) {
@@ -173,6 +225,8 @@ void fuzz() {
             }
         }
         check(ac.connected()&&bc.connected(),"fuzz_reconnected");
+        check(ac.progressStatus()==wantProgress&&bc.progressStatus()==wantProgress,"fuzz_progress_handshake");
+        check(bool(ac.render(16000+clocks[0]).state.flags&ProgressMismatch)==(wantProgress==ProgressStatus::Mismatch),"fuzz_progress_flag");
         // Eight events queued before the outage: all delivered, in order, none twice (the outage may cut them off
         // only if they were still pending; then they are renumbered and delivered after reconnection).
         { std::vector<uint32_t> want; for(uint32_t t=1000;t<5000;t+=500) want.push_back(t); check(delivered==want,"fuzz_cargo_exactly_once"); }
@@ -194,9 +248,9 @@ int main(int argc,char** argv) {
     auto start=std::chrono::steady_clock::now(); std::string mutant=argc>1?argv[1]:"";
 #define MUTATE(name) if(mutant==#name) protection.name=false
     MUTATE(version); MUTATE(range); MUTATE(teleport); MUTATE(duplicate); MUTATE(delay); MUTATE(session); MUTATE(build);
-    MUTATE(magic); MUTATE(checksum); MUTATE(reserved); MUTATE(nonce); MUTATE(time); MUTATE(speed); MUTATE(floor); MUTATE(extrapolate); MUTATE(stale); MUTATE(gate); MUTATE(timeout); MUTATE(buffer); MUTATE(rate); MUTATE(length); MUTATE(kind); MUTATE(role); MUTATE(handshake); MUTATE(ping); MUTATE(pingHistory); MUTATE(clamp); MUTATE(finite); MUTATE(cargoOrder); MUTATE(cargoAck); MUTATE(cargoOnce);
+    MUTATE(magic); MUTATE(checksum); MUTATE(reserved); MUTATE(nonce); MUTATE(time); MUTATE(speed); MUTATE(floor); MUTATE(extrapolate); MUTATE(stale); MUTATE(gate); MUTATE(timeout); MUTATE(buffer); MUTATE(rate); MUTATE(length); MUTATE(kind); MUTATE(role); MUTATE(handshake); MUTATE(ping); MUTATE(pingHistory); MUTATE(clamp); MUTATE(finite); MUTATE(cargoOrder); MUTATE(cargoAck); MUTATE(cargoOnce); MUTATE(progressReady); MUTATE(progress); MUTATE(progressUnknown); MUTATE(progressFlag); MUTATE(progressPolicy);
 #undef MUTATE
-    parserTests(); cargoTests(); sessionTests(); if(mutant.empty()&&failures==0) fuzz();
+    parserTests(); cargoTests(); progressTests(); sessionTests(); if(mutant.empty()&&failures==0) fuzz();
     std::printf("%s failures=%d runtime=%.3fs\n",failures?"FAILED":"PASSED",failures,std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());
     return failures?1:0;
 }

@@ -20,6 +20,9 @@ inline std::array<double,3> beside(const ds::State& porter){
     double y=porter.yaw;auto p=porter.position;
     return {p[0]+FollowRight*std::cos(y)-FollowBack*std::sin(y),p[1],p[2]-FollowRight*std::sin(y)-FollowBack*std::cos(y)};
 }
+// Test-fixture progress values and a fixed displacement of the follow target (adapter axes).
+uint32_t progressValue(const std::string&); // decimal u32, or "unknown"; throws on malformed input
+std::optional<ds::State> offsetTarget(const std::optional<ds::State>&,const std::array<double,3>&);
 class Follower {
 public:
     // porter: the game's porter as last received (nullopt before the first one). Returns the partner's state, or

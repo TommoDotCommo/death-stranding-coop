@@ -3,8 +3,8 @@ CXX ?= g++
 MINGW ?= x86_64-w64-mingw32-g++-posix
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = game_thread.cpp puppet.cpp double.cpp body.cpp pad.cpp cargo.cpp structures.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = game_thread.h puppet.h double.h body.h auto_continue.h pad.h cargo.h structures.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp pad.cpp cargo.cpp structures.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = join.h game_thread.h puppet.h double.h body.h auto_continue.h pad.h cargo.h structures.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -37,7 +37,7 @@ build/fake-no-interpolation.so: $(SRC) $(HEADERS) | build
 build/unit: unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp $(HEADERS) | build
 	$(CXX) $(FLAGS) unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o $@
 host: identity build/mod.so build/mod-no-build.so build/mod-no-interpolation.so build/mod_probe build/unit
-test: game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so
+test: join-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so
 	./build/unit
 	@$(CXX) $(FLAGS) -DMUTANT_PEER_ANY unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-peer-any && if ./build/unit-peer-any >/dev/null 2>&1; then echo SURVIVED PEER_ANY; exit 1; else echo KILLED MUTANT_PEER_ANY; fi
 	python3 -B test_probe.py
@@ -112,3 +112,11 @@ game-thread-test: build/game-thread-test build/puppet-test build/double-test bui
 
 build/puppet-test.exe: puppet_test.cpp puppet.cpp pose.cpp discovery.cpp puppet.h | build
 	$(MINGW) $(WINFLAGS) puppet_test.cpp puppet.cpp pose.cpp discovery.cpp -o $@ -lbcrypt -lwinmm
+
+# Join decisions and static read-only progress provider; no game or native move backend.
+build/join-test: join_test.cpp join.cpp join.h discovery.cpp ../core/core.cpp | build
+	$(CXX) $(FLAGS) join_test.cpp join.cpp discovery.cpp ../core/core.cpp -o $@
+join-test: build/join-test
+	./build/join-test
+	python3 -B test_join_mutants.py
+.PHONY: join-test

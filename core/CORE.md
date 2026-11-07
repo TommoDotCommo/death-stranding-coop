@@ -282,3 +282,38 @@ an outage and reconnect) checks that every event is delivered exactly once and i
 Like every t-field, t1 and t2 must stay below 2^53 or the receiver refuses the frame as an invalid time. The core's own
 event ids are 33 bits mixed from the nonce above a 20-bit counter; the first version shifted the whole 64-bit nonce,
 which overflowed for any real (random) nonce, so live cargo events were refused (test `cargo_id_fits_random_nonce`).
+
+## Story-progress handshake extension
+
+HELLO and HELLO_ACK overlay the otherwise unused clock payload at offsets 96..119:
+96..99 is a little-endian u32 episode resource index, 100..103 a u32 progress ID,
+104 is the sender's `progress_mismatch` policy (0 warn, 1 refuse), and 105..119
+must be zero. `0xffffffff` means unknown independently for either field. These
+are descriptive observations; they never replicate or modify story state. The
+existing game/build identity at 12..31 remains mandatory. Changed peers require
+the regenerated, identical adapter identity even though the fixed 128-byte frame
+and protocol version stay unchanged.
+
+A known difference in either comparable field is a mismatch. Fully known equal
+fields are equal; all other cases are unknown. Unknown is never inferred equal
+and never refused. If either peer requests refusal, a known mismatch rejects
+both HELLO and ACK before pairing. Otherwise presence, clocks and reliable cargo
+remain available. `Core::progressStatus`, `localProgress`, and `peerProgress`
+expose the connection's handshake snapshot; presence bit 6 (`ProgressMismatch`)
+and rendered state mark a warning. Allowed state bits are now 0..6. The receiver
+computes its rendered warning from the handshake rather than trusting a peer's
+flag. Duplicate ACKs neither change metadata nor create another connection.
+Reconnect clears metadata, reevaluates progress and increments `connectionSerial`.
+
+Providers may defer initial pairing with `readyForSession`. The game adapter waits
+for its first readable local pose and bounded progress observation, so a handshake
+from the title screen cannot accidentally stand in for the loaded save. A failed
+progress discovery is an explicit unknown observation and permits pairing. The
+adapter refreshes observations once a second; the accepted handshake snapshot
+stays fixed until reconnect. No cross-region compatibility is implied.
+
+The core suite adds progress parser/roundtrip, bilateral policy, partial/unknown,
+warning-flag, readiness, duplicate-ACK and reset checks. The 500 seeded lossy-link
+sessions include equal, mismatched and unknown progress through timeout/reconnect;
+named mutants remove readiness, refusal, peer-policy enforcement, unknown handling
+and warning flags. This is game-free protocol evidence, not validation of a save.

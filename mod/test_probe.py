@@ -175,11 +175,11 @@ def game_provider_fake(tmp):
             time.sleep(.005)
     begin = time.monotonic()
     try:
-        # Phase 1: menu. Connected, ticking, but no pose and no presence.
+        # Phase 1: menu. Ticking, but pairing waits for a loaded save observation and no presence is sent.
         pump(1.2)
         for s in map(status, libs):
             assert not s['failed'] and s['pose'] == {'available': False, 'reason': 'manager null'}, s
-            assert s['connected'] and s['self_tick']['enabled'] and 15 <= s['self_tick']['ticks'] <= 26, s
+            assert not s['connected'] and s['self_tick']['enabled'] and 15 <= s['self_tick']['ticks'] <= 26, s
         assert sent_presence == [0, 0], 'presence must stay gated while no pose is available'
         ticks = status(libs[0])['self_tick']['ticks']
         assert libs[0].mod_tick(.01) == 1 and status(libs[0])['self_tick']['ticks'] <= ticks+2, 'external ticks must not add ticks'

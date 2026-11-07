@@ -19,13 +19,14 @@ Config parseConfig(const std::string& s) {
         ws();if(at==s.size() || s[at]!=',') break;++at;
     }
     take('}');ws();if(at!=s.size()) throw std::runtime_error("trailing JSON");
-    for(auto& kv:values) if(!std::set<std::string>{"slot","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
+    for(auto& kv:values) if(!std::set<std::string>{"slot","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
     auto text=[&](const char* k){if(!strings.count(k)) throw std::runtime_error(std::string("missing/string expected: ")+k);return values.at(k);};
     auto number=[&](const char* k){auto v=values[k];if(strings.count(k)||v.empty()||v.size()>15||v.find_first_not_of("0123456789")!=std::string::npos||(v.size()>1&&v[0]=='0')) throw std::runtime_error(std::string("invalid integer: ")+k);return std::stoull(v);};
     auto boolean=[&](const char* k,bool d){if(!values.count(k)) return d;auto v=values[k];if(strings.count(k)||(v!="true"&&v!="false")) throw std::runtime_error("boolean expected");return v=="true";};
     Config c; auto slot=number("slot"),peer=number("peer_slot");if(slot>=16||peer>=16||slot==peer) throw std::runtime_error("distinct slots 0..15 required");c.slot=slot;c.peerSlot=peer;
     c.session=number("session");if(!c.session) throw std::runtime_error("nonzero session required");
-    c.role=text("role");c.peer=text("peer");c.nickname=text("nickname");c.provider=text("provider");
+    if(values.count("role"))c.role=text("role");
+    c.peer=text("peer");c.nickname=text("nickname");c.provider=text("provider");
     {auto a=peerAddress(c.peer);if(!a)throw std::runtime_error("peer must be a numeric unicast IPv4 address");c.peerAddress=*a;}
     if(values.count("bind")){
         c.bind=text("bind");auto b=peerAddress(c.bind);
@@ -33,7 +34,7 @@ Config parseConfig(const std::string& s) {
         if((c.peerAddress>>24)==127&&(*b>>24)!=127)throw std::runtime_error("a loopback peer needs a loopback bind");
         c.bindAddress=*b;
     }
-    if((c.role!="host"&&c.role!="client")||(c.provider!="synthetic"&&c.provider!="game")||c.nickname.empty()||c.nickname.size()>32) throw std::runtime_error("invalid role/provider/nickname");
+    if((c.role!="none"&&c.role!="host"&&c.role!="guest"&&c.role!="client")||(c.provider!="synthetic"&&c.provider!="game")||c.nickname.empty()||c.nickname.size()>32) throw std::runtime_error("invalid role/provider/nickname");
     c.logging=boolean("logging",true);c.required=boolean("required",false);c.impairment=boolean("impairment",false);
     if(values.count("fault")) c.fault=text("fault");
     if(c.fault!="none"&&c.fault!="build"&&c.fault!="version"&&c.fault!="session") throw std::runtime_error("invalid probe fault");
@@ -48,6 +49,10 @@ Config parseConfig(const std::string& s) {
     c.gameThread=boolean("game_thread",false);c.puppetProbe=boolean("puppet_probe",false);
     if(c.gameThread&&(c.provider!="game"||c.discovery||c.selfTick))throw std::runtime_error("game_thread requires game provider, no discovery or self_tick");
     if(c.puppetProbe&&(!c.gameThread||!c.required))throw std::runtime_error("puppet_probe requires game_thread and required true");
+    c.joinAtHost=boolean("join_at_host",false);
+    if(values.count("progress_mismatch"))c.progressMismatch=text("progress_mismatch");
+    if(c.progressMismatch!="warn"&&c.progressMismatch!="refuse")throw std::runtime_error("progress_mismatch must be warn or refuse");
+    if(c.joinAtHost&&!c.gameThread)throw std::runtime_error("join_at_host requires game_thread");
     c.virtualPad=boolean("virtual_pad",false);
     c.autoContinue=boolean("auto_continue",false);
     if(c.autoContinue&&!c.gameThread)throw std::runtime_error("auto_continue requires game_thread");

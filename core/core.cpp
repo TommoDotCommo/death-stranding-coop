@@ -16,7 +16,7 @@ double speed(const State& a) { double v=0; for(double x:a.velocity) v+=x*x; retu
 bool valid(const State& s) {
     for(double x:s.position) if(!std::isfinite(x)||std::abs(x)>100000) return false;
     for(double x:s.velocity) if(!std::isfinite(x)||std::abs(x)>100) return false;
-    return std::isfinite(s.yaw)&&std::abs(s.yaw)<=Pi+1e-9 && std::isfinite(s.phase)&&s.phase>=0&&s.phase<=1 && s.action<=31 && !(s.flags&~uint16_t(63)) && speed(s)<=100.02;
+    return std::isfinite(s.yaw)&&std::abs(s.yaw)<=Pi+1e-9 && std::isfinite(s.phase)&&s.phase>=0&&s.phase<=1 && s.action<=31 && !(s.flags&~uint16_t(127)) && speed(s)<=100.02;
 }
 Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
     if(!b || (p.length && n!=WireSize)) return Error::Length;
@@ -35,7 +35,12 @@ Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
     q.sequence=uint32_t(get(b,56,4)); q.state.flags=uint16_t(get(b,60,2)); q.state.action=b[62]; q.state.phase=b[63]/255.;
     q.stamp=get(b,64,8);
     // Limit clocks to 53 bits so integer milliseconds convert exactly to double.
-    q.t0=get(b,96,8); q.t1=get(b,104,8); q.t2=get(b,112,8);
+    if(q.kind==Kind::Hello||q.kind==Kind::Ack) {
+        q.progress={uint32_t(get(b,96,4)),uint32_t(get(b,100,4))};
+        q.progressPolicy=ProgressPolicy(b[104]);
+        if(p.range&&b[104]>1)return Error::Range;
+        if(p.reserved&&(get(b,105,7)||get(b,112,8)))return Error::Reserved;
+    } else { q.t0=get(b,96,8); q.t1=get(b,104,8); q.t2=get(b,112,8); }
     if(p.time && (q.stamp>(1ull<<53)||q.t0>(1ull<<53)||q.t1>(1ull<<53)||q.t2>(1ull<<53))) return Error::Time;
     for(int i=0;i<3;++i) { q.state.position[i]=signedGet(b,72+4*i,4)/100.; q.state.velocity[i]=signedGet(b,84+2*i,2)/100.; }
     q.state.yaw=signedGet(b,90,2)*Pi/32767.; q.state.health=b[92]; q.state.stamina=b[93]; q.byeReason=b[94];
@@ -86,7 +91,7 @@ Render sampling(const std::deque<Snapshot>& b,uint64_t now,uint32_t delay,uint32
 }
 }
 const char* reason(Error e) {
-    static const char* names[]={"ok","bad length","bad magic","protocol version mismatch","checksum mismatch","reserved bits","unknown kind","role mismatch","game/mod build mismatch","wrong session","nonce mismatch","out of range","duplicate/reordered sequence","invalid timestamp","impossible motion","teleport rate limit","not connected"};
+    static const char* names[]={"ok","bad length","bad magic","protocol version mismatch","checksum mismatch","reserved bits","unknown kind","role mismatch","game/mod build mismatch","wrong session","nonce mismatch","out of range","duplicate/reordered sequence","invalid timestamp","impossible motion","teleport rate limit","not connected","story progress mismatch"};
     return names[static_cast<unsigned>(e)];
 }
 namespace {
@@ -98,7 +103,7 @@ bool sanitiseImpl(State& s,const Protection& p) {
     for(double& x:s.position) x=std::clamp(x,-100000.,100000.);
     for(double& x:s.velocity) x=std::clamp(x,-100.,100.);
     double v=speed(s); if(v>100) for(double& x:s.velocity) x*=100/v;
-    s.yaw=std::remainder(s.yaw,2*Pi); s.phase=std::clamp(s.phase,0.,1.); s.flags&=63; s.action=std::min<uint8_t>(s.action,31); return true;
+    s.yaw=std::remainder(s.yaw,2*Pi); s.phase=std::clamp(s.phase,0.,1.); s.flags&=127; s.action=std::min<uint8_t>(s.action,31); return true;
 }
 }
 bool sanitise(State& s) { return sanitiseImpl(s,{}); }
@@ -111,7 +116,10 @@ Bytes encode(Packet q) {
     put(b,32,q.session,8); put(b,40,q.nonce,8); put(b,48,q.echo,8); put(b,56,q.sequence,4); put(b,60,q.state.flags,2); b[62]=q.state.action; b[63]=uint8_t(std::lround(q.state.phase*255)); put(b,64,q.stamp,8);
     for(int i=0;i<3;++i) { put(b,72+4*i,uint32_t(int32_t(std::lround(q.state.position[i]*100))),4); put(b,84+2*i,uint16_t(int16_t(std::lround(q.state.velocity[i]*100))),2); }
     put(b,90,uint16_t(int16_t(std::lround(q.state.yaw*32767/Pi))),2); b[92]=q.state.health; b[93]=q.state.stamina; b[94]=q.byeReason;
-    put(b,96,q.t0,8); put(b,104,q.t1,8); put(b,112,q.t2,8); put(b,120,checksum(b.data()),4); return b;
+    if(q.kind==Kind::Hello||q.kind==Kind::Ack) {
+        put(b,96,q.progress.episode,4);put(b,100,q.progress.id,4);b[104]=uint8_t(q.progressPolicy);
+    } else { put(b,96,q.t0,8); put(b,104,q.t1,8); put(b,112,q.t2,8); }
+    put(b,120,checksum(b.data()),4); return b;
 }
 Error decode(const uint8_t* b,size_t n,Packet& q) { return parse(b,n,q,{}); }
 #ifdef DS_TESTING
@@ -122,8 +130,18 @@ uint16_t portForSlot(unsigned slot) { if(slot>=16) throw std::out_of_range("slot
 Core::Core(Config c,StateProvider& p,Transport& t):config_(c),provider_(p),transport_(t) {
     if(!c.session||!c.nonce||c.delayMs>1000||(c.role!=Role::Host&&c.role!=Role::Client)) throw std::invalid_argument("invalid config");
 }
+ProgressStatus compareProgress(Progress a,Progress b) {
+    if((a.episode!=UnknownProgress&&b.episode!=UnknownProgress&&a.episode!=b.episode)||
+       (a.id!=UnknownProgress&&b.id!=UnknownProgress&&a.id!=b.id))return ProgressStatus::Mismatch;
+    if(a.episode==UnknownProgress||b.episode==UnknownProgress||a.id==UnknownProgress||b.id==UnknownProgress)return ProgressStatus::Unknown;
+    return ProgressStatus::Equal;
+}
+const char* progressReason(ProgressStatus s) {
+    return s==ProgressStatus::Mismatch?"mismatch":s==ProgressStatus::Equal?"equal":"unknown";
+}
 void Core::send(Kind k,uint64_t now) {
     Packet q; q.kind=k; q.role=config_.role; q.session=config_.session; q.nonce=config_.nonce; q.echo=peer_; q.stamp=now;
+    if(k==Kind::Hello||k==Kind::Ack){q.progress=provider_.readProgress();q.progressPolicy=config_.progressPolicy;}
     if(k==Kind::Hello) { q.echo=0; sentHello_=true; }
     if(k==Kind::Ping) { q.t0=now;
         if(!protections_.pingHistory)pendingPings_.clear();
@@ -134,17 +152,21 @@ void Core::send(Kind k,uint64_t now) {
 void Core::reset(bool rotate) {
     connected_=false; sentHello_=false; peer_=0; snapshots_.clear(); haveSequence_=false; haveTeleport_=false; haveSent_=false; clockValid_=false; pendingPings_.clear(); rtt_=-1; offset_=0;
     nextHello_=nextSend_=nextPing_=0; outgoing_=0;
+    localProgress_={};peerProgress_={};progressStatus_=ProgressStatus::Unknown;
     // A new connection numbers cargo from 1 again on both sides; undelivered events are kept and renumbered.
     cargoSeen_=0; cargoIn_.clear(); cargoNext_=0; for(auto& e:cargoOut_) e.sequence=++cargoNext_; nextCargo_=0;
     if(rotate) { if(config_.nonce==std::numeric_limits<uint64_t>::max()) throw std::overflow_error("nonce exhausted"); ++config_.nonce; }
 }
 void Core::tick(uint64_t now) {
     if(connected_ && protections_.timeout && now-lastReceive_>3000) reset(true);
+    if(!connected_&&protections_.progressReady&&!provider_.readyForSession())return;
     if(!connected_) { if(now>=nextHello_) { send(Kind::Hello,now); nextHello_=now+250; } return; }
     if(now>=nextPing_) { send(Kind::Ping,now); nextPing_=now+((clockValid_||!protections_.pingRetry)?1000:100); }
     if(!cargoOut_.empty() && now>=nextCargo_) { sendCargo(cargoOut_.front(),now); nextCargo_=now+200; }
     if(protections_.gate && provider_.isInCutsceneOrLoading()) return;
     State s; if(!provider_.readLocal(s)||!sanitiseImpl(s,protections_)) return;
+    s.flags&=uint16_t(~ProgressMismatch);
+    if(protections_.progressFlag&&progressStatus_==ProgressStatus::Mismatch)s.flags|=ProgressMismatch;
     bool changed=!haveSent_||distance(s,sentState_)>=0.01||std::abs(s.yaw-sentState_.yaw)>=0.01||s.flags!=sentState_.flags||s.action!=sentState_.action||std::abs(s.phase-sentState_.phase)>=1./255.||s.health!=sentState_.health||s.stamina!=sentState_.stamina||s.velocity!=sentState_.velocity;
     if(protections_.rate && (now<nextSend_ || (!changed && now<lastStamp_+500))) return;
     auto sampleTime=provider_.localSampleTime(now);
@@ -157,16 +179,24 @@ Error Core::receive(const uint8_t* b,size_t n,uint64_t now) {
     Error e=parse(b,n,q,protections_); if(e!=Error::None) return fail(e);
     if(protections_.role && q.role==config_.role) return fail(Error::Role);
     if(protections_.session && q.session!=config_.session) return fail(Error::Session);
+    if(!connected_&&protections_.progressReady&&!provider_.readyForSession())return fail(Error::NotConnected);
+    auto localProgress=provider_.readProgress();
+    auto status=compareProgress(localProgress,q.progress);
+    if(!protections_.progressUnknown&&status==ProgressStatus::Unknown)status=ProgressStatus::Mismatch;
+    bool refuses=config_.progressPolicy==ProgressPolicy::Refuse || (protections_.progressPolicy&&q.progressPolicy==ProgressPolicy::Refuse);
     if(q.kind==Kind::Hello) {
         if(connected_ && q.nonce!=peer_) return fail(Error::Nonce);
+        if(protections_.progress&&refuses&&status==ProgressStatus::Mismatch)return fail(Error::Progress);
         // HELLO itself never establishes pairing or refreshes liveness.
-        Packet a; a.kind=Kind::Ack; a.role=config_.role; a.session=config_.session; a.nonce=config_.nonce; a.echo=q.nonce; a.stamp=now; transport_.send(encode(a));
+        Packet a; a.kind=Kind::Ack; a.role=config_.role; a.session=config_.session; a.nonce=config_.nonce; a.echo=q.nonce; a.stamp=now;a.progress=localProgress;a.progressPolicy=config_.progressPolicy; transport_.send(encode(a));
         return fail(Error::None);
     }
     if(protections_.nonce && q.echo!=config_.nonce) return fail(Error::Nonce);
     if(q.kind==Kind::Ack) {
         if(protections_.handshake && !sentHello_) return fail(Error::NotConnected);
         if(connected_) return fail(q.nonce==peer_?Error::None:Error::Nonce);
+        if(protections_.progress&&refuses&&status==ProgressStatus::Mismatch)return fail(Error::Progress);
+        localProgress_=localProgress;peerProgress_=q.progress;progressStatus_=status;++connectionSerial_;
         peer_=q.nonce; connected_=true; lastReceive_=now; return fail(Error::None);
     }
     if(protections_.handshake && !connected_) return fail(Error::NotConnected);
@@ -238,7 +268,13 @@ void Core::sendCargo(const CargoEvent& e,uint64_t now) {
     q.sequence=e.sequence; q.state.action=e.type; q.t0=e.item; q.t1=e.id; q.t2=e.ref; q.state.position=e.position; q.state.yaw=e.yaw;
     transport_.send(encode(q));
 }
-Render Core::render(uint64_t now) const { return sampling(snapshots_,now,protections_.delay?config_.delayMs:0,150,protections_); }
+Render Core::render(uint64_t now) const {
+    auto r=sampling(snapshots_,now,protections_.delay?config_.delayMs:0,150,protections_);
+    r.state.flags&=uint16_t(~ProgressMismatch);
+    if(protections_.progressFlag&&progressStatus_==ProgressStatus::Mismatch)r.state.flags|=ProgressMismatch;
+    return r;
+}
+Render Core::latestPresence(uint64_t now) const { return sampling(snapshots_,now,0,0,protections_); }
 void Core::frame(uint64_t now) { Render r=render(now); if(protections_.gate && provider_.isInCutsceneOrLoading()) r.visible=false; provider_.applyRemote(r); }
 void Core::disconnect(uint64_t now) { if(connected_) send(Kind::Bye,now); reset(true); }
 }

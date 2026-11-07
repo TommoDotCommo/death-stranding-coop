@@ -13,9 +13,9 @@ constexpr uint32_t GameBuild = 13300582;
 using Bytes = std::array<uint8_t,WireSize>;
 enum class Kind : uint8_t { Hello=1, Ack, Presence, Ping, Pong, Bye, Cargo, CargoAck };
 enum class Role : uint8_t { Host=1, Client=2 };
-enum class Error { None, Length, Magic, Version, Checksum, Reserved, Kind, Role, Build, Session, Nonce, Range, Duplicate, Time, Speed, Teleport, NotConnected };
+enum class Error { None, Length, Magic, Version, Checksum, Reserved, Kind, Role, Build, Session, Nonce, Range, Duplicate, Time, Speed, Teleport, NotConnected, Progress };
 const char* reason(Error);
-enum Flag : uint16_t { Sprint=1, Crouch=2, Cargo=4, Vehicle=8, PrivateRoom=16, Teleport=32 };
+enum Flag : uint16_t { Sprint=1, Crouch=2, Cargo=4, Vehicle=8, PrivateRoom=16, Teleport=32, ProgressMismatch=64 };
 struct State {
     std::array<double,3> position{}, velocity{}; // metres, metres/second; Y is up in this adapter convention
     double yaw=0, phase=0; // radians [-pi,pi], normalised [0,1]
@@ -24,12 +24,19 @@ struct State {
 };
 // Local inputs: reject nonfinite transforms; clamp finite values to the wire envelope.
 bool sanitise(State&);
+constexpr uint32_t UnknownProgress=0xffffffffu;
+struct Progress { uint32_t episode=UnknownProgress, id=UnknownProgress; };
+enum class ProgressPolicy : uint8_t { Warn=0, Refuse=1 };
+enum class ProgressStatus { Unknown, Equal, Mismatch };
+ProgressStatus compareProgress(Progress,Progress);
+const char* progressReason(ProgressStatus);
 struct Packet {
     Kind kind=Kind::Hello; Role role=Role::Host;
     uint32_t game=GameBuild; std::array<uint8_t,16> mod=ModBuild;
     uint64_t session=1, nonce=1, echo=0, stamp=0, t0=0, t1=0, t2=0;
     uint32_t sequence=0; State state{};
     uint8_t byeReason=0;
+    Progress progress{}; ProgressPolicy progressPolicy=ProgressPolicy::Warn; // HELLO/ACK only
 };
 // A shared-world cargo event (adapter axes, like State). Delivered reliably and in order, at most once per connection:
 // the sender repeats the oldest unacknowledged event, the receiver accepts only the next sequence and acknowledges
@@ -44,6 +51,7 @@ struct Protection {
     bool magic=true, checksum=true, reserved=true, nonce=true, time=true, speed=true;
     bool length=true, kind=true, role=true, handshake=true, ping=true, clamp=true, finite=true;
     bool pingRetry=true, pingHistory=true, cargoOrder=true, cargoAck=true, cargoOnce=true;
+    bool progressReady=true, progress=true, progressUnknown=true, progressFlag=true, progressPolicy=true;
     bool floor=true, extrapolate=true, stale=true, gate=true, timeout=true, buffer=true, rate=true;
 };
 Bytes encode(Packet); // throws invalid_argument for nonfinite state
@@ -59,6 +67,8 @@ Render sample(const std::deque<Snapshot>&, uint64_t now, uint32_t delay=120, uin
 struct StateProvider {
     virtual ~StateProvider()=default;
     virtual bool readLocal(State&)=0;
+    virtual Progress readProgress() const { return {}; }
+    virtual bool readyForSession() const { return true; }
     // Timestamp of the pose returned by readLocal, in the caller clock domain.
     virtual uint64_t localSampleTime(uint64_t now) const { return now; }
     virtual bool isInCutsceneOrLoading() const=0;
@@ -66,7 +76,7 @@ struct StateProvider {
 };
 // One configured peer only. Adapter must filter source endpoint before invoking receive.
 struct Transport { virtual ~Transport()=default; virtual void send(const Bytes&)=0; };
-struct Config { Role role=Role::Host; uint64_t session=1, nonce=1; uint32_t delayMs=120; };
+struct Config { Role role=Role::Host; uint64_t session=1, nonce=1; uint32_t delayMs=120; ProgressPolicy progressPolicy=ProgressPolicy::Warn; };
 uint16_t portForSlot(unsigned slot); // throws if slot outside 0..15
 class Core {
 public:
@@ -79,6 +89,12 @@ public:
     void frame(uint64_t now);
     void disconnect(uint64_t now);
     bool connected() const { return connected_; }
+    ProgressStatus progressStatus() const { return progressStatus_; }
+    Progress localProgress() const { return localProgress_; }
+    Progress peerProgress() const { return peerProgress_; }
+    uint64_t connectionSerial() const { return connectionSerial_; }
+    // Freshest accepted sample without presentation delay/extrapolation, for decisions.
+    Render latestPresence(uint64_t now) const;
     Error lastError() const { return error_; }
     size_t buffered() const { return snapshots_.size(); }
     uint64_t accepted() const { return accepted_; }
@@ -104,6 +120,9 @@ private:
     uint32_t cargoNext_=0, cargoSeen_=0; uint64_t nextCargo_=0, cargoIds_=0;
     std::deque<uint64_t> deliveredIds_;   // bounded memory of delivered event ids
     void sendCargo(const CargoEvent&,uint64_t now);
+    Progress localProgress_{},peerProgress_{};
+    ProgressStatus progressStatus_=ProgressStatus::Unknown;
+    uint64_t connectionSerial_=0;
     Error error_=Error::None;
 };
 }

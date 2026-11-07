@@ -944,3 +944,67 @@ is set at load. A made body has the same graph component but is not dressed.
 look up a `PlayerOutfitComponent` (type 4e07de0) on the given entity and do nothing without one; the double and a
 made body have none, so these cannot dress them. Remaining candidate: the double's `NodeGraphComponent` script.
 
+
+## Story progress and join-at-host research (2026-11-07, static only)
+
+Pinned build 13300582, hash as above; opened `<game dir>/ds.exe` read-only. This
+pass searched `.rdata` for Episode, GameProgress, StoryProgress, ChapterManager,
+MainOrder, teleport and respawn names, followed name pointers and RIP-relative
+references, then disassembled the relevant `.pdata` ranges. No game ran.
+
+Observed static chain (all addresses are RVAs):
+
+- `CurrentEpisodeHashFact` string `0x3eb7380` has a reflection field descriptor at
+  `0x4dc3cf0`, encoding offset `+0x68`. `CurrentEpisodeIndexFact` at `0x3eb7478`
+  has a descriptor at `0x4dc3e78`, encoding `+0xa0`. These are **fact resource
+  references**, not direct integer values.
+- Registration at `0x332935c` associates `DSMissionGoalsResource_sExportedSetEpisode`
+  (`0x3eb7728`) with thunk `0x335e500`, which jumps to `0x335f3a0`.
+  The latter obtains `goals = *(*( *(base+0x7c0b000) + 0x28) + 0x1f0)`.
+  It searches the goals' episode pointer array (signed count `+0x40`, array
+  `+0x48`) for a resource UUID at resource `+8/+0x10`, computes the two x86 CRC32
+  instructions' CRC32C with seed zero and no final XOR, and writes that hash
+  through the fact resource at goals `+0x68`, database `*(base+0x5794720)`,
+  scope UUID at `base+0x4dd9600`, using `0x1afce50`. The optional index fact at
+  goals `+0xa0` is cleared to -2; reading its resource bytes as an episode number
+  would be wrong. ClearEpisode (`0x335f0f0..0x335f16b`) writes hash zero and
+  clears the optional index similarly.
+- The integer getter `0x1afc710..0x1afc7e8` looks up the scope in database `+0x20`
+  with `0x1b038f0` (32-byte rows, nonzero hash at +0, UUID +8, values pointer +24).
+  It looks up a fact resource's UUID at resource `+8` in values `+0x50` with
+  `0x1b037e0` (24-byte rows, nonzero hash +0, UUID +4, integer +20). Table headers
+  hold row pointer +0 and capacity +12. Hashes use CRC32C(UUID) OR `0x80000000`.
+  Native lookup compares the full UUID as well as the hash. Its missing-value
+  fallback is resource `+0x30`; the discovery reader deliberately returns unknown
+  instead of treating that resource default as current save progress.
+
+`join::ProgressReader` follows that read path without calling the setters or
+getter. It uses the hash-validated discovery Sampler's guarded copies; validates
+code prefixes, module data spans, pointers, power-of-two table capacities (max
+4096), unique scope/fact rows, and an episode count 1..64; then rechecks every
+copied span. It matches the current hash against the episode resource array and
+reports the matching array index. A missing, duplicate, unreadable, torn, changed,
+zero-cleared or unmatched value returns unknown. No story memory is written.
+Fake-memory tests exercise the layout and refusal paths, with failing mutants.
+Repeated guarded reads cannot establish allocation lifetime or atomicity.
+
+**Unknown:** correspondence of this resource index to the episode number shown
+in the UI, live table sizes/read availability, episode transitions and a main-order
+or chapter ID. The protocol progress ID therefore stays unknown. An authorized
+read-only live comparison against the save's displayed episode is required before
+claiming numeric episode semantics. The hash is only a discovery diagnostic, not
+a main-order ID and not replicated world state.
+
+Teleport leads: `SequenceNetworkTeleportPlayerNode` at `0x3d406c0` references
+metadata `0x4b79d20`; direct references include type checks at `0x24e182b` and a
+metadata getter at `0x24ef570`. `GameMovie_ExportedPlayMovieAndTeleport` at
+`0x3f176b0` registers thunk `0x3634f60`, which jumps to
+`0x362b550..0x362b5d0`. That path checks a global and object state, copies a
+60-byte transform into a queued movie operation, sets state +0x18 and +0x60,
+and calls `0x324b5a0`/`0x325bf20`. It is not established as a standalone porter
+teleport. The generic Entity SetWorldTransform path described above updates the
+entity and marks its subtree; it does not prove that Sam's mover/controller,
+physics, streaming or respawn state is reset. NPC teleport is also not evidence
+for the local player's contract. **No safe local-porter relocation path was
+established.** Join-at-host therefore produces a game-thread decision and a
+`JOIN would move ...; native teleport unavailable; no move performed` log only.

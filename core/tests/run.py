@@ -12,7 +12,7 @@ if clean.returncode:
     sys.exit(1)
 mutants = ['version', 'range', 'teleport', 'duplicate', 'delay', 'session', 'build',
            'magic', 'checksum', 'reserved', 'nonce', 'time', 'speed', 'floor',
-           'extrapolate', 'stale', 'gate', 'timeout', 'buffer', 'rate', 'length', 'kind', 'role', 'handshake', 'ping', 'pingHistory', 'clamp', 'finite', 'cargoOrder', 'cargoAck', 'cargoOnce']
+           'extrapolate', 'stale', 'gate', 'timeout', 'buffer', 'rate', 'length', 'kind', 'role', 'handshake', 'ping', 'pingHistory', 'clamp', 'finite', 'cargoOrder', 'cargoAck', 'cargoOnce', 'progressReady', 'progress', 'progressUnknown', 'progressFlag', 'progressPolicy']
 bad = 0
 for mutant in mutants:
     result = subprocess.run([exe, mutant], text=True, capture_output=True)

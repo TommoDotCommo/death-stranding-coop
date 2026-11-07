@@ -647,3 +647,82 @@ the porter is in the world (`AUTO in game after N s` in the log), so it never lo
 attempt, and with it the offline notices of an isolated copy.
 
 The mod log records `POSE available|unavailable reason=...` on every change, so an outside driver can wait for gameplay.
+
+## Session progress and join-at-host (experimental, move is a stub)
+
+`progress_mismatch` accepts `"warn"` (default) or `"refuse"`. The handshake carries
+the exact wire build and the local progress observation. A known difference
+warns once per connection and sets presence flag `ProgressMismatch`; presence
+still works. If either side selects refuse, a known mismatch refuses pairing
+with `HANDSHAKE refused: story progress mismatch`. Unknown values are explicitly
+reported and allow pairing under either policy. This does not synchronize saves.
+
+The read-only provider currently discovers an **episode resource-list index**;
+its correspondence to the displayed episode number is unverified. The main-order
+progress ID remains unknown. A failed or ambiguous discovery yields unknown,
+never a resource default. Game pairing waits for the first available local pose,
+then the provider refreshes once a second. Connection logs start with
+`HANDSHAKE progress=equal|mismatch|unknown`, name both observed fields, and include
+`wire_build`. Metadata is frozen for that connection and reevaluated on reconnect.
+
+`join_at_host` defaults to false and requires `game_thread:true`. The current
+gameplay/event/private-room observations also require `puppet_probe:true`; without
+that observation backend, the decision stays gated. `role` accepts
+`"host"`, `"guest"`, or `"none"` (default); `"client"` remains a guest alias for
+existing configs. Without an explicit role, presence uses slot ordering to choose
+opposite wire roles; joining stays disabled. An opted-in guest considers the
+first connection only, waits for a readable local porter and fresh host presence
+in normal gameplay, rejects event/private-room/vehicle states, then consumes the
+opportunity. Over 300 m in adapter space, the target is 2 m right of the host at
+the host's height. A nearer first observation consumes the opportunity too;
+walking away or reconnecting cannot trigger a later join.
+
+**No native move is implemented.** The verified game callback logs
+`JOIN would move local porter to ...; native teleport unavailable; no move performed`
+once, without writing Sam's transform or controller. See `game_offsets.md` for
+the unresolved native teleport contract. Host tests and mutants cover decisions
+and the guarded progress reader (`make -C mod join-test`).
+
+For a one-copy live experiment by an authorized operator, retain the normal pinned
+config, enforced networking, instance save isolation and fresh proxy probes.
+Rebuild/deploy the same identities to the proxy, mod and stand-in. Add:
+
+```json
+{"role":"guest","game_thread":true,"self_tick":false,"required":true,
+ "puppet_probe":true,"join_at_host":true,"progress_mismatch":"warn"}
+```
+
+Keep the other required keys. Start the disposable copy with the reviewed thread
+trace environment. The existing per-process command from **Live test commands**
+arms the normal partner backend (use the actual log stem for `<run stamp>`):
+
+```text
+puppet.double: peer <run stamp>
+```
+
+Run the stand-in for that copy's reciprocal slots and shared session (adapter
+coordinates are x, Y-up, z):
+
+```sh
+coop-partner --slot 1 --peer-slot 0 --role host --session <session> --follow --offset 600 0 0 --seconds 90
+```
+
+`--offset X Y Z` offsets the follow target in metres (finite, at most 10 km per
+axis); replay mode uses its existing placement options instead. Expect
+`HANDSHAKE progress=unknown` or a discovered partial value on both peers, then
+one `JOIN would move ... distance ...` over 300 m once the partner is fresh.
+Read the local porter position independently before/after: it must remain at its
+original location, because this is a stub. The host must stay roughly 600 m away.
+Expect no JOIN with join disabled, host/none role, private-room/event flags, stale
+presence or a near partner, and no second JOIN after reconnect. Allow about 90 s
+for loaded gameplay plus 2 s for pairing; title/loading time is additional.
+
+For warning/refusal coverage, restart both peers with fresh nonces and use
+`--episode 99 --progress-id unknown` on the stand-in, only after confirming the
+copy discovers a different episode index. Warning should log `progress=mismatch`
+and keep presence; refusal (`progress_mismatch:"refuse"` or stand-in
+`--progress-mismatch refuse`) should log refusal and never pair. When the copy's
+progress is unknown, refusal is not expected: use the game-free fixtures to test
+known mismatch instead. `--episode N|unknown` and `--progress-id N|unknown` are
+explicit stand-in fixtures, not statements about a loaded save. No two-copy run
+is needed for these experiments. No live result is claimed here.

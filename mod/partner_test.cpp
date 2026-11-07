@@ -4,10 +4,16 @@
 #include <cstdio>
 using namespace mod::partner;
 unsigned failures=0;
-#define CHECK(x) do{if(!(x)){std::fprintf(stderr,"partner oracle: %s\n",#x);++failures;}}while(0)
+#define CHECK(...) do{if(!(__VA_ARGS__)){std::fprintf(stderr,"partner oracle: %s\n",#__VA_ARGS__);++failures;}}while(0)
 static double flat(const std::array<double,3>& a,const std::array<double,3>& b){return std::hypot(a[0]-b[0],a[2]-b[2]);}
 static ds::State porterAt(double x,double z,double yaw,double y=140){ds::State s;s.position={x,y,z};s.yaw=yaw;return s;}
 int main(){
+    {CHECK(progressValue("unknown")==ds::UnknownProgress);CHECK(progressValue("3")==3);CHECK(progressValue("4294967294")==4294967294u);
+        for(auto value:{"", "-1", "1.0", "4294967295", "4294967296", "unknowns"}){bool refused=false;try{progressValue(value);}catch(const std::exception&){refused=true;}CHECK(refused);}
+        ds::State state;state.position={1,2,3};auto shifted=offsetTarget(state,{600,0,0});CHECK(shifted&&shifted->position==std::array<double,3>({601,2,3}));CHECK(!offsetTarget({},{}));
+        bool refused=false;try{offsetTarget(state,{10001,0,0});}catch(const std::exception&){refused=true;}CHECK(refused);
+    }
+
     {   // Facing yaw 0 is +z, so his right is +x: the place is 3 m to +x and 1 m to -z.
         auto b=beside(porterAt(10,20,0));CHECK(std::fabs(b[0]-13)<1e-9&&std::fabs(b[2]-19)<1e-9&&b[1]==140);
         auto c=beside(porterAt(0,0,Pi/2));CHECK(std::fabs(c[0]+1)<1e-9&&std::fabs(c[2]+3)<1e-9);   // facing +x: right is -z

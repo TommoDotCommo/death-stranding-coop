@@ -12,7 +12,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('ownbody',['WORLD','ALIVE','PARK','DRESS'],['double_test.cpp','double.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
           ('padscript',['BOUNDS','STAMP','TIMING'],['pad_test.cpp','pad.cpp']),
           ('cargo',['ECHO','HELD','TAKEN','TOOK_ECHO','DOOM','FIND','NEAR_HELD','CARRY_FRAME','LOCAL','STAGED','MOVED','OTHER_ID','RUN'],['cargo_test.cpp','cargo.cpp','discovery.cpp']),
-          ('partner',['TELEPORT','ACCEL','WIRE','WIRE_ANY'],['partner_test.cpp','partner_logic.cpp','../core/core.cpp']),
+          ('partner',['TELEPORT','ACCEL','WIRE','WIRE_ANY','OFFSET','OFFSET_RANGE','PROGRESS_RANGE'],['partner_test.cpp','partner_logic.cpp','../core/core.cpp']),
           ('structure',['PACK','NET','REMOVED','EARLY'],['structures_test.cpp','structures.cpp','discovery.cpp']),
           ('body',['ANY_CLASS'],['body_test.cpp','body.cpp','discovery.cpp']),
           ('auto',['ONCE_IN_GAME'],['auto_continue_test.cpp'])]

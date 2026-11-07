@@ -3,7 +3,31 @@
 #include <algorithm>
 #include <cstdlib>
 #include <sstream>
+#include <stdexcept>
 namespace mod::partner {
+uint32_t progressValue(const std::string& value) {
+    if(value=="unknown")return ds::UnknownProgress;
+    if(value.empty()||value.size()>10||value.find_first_not_of("0123456789")!=std::string::npos)throw std::invalid_argument("progress requires a decimal u32 or unknown");
+    auto n=std::stoull(value);
+#ifndef MUTANT_PARTNER_PROGRESS_RANGE
+    if(n>=ds::UnknownProgress)throw std::invalid_argument("progress outside u32 range (use unknown)");
+#endif
+    return uint32_t(n);
+}
+std::optional<ds::State> offsetTarget(const std::optional<ds::State>& porter,const std::array<double,3>& offset) {
+    #ifndef MUTANT_PARTNER_OFFSET_RANGE
+    for(double x:offset)if(!std::isfinite(x)||std::abs(x)>10000)throw std::invalid_argument("follow offset must be finite, within 10 km per axis");
+#endif
+    if(!porter)return {};
+    auto target=*porter;
+#ifndef MUTANT_PARTNER_OFFSET
+    for(unsigned i=0;i<3;++i)target.position[i]+=offset[i];
+#else
+    (void)offset;
+#endif
+    return target;
+}
+
 namespace {
 // Position just after `"key"` and its colon (whitespace allowed around the colon), or npos.
 size_t value(const std::string& line,const char* key,size_t from=0){
