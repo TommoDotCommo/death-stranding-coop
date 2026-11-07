@@ -25,7 +25,7 @@ Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
     if(p.length && get(b,8,2)!=WireSize) return Error::Length;
     if(p.checksum && get(b,120,4)!=checksum(b)) return Error::Checksum;
     if(p.reserved && (get(b,10,2)||b[95]||get(b,124,4))) return Error::Reserved;
-    if(p.kind && (b[6]<1||b[6]>8)) return Error::Kind;
+    if(p.kind && (b[6]<1||b[6]>9)) return Error::Kind;
     if(p.role && (b[7]<1||b[7]>2)) return Error::Role;
     Packet q; q.kind=Kind(b[6]); q.role=Role(b[7]); q.game=uint32_t(get(b,12,4));
     std::copy(b+16,b+32,q.mod.begin());
@@ -45,6 +45,12 @@ Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
     for(int i=0;i<3;++i) { q.state.position[i]=signedGet(b,72+4*i,4)/100.; q.state.velocity[i]=signedGet(b,84+2*i,2)/100.; }
     q.state.yaw=signedGet(b,90,2)*Pi/32767.; q.state.health=b[92]; q.state.stamina=b[93]; q.byeReason=b[94];
     if(p.range && (!valid(q.state)||q.byeReason>3)) return Error::Range;
+    if(q.kind==Kind::Environment) {
+        if(p.environmentRange && q.t0>=EnvironmentDayMs)return Error::Range;
+        if(p.reserved && (q.t1||q.t2||q.state.flags||q.state.action||b[63]||q.byeReason||
+            q.state.position!=State{}.position||q.state.velocity!=State{}.velocity||q.state.yaw||
+            q.state.health!=255||q.state.stamina!=255))return Error::Reserved;
+    }
     out=q; return Error::None;
 }
 // Height between two snapshots: blend gentle slopes and steps, snap real discontinuities (ledges, falls, lifts).
@@ -152,6 +158,8 @@ void Core::send(Kind k,uint64_t now) {
 void Core::reset(bool rotate) {
     connected_=false; sentHello_=false; peer_=0; snapshots_.clear(); haveSequence_=false; haveTeleport_=false; haveSent_=false; clockValid_=false; pendingPings_.clear(); rtt_=-1; offset_=0;
     nextHello_=nextSend_=nextPing_=0; outgoing_=0;
+    haveEnvironment_=false;environmentOut_=environmentIn_=0;environmentReceived_=environmentStamp_=0;
+    // Send/apply rate limits survive reconnects; changing a nonce cannot accelerate native calls.
     localProgress_={};peerProgress_={};progressStatus_=ProgressStatus::Unknown;
     // A new connection numbers cargo from 1 again on both sides; undelivered events are kept and renumbered.
     cargoSeen_=0; cargoIn_.clear(); cargoNext_=0; for(auto& e:cargoOut_) e.sequence=++cargoNext_; nextCargo_=0;
@@ -201,6 +209,17 @@ Error Core::receive(const uint8_t* b,size_t n,uint64_t now) {
     }
     if(protections_.handshake && !connected_) return fail(Error::NotConnected);
     if(protections_.nonce && q.nonce!=peer_) return fail(Error::Nonce);
+    if(q.kind==Kind::Environment) {
+        if(protections_.environmentRole && (config_.role!=Role::Client||q.role!=Role::Host))return fail(Error::Role);
+        if(q.echo!=config_.nonce)return fail(Error::Nonce);
+        uint32_t advance=q.sequence-environmentIn_;
+        if(protections_.environmentOrder && (!q.sequence||(haveEnvironment_&&(advance==0||advance>=0x80000000u||q.stamp<=environmentStamp_))))return fail(Error::Duplicate);
+        double mapped=double(q.stamp)-offset_;
+        if(protections_.environmentFresh && (!clockValid_||mapped<0||std::abs(mapped-double(now))>2000))return fail(Error::Time);
+        environment_={uint32_t(q.t0)};haveEnvironment_=true;environmentIn_=q.sequence;environmentStamp_=q.stamp;environmentReceived_=now;
+        // Optional traffic cannot keep a dead presence connection alive.
+        return fail(Error::None);
+    }
     if(q.kind==Kind::Bye) { reset(true); return fail(Error::None); }
     if(q.kind==Kind::Ping) {
         Packet a=q; a.kind=Kind::Pong; a.role=config_.role; a.nonce=config_.nonce; a.echo=peer_; a.stamp=now; a.t1=now; a.t2=now; transport_.send(encode(a));
@@ -277,4 +296,15 @@ Render Core::render(uint64_t now) const {
 Render Core::latestPresence(uint64_t now) const { return sampling(snapshots_,now,0,0,protections_); }
 void Core::frame(uint64_t now) { Render r=render(now); if(protections_.gate && provider_.isInCutsceneOrLoading()) r.visible=false; provider_.applyRemote(r); }
 void Core::disconnect(uint64_t now) { if(connected_) send(Kind::Bye,now); reset(true); }
+bool Core::sendEnvironment(Environment value,uint64_t now) {
+    if(!connected_||config_.role!=Role::Host||value.timeOfDayMs>=EnvironmentDayMs)return false;
+    if(protections_.environmentRate && sentEnvironment_&&(now<environmentSent_||now-environmentSent_<30000))return false;
+    Packet q;q.kind=Kind::Environment;q.role=config_.role;q.session=config_.session;q.nonce=config_.nonce;q.echo=peer_;
+    q.stamp=now;q.sequence=++environmentOut_;q.t0=value.timeOfDayMs;
+    transport_.send(encode(q));sentEnvironment_=true;environmentSent_=now;return true;
+}
+std::optional<Environment> Core::latestEnvironment(uint64_t now) const {
+    if(!connected_||!haveEnvironment_||now<environmentReceived_||now-environmentReceived_>2000)return {};
+    return environment_;
+}
 }

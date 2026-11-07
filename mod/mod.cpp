@@ -30,6 +30,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "double.h"
 #include "body.h"
 #include "vehicle.h"
+#include "environment.h"
 #include "auto_continue.h"
 #include "pad.h"
 #include "cargo.h"
@@ -175,6 +176,9 @@ struct Runtime final:ds::Transport {
     std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
     // Read-only vehicle diagnostics. No changes to presence or actor control (vehicle.h).
     std::filesystem::path vehicleCommand;std::unique_ptr<mod::vehicle::Monitor> vehicleMonitor;
+    // Optional environment sampling and host time setter. Only the verified callback can call the export.
+    std::filesystem::path environmentCommand;std::unique_ptr<mod::environment::Reader> environmentReader;
+    std::unique_ptr<mod::environment::Sync> environmentSync;uint64_t environmentReadAt=0,environmentApplyAt=0;
     std::function<void(uint32_t)> cargoGive,cargoDelete;std::function<void(uint8_t,const mod::puppet::Transform&,bool)> construct;std::function<bool(uint64_t,unsigned,bool)> partToggle;
     std::function<void(const std::array<float,4>&,const std::array<float,4>&,const mod::puppet::Transform&,bool,bool,bool)> unconstruct;
     std::function<void()> continueLastSave;mod::AutoContinue autoContinue;bool autoNoted=false;
@@ -515,6 +519,17 @@ struct Runtime final:ds::Transport {
             sampler=openSampler();
             vehicleCommand=path.parent_path()/"puppet.vehicle";
             vehicleMonitor=std::make_unique<mod::vehicle::Monitor>(*sampler);
+            environmentCommand=path.parent_path()/"puppet.environment";
+            environmentReader=std::make_unique<mod::environment::Reader>(*sampler);
+            if(config.shareEnvironment=="host") {
+                std::function<void(float,float)> setter;
+#if defined(_WIN32) && !defined(MOD_FAKE_NETWORK)
+                auto address=environmentReader->setterAddress();
+                setter=[address](float hour,float seconds){reinterpret_cast<void(*)(float,float)>(address)(hour,seconds);};
+#endif
+                environmentSync=std::make_unique<mod::environment::Sync>(*sampler,std::move(setter));
+                note("ENVIRONMENT host sync enabled: time only; weather setter unavailable\n");
+            }
             if(config.gameThread) {
 #ifdef MOD_FAKE_NETWORK
                 const auto sites=mod::dispatch::FixtureSites;
@@ -878,6 +893,35 @@ struct Runtime final:ds::Transport {
                 if(joinMover){stage="join settle";auto line=joinMover->tick(now);if(!line.empty())note(line.c_str());}
             }
             // End join dispatch.
+            // Environment dispatch: reads are optional; writes require the independently attested callback.
+            if(environmentReader&&(environmentSync||std::filesystem::exists(environmentCommand))) {
+                bool requested=false;
+                if(std::filesystem::exists(environmentCommand)) {
+                    auto command=readConfig(environmentCommand);
+                    if(!std::filesystem::remove(environmentCommand))throw std::runtime_error("cannot consume environment command");
+                    requested=mod::environment::readCommand(command,mod::runStamp());
+                    if(!requested)note("ENVIRONMENT ignored command for another process or malformed command\n");
+                }
+                auto anchor=environmentSync&&gameContext?mod::puppet::readLocalAnchor(*sampler):mod::puppet::Anchor{};
+                bool gameplay=cache.available&&!cache.gated&&gameContext&&gameEvent&&!gameEvent()&&!(cache.local.flags&ds::PrivateRoom)&&
+                    anchor.entity&&twin&&!twin->gameUsesDouble(anchor.entity);
+                std::array<double,3> position{cache.local.position[0],cache.local.position[2],cache.local.position[1]};
+                if(!cache.available)position.fill(std::nan("")); // no stale porter position for a weather query in menus
+                if(requested||(environmentSync&&gameplay&&now>=environmentReadAt)) {
+                    auto observation=environmentReader->read(position);note(mod::environment::row(observation).c_str());
+                    environmentReadAt=now+1000;
+                    if(environmentSync&&gameplay&&observation.available&&config.role=="host")
+                        core->sendEnvironment({uint32_t(std::min<double>(ds::EnvironmentDayMs-1,std::llround(double(observation.hour)*3600000)))},now);
+                }
+                if(environmentSync&&gameContext&&now>=environmentApplyAt) {
+                    environmentApplyAt=now+1000;
+                    mod::environment::Input input;input.enabled=true;input.guest=config.role=="guest"||config.role=="client";
+                    input.gameThread=gameContext;input.networkEnforced=gameContext; // dispatch Gate requires network_enforced==1
+                    input.gameplay=gameplay;input.connected=core->connected();input.nowMs=now;input.host=core->latestEnvironment(now);input.gamePosition=position;
+                    auto line=environmentSync->tick(input);if(!line.empty())note(line.c_str());
+                }
+            }
+            // End environment dispatch.
             stage="cargo";
             if(twin&&gameContext)tickCargo(now);
             stage="carry";   // ds3

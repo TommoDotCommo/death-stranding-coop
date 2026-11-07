@@ -12,6 +12,7 @@ struct Config {
     bool logging=true, required=false, impairment=false, discovery=false, selfTick=false, gameThread=false, puppetProbe=false, virtualPad=false, autoContinue=false, joinAtHost=false;
     bool carryVisual=false;   // ds3: send what the porter carries, show what the partner carries (carry_visual.h)
     unsigned presenceLogMaxMiB=8;
+    std::string shareEnvironment="off"; // host-authoritative time only; weather contract remains unknown
     discovery::Options discoveryOptions;
 };
 // Deliberately small strict flat JSON schema. No paths from JSON are used for writes.

@@ -5,6 +5,7 @@
 //                [--carry SPEC] [--carry-drop-after SECONDS] [--seconds N] [--stop FILE]
 // --offset X Y Z shifts the follow target (adapter metres, Y up); --episode N|unknown and --progress-id N|unknown
 // set explicit handshake fixtures, --progress-mismatch warn|refuse chooses policy.
+// --environment-time HOURS requires --role host and sends a fixed [0,24) time sample every 30 s (no weather).
 // --where-recorded plays the walk where it was recorded (same save, same place) instead of beside the porter.
 // Prints one status line a second and every cargo event the game sends. --drop places one cargo item (the game's
 // item hash) where the partner stands, SECONDS after connecting. --take-after picks up (sends "taken" for) every item the
@@ -18,6 +19,7 @@
 #include "partner.h"
 #include "structures.h"
 #include "carry_visual.h"
+#include "environment.h"
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -86,6 +88,7 @@ struct CarryPrint final:mod::carry::Sink {
 int main(int argc,char** argv){
     unsigned slot=1,peerSlot=0;ds::Role role=ds::Role::Client;uint64_t session=0;double seconds=3600,dropAfter=-1,takeAfter=-1,takeOwnAfter=-1,buildAfter=-1,unbuildAfter=-1;uint32_t dropItem=0,buildType=0;
     std::string replayFile,stopFile;Shell shell;ds::ProgressPolicy progressPolicy=ds::ProgressPolicy::Warn;std::optional<mod::carry::Summary> carrySpec;double carryDropAfter=-1;
+    std::optional<ds::Environment> fixedEnvironment;
     for(int i=1;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc)usage(("missing value after "+a).c_str());return std::string(argv[++i]);};
         if(a=="--slot")slot=unsigned(std::stoul(next()));else if(a=="--peer-slot")peerSlot=unsigned(std::stoul(next()));
@@ -95,6 +98,11 @@ int main(int argc,char** argv){
         else if(a=="--offset"){for(auto& x:shell.offset)x=std::stod(next());offsetTarget({},shell.offset);}
         else if(a=="--episode")shell.progress.episode=progressValue(next());
         else if(a=="--progress-id")shell.progress.id=progressValue(next());
+        else if(a=="--environment-time") {
+            auto value=next();
+            try {fixedEnvironment=ds::Environment{mod::environment::fixedTime(value)};}
+            catch(const std::exception&){usage("--environment-time requires finite decimal hours [0,24)");}
+        }
         else if(a=="--progress-mismatch"){auto p=next();if(p=="warn")progressPolicy=ds::ProgressPolicy::Warn;else if(p=="refuse")progressPolicy=ds::ProgressPolicy::Refuse;else usage("progress-mismatch is warn or refuse");}
         else if(a=="--drop"){dropAfter=std::stod(next());dropItem=uint32_t(std::stoul(next()));}
         else if(a=="--build"){buildAfter=std::stod(next());buildType=uint32_t(std::stoul(next()));if(buildType>255)usage("structure type is 0..255");}
@@ -105,6 +113,7 @@ int main(int argc,char** argv){
         else usage(("unknown option "+a).c_str());
     }
     if(!session)usage("--session is required (the game copy's mod.json session)");
+    if(fixedEnvironment&&role!=ds::Role::Host)usage("--environment-time requires --role host");
     if(!replayFile.empty()){
         std::ifstream f(replayFile,std::ios::binary);if(!f)usage("cannot read the replay file");
         std::stringstream ss;ss<<f.rdbuf();Replay r(parseRecording(ss.str()));
@@ -126,7 +135,7 @@ int main(int argc,char** argv){
     ds::Config config;config.role=role;config.session=session;config.nonce=(nowMs()<<8)|slot|1;config.progressPolicy=progressPolicy;
     ds::Core core(config,shell,shell);
     auto start=nowMs();uint64_t nextStatus=start+1000,connectedAt=0,refused=0,ownRef=0,droppedAt=0,builtRef=0,builtAt=0;bool dropped=false,built=false;std::array<double,3> builtAtPos{};
-    uint64_t handshakeSerial=0;bool progressRefused=false;
+    uint64_t handshakeSerial=0;bool progressRefused=false;std::optional<uint32_t> observedEnvironment;
     std::vector<std::pair<uint64_t,uint64_t>> toTake;   // (when, ref)
     mod::carry::Exchange carry;CarryPrint carryPrint;uint64_t carryTickAt=0;bool carryDropped=false;
     std::printf("PARTNER slot %u -> %u session %llu mode %s\n",slot,peerSlot,(unsigned long long)session,shell.replay?"replay":"follow");std::fflush(stdout);
@@ -143,6 +152,15 @@ int main(int argc,char** argv){
             if(error==ds::Error::Progress&&!progressRefused){progressRefused=true;std::puts("HANDSHAKE refused: story progress mismatch");}
         }
         core.frame(now);shell.step(now);core.tick(now);
+        if(fixedEnvironment&&core.sendEnvironment(*fixedEnvironment,now)) {
+            std::printf("ENVIRONMENT sent fixed hour=%.6f weather=unknown\n",fixedEnvironment->timeOfDayMs/3600000.);std::fflush(stdout);
+        }
+        if(auto value=core.latestEnvironment(now)) {
+            if(!observedEnvironment||*observedEnvironment!=value->timeOfDayMs) {
+                observedEnvironment=value->timeOfDayMs;
+                std::printf("ENVIRONMENT received hour=%.6f weather=unknown\n",value->timeOfDayMs/3600000.);std::fflush(stdout);
+            }
+        }
         if(core.connected()&&handshakeSerial!=core.connectionSerial()){
             handshakeSerial=core.connectionSerial();progressRefused=false;
             auto text=[](uint32_t n){return n==ds::UnknownProgress?std::string("unknown"):std::to_string(n);};

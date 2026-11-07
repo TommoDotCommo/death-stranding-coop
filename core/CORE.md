@@ -37,7 +37,7 @@ not authentication or proof of a trusted binary.
 
 ## Wire format
 
-All eight packet types are **exactly 128 bytes**, one UDP datagram each. Integers
+All nine packet types are **exactly 128 bytes**, one UDP datagram each. Integers
 are explicitly little endian; signed values use two's complement. No packed
 structs, float bit patterns, pointer casts or native padding are on the wire.
 Reserved bytes must be zero. Fields unused by a packet type are ignored after
@@ -48,7 +48,7 @@ and stamina 255). Receivers do not require ignored fields to be zero.
 |---|---:|---|
 | 0 | 4 | Magic ASCII `DSP1` (`0x31505344`) |
 | 4 | 2 | Protocol version, exactly 1 |
-| 6 | 1 | Kind: HELLO=1, HELLO_ACK=2, PRESENCE=3, PING=4, PONG=5, BYE=6, CARGO=7, CARGO_ACK=8 |
+| 6 | 1 | Kind: HELLO=1, HELLO_ACK=2, PRESENCE=3, PING=4, PONG=5, BYE=6, CARGO=7, CARGO_ACK=8, ENVIRONMENT=9 (optional) |
 | 7 | 1 | Sender role: host=1, client=2; peer must have opposite role |
 | 8 | 2 | Datagram length, exactly 128; actual received length must match |
 | 10 | 2 | Reserved zero |
@@ -317,3 +317,34 @@ warning-flag, readiness, duplicate-ACK and reset checks. The 500 seeded lossy-li
 sessions include equal, mismatched and unknown progress through timeout/reconnect;
 named mutants remove readiness, refusal, peer-policy enforcement, unknown handling
 and warning flags. This is game-free protocol evidence, not validation of a save.
+
+## Optional environment samples (kind 9)
+
+`ENVIRONMENT=9` is a separate 128-byte message. HELLO/ACK and their metadata are
+unchanged. The production source identities change as usual; deploy the same
+adapter identity to both peers and the stand-in. This is an optional latest-value
+sample, with no acknowledgement, retransmit queue or cargo sequence dependency.
+
+The usual game/mod build, session, source endpoint and handshake/nonce checks
+apply. Only the host sends; only the guest receives. `sequence` at bytes 56..59
+has its own strictly advancing nonzero serial, `stamp` at 64..71 is the sender's
+monotonic milliseconds, and `t0` at 96..103 is integer milliseconds since midnight
+in `[0,86400000)`. `t1`/`t2` and presence/cargo fields are reserved/default
+(position/velocity/yaw/flags/action/phase/reason zero; health/stamina 255).
+Weather is unknown and has no payload. The host rate is at most one sample per
+30 seconds, including reconnects; a lost sample waits for the next period.
+
+The guest requires an established ping clock mapping, a timestamp within 2 s of
+its mapped local time, a fresh sequence and a strictly advancing remote stamp.
+`latestEnvironment` expires after 2 s and resets on disconnect. Optional samples
+never refresh connection liveness and cannot hold a dead presence session open.
+The adapter independently controls native-call eligibility and retains its
+30-second apply limit across reconnects. No extrapolation of time or weather is
+performed. A first sample can precede clock estimation and be refused; allow the
+next period before diagnosing a failure.
+
+`make -C core environment-test` runs roundtrip/reserved/range/authority/nonce,
+duplicate/reorder, age, disconnect and rate checks, five named mutants, and 200
+lossy simulated sessions with independent clocks, outage/reconnect and a final
+quiet period. Structured environment payloads exercise the new decoder branch.
+This is game-free wire evidence, not proof of a visible sky change.

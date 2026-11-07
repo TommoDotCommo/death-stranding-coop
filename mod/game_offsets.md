@@ -1439,3 +1439,102 @@ settings, which this pass did not read. So whether V, middle mouse, Tab or F1 is
 static evidence. Middle mouse does have a menu meaning (`EMenuInputFunction_FUNCTION_MOUSE_MIDDLE`, map menu
 `OnMouseMiddle...` handlers). The mod's ping key is V by default and changeable at run time (`key <vk>` command), read
 only while the game window has the focus; a live check of the key-assign menu is the next step.
+
+## Time of day and weather (static only, build 13300582)
+
+Observed by hashing the pinned executable and following Decima registration
+strings, RIP-relative references and focused disassembly. No game was launched,
+no process memory was read and no native setter was called for this work. Runtime
+semantics, visible sky/rain changes and object lifetime remain **unknown**.
+
+Time exports are registered in `ds.exe+0x3656a30..0x36586ef`:
+
+| Export string RVA | Export | Implementation RVA |
+|---|---|---:|
+| `0x3f1f978` | `NodeGraphBindingsGame::sSetTimeOfDay` / `Game_SetTimeOfDay` | `0x365d960` |
+| `0x3f1f9b8` | `NodeGraphBindingsGame::sGetTimeOfDay` / `Game_GetTimeOfDay` | `0x365d470` |
+| `0x3f1f9f8` | `NodeGraphBindingsGame::sEnableDayNightCycle` | `0x365ca10` |
+| `0x3f1fa48` | `NodeGraphBindingsGame::sIsDayNightCycleEnabled` | `0x365d4a0` |
+
+The getter loads application `A = *(ds.exe+0x7be6318)`, then time object
+`T = *(A+0x58)`, then float `T+0x20`. When A is null the native getter returns
+12; the mod refuses a null chain instead of announcing that fallback as a real
+observation. The cycle predicate is byte `T+0x2c != 0 && T+0x2d == 0`.
+The public `GameWorldTimeState` name is at `0x3f179c8`; that name alone does not
+establish the runtime class of T.
+
+The setter at `0x365d960` takes two floats in XMM0/XMM1, fetches the same T,
+shuffles them into a member call and tail-jumps to `0x3631f90`. The first float is
+target hours; the second is transition duration. The helper multiplies hour deltas
+by 3600 (`0x3b88e94`) and wraps at 24 (`0x3bb5488`, with -24 at `0x3bb7584`).
+A positive duration sets a remaining delta/rate at `T+0x30/+0x34`. A nonpositive
+duration changes `T+0x20` immediately, clears the remaining delta and increments
+integer `T+0x28` when wrapping forward across midnight. **A backwards clock
+correction can therefore advance the native day counter.** The opt-in mod calls
+this export with zero duration, skips circular drift within 0.01 hour (36 s),
+and never writes fields directly or calls the cycle-enable export. Effects on
+quests, saves, lighting overrides and elapsed game time are unknown. Host cycle
+enablement/rate and day count are not synchronized.
+
+`environment.cpp` verifies full instruction-span fingerprints at the pinned RVAs
+inside executable image sections, after the ordinary SHA-256/signature sampler
+gate. The wrapper's entire 30 bytes and the helper's entire 252 bytes are checked
+again before every attempted call. These spans contain no absolute relocation
+operands. The getter (31 bytes) and cycle predicate (34 bytes) are checked before
+reading. Fingerprints use FNV-1a-64 to compare reviewed loaded instructions; the
+executable SHA-256 pin remains the identity protection. These are pinned-build
+checks, not signatures for unknown patches. The small leaf functions lack
+`.pdata` entries; their explicit return/padding boundaries were disassembled.
+
+Weather is a separate subsystem:
+
+- `DSWeatherSystem` name `0x3e06b28`; exports are registered in
+  `0x2e00750..0x2e00be5`. Global weather instance `W = *(ds.exe+0x7bf83b8)`.
+- `weather::sGetRainyConditionFromMap` (`0x3e06ae0`) registers `0x2e1f6e0`,
+  which passes W and a 3-double game position to `0x2e0c3f0`.
+- `0x2e0c3f0` projects world x/y (z is up) using origin doubles `W+8/+0x10`,
+  float4 scale `W+0x70` and offset `W+0x80`, clamps to dimensions
+  `int32 W+0x38/+0x3c`, and calls `0x2e0b490`. That helper scales coordinates
+  by the cached float4 at `ds.exe+0x7bf8a10` (initialized from `int32 W+0x6564`),
+  subtracts 0.5, clamps again, and bilinearly reads four float4 cells through
+  `*(W+0x64f0)`. The export returns `4*interpolated.z - 2`.
+- The read-only provider reproduces that calculation, bounds dimensions/factor
+  and reads only four cell channels. It refuses an uninitialized/different scale
+  cache, bad pointers, nonfinite/range-invalid cells, or changed read dependencies.
+  `rain_from_map` is this **signed native map condition**, not precipitation
+  intensity or proof of timefall. Its visual/gameplay classification is unknown.
+- `weather::sGetRainyCondition` (`0x3e06aa8`) registers `0x2e1f670`, which further
+  clamps the map result using `W+0x69e0`. The mod does not apply that clamp or
+  advertise its result as a percentage.
+- `weather::sResetForecastTime` (`0x3e06a10`, implementation `0x2e1fc80`)
+  reads float `W+0x64a8` and changes forecast timing/control fields, independently
+  of the time-of-day object. The provider exposes `forecast_time` with unknown
+  units. The weather map is derived state; it is never written by the mod.
+- `SetForecastTypeOfRegionDirect` at `0x2e1fdd0` selects a table using
+  `int32 W+0x64a0`, a byte region index and byte forecast type, then writes a
+  regional override and timing fields. `DirectEx` at `0x2e1fe20` adds a current
+  world/area check. Their table/region lifetime, duration/reset ownership,
+  forecast-to-render propagation and safe complete state-transfer contract are
+  unresolved. No weather setter is approved or called.
+
+Whether weather is a deterministic schedule given additional seed/clock/region
+state is **unknown**. These independent clocks and mutable regional overrides do
+not establish that syncing time of day will sync weather. No shared-rain claim
+is made; time-only sync is an explicit partial milestone.
+
+Reproduce the focused disassembly with the method above, for example (absolute
+VA = image base `0x140000000` + RVA):
+
+```sh
+x86_64-w64-mingw32-objdump -d -M intel --start-address=0x14365d470 --stop-address=0x14365d4c2 "<game dir>/ds.exe"
+x86_64-w64-mingw32-objdump -d -M intel --start-address=0x14365d960 --stop-address=0x14365d97e "<game dir>/ds.exe"
+x86_64-w64-mingw32-objdump -d -M intel --start-address=0x143631f90 --stop-address=0x14363208c "<game dir>/ds.exe"
+x86_64-w64-mingw32-objdump -d -M intel --start-address=0x142e0c3f0 --stop-address=0x142e0c4c3 "<game dir>/ds.exe"
+x86_64-w64-mingw32-objdump -d -M intel --start-address=0x142e0b490 --stop-address=0x142e0b6be "<game dir>/ds.exe"
+```
+
+Next evidence needed: a loaded-world read of the time path against a visible sky,
+then an authorized one-copy time setter run with a stand-in, independent process
+state observations and 90 s responsiveness. For weather, observe region/map and
+forecast state through a rain transition, then trace its producer/reset/seed and
+regional override lifetime before considering any weather-setting implementation.

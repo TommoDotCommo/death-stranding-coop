@@ -183,3 +183,15 @@ designed, so one-copy runs now turn it off). A driver installed since 2026-11-03
   recorded walk, and can place cargo, so one copy can be tested at full speed. Tested game-free on Linux, including
   two partners against each other.
 - `auto_continue` (mod): from the title screen, asks the game to continue the last save, with no menu input.
+
+## Shared environment (static/game-free only)
+
+The pinned build's time-of-day getter/setter and weather map reader have been
+traced statically. A read-only provider and opt-in `share_environment:"host"`
+time synchronization are implemented; default is off. The guest uses the native
+time export only on the verified game callback, with instruction fingerprints,
+fresh host samples and a 30 s call limit. No live environment check has run.
+The native setter can advance its day counter for backwards corrections; effects
+on quests/saves are unknown. Shared rain/timefall is not implemented: weather has
+independent forecast/map state and its deterministic schedule and safe complete
+setter contract remain unknown. See `mod/README.md` for the one-copy experiment.

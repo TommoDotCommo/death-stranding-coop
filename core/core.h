@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <algorithm>
 #include <vector>
 #include "build_id.h"
@@ -11,7 +12,7 @@ namespace ds {
 constexpr size_t WireSize = 128;
 constexpr uint32_t GameBuild = 13300582;
 using Bytes = std::array<uint8_t,WireSize>;
-enum class Kind : uint8_t { Hello=1, Ack, Presence, Ping, Pong, Bye, Cargo, CargoAck };
+enum class Kind : uint8_t { Hello=1, Ack, Presence, Ping, Pong, Bye, Cargo, CargoAck, Environment=9 };
 enum class Role : uint8_t { Host=1, Client=2 };
 enum class Error { None, Length, Magic, Version, Checksum, Reserved, Kind, Role, Build, Session, Nonce, Range, Duplicate, Time, Speed, Teleport, NotConnected, Progress };
 const char* reason(Error);
@@ -46,6 +47,10 @@ struct Packet {
 // id is a stable nonzero identity chosen by the sender; the receiver delivers each id once for the lifetime of the
 // Core, so an event resent after a reconnection (its acknowledgement lost) is not delivered twice.
 struct CargoEvent { uint32_t sequence=0; uint8_t type=1; uint32_t item=0; std::array<double,3> position{}; double yaw=0; uint64_t id=0, ref=0; };
+// Optional host-only sample, independent of presence/cargo and the handshake.
+// Milliseconds since midnight, not an elapsed world/forecast clock. Weather is unknown.
+constexpr uint32_t EnvironmentDayMs=86400000;
+struct Environment { uint32_t timeOfDayMs=0; };
 // Mutants exist only in test builds (-DDS_TESTING).
 struct Protection {
     bool version=true, range=true, teleport=true, duplicate=true, delay=true, session=true, build=true;
@@ -53,6 +58,7 @@ struct Protection {
     bool length=true, kind=true, role=true, handshake=true, ping=true, clamp=true, finite=true;
     bool pingRetry=true, pingHistory=true, cargoOrder=true, cargoAck=true, cargoOnce=true;
     bool progressReady=true, progress=true, progressUnknown=true, progressFlag=true, progressPolicy=true;
+    bool environmentRange=true, environmentRole=true, environmentOrder=true, environmentFresh=true, environmentRate=true;
     bool floor=true, extrapolate=true, stale=true, gate=true, timeout=true, buffer=true, rate=true;
 };
 Bytes encode(Packet); // throws invalid_argument for nonfinite state
@@ -105,6 +111,8 @@ public:
     void queueCargo(CargoEvent);              // sequence is assigned here
     std::vector<CargoEvent> takeCargo();      // received events, each exactly once, in order
     size_t cargoPending() const { return cargoOut_.size(); }
+    bool sendEnvironment(Environment,uint64_t now); // connected host only, at most once per 30 seconds
+    std::optional<Environment> latestEnvironment(uint64_t now) const; // expires after 2 s; cleared on reconnect
 private:
     void send(Kind,uint64_t);
     void reset(bool rotateNonce);
@@ -124,6 +132,9 @@ private:
     Progress localProgress_{},peerProgress_{};
     ProgressStatus progressStatus_=ProgressStatus::Unknown;
     uint64_t connectionSerial_=0;
+    Environment environment_{}; bool haveEnvironment_=false, sentEnvironment_=false;
+    uint32_t environmentOut_=0, environmentIn_=0;
+    uint64_t environmentReceived_=0, environmentStamp_=0, environmentSent_=0;
     Error error_=Error::None;
 };
 }

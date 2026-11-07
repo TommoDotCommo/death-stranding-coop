@@ -816,3 +816,89 @@ progress is unknown, refusal is not expected: use the game-free fixtures to test
 known mismatch instead. `--episode N|unknown` and `--progress-id N|unknown` are
 explicit stand-in fixtures, not statements about a loaded save. No two-copy run
 is needed for these experiments. No live result is claimed here.
+
+## Shared time and environment research (opt-in, not live verified)
+
+`share_environment` accepts `"off"` (default) or `"host"`. Host mode requires
+`provider:"game"`, `game_thread:true`, `self_tick:false`, `required:true`,
+`puppet_probe:true` and an explicit `role:"host"` or `role:"guest"` (the existing
+`client` alias also works). It uses the existing verified game-thread callback,
+whose gate requires enforced networking. Normal loaded gameplay, readable local
+state, no event/cutscene and no private-room double use are required. The explicit
+role determines authority; slot ordering is insufficient for this feature.
+
+The host reads time and sends an optional environment sample at most every 30 s.
+An opted-in guest accepts only a fresh authenticated host sample, independently
+reads its own time, checks both complete setter instruction spans and calls the
+native `Game_SetTimeOfDay` on that callback at most every 30 s. Reconnects cannot
+shorten either rate limit. Changes within 36 s of circular time drift are skipped.
+No direct memory writes are used. The native day counter can advance when the
+clock is corrected backwards; quest/save effects remain unknown. This feature
+is research-only and **does not yet synchronize rain/timefall**, day count or
+cycle enablement/rate. Weather determinism and a safe complete setter contract
+remain unknown; see `game_offsets.md`, "Time of day and weather".
+
+A read-only stamped command works with either ordinary game ticking mode and
+with sharing off. As in **Live test commands**, write exactly this line to the
+per-copy `puppet.environment` file beside `mod.json`:
+
+```text
+read <run stamp>
+```
+
+A stale or malformed command logs `ENVIRONMENT ignored command ...` and does not
+request a sample. For example, using native Windows Python and the current
+log stem as the stamp (write LF exactly):
+
+```sh
+python -c "from pathlib import Path; p=Path(r'<copy>/redirect-data/mod/puppet.environment'); t=p.with_name(p.name+'.tmp'); t.write_bytes(b'read <run stamp>\n'); t.replace(p)"
+```
+
+The `ENVIRONMENT {json}` row exposes `available`, `hour`, `cycle`,
+`weather_available`, `forecast_time`, `rain_from_map` and refusal reasons.
+Unavailable values are null. `rain_from_map` is a signed native map sample, not
+a rain percentage; its relation to visible rain/timefall is unverified.
+Time and weather are independent guarded observations and are not atomic.
+Sharing mode also logs one read per second during eligible gameplay.
+
+One-copy live experiment for an authorized operator (not run for this change):
+
+1. Rebuild/deploy matching proxy, mod and partner binaries; config parser changes
+   require a fresh proxy and the normal fresh game-free proxy probes. Retain
+   instance save isolation, executable pin, enforced networking and the reviewed
+   thread trace setup. Hash original saves before/after and after the settle
+   period. Configure the game copy with role guest and `share_environment:"host"`
+   plus the required keys above. This callback needs `puppet_probe` observations;
+   no double-borrow or body-creation command is needed for time synchronization.
+2. In ordinary outdoor gameplay, send `read <stamp>` to `puppet.environment` and
+   independently query application/time pointers and `float T+0x20` with a
+   read-only process handle. Capture the current sky from the copy. Select a
+   fixed hour clearly different from the observed value (21.25 in the example).
+3. Run the stand-in on the opposite slots, with the same session as the game:
+
+   ```sh
+   coop-partner.exe --slot 1 --peer-slot 0 --role host --session <session> --follow --environment-time 21.25 --seconds 90
+   ```
+
+   Adjust slots to the copy's actual config. Expected: stand-in
+   `ENVIRONMENT sent fixed hour=21.250000 weather=unknown`; mod
+   `ENVIRONMENT host sync enabled: time only; weather setter unavailable`, then
+   `ENVIRONMENT applied hour=21.250000 previous=... weather=unknown (time only)`.
+   Allow up to 32 s after connection: a first sample can arrive before clock
+   estimation and be refused. Independently re-read the time field, compare the
+   next environment row and capture the sky at the same location and camera.
+4. Continue for 90 s. Assert that the callback continues, input moves the porter
+   (independently read positions), and native applies are at least 30 s apart.
+   Repeat with a contrasting fixed hour, and repeat once with sharing off: off
+   must produce no apply. Logs/screenshots alone do not prove responsiveness or
+   state transfer. A signature/local-state refusal, a field that does not change,
+   a persistent lighting override, a crash/hang, an apply while gated, or a change
+   with sharing off fails or leaves the visual result inconclusive. Rain need not
+   change and is not a success criterion for this time-only experiment.
+
+Two real copies are needed later to verify changing host time at the same place;
+the fixed stand-in tests the guest setter, not host sampling or matching weather.
+Game-free checks: `make -C mod environment-test` (fake memory, guards/mutants,
+fixed-time parser/CLI refusals), `make -C core environment-test` (protocol fuzz/mutants).
+`make -C mod environment-udp-test` is an additional 33 s two-stand-in wire smoke;
+it requires permission to create/bind local UDP sockets and fails if that is denied.

@@ -3,8 +3,8 @@ CXX ?= g++
 MINGW ?= x86_64-w64-mingw32-g++-posix
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = join.h game_thread.h puppet.h double.h body.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = environment.h join.h game_thread.h puppet.h double.h body.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -37,7 +37,7 @@ build/fake-no-interpolation.so: $(SRC) $(HEADERS) | build
 build/unit: unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp $(HEADERS) | build
 	$(CXX) $(FLAGS) unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o $@
 host: identity build/mod.so build/mod-no-build.so build/mod-no-interpolation.so build/mod_probe build/unit
-test: join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so
+test: environment-test join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so
 	./build/unit
 	@$(CXX) $(FLAGS) -DMUTANT_PEER_ANY unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-peer-any && if ./build/unit-peer-any >/dev/null 2>&1; then echo SURVIVED PEER_ANY; exit 1; else echo KILLED MUTANT_PEER_ANY; fi
 	python3 -B test_probe.py
@@ -101,10 +101,10 @@ build/auto-continue-test: auto_continue_test.cpp auto_continue.h | build
 	$(CXX) $(FLAGS) auto_continue_test.cpp -o $@
 build/partner-test: partner_test.cpp partner_logic.cpp partner.h identity.h ../core/core.h ../core/core.cpp | build
 	$(CXX) $(FLAGS) partner_test.cpp partner_logic.cpp ../core/core.cpp -o $@
-build/coop-partner: partner.cpp partner_logic.cpp partner.h identity.h structures.cpp structures.h carry_visual.cpp carry_visual.h discovery.cpp ../core/core.cpp ../core/core.h | build
-	$(CXX) $(FLAGS) partner.cpp partner_logic.cpp structures.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@
-build/coop-partner.exe: partner.cpp partner_logic.cpp partner.h identity.h structures.cpp structures.h carry_visual.cpp carry_visual.h discovery.cpp ../core/core.cpp ../core/core.h | build
-	$(MINGW) $(WINFLAGS) partner.cpp partner_logic.cpp structures.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@ -lws2_32 -lbcrypt
+build/coop-partner: environment.cpp environment.h partner.cpp partner_logic.cpp partner.h identity.h structures.cpp structures.h carry_visual.cpp carry_visual.h discovery.cpp ../core/core.cpp ../core/core.h | build
+	$(CXX) $(FLAGS) partner.cpp partner_logic.cpp environment.cpp structures.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@
+build/coop-partner.exe: environment.cpp environment.h partner.cpp partner_logic.cpp partner.h identity.h structures.cpp structures.h carry_visual.cpp carry_visual.h discovery.cpp ../core/core.cpp ../core/core.h | build
+	$(MINGW) $(WINFLAGS) partner.cpp partner_logic.cpp environment.cpp structures.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@ -lws2_32 -lbcrypt
 game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test
 	./build/game-thread-test
 	./build/puppet-test
@@ -134,3 +134,15 @@ join-test: build/join-test
 	./build/join-test
 	python3 -B test_join_mutants.py
 .PHONY: join-test
+
+# Read-only environment provider and opt-in setter guards, game-free.
+build/environment-test: environment_test.cpp environment.cpp config.cpp discovery.cpp $(HEADERS) | build
+	$(CXX) $(FLAGS) environment_test.cpp environment.cpp config.cpp discovery.cpp -o $@
+environment-test: build/environment-test build/coop-partner
+	./build/environment-test
+	python3 -B test_environment_mutants.py
+	python3 -B test_environment_partner.py --cli-only
+.PHONY: environment-test
+environment-udp-test: build/coop-partner
+	python3 -B test_environment_partner.py
+.PHONY: environment-udp-test
