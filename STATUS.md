@@ -23,8 +23,7 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
   is drawn and walks, stable over 90 s, but with stretched-polygon artifacts still to fix (`mod/game_offsets.md`,
   "Drawing the own body"). `peer` stays the default.
 - BTs, vehicles, cutscenes, death and voidouts, saves of a shared world,
-  the partner's gear and outfit, and the partner's own controller input. Cargo the porter himself picks up or puts down is detected by the logic
-  below but has not yet been driven live (the run had no keyboard focus).
+  the partner's gear and outfit, and the partner's own controller input.
 - A real two-PC session. The mod now accepts any unicast IPv4 peer (LAN or VPN) and binds only the address that
   routes to it (README, "Two PCs"); it has only run over loopback so far. No NAT traversal: across the internet use
   a VPN such as Tailscale.
@@ -130,8 +129,16 @@ table, state "built"). Posts, shelters, watchtowers, bridges and ziplines reques
 during that run and were standing after the next load; syncing them is untested. Dismantling is shared too: when a porter's structure disappears, the partner's mod removes its Net copy with the
 game's `RemoveConstructionsInArea`, limited to Net structures in a 3 m box; both directions ran live. A partner's
 structure that already stands here (saved from an earlier session) is not built twice. Not done: upgrades, and
-structures built or dismantled through the game's own menus (the run had no keyboard focus; the test used the
-same exports).
+structures built or dismantled through the game's own menus (the test save is early in Episode 1, before the
+construction device; the test used the same exports).
+
+Cargo driven live with keyboard input (2026-11-07, one copy and `coop-partner`): the porter carried the partner's
+crate on his back (E), grabbed it by hand, put it down from the cargo menu and from his hand; each pick-up removed the
+partner's copy and each put-down reached the partner at the porter's feet. Two bugs found and fixed that way: an
+item put down from the menu keeps a carry-frame position for over a second (it was announced there), and story cargo
+(the president's corpse, after a reload) was shared; only ordinary cargo is shared now. A return to the title screen
+and continue while connected: the crate put down after the last save vanished with the reload and the partner was
+told to remove it.
 
 ## Testing aids (built 2026-11-03, first run live 2026-11-07)
 

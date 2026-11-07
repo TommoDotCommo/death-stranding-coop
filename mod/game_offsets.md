@@ -697,9 +697,8 @@ Shared cargo, first version (`mod/cargo.{h,cpp}`, core CARGO events):
 - **Recreate:** the partner calls `CreateBaggage(hash, transform)` on its game thread. It first registers the
   expected item and point, so the record that appears for it is marked as a mirror and never announced back.
 - **Live, two copies:** a crate created on one copy appeared in the other at the same coordinates, with no echo.
-- **Not yet:** picking cargo up and ownership (a mirrored item stays in the partner's world when the original is
-  picked up), a real put-down by the porter (the keyboard binding is still unknown), and cargo far from the
-  partner.
+- **Not yet (then):** picking cargo up and ownership, a real put-down by the porter, and cargo far from the partner.
+  The first two are done and were driven live on 2026-11-07 (below).
 
 ### Cargo, live 2026-11-07: where an item is, and deleting one
 
@@ -713,6 +712,23 @@ Shared cargo, first version (`mod/cargo.{h,cpp}`, core CARGO events):
   **index of the record in the manager's array** (`manager+20+index*0x240`) and goes on only when record byte `+21`
   is 1, 2 or 8. Live: `delete 7` removed the crate in record index 7 (36 -> 35 records); its `+20` value (263),
   its `+18` slot (65) and a `+84` id (8238) did nothing.
+
+### Cargo, live 2026-11-07 with keyboard input: the porter's own pick-ups and put-downs
+
+- **Carry frame.** While an item is on the porter's back, its record `+38` position is not a world position: it holds
+  values near (100, 100, 20) that jitter with his walk. Put down from the cargo menu (Offload, then Confirm), the record
+  reads `0x107` at once but keeps the carry-frame position for over a second; then the real place is written (here
+  1692.4, 1056.5, 135.7, at his feet). The first build announced the carry-frame place to the partner. An item in his
+  hand (grabbed with a mouse button) holds world coordinates. The partner's double was parked at (100, 100, 20) too
+  while the game was on the title screen.
+- **Kind.** Record `+20` bits 0..7: 7 on every ordinary item seen (crates, materials, copies made by `CreateBaggage`), 5
+  on the president's corpse (story cargo; holder `+1c` 0 where ordinary items read `0xfffffe00`), 0 on equipped gear.
+  After a reload with Sam resting, the corpse lay on the ground and was announced as a put-down; only kind 7 is shared
+  now.
+- **Controls (PC defaults):** E carries an item on the back; holding the right or left mouse button grabs it into
+  that hand, and a left click puts it down; Tab opens the map, where clicking on Sam opens cargo management (Enter on
+  an item opens its commands; Confirm is a button at the bottom left that takes a mouse click). Taps under about
+  300 ms are sometimes lost at 20 fps.
 
 ## Outfit (2026-11-03, read-only)
 

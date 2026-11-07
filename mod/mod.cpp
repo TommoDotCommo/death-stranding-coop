@@ -198,6 +198,9 @@ struct Runtime final:ds::Transport {
             // The partner took this item before our copy of it appeared: remove the copy now.
             if(cargoDelete){cargoDelete(index);++cargoRemoved;note(("CARGO removed a copy taken before it appeared (record "+std::to_string(index)+")\n").c_str());}
         }
+        for(auto& k:cargoSync.takeKept()) {
+            std::ostringstream o;o<<"CARGO not shared: item "<<k.hash<<" kind "<<unsigned(k.kind)<<(k.pickedUp?" picked up":" put down")<<"\n";note(o.str().c_str());
+        }
         for(auto& tk:cargoSync.takeTaken()) {
             ds::CargoEvent e;e.type=2;e.ref=tk.id;e.item=tk.hash;e.position={tk.position[0],tk.position[2],tk.position[1]};   // game -> adapter axes
             core->queueCargo(e);++cargoTaken;

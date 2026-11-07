@@ -22,14 +22,14 @@ void cargoRun(unsigned seed){
     for(step=0;step<400;++step){
         now+=250;int a=int(rng()%10);
         if(a==0&&world.size()<40){   // our cargo appears near the porter, in the world
-            cargo::Record r;r.slot=nextSlot++;r.hash=7;r.index=r.slot;r.state=cargo::InWorld<<8;r.position={porter[0]+double(rng()%5),porter[1],100};
+            cargo::Record r;r.slot=nextSlot++;r.hash=7;r.index=r.slot;r.state=cargo::InWorld<<8|cargo::SharedKind;r.position={porter[0]+double(rng()%5),porter[1],100};
             world[r.slot]={r,false,0};
         } else if(a==1&&world.size()<40){   // the partner's item is created here
-            uint64_t id=(uint64_t(seed+1)<<21)+step;cargo::Record r;r.slot=nextSlot++;r.hash=9;r.index=r.slot;r.state=cargo::InWorld<<8;
+            uint64_t id=(uint64_t(seed+1)<<21)+step;cargo::Record r;r.slot=nextSlot++;r.hash=9;r.index=r.slot;r.state=cargo::InWorld<<8|cargo::SharedKind;
             r.position={porter[0]+double(rng()%20)-10,porter[1],100};s.expect({9,r.position,id},now);world[r.slot]={r,true,id};expectedIds.insert(id);
         } else if(a==2&&!world.empty()){   // pick something up / put it down
             auto it=std::next(world.begin(),long(rng()%world.size()));auto& st=it->second.r.state;
-            bool wasWorld=(st>>8)==cargo::InWorld;st=((st>>8)==cargo::InWorld?cargo::OnPorter:cargo::InWorld)<<8;if((st>>8)==cargo::OnPorter){it->second.r.position=porter;if(it->second.partners)partnerCarried.insert(it->first);}
+            bool wasWorld=(st>>8)==cargo::InWorld;st=((st>>8)==cargo::InWorld?cargo::OnPorter:cargo::InWorld)<<8|cargo::SharedKind;if((st>>8)==cargo::OnPorter){it->second.r.position=porter;if(it->second.partners)partnerCarried.insert(it->first);}
             // A partner's item already seen here, picked up from the world for the first time: must be reported taken.
             if(wasWorld&&it->second.partners&&seenSlots.count(it->first)&&!partnerCarried.count(it->first+1000000)&&!gone.count(it->second.partnerId)){mustTake.insert(it->second.partnerId);partnerCarried.insert(it->first+1000000);}
         } else if(a==3&&!world.empty()){   // something vanishes

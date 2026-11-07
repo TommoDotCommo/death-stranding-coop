@@ -41,6 +41,27 @@ int main(){
     { Sync s;s.observe({carried(3,30,0.3)},porter,0);s.observe({carried(3,30,0.3)},porter,500);
       CHECK(s.observe({world(3,30,0.8)},porter,600).empty());
       auto a=s.observe({world(3,30,0.8)},porter,1700);CHECK(a.size()==1&&a[0].hash==30&&a[0].id); }
+    // Put down from the cargo menu (live 2026-11-07): carried, the record holds a carry-frame position near (100,100,20);
+    // after the put-down it stays there for over a second before the game writes the real place. Announced only there.
+    { Sync s;s.observe({},porter,0);Record c=carried(3,30,100);c.position={100,100,20};s.observe({c},porter,100);s.observe({c},porter,500);
+      Record w=c;w.state=uint32_t(InWorld)<<8|7;
+      for(uint64_t t=600;t<=3000;t+=200)CHECK(s.observe({w},porter,t).empty());     // stale carry frame: never announced
+      CHECK(s.observe({world(3,30,0.8)},porter,3100).empty());
+      auto a=s.observe({world(3,30,0.8)},porter,4200);CHECK(a.size()==1&&a[0].position[0]==0.8&&a[0].position[2]==100); }
+    // Carried far from the porter's place (the carry frame) and still there after a pick-up of a fresh item: not ours.
+    { Sync s;s.observe({},porter,0);Record c=carried(9,90,100);c.position={100,100,20};s.observe({c},porter,100);
+      Record w=c;w.state=uint32_t(InWorld)<<8|7;w.position={101,100,20};   // moved within the frame, still far away
+      for(uint64_t t=200;t<=4000;t+=200)CHECK(s.observe({w},porter,t).empty()); }
+    // Story cargo (kind 5, the president's corpse) stays local: a put-down is not announced, a pick-up is not reported,
+    // and a partner's pick-up by item and place never removes it (live 2026-11-07, after a reload).
+    { Sync s;s.observe({},porter,0);Record c=world(5,55,1.0);c.state=uint32_t(InWorld)<<8|5;
+      s.observe({c},porter,100);CHECK(s.observe({c},porter,1500).empty());auto k=s.takeKept();CHECK(k.size()==1&&k[0].hash==55&&k[0].kind==5&&!k[0].pickedUp);
+      CHECK(s.observe({c},porter,3000).empty()&&s.takeKept().empty());                                // noted once
+      CHECK(!s.partnerTook(0,55,{1.0,0,100}));
+      Record h=c;h.state=uint32_t(OnPorter)<<8|5;s.observe({h},porter,3100);
+      CHECK(s.takeTaken().empty());k=s.takeKept();CHECK(k.size()==1&&k[0].pickedUp); }
+    { Sync s;Record c=world(5,55,1.0);c.state=uint32_t(InWorld)<<8|5;s.observe({c},porter,0);   // there at the first look
+      Record h=c;h.state=uint32_t(OnPorter)<<8|5;s.observe({h},porter,100);CHECK(s.takeTaken().empty()); }
     // Picking up a shared item tells the partner once; putting it down again is a new placement with a new id.
     { Sync s;s.setIdBase(50);s.observe({},porter,0);s.observe({world(4,40,1)},porter,100);
       auto a=s.observe({world(4,40,1)},porter,1200);CHECK(a.size()==1&&a[0].id==51);

@@ -25,6 +25,7 @@ size_t Sync::mirrored() const {return size_t(std::count_if(tracks_.begin(),track
 size_t Sync::shared() const {return size_t(std::count_if(tracks_.begin(),tracks_.end(),[](auto& t){return t.second.id!=0;}));}
 std::vector<Taken> Sync::takeTaken(){std::vector<Taken> out;out.swap(taken_);return out;}
 std::vector<uint32_t> Sync::takeDoomed(){std::vector<uint32_t> out;out.swap(doomed_);return out;}
+std::vector<Kept> Sync::takeKept(){std::vector<Kept> out;out.swap(kept_);return out;}
 std::optional<uint32_t> Sync::partnerTook(uint64_t id,uint32_t hash,const std::array<double,3>& at){
 #ifndef MUTANT_CARGO_DOOM
     // Taken before its copy appeared here: the copy is deleted when it appears.
@@ -43,7 +44,7 @@ std::optional<uint32_t> Sync::partnerTook(uint64_t id,uint32_t hash,const std::a
 #ifndef MUTANT_CARGO_FIND
     // Not known by id here (either mod restarted since it was shared): the nearest same item on the ground.
     if(hash){Track* best=nullptr;double bd=FindRange;
-        for(auto& [slot,t]:tracks_){(void)slot;if(t.hash!=hash||t.where==OnPorter||t.removed)continue;double d=distance(t.position,at);if(d<=bd){bd=d;best=&t;}}
+        for(auto& [slot,t]:tracks_){(void)slot;if(t.hash!=hash||t.where==OnPorter||t.removed||t.local)continue;double d=distance(t.position,at);if(d<=bd){bd=d;best=&t;}}
         if(best){forget(*best);return best->index;}}
 #endif
     return std::nullopt;
@@ -60,14 +61,18 @@ std::vector<Placement> Sync::observe(const std::vector<Record>& records,const st
         Track t=same?old->second:Track{};
         if(!same){t.hash=r.hash;t.position=r.position;t.stillSince=now;t.fresh=primed_;t.learned=!primed_&&location(r)==InWorld;}
         t.index=r.index;
+#ifndef MUTANT_CARGO_LOCAL
+        t.local=kind(r)!=SharedKind;
+#endif
         uint8_t was=t.where,where=location(r);t.where=where;
-        if(where==OnPorter)t.heldAt=now;
+        if(where==OnPorter){t.heldAt=now;t.carriedAt=r.position;}
 #ifndef MUTANT_CARGO_TAKEN
         // Picked up: a shared item went from the world onto this porter. The partner removes theirs; from now on the item
         // is this porter's own cargo (a later put-down is a new placement).
         // Reported with its shared id, or without one for an item that was already here at the first look (shared in an
         // earlier session, or the same game cargo in both worlds): the partner then finds it by item and place.
-        if(same&&was==InWorld&&where==OnPorter&&(t.id||t.learned)){taken_.push_back({t.id,t.hash,t.position});t.id=0;t.mirror=false;t.announced=false;t.fresh=false;t.learned=false;}
+        if(same&&was==InWorld&&where==OnPorter&&t.local)kept_.push_back({t.hash,kind(r),true});
+        else if(same&&was==InWorld&&where==OnPorter&&(t.id||t.learned)){taken_.push_back({t.id,t.hash,t.position});t.id=0;t.mirror=false;t.announced=false;t.fresh=false;t.learned=false;}
 #endif
         if(same&&was==OnPorter&&where==InWorld){t.putDown=true;t.learned=false;}   // put down here: ours, not an older item
         // Moved: not settled.
@@ -94,14 +99,22 @@ std::vector<Placement> Sync::observe(const std::vector<Record>& records,const st
 #endif
         }
         bool settled=placed(r.position)&&now-t.stillSince>=Settle&&where!=OnPorter;
+#ifndef MUTANT_CARGO_CARRY_FRAME
+        // Just put down but still at its carry-frame position: the game has not written the real place yet.
+        if(t.putDown&&distance(r.position,t.carriedAt)<=Still)settled=false;
+        bool ours=(t.fresh&&distance(r.position,porter)<=NearRange)||(t.heldAt&&now-t.heldAt<=HeldMemory&&distance(r.position,porter)<=DropRange);
+#else
         bool ours=(t.fresh&&distance(r.position,porter)<=NearRange)||(t.heldAt&&now-t.heldAt<=HeldMemory);
+#endif
 #ifndef MUTANT_CARGO_HELD
         bool letGo=t.putDown||distance(r.position,porter)>=AwayRange||t.fresh;
 #else
         bool letGo=true;
 #endif
         if(primed_&&!t.mirror&&!t.announced&&settled&&ours&&letGo){
-            t.id=++nextId_;out.push_back({r.hash,r.position,t.id});t.announced=true;t.fresh=false;t.putDown=false;}
+            if(t.local)kept_.push_back({r.hash,kind(r),false});   // not shared: noted once
+            else{t.id=++nextId_;out.push_back({r.hash,r.position,t.id});}
+            t.announced=true;t.fresh=false;t.putDown=false;}
         next[r.slot]=t;
     }
     // Gone: a shared item that vanished from the world while this porter was near (used, delivered, destroyed here).
