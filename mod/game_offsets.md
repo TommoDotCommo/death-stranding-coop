@@ -725,10 +725,17 @@ Shared cargo, first version (`mod/cargo.{h,cpp}`, core CARGO events):
   on the president's corpse (story cargo; holder `+1c` 0 where ordinary items read `0xfffffe00`), 0 on equipped gear.
   After a reload with Sam resting, the corpse lay on the ground and was announced as a put-down; only kind 7 is shared
   now.
-- **Controls (PC defaults):** E carries an item on the back; holding the right or left mouse button grabs it into
-  that hand, and a left click puts it down; Tab opens the map, where clicking on Sam opens cargo management (Enter on
-  an item opens its commands; Confirm is a button at the bottom left that takes a mouse click). Taps under about
-  300 ms are sometimes lost at 20 fps.
+- **The cargo menu stages.** With the cargo menu open, items on the ground within reach read exactly like carried
+  cargo (`0x207`, carry frame) although the menu lists them as "Not carried"; closing it puts them back (location 1
+  at their old place, after the same carry-frame delay). The mod therefore reports a pick-up only once the porter has
+  walked 0.5 m (he cannot move while the menu is open), or the item lands elsewhere or is used up; an item back at
+  its place was never taken. Live: opening and closing the menu next to a crate sent nothing; carrying it (E) was
+  reported once he walked.
+- **Controls (PC defaults, from the game's Key Assignments, K):** E carries an item on the back; holding the right or
+  left mouse button grabs it into that hand, and a left click puts it down; I opens the cargo menu (Enter on an item
+  opens its commands; Confirm is a button at the bottom left that takes a mouse click; right click goes back); Tab
+  opens the cuff links (map); F performs actions and opens terminals; C crouches; Q scans. Taps under about 300 ms
+  are sometimes lost at 20 fps.
 
 ## Outfit (2026-11-03, read-only)
 

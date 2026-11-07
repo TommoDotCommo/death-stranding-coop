@@ -38,13 +38,17 @@ std::optional<uint32_t> Sync::partnerTook(uint64_t id,uint32_t hash,const std::a
 #else
         (void)slot;
 #endif
+        // Staged by the cargo menu (not yet a pick-up): removed if it goes back to the ground, kept if he takes it.
+        if(t.staged){t.lostToPartner=true;return std::nullopt;}
         if(t.where==OnPorter)return std::nullopt;            // both picked it up at once: ours stays with us
         return t.index;
     }
 #ifndef MUTANT_CARGO_FIND
     // Not known by id here (either mod restarted since it was shared): the nearest same item on the ground.
     if(hash){Track* best=nullptr;double bd=FindRange;
-        for(auto& [slot,t]:tracks_){(void)slot;if(t.hash!=hash||t.where==OnPorter||t.removed||t.local)continue;double d=distance(t.position,at);if(d<=bd){bd=d;best=&t;}}
+        for(auto& [slot,t]:tracks_){(void)slot;if(t.hash!=hash||(t.where==OnPorter&&!t.staged)||t.removed||t.local)continue;
+            double d=distance(t.staged?t.stagedFrom:t.position,at);if(d<=bd){bd=d;best=&t;}}
+        if(best&&best->staged){best->lostToPartner=true;return std::nullopt;}
         if(best){forget(*best);return best->index;}}
 #endif
     return std::nullopt;
@@ -66,15 +70,41 @@ std::vector<Placement> Sync::observe(const std::vector<Record>& records,const st
 #endif
         uint8_t was=t.where,where=location(r);t.where=where;
         if(where==OnPorter){t.heldAt=now;t.carriedAt=r.position;}
+        if(same&&was==OnPorter&&where==InWorld)t.downAt=now;
+        // Just put down and still at its carried position: the game has not written the real place yet.
+        bool carryFrame=where==InWorld&&t.downAt&&distance(r.position,t.carriedAt)<=Still&&(now-t.downAt<CarryWait||distance(r.position,porter)>DropRange);
 #ifndef MUTANT_CARGO_TAKEN
         // Picked up: a shared item went from the world onto this porter. The partner removes theirs; from now on the item
         // is this porter's own cargo (a later put-down is a new placement).
         // Reported with its shared id, or without one for an item that was already here at the first look (shared in an
         // earlier session, or the same game cargo in both worlds): the partner then finds it by item and place.
         if(same&&was==InWorld&&where==OnPorter&&t.local)kept_.push_back({t.hash,kind(r),true});
-        else if(same&&was==InWorld&&where==OnPorter&&(t.id||t.learned)){taken_.push_back({t.id,t.hash,t.position});t.id=0;t.mirror=false;t.announced=false;t.fresh=false;t.learned=false;}
+        else if(same&&was==InWorld&&where==OnPorter&&(t.id||t.learned)){
+#ifndef MUTANT_CARGO_STAGED
+            // Not reported yet: opening the cargo menu next to an item reads exactly like this (location 2, carry frame)
+            // and the menu puts back what he leaves (live 2026-11-07). Reported once he moves, or it lands elsewhere.
+            if(!t.staged){t.stagedFrom=t.position;t.stagedPath=0;t.lostToPartner=false;}   // picked up again while pending: same pick-up
+            t.staged=true;t.stagedPorter=porter;
+#else
+            taken_.push_back({t.id,t.hash,t.position});t.id=0;t.mirror=false;t.announced=false;t.fresh=false;t.learned=false;
 #endif
-        if(same&&was==OnPorter&&where==InWorld){t.putDown=true;t.learned=false;}   // put down here: ours, not an older item
+        }
+#endif
+        bool returned=false;
+        if(t.staged){
+            auto taken=[&]{   // a real pick-up
+                if(!t.lostToPartner)taken_.push_back({t.id,t.hash,t.stagedFrom});   // (the partner already took theirs)
+                t.id=0;t.mirror=false;t.announced=false;t.fresh=false;t.learned=false;t.staged=false;t.lostToPartner=false;};
+            if(where==OnPorter){t.stagedPath+=distance(porter,t.stagedPorter);t.stagedPorter=porter;if(t.stagedPath>StagedMove)taken();}
+            else if(where==InWorld){
+                if(carryFrame){}                                                  // the real place comes later
+                else if(distance(r.position,t.stagedFrom)<=MatchRange){           // back where it lay: never taken
+                    returned=true;t.staged=false;t.heldAt=0;
+                    if(t.lostToPartner){doomed_.push_back(r.index);t.id=0;t.mirror=false;t.announced=true;t.learned=false;t.removed=true;t.lostToPartner=false;}}
+                else{taken();t.putDown=true;}}                                    // put down elsewhere: a new placement
+            else taken();
+        }
+        if(same&&was==OnPorter&&where==InWorld&&!t.staged&&!returned){t.putDown=true;t.learned=false;}   // put down here: ours, not an older item
         // Moved: not settled.
         if(distance(t.position,r.position)>Still){t.position=r.position;t.stillSince=now;}
         // Without the location byte (0), an item next to the porter counts as held. With it, only what he carries does:
@@ -100,8 +130,7 @@ std::vector<Placement> Sync::observe(const std::vector<Record>& records,const st
         }
         bool settled=placed(r.position)&&now-t.stillSince>=Settle&&where!=OnPorter;
 #ifndef MUTANT_CARGO_CARRY_FRAME
-        // Just put down but still at its carry-frame position: the game has not written the real place yet.
-        if(t.putDown&&distance(r.position,t.carriedAt)<=Still)settled=false;
+        if(t.putDown&&carryFrame)settled=false;
         bool ours=(t.fresh&&distance(r.position,porter)<=NearRange)||(t.heldAt&&now-t.heldAt<=HeldMemory&&distance(r.position,porter)<=DropRange);
 #else
         bool ours=(t.fresh&&distance(r.position,porter)<=NearRange)||(t.heldAt&&now-t.heldAt<=HeldMemory);
@@ -118,8 +147,12 @@ std::vector<Placement> Sync::observe(const std::vector<Record>& records,const st
         next[r.slot]=t;
     }
     // Gone: a shared item that vanished from the world while this porter was near (used, delivered, destroyed here).
-    for(auto& [slot,t]:tracks_)
-        if(t.id&&!next.count(slot)&&t.where==InWorld&&distance(t.position,porter)<=NearRange)taken_.push_back({t.id,t.hash,t.position});
+    for(auto& [slot,t]:tracks_){
+        auto n=next.find(slot);bool gone=n==next.end()||n->second.hash!=t.hash;
+        if(!gone)continue;
+        if(t.staged){if(!t.lostToPartner)taken_.push_back({t.id,t.hash,t.stagedFrom});continue;}   // used from the cargo menu
+        if(t.id&&t.where==InWorld&&distance(t.position,porter)<=NearRange)taken_.push_back({t.id,t.hash,t.position});
+    }
     tracks_.swap(next);primed_=true;
     return out;
 }

@@ -9,6 +9,7 @@
 #include <map>
 #include <random>
 #include <set>
+#include <cmath>
 unsigned failures=0;
 #define CHECK(x) do{if(!(x)){std::fprintf(stderr,"fuzz oracle: %s (seed %u step %u)\n",#x,seed,step);++failures;return;}}while(0)
 using namespace mod;
@@ -17,7 +18,8 @@ void cargoRun(unsigned seed){
     cargo::Sync s;s.setIdBase(uint64_t(seed)<<20);
     struct Item{cargo::Record r;bool partners=false;uint64_t partnerId=0;};
     std::map<uint32_t,Item> world;uint32_t nextSlot=1;std::array<double,3> porter{0,0,100};uint64_t now=0;
-    std::set<uint64_t> announced,taken,expectedIds,removedOnce;std::set<uint32_t> partnerCarried,seenSlots;std::set<uint64_t> mustTake,gone;
+    std::set<uint64_t> announced,taken,expectedIds,removedOnce;std::set<uint32_t> partnerCarried,seenSlots;std::set<uint64_t> gone;
+    struct Must{uint32_t slot;std::array<double,3> porterAt,from;double path=0;uint64_t landedAt=0;};std::map<uint64_t,Must> mustTake;
     auto records=[&]{std::vector<cargo::Record> v;for(auto& [k,i]:world){(void)k;v.push_back(i.r);}return v;};
     for(step=0;step<400;++step){
         now+=250;int a=int(rng()%10);
@@ -29,9 +31,10 @@ void cargoRun(unsigned seed){
             r.position={porter[0]+double(rng()%20)-10,porter[1],100};s.expect({9,r.position,id},now);world[r.slot]={r,true,id};expectedIds.insert(id);
         } else if(a==2&&!world.empty()){   // pick something up / put it down
             auto it=std::next(world.begin(),long(rng()%world.size()));auto& st=it->second.r.state;
-            bool wasWorld=(st>>8)==cargo::InWorld;st=((st>>8)==cargo::InWorld?cargo::OnPorter:cargo::InWorld)<<8|cargo::SharedKind;if((st>>8)==cargo::OnPorter){it->second.r.position=porter;if(it->second.partners)partnerCarried.insert(it->first);}
-            // A partner's item already seen here, picked up from the world for the first time: must be reported taken.
-            if(wasWorld&&it->second.partners&&seenSlots.count(it->first)&&!partnerCarried.count(it->first+1000000)&&!gone.count(it->second.partnerId)){mustTake.insert(it->second.partnerId);partnerCarried.insert(it->first+1000000);}
+            bool wasWorld=(st>>8)==cargo::InWorld;auto from=it->second.r.position;st=((st>>8)==cargo::InWorld?cargo::OnPorter:cargo::InWorld)<<8|cargo::SharedKind;if((st>>8)==cargo::OnPorter){it->second.r.position=porter;if(it->second.partners)partnerCarried.insert(it->first);}
+            // A partner's item already seen here, picked up from the world for the first time: must be reported taken once
+            // the porter moves on, it lands elsewhere or it goes (until then it may be the cargo menu staging it).
+            if(wasWorld&&it->second.partners&&seenSlots.count(it->first)&&!partnerCarried.count(it->first+1000000)&&!gone.count(it->second.partnerId)){mustTake[it->second.partnerId]={it->first,porter,from};partnerCarried.insert(it->first+1000000);}
         } else if(a==3&&!world.empty()){   // something vanishes
             world.erase(std::next(world.begin(),long(rng()%world.size())));
         } else if(a==4){porter[0]+=double(rng()%7)-3;}
@@ -44,8 +47,18 @@ void cargoRun(unsigned seed){
             CHECK(p.hash!=9||!partnerCarried.empty());   // a partner's item goes back only after this porter carried it
         }
         for(auto tk:s.takeTaken()){auto id=tk.id;if(!id)continue;CHECK(!taken.count(id));CHECK(announced.count(id)||expectedIds.count(id));CHECK(!removedOnce.count(id));taken.insert(id);gone.insert(id);}
-        for(auto id:mustTake){CHECK(taken.count(id));}
-        mustTake.clear();
+        auto dist=[](const std::array<double,3>& a,const std::array<double,3>& b){return std::hypot(a[0]-b[0],a[1]-b[1]);};
+        for(auto it=mustTake.begin();it!=mustTake.end();){
+            auto& m=it->second;auto w=world.find(m.slot);bool due;
+            if(taken.count(it->first)){it=mustTake.erase(it);continue;}
+            if(w==world.end())due=true;                                                           // gone
+            else if((w->second.r.state>>8)==cargo::OnPorter){m.landedAt=0;m.path+=dist(porter,m.porterAt);m.porterAt=porter;due=m.path>cargo::Sync::StagedMove;}   // he moved on
+            else if(m.porterAt=porter,dist(w->second.r.position,m.from)<=cargo::Sync::MatchRange){it=mustTake.erase(it);continue;}  // put back: not taken
+                                                                                                  // (walking while it lies there does not count)
+            else{if(!m.landedAt)m.landedAt=now;due=now-m.landedAt>cargo::Sync::CarryWait;}       // landed elsewhere (it may keep
+                                                                                                  // its carried place a while)
+            if(due)CHECK(taken.count(it->first));
+            ++it;}
         for(auto& [k,i]:world){(void)i;seenSlots.insert(k);}
     }
 }

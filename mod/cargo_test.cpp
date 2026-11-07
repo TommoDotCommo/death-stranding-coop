@@ -7,7 +7,7 @@ Record rec(uint32_t slot,uint32_t hash,double x,double y=0,uint8_t where=0){Reco
 Record world(uint32_t slot,uint32_t hash,double x,double y=0){return rec(slot,hash,x,y,InWorld);}
 Record carried(uint32_t slot,uint32_t hash,double x,double y=0){return rec(slot,hash,x,y,OnPorter);}
 int main(){
-    std::array<double,3> porter{0,0,100};
+    std::array<double,3> porter{0,0,100},moved{2,0,100};
     // Existing cargo is learnt, never announced.
     { Sync s;CHECK(s.observe({rec(1,10,1),rec(2,20,500)},porter,0).empty());
       CHECK(s.observe({rec(1,10,1),rec(2,20,500)},porter,5000).empty()); }
@@ -66,22 +66,53 @@ int main(){
     { Sync s;s.setIdBase(50);s.observe({},porter,0);s.observe({world(4,40,1)},porter,100);
       auto a=s.observe({world(4,40,1)},porter,1200);CHECK(a.size()==1&&a[0].id==51);
       CHECK(s.takeTaken().empty());
-      s.observe({carried(4,40,0.2)},porter,1300);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==51);
+      s.observe({carried(4,40,0.2)},porter,1300);CHECK(s.takeTaken().empty());          // held back until he moves
+      s.observe({carried(4,40,0.2)},moved,1350);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==51&&t[0].position[0]==1);
       s.observe({carried(4,40,0.2)},porter,1400);CHECK(s.takeTaken().empty()&&s.shared()==0);   // once
       s.observe({world(4,40,2)},porter,1500);auto b=s.observe({world(4,40,2)},porter,2600);CHECK(b.size()==1&&b[0].id==52); }
     // The partner's item (mirror) picked up here: taken with the partner's id.
     { Sync s;s.observe({},porter,0);s.expect({60,{2,0,100},777},100);
       s.observe({world(6,60,2.3)},porter,200);CHECK(s.observe({world(6,60,2.3)},porter,2000).empty()&&s.mirrored()==1&&s.shared()==1);
-      s.observe({carried(6,60,0.2)},porter,2100);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==777&&s.mirrored()==0); }
+      s.observe({carried(6,60,0.2)},porter,2100);s.observe({carried(6,60,0.2)},moved,2150);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==777&&s.mirrored()==0); }
     // The partner took an item: its record index here, once; never reported back when it disappears.
     { Sync s;s.observe({},porter,0);s.expect({60,{2,0,100},888},100);
       s.observe({world(6,60,2.3)},porter,200);s.observe({world(6,60,2.3)},porter,2000);
       CHECK(!s.partnerTook(999)&&!s.partnerTook(0));
       auto i=s.partnerTook(888);CHECK(i&&*i==106);CHECK(!s.partnerTook(888));
       s.observe({},porter,2100);CHECK(s.takeTaken().empty()); }
+    // The cargo menu stages the items next to the porter like a pick-up (location 2, carry frame) and puts back what he
+    // leaves (live 2026-11-07): nothing is reported, and walking away afterwards announces nothing either.
+    auto staged=[](uint32_t slot,uint32_t hash){Record c=carried(slot,hash,0);c.position={99.6,100.7,20};return c;};
+    auto back=[](uint32_t slot,uint32_t hash){Record c=world(slot,hash,0);c.position={99.6,100.7,20};return c;};
+    { Sync s;s.setIdBase(10);s.observe({},porter,0);s.observe({world(3,30,1)},porter,100);CHECK(s.observe({world(3,30,1)},porter,1200).size()==1);
+      for(uint64_t t=1300;t<=9000;t+=500)s.observe({staged(3,30)},porter,t);              // a long look at the menu
+      s.observe({back(3,30)},porter,9100);s.observe({back(3,30)},porter,10500);            // carry frame for a while
+      s.observe({world(3,30,1)},porter,10600);CHECK(s.takeTaken().empty());
+      std::array<double,3> away{8,0,100};
+      for(uint64_t t=10700;t<=14000;t+=300)CHECK(s.observe({world(3,30,1)},away,t).empty());
+      CHECK(s.takeTaken().empty()&&s.shared()==1); }                                       // still shared, same id
+    { Sync s;s.observe({world(3,30,1)},porter,0);                                          // learned at the first look
+      s.observe({staged(3,30)},porter,100);s.observe({world(3,30,1)},porter,200);
+      std::array<double,3> away{8,0,100};
+      for(uint64_t t=300;t<=5000;t+=300)CHECK(s.observe({world(3,30,1)},away,t).empty());
+      CHECK(s.takeTaken().empty()); }
+    // Staged, and the partner took theirs meanwhile: ours is deleted once the menu puts it back.
+    { Sync s;s.setIdBase(10);s.observe({},porter,0);s.observe({world(3,30,1)},porter,100);s.observe({world(3,30,1)},porter,1200);
+      s.observe({staged(3,30)},porter,1300);CHECK(!s.partnerTook(11));
+      s.observe({world(3,30,1)},porter,1400);auto d=s.takeDoomed();CHECK(d.size()==1&&d[0]==103&&s.takeTaken().empty());
+      CHECK(!s.partnerTook(11)); }
+    // Staged and then put down elsewhere from the menu: taken from its old place, placed at the new one.
+    { Sync s;s.setIdBase(10);s.observe({},porter,0);s.observe({world(3,30,1)},porter,100);s.observe({world(3,30,1)},porter,1200);
+      s.observe({staged(3,30)},porter,1300);s.observe({back(3,30)},porter,1400);CHECK(s.takeTaken().empty());
+      s.observe({world(3,30,0,2)},porter,1500);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==11&&t[0].position[0]==1);
+      auto a=s.observe({world(3,30,0,2)},porter,2600);CHECK(a.size()==1&&a[0].id==12&&a[0].position[1]==2); }
+    // Staged and used up (gone from the records): taken.
+    { Sync s;s.setIdBase(10);s.observe({},porter,0);s.observe({world(3,30,1)},porter,100);s.observe({world(3,30,1)},porter,1200);
+      s.observe({staged(3,30)},porter,1300);s.observe({},porter,1400);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==11); }
     // Both picked it up at once: ours stays with us (nothing to delete here).
     { Sync s;s.setIdBase(70);s.observe({},porter,0);s.observe({world(7,70,1)},porter,100);s.observe({world(7,70,1)},porter,1200);
-      s.observe({carried(7,70,0.1)},porter,1300);s.takeTaken();CHECK(!s.partnerTook(71)); }
+      s.observe({carried(7,70,0.1)},porter,1300);s.takeTaken();CHECK(!s.partnerTook(71));
+      s.observe({carried(7,70,0.1)},moved,1400);CHECK(s.takeTaken().empty()&&s.takeDoomed().empty()); }   // theirs is gone already
     // A shared item that vanishes near the porter (used here) is taken; far away it is not.
     { Sync s;s.setIdBase(80);s.observe({},porter,0);s.observe({world(8,80,1)},porter,100);s.observe({world(8,80,1)},porter,1200);
       s.observe({},porter,1300);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==81);
@@ -89,7 +120,7 @@ int main(){
       std::array<double,3> far{500,0,100};u.observe({},far,1300);CHECK(u.takeTaken().empty()); }
     // A partner item that already exists at the first look is still recognised as theirs (its pick-up is reported).
     { Sync s;s.expect({60,{2,0,100},555},0);s.observe({world(6,60,2.3)},porter,100);CHECK(s.mirrored()==1);
-      s.observe({carried(6,60,0.2)},porter,200);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==555); }
+      s.observe({carried(6,60,0.2)},porter,200);s.observe({carried(6,60,0.2)},moved,250);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==555); }
     // Placement and pick-up close together: the copy that appears after the "taken" is deleted, and never reported.
     { Sync s;s.observe({},porter,0);s.expect({60,{2,0,100},444},100);CHECK(!s.partnerTook(444));
       s.observe({world(6,60,2.3)},porter,200);auto d=s.takeDoomed();CHECK(d.size()==1&&d[0]==106);
@@ -97,7 +128,7 @@ int main(){
     // After a restart (no shared ids known here): a pick-up from the ground is still reported with item and place, and
     // the partner's report finds the nearest same item on the ground within 0.5 m.
     { Sync s;s.observe({world(1,10,1),world(2,10,3)},porter,0);
-      s.observe({carried(1,10,0.2),world(2,10,3)},porter,100);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==0&&t[0].hash==10&&t[0].position[0]==1);
+      s.observe({carried(1,10,0.2),world(2,10,3)},porter,100);s.observe({carried(1,10,0.2),world(2,10,3)},moved,150);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==0&&t[0].hash==10&&t[0].position[0]==1);
       Sync r;r.observe({world(5,10,1.2),world(6,10,3),world(7,11,1)},porter,0);
       auto i=r.partnerTook(0,10,{1,0,100});CHECK(i&&*i==105);CHECK(!r.partnerTook(0,10,{1,0,100}));   // once
       CHECK(!r.partnerTook(0,10,{9,0,100})&&!r.partnerTook(0,12,{3,0,100})); }

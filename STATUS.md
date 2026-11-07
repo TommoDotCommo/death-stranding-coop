@@ -138,7 +138,9 @@ partner's copy and each put-down reached the partner at the porter's feet. Two b
 item put down from the menu keeps a carry-frame position for over a second (it was announced there), and story cargo
 (the president's corpse, after a reload) was shared; only ordinary cargo is shared now. A return to the title screen
 and continue while connected: the crate put down after the last save vanished with the reload and the partner was
-told to remove it.
+told to remove it. A third: the cargo menu stages the items next to the porter exactly like a pick-up, so opening it
+next to shared cargo made the partner's copies vanish and come back; a pick-up is now reported once the porter walks
+on, and opening and closing the menu sends nothing (live).
 
 ## Testing aids (built 2026-11-03, first run live 2026-11-07)
 

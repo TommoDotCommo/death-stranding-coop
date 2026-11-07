@@ -20,7 +20,10 @@ struct World{
     // A put-down from the cargo menu: the record is in the world at once but keeps its carry-frame position until the game
     // writes the real place (live 2026-11-07). (slot, real place, when)
     struct Landing{uint32_t slot;std::array<double,3> at;uint64_t when;};std::vector<Landing> landing;
-    unsigned story=0;   // story items (kind 5) made here: only these may exist here, and none in the other world
+    unsigned story=0;
+    // The cargo menu is open: the items next to the porter are staged (location 2, carry frame) and put back when it
+    // closes, maybe minus one he takes; he cannot move meanwhile (live 2026-11-07).
+    bool browsing=false;uint64_t browseUntil=0;std::vector<std::pair<uint32_t,std::array<double,3>>> browsed;   // story items (kind 5) made here: only these may exist here, and none in the other world
     std::vector<Record> list() const {std::vector<Record> v;for(auto& [k,r]:records){(void)k;v.push_back(r);}return v;}
     void create(uint32_t hash,const std::array<double,3>& at){Record r;r.slot=next++;r.index=r.slot;r.hash=hash;r.state=InWorld<<8|SharedKind;r.position=at;records[r.slot]=r;}
 };
@@ -32,6 +35,11 @@ int main(){
         std::mt19937 rng(seed);World w[2];w[0].sync.setIdBase(1ull<<40);w[1].sync.setIdBase(2ull<<40);w[1].porter={4,0,100};
         uint64_t now=0;bool primed=false;
         auto settle=[&](int rounds){for(int i=0;i<rounds;++i){now+=250;
+            for(auto& me:w)if(me.browsing&&now>=me.browseUntil){
+                size_t keep=rng()%3==0?rng()%std::max<size_t>(1,me.browsed.size()):me.browsed.size();   // sometimes he takes one
+                for(size_t j=0;j<me.browsed.size();++j){auto r=me.records.find(me.browsed[j].first);if(r==me.records.end()||j==keep)continue;
+                    r->second.state=InWorld<<8|(r->second.state&0xff);me.landing.push_back({r->first,me.browsed[j].second,now+250*(rng()%6)});}
+                me.browsed.clear();me.browsing=false;}
             for(auto& me:w)for(auto it=me.landing.begin();it!=me.landing.end();){
                 auto r=me.records.find(it->slot);if(r==me.records.end()){it=me.landing.erase(it);continue;}
                 if(it->when<=now){r->second.position=it->at;it=me.landing.erase(it);}else ++it;}
@@ -49,14 +57,20 @@ int main(){
             primed=true;}};
         settle(1);
         for(int step=0;step<120;++step){
-            int s=int(rng()%2);auto& me=w[s];int a=int(rng()%4);
-            if(a==0){std::array<double,3> at{me.porter[0]+double(rng()%3),me.porter[1]+double(rng()%3),100};uint32_t h=uint32_t(10+rng()%3);bool story=rng()%8==0;if(story)h=99;if(trace)std::fprintf(stderr,"t%llu w%d menu-drop h%u at %.0f,%.0f\n",(unsigned long long)now,s,h,at[0],at[1]);me.create(h,at);if(story){me.records[me.next-1].state=InWorld<<8|5;++me.story;}}   // put down from the menu (sometimes story cargo, kind 5)
+            int s=int(rng()%2);auto& me=w[s];int a=me.browsing?-1:int(rng()%5);
+            if(a==-1){}   // in the cargo menu: nothing else
+            else if(a==4){me.browsing=true;me.browseUntil=now+250*(1+rng()%30);
+                for(auto& [k,r]:me.records)if((r.state>>8)==InWorld&&std::hypot(r.position[0]-me.porter[0],r.position[1]-me.porter[1])<3){
+                    me.browsed.push_back({k,r.position});r.state=OnPorter<<8|(r.state&0xff);r.position={99.6,100.7,20};}}
+            else if(a==0){std::array<double,3> at{me.porter[0]+double(rng()%3),me.porter[1]+double(rng()%3),100};uint32_t h=uint32_t(10+rng()%3);bool story=rng()%8==0;if(story)h=99;if(trace)std::fprintf(stderr,"t%llu w%d menu-drop h%u at %.0f,%.0f\n",(unsigned long long)now,s,h,at[0],at[1]);me.create(h,at);if(story){me.records[me.next-1].state=InWorld<<8|5;++me.story;}}   // put down from the menu (sometimes story cargo, kind 5)
             else if(a==1){for(auto& [k,r]:me.records)if((r.state>>8)==InWorld&&std::hypot(r.position[0]-me.porter[0],r.position[1]-me.porter[1])<3){if(trace)std::fprintf(stderr,"t%llu w%d pick slot %u h%u at %.0f,%.0f\n",(unsigned long long)now,s,k,r.hash,r.position[0],r.position[1]);r.state=OnPorter<<8|(r.state&0xff);r.position={100+double(rng()%100)/100,100,20};break;}}   // pick up (the record moves to the carry frame)
             else if(a==2){for(auto& [k,r]:me.records)if((r.state>>8)==OnPorter){r.state=InWorld<<8|(r.state&0xff);me.landing.push_back({k,{me.porter[0]+1,me.porter[1],100},now+250*(rng()%12)});if(trace)std::fprintf(stderr,"t%llu w%d putdown slot %u h%u at %.0f,%.0f\n",(unsigned long long)now,s,k,r.hash,r.position[0],r.position[1]);break;}}   // put down what it carries
             else {me.porter[0]+=double(int(rng()%5)-2);me.porter[1]+=double(int(rng()%5)-2);}
             settle(1+int(rng()%3));
-            if(restarts&&rng()%40==0){settle(40);int r=int(rng()%2);if(trace)std::fprintf(stderr,"t%llu RESTART w%d\n",(unsigned long long)now,r);w[r].sync=Sync();w[r].sync.setIdBase((3ull+step)<<40);settle(1);}   // a mod restarts
+            if(restarts&&!w[0].browsing&&!w[1].browsing&&rng()%40==0){for(auto& me:w)me.porter[0]+=1;/* walked on: nothing pending */settle(40);int r=int(rng()%2);if(trace)std::fprintf(stderr,"t%llu RESTART w%d\n",(unsigned long long)now,r);w[r].sync=Sync();w[r].sync.setIdBase((3ull+step)<<40);settle(1);}   // a mod restarts
             if(step%20==19){
+                settle(40);   // menus closed
+                for(auto& me:w)me.porter[0]+=2;   // both walk on (a pick-up is reported once the porter moves)
                 settle(40);   // quiet: everything delivered and settled
                 auto ground=[&](int s){std::vector<std::pair<uint32_t,std::array<double,3>>> g;for(auto& [k,r]:w[s].records)if((r.state>>8)==InWorld&&kind(r)==SharedKind)g.push_back({r.hash,r.position});return g;};
                 for(int s=0;s<2;++s){unsigned n=0;for(auto& [k,r]:w[s].records)if(r.hash==99)++n;

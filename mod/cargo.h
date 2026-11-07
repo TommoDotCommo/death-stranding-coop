@@ -41,8 +41,13 @@ public:
     // DropRange: how far from the porter something he held or put down may land (live 2026-11-07: while carried, a
     // record holds a carry-frame position near (100,100,20), not a world one, and keeps it for over a second after a
     // put-down from the cargo menu before the game writes the real place).
-    static constexpr double HeldRange=2.5, AwayRange=3.0, NearRange=15.0, Still=0.05, MatchRange=0.5, FindRange=0.5, DropRange=40.0;
-    static constexpr uint64_t Settle=1000, HeldMemory=30000, ExpectFor=10000;
+    // StagedMove: how far the porter must walk (path length) before a pick-up is reported (the cargo menu stages the
+    // items next to him exactly like a pick-up and puts back what he leaves; he cannot move while it is open).
+    static constexpr double HeldRange=2.5, AwayRange=3.0, NearRange=15.0, Still=0.05, MatchRange=0.5, FindRange=0.5, DropRange=40.0,
+                            StagedMove=0.5;
+    // CarryWait: how long a just-put-down item may keep its carried position before it counts as its real place (the
+    // carry frame lasted over a second live; it lies far from the porter, so it never counts while he is elsewhere).
+    static constexpr uint64_t Settle=1000, HeldMemory=30000, ExpectFor=10000, CarryWait=5000;
     // One call per observation. The first call only learns what already exists (nothing is announced for it).
     std::vector<Placement> observe(const std::vector<Record>&, const std::array<double,3>& porter, uint64_t now);
     // A partner placement about to be created here: the record that appears for it is the partner's, not ours.
@@ -64,8 +69,10 @@ public:
     size_t pending() const {return expected_.size()+cancelled_.size();}   // expectations and cancellations still held
     size_t shared() const;
 private:
-    struct Track { uint32_t hash=0,index=0; std::array<double,3> position{}, carriedAt{}; uint64_t stillSince=0, heldAt=0, id=0; uint8_t where=0;
-                   bool fresh=false, announced=false, mirror=false, putDown=false, learned=false, removed=false, local=false; };
+    struct Track { uint32_t hash=0,index=0; std::array<double,3> position{}, carriedAt{}, stagedFrom{}, stagedPorter{};
+                   double stagedPath=0; uint64_t stillSince=0, heldAt=0, id=0, downAt=0; uint8_t where=0;
+                   bool fresh=false, announced=false, mirror=false, putDown=false, learned=false, removed=false, local=false,
+                        staged=false, lostToPartner=false; };
     std::map<uint32_t,Track> tracks_; bool primed_=false; uint64_t nextId_=0;
     std::vector<std::pair<Placement,uint64_t>> expected_; std::vector<Taken> taken_; std::vector<Kept> kept_;std::vector<uint64_t> cancelled_; std::vector<uint32_t> doomed_;
 };
