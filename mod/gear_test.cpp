@@ -95,27 +95,28 @@ int main(){
     // Mirror: two pieces per tick, children attached to the copy of their parent at the same helper.
     World w;Mirror mirror(w.api(),[](const std::string& s){lines.push_back(s);});
     mod::puppet::Transform t{};const uint64_t body=0x60000000,world=p.porter;auto get=[&]{return pieces;};
-    mirror.tick(body,world,get,t,false);
-    CHECK(w.live()==2);
-    mirror.tick(body,world,get,t,false);
-    CHECK(w.live()==4&&mirror.done());
+    const unsigned settle=Mirror::CheckEvery*(Mirror::StableChecks-1)+1;   // ticks until a new body's first plan
+    auto ticks=[&](uint64_t b,uint64_t wd,unsigned n,bool shown){for(unsigned i=0;i<n;++i)mirror.tick(b,wd,get,t,shown);};
+    ticks(body,world,settle+10,false);CHECK(w.creates==0);   // a hidden (parked) body: nothing read or made
+    ticks(body,world,settle-1,true);CHECK(w.creates==0);     // not yet read StableChecks times
+    ticks(body,world,1,true);CHECK(w.live()==2);
+    ticks(body,world,1,true);CHECK(w.live()==4&&mirror.done());
     CHECK(w.parentOf("HLP_Hcuf")==body&&w.parentOf("HLP_Backpack")==body);
     CHECK(w.idOf("HLP_Backpack")&&w.parentOf("HLP_PodPouch_2nd")==w.idOf("HLP_Backpack"));
     CHECK(w.byHelper("HLP_Item_c")&&w.byHelper("HLP_Item_c")->resource==(p.item^0x5000000000ULL));
-    for(auto& [k,v]:w.made)CHECK(!v.visible);   // the body is parked: no gear shows
-    // Visibility follows the body; nothing is made twice.
-    mirror.tick(body,world,get,t,true);
     for(auto& [k,v]:w.made)CHECK(v.visible);
-    for(int i=0;i<10;++i)mirror.tick(body,world,get,t,true);
+    // Visibility follows the body; nothing is made twice.
+    ticks(body,world,1,false);for(auto& [k,v]:w.made)CHECK(!v.visible);
+    ticks(body,world,1,true);for(auto& [k,v]:w.made)CHECK(v.visible);
+    ticks(body,world,Mirror::CheckEvery*(Mirror::StableChecks+2),true);
     CHECK(w.creates==4&&w.live()==4);
-    mirror.tick(body,world,get,t,false);for(auto& [k,v]:w.made)CHECK(!v.visible);
     // A new body in the same world: the old copies are removed, new ones made on the new body.
     const uint64_t body2=0x61000000;
-    for(int i=0;i<3;++i)mirror.tick(body2,world,get,t,true);
+    ticks(body2,world,settle+2,true);
     CHECK(w.removes==4&&w.live()==4&&w.parentOf("HLP_Hcuf")==body2);
     // A new world: the old copies belong to the old world and are never touched; the new body gets its own.
     unsigned removes=w.removes;const uint64_t world2=world+0x100000,body3=0x62000000;
-    for(int i=0;i<3;++i)mirror.tick(body3,world2,get,t,true);
+    ticks(body3,world2,settle+2,true);
     CHECK(w.removes==removes&&w.parentOf("HLP_Hcuf",body3)==body3);
     CHECK(mirror.made()==4);
     // The body gone: the copies are removed.
@@ -126,22 +127,44 @@ int main(){
     {
         World r;r.refuse=10;Mirror m2(r.api(),[](const std::string& s){lines.push_back(s);});
         std::vector<Piece> flat;for(const char* h:{"HLP_Hcuf","HLP_Ammo","HLP_Boot","HLP_Head","HLP_Bbcord"})flat.push_back({p.cuff,-1,h});
-        for(int i=0;i<10;++i)m2.tick(body,world,[&]{return flat;},t,true);
+        for(unsigned i=0;i<settle+10;++i)m2.tick(body,world,[&]{return flat;},t,true);
         CHECK(r.creates==3&&r.live()==0);
         World r2;Mirror m3(r2.api(),[](const std::string& s){lines.push_back(s);});
-        r2.refuse=0;std::vector<Piece> only={{p.backpack,-1,"HLP_Backpack"},{p.pouch,0,"HLP_PodPouch_2nd"}};
-        r2.refuse=1;for(int i=0;i<4;++i)m3.tick(body,world,[&]{return only;},t,true);
+        std::vector<Piece> only={{p.backpack,-1,"HLP_Backpack"},{p.pouch,0,"HLP_PodPouch_2nd"}};
+        r2.refuse=1;for(unsigned i=0;i<settle+4;++i)m3.tick(body,world,[&]{return only;},t,true);
         CHECK(r2.creates==1&&r2.live()==0);
     }
     // Stop removes the copies and keeps them away; start brings them back.
     {
         World s;Mirror m4(s.api(),[](const std::string& x){lines.push_back(x);});
-        for(int i=0;i<3;++i)m4.tick(body,world,get,t,true);
-        m4.stop();CHECK(s.live()==0);
-        for(int i=0;i<3;++i)m4.tick(body,world,get,t,true);
-        CHECK(s.live()==0);
-        m4.start();for(int i=0;i<3;++i)m4.tick(body,world,get,t,true);
+        for(unsigned i=0;i<settle+3;++i)m4.tick(body,world,get,t,true);
         CHECK(s.live()==4);
+        m4.stop();CHECK(s.live()==0);
+        for(unsigned i=0;i<settle+3;++i)m4.tick(body,world,get,t,true);
+        CHECK(s.live()==0);
+        m4.start();for(unsigned i=0;i<settle+3;++i)m4.tick(body,world,get,t,true);
+        CHECK(s.live()==4);
+    }
+    // Re-plan: the porter's gear read again every CheckEvery ticks; a different set seen StableChecks times in a row
+    // replaces the copies; a one-check flicker, an empty set, or a change while the body is hidden does not.
+    {
+        World r;Mirror m5(r.api(),[](const std::string& x){lines.push_back(x);});
+        std::vector<Piece> a={{p.cuff,-1,"HLP_Hcuf"},{p.backpack,-1,"HLP_Backpack"}},b=a,empty;b.push_back({p.armour,-1,"HLP_Boot"});
+        std::vector<Piece>* now=&a;auto plan=[&]{return *now;};
+        auto run=[&](unsigned ticks,bool shown=true){for(unsigned i=0;i<ticks;++i)m5.tick(body,world,plan,t,shown);};
+        run(settle+1);CHECK(r.live()==2&&r.creates==2);
+        now=&b;run(Mirror::CheckEvery*(Mirror::StableChecks-1));
+        now=&a;run(Mirror::CheckEvery);                       // back before the third check: a flicker
+        now=&b;run(Mirror::CheckEvery*(Mirror::StableChecks-1));
+        CHECK(r.creates==2&&r.removes==0);
+        now=&empty;run(Mirror::CheckEvery*(Mirror::StableChecks+2));
+        CHECK(r.creates==2&&r.removes==0&&r.live()==2);
+        now=&b;run(Mirror::CheckEvery*(Mirror::StableChecks+2),false);   // hidden: not read
+        CHECK(r.creates==2&&r.removes==0);
+        run(Mirror::CheckEvery*Mirror::StableChecks+2);
+        CHECK(r.removes==2&&r.creates==5&&r.live()==3&&r.parentOf("HLP_Boot")==body);
+        run(Mirror::CheckEvery*(Mirror::StableChecks+2));
+        CHECK(r.creates==5);                                  // stable again: nothing more
     }
     // The empty carrier a backpack copy gets: the game's slot lookup (2c52010, emulated) finds a slot for every type,
     // and no slot holds a stack or an item; the component search finds the carrier component among others.

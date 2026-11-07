@@ -39,6 +39,7 @@ struct Piece {
     uint64_t source=0;
     int parent=-1;        // index into the plan, -1 for the body
     std::string helper;
+    bool operator==(const Piece& o) const {return source==o.source&&parent==o.parent&&helper==o.helper;}
 };
 // The pieces worth copying: the porter's direct children that are visible, a plain gear entity or the backpack, and
 // attached to a named helper. Nested gear is not copied: a piece made from its resource brings the resource's own
@@ -57,6 +58,12 @@ struct Api {
 class Mirror {
 public:
     static constexpr unsigned PerTick=2,MaxFailures=3;
+    // The porter's visible gear is read again every CheckEvery ticks (about 1 s) while the body shows; a different set
+    // seen StableChecks times in a row replaces the copies; a new body gets its first copies the same way. Right after a
+    // load the game shows gear it hides moments later (live: 15 pieces, then 2), and the porter's gear changes in
+    // play. An empty set is never taken: the cargo menu moves the porter's gear onto the resident double for its
+    // preview.
+    static constexpr unsigned CheckEvery=20,StableChecks=3;
     Mirror(Api api,std::function<void(const std::string&)> log):api_(std::move(api)),log_(std::move(log)){}
     // body: the partner body (0: none); world: the porter entity (a new one means a new world, whose entities
     // replaced the old ones: the old copies are forgotten, never touched). pieces: the plan, taken when a body is
@@ -72,6 +79,8 @@ private:
     struct Made {uint64_t entity=0;bool shown=false;};
     Api api_;std::function<void(const std::string&)> log_;
     uint64_t body_=0,world_=0;std::vector<Piece> pieces_;std::vector<Made> made_;size_t next_=0;unsigned failures_=0;bool stopped_=false;
+    std::vector<Piece> candidate_;unsigned stable_=0,ticks_=0;
+    void removeCopies();
 };
 // A backpack carries a cargo carrier component (DSBaggage2CarrierComponent, vtable image+3dd9750). The game's cargo
 // manager gives the porter's backpack its carrier (component +50); a copy gets none, and the backpack's update

@@ -651,7 +651,10 @@ backpack (with its pouches, rain cover and cylinder) and the wrist cuff. The mod
 copies each visible plain gear piece and the backpack from its own game resource, and attaches the copy to the body at
 the same helper with the game's attach call (`gear.h`; the evidence is in `game_offsets.md`, "Gear on the partner
 body"). A copied backpack gets an empty cargo carrier the mod owns, without which the game's backpack update faults.
-The copies are hidden whenever the body is, removed with `off <stamp>`, when `own` mode ends or when the body changes,
+The porter's visible gear is read every second while the body shows; the copies are made once the same set has been
+seen three times in a row, and a different set seen three times in a row replaces them (right after a load the game
+briefly shows gear it then hides: 15 pieces, then 2). The copies are hidden whenever the body is,
+removed with `off <stamp>`, when `own` mode ends or when the body changes,
 and forgotten (never touched) when a new world loads. The source is the local porter, so the partner shows this
 porter's gear, not their own, and carried cargo is not drawn. The resident double (`peer` mode) is never given gear.
 Log lines start with `GEAR`. Tests: `gear_test.cpp` (the porter's tree in fake memory, the plan, the mirror in a fake

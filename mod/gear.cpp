@@ -93,27 +93,46 @@ uint64_t carrierComponent(const discovery::Sampler& s,uint64_t entity){
     return 0;
 }
 size_t Mirror::made() const {size_t n=0;for(auto& m:made_)n+=m.entity!=0;return n;}
-void Mirror::clear(){
+void Mirror::removeCopies(){
     unsigned removed=0;
     for(auto& m:made_)if(m.entity&&api_.alive(m.entity)){api_.remove(m.entity);++removed;}
-    if(body_)log_("GEAR removed "+std::to_string(removed)+" pieces\n");
-    made_.clear();pieces_.clear();body_=0;next_=0;
+    if(body_&&!made_.empty())log_("GEAR removed "+std::to_string(removed)+" pieces\n");
+    made_.clear();
+}
+void Mirror::clear(){
+    removeCopies();pieces_.clear();body_=0;next_=0;candidate_.clear();stable_=0;
 }
 void Mirror::tick(uint64_t body,uint64_t world,const std::function<std::vector<Piece>()>& pieces,const puppet::Transform& at,bool shown){
     if(world!=world_){
         // The old world's entities went with it: forget the copies without touching them.
         if(world_&&made())log_("GEAR new world: "+std::to_string(made())+" old pieces forgotten\n");
 #ifndef MUTANT_GEAR_STALE_WORLD
-        made_.clear();pieces_.clear();body_=0;next_=0;
+        made_.clear();pieces_.clear();body_=0;next_=0;candidate_.clear();stable_=0;
 #endif
         world_=world;failures_=0;
     }
     if(stopped_)return;
     if(body!=body_&&body_)clear();
     if(!body)return;
-    if(!body_){
-        body_=body;next_=0;pieces_=pieces();made_.assign(pieces_.size(),{});
-        log_("GEAR plan: "+std::to_string(pieces_.size())+" visible pieces of the porter's gear\n");
+    auto adopt=[&](std::vector<Piece> plan){
+        pieces_=std::move(plan);next_=0;made_.assign(pieces_.size(),{});candidate_.clear();stable_=0;ticks_=0;
+        std::string names;for(size_t i=0;i<pieces_.size()&&i<8;++i)names+=(i?",":" (")+pieces_[i].helper;
+        if(pieces_.size()>8)names+=",...";
+        if(!names.empty())names+=")";
+        log_("GEAR plan: "+std::to_string(pieces_.size())+" visible pieces of the porter's gear"+names+"\n");
+    };
+    // A new body: nothing is made until the porter's visible gear has held still for StableChecks reads.
+    if(!body_){body_=body;pieces_.clear();made_.clear();next_=0;candidate_.clear();stable_=0;ticks_=CheckEvery-1;}
+    else if(next_>=pieces_.size()&&shown&&++ticks_>=CheckEvery){
+        ticks_=0;auto now=pieces();
+        if(now==pieces_||now.empty()){candidate_.clear();stable_=0;}
+        else{
+            if(now==candidate_)++stable_;else{candidate_=now;stable_=1;}
+#ifndef MUTANT_GEAR_FLICKER
+            if(stable_>=StableChecks)
+#endif
+            {if(!pieces_.empty())log_("GEAR the porter's gear changed\n");removeCopies();adopt(std::move(now));}
+        }
     }
     for(unsigned k=0;k<PerTick&&next_<pieces_.size()&&failures_<MaxFailures;++k,++next_){
         auto& p=pieces_[next_];
