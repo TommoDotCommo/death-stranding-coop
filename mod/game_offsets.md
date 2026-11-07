@@ -737,6 +737,66 @@ Shared cargo, first version (`mod/cargo.{h,cpp}`, core CARGO events):
   opens the cuff links (map); F performs actions and opens terminals; C crouches; Q scans. Taps under about 300 ms
   are sometimes lost at 20 fps.
 
+### Carried cargo: what a porter carries and how the game draws it (static, 2026-11-08, nothing called)
+
+Enumerations from RTTI (enum descriptor: `-1`, kind 3, size byte, u16 value count, values at `+18`, 0x28 bytes each:
+u32 value, name pointer at `+8`):
+- `EDSBaggage2SlotType`: 0 Default, 1 BackPack, 2 LeftArm, 3 RightArm, 4 LeftWaist, 5 RightWaist, 6 LeftHand, 7 RightHand,
+  8 LeftCarrier, 9 RightCarrier, 10 MainWeapon, 11 SubWeapon, 12 SubWeaponPouch, 13 Item, 14 Shoes, 15 SpareShoes,
+  16 SuitParts, 17 Glove, 18 Mask, 19.. storage, terminal shelves and vehicle slots.
+- `EDSBaggage2CarrierType`: 0 None, 1 Player, 2 Cart, 3 Truck, 4 Bike, 6 Post, 7 Terminal, 8 Mule, 12 Ground,
+  13 AutoDeliveryCarrier, 14 TerminalShelf, 17 PrivateRoomStorage, 20 PlayerBackup, ...
+- Also `EDSBaggage2Type`, `EDSBaggage2Size`, `EDSBaggage2Category` (7 = DynamicOffline, 5 = FriendlyMule, 0 = Private)
+  and `EDSBaggage2Model`. Whether record `+20` (the "kind" 7/5/0 above) is the category is unconfirmed.
+
+The porter's carried cargo, as the game reads it in `DSPlayerSystem_sExportedDoesHaveBaggage` (thunk 26e67a0 ->
+26e8610, then 2c532f0 -> 2c53340 -> 2c53640):
+
+| Object | Field | Meaning |
+|---|---|---|
+| `DSPlayerEntity` | +54d0 | its `DSBaggage2CarrierComponent` (cached by 271fa60 with the component lookup 22b2a60; zeroed by the constructor 26f3f40) |
+| `DSBaggage2CarrierComponent` (vtable 3dd9750, type 4c39790, 0xb0 bytes) | +50 | the carrier |
+| carrier | +10 / +18 | slot count (i32) / slot pointer array; 2c52010 finds a slot by type |
+| carrier | +38, +88, +a0 | carrier id (the manager lists every carrier at +46d280 count / +46d288 array and finds one by +38, 2c52040), flags, lock |
+| slot | +1 | slot type (`EDSBaggage2SlotType`) |
+| slot | +4 | item count (i32; the holster code below tests the BackPack slot's) |
+| slot | +18 / +20 | stack count / stack pointer array (a stack is a column of cargo) |
+| stack | +10 / +18 | record count / pointer array to `DSBaggage2` records (bottom first is assumed, not confirmed) |
+| record | +80, +90 | holder carrier type (`EDSBaggage2CarrierType`) and holder carrier |
+
+With its second argument set, `DoesHaveBaggage` also walks every carrier in the manager (2c5e920), so the game's own
+"has the porter got this item" checks count records on any carrier.
+
+How carried cargo is drawn: the cargo entity update 2cc33b0 (a `DSBaggage2Entity`, its record at entity+330) runs when
+record +21 is 2 (carried). It finds the holder entity through the record's carrier (+90, then +28, then +20, a handle
+to the holder's component): for a `DSPlayerEntity` the parent is the entity at +4cb8 of its `DSPlayerInventoryComponent`;
+for a `DSPlayerAKukanEntity` (the resident double, and the body the mod makes) the entity at +f0 of its
+`DSPlayerAKukanInventoryComponent`; for a `DSVehicleMotorbike` the entity at +d60. It then picks a helper name (body bags:
+`HLP_DeadBody`, `_2nd`, `_3rd`, `_4th`; vehicle carriers: the slot's helper from 2c54810) and, when the cargo's mover
+(entity+b0, an `AttachToHelperMover` with its helper name at +b0) names another helper, re-parents the cargo (235e990)
+and sets the helper (23a8bb0). Weapons choose `CarrierAttachHelperName` or `EmptyCarrierAttachHelperName`
+(`DSWeaponParameter` +100/+108) by whether the owner's BackPack slot holds anything; the same code accepts the double as
+owner (2922cc0, 291156a). So the game can draw cargo on a double's back by itself.
+
+Why the partner's cargo is not made as real records held by the partner body: such a record is the game's real cargo.
+It lives in the manager's save-backed array, the checks above would count it as this porter's, and no export puts a
+record on any carrier but the local porter's (`AddBaggageToPlayer` 2cd1370, `MoveBaggageToPlayer` 2cd1680 and
+`CreateAndAddBaggageToPlayer` 2cd1440 all target the local player). Weight and UI effects are unknown.
+
+Purely visual route (untried): `Entity_ExportedSetParentAndAttachToHelper` (thunk 2361dc0 -> 234ceb0: entity, parent,
+helper name as a C string, bool; the bool sets entity+88 bit 9) sets the parent (235e990), builds an `AttachToHelperMover`
+(23aa8d0; type 4b140a0, constructor 2398c30, 0x110 bytes) with the helper name at +b0, installs it and sends a
+transform message. `AttachToHelperMover_sExportedCreate` exists too. What is missing is an entity that looks like the
+cargo without being a record: a `DSBaggage2Entity` expects its record at +330, and making one outside the manager is
+untried (it could fault like the Sam clone). The helper names the backpack uses for ordinary cargo were not found as
+literals (likely from 2c54810 or the backpack resource).
+
+`mod/carry_visual.{h,cpp}` (config `carry_visual`, off by default) reads the chain above read-only, checks the
+component's vtable, the counts, that each record is one of the manager's and names this carrier as its holder, and
+sends a capped summary (item, slot, stack, level, count) as CARGO events of type 6. The partner's mod keeps the latest
+summary and only logs it (`CARRY partner shows ...`); it never makes or moves a record. Unconfirmed live: the whole
+chain, the stack order, and the slot types seen for a back carry and a hand carry.
+
 ## Outfit (2026-11-03, read-only)
 
 The double has no backpack or hood. The porter's backpack, pouches and other gear are about 30 attached child

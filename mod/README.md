@@ -617,6 +617,7 @@ binds that copy's loopback slot and runs the real protocol core, so the game can
 coop-partner --slot 1 --peer-slot 0 --role client --session <the game copy's mod.json session> --follow
 coop-partner ... --replay presence-<pid>-<start>.jsonl [--where-recorded]
 coop-partner ... --drop 10 125983117      # place one cargo item where the partner stands, 10 s after connecting
+coop-partner ... --carry 125983117:1:2,7:7 [--carry-drop-after 30]   # the partner carries this (see below)
 ```
 
 `--follow` keeps a place 3 m to the porter's right and 1 m behind, walking, running or sprinting to it with a person's
@@ -625,6 +626,22 @@ a presence log) from beside the porter, or where it was recorded. It prints a st
 event the game sends, so cargo put down in the game is seen arriving. The movement rules live in `partner.h` and are
 pinned by `partner_test.cpp` and two mutants. Two partners run against each other on Linux (`build/coop-partner`, one as
 slot 0 host replaying, one as slot 1 client following) as an end-to-end check of the protocol without any game.
+
+## What the partner carries (`carry_visual`, off by default)
+
+With `"carry_visual": true` in `mod.json` (requires the game provider), the mod reads what its porter carries four
+times a second, read-only (`carry_visual.h`; the layout is in `game_offsets.md`, "Carried cargo"), and logs it on every
+change: `CARRY porter carries 2 entries; 125983117 BackPack stack 0 level 0 x2; ...`. In partner mode (`peer` or `own`)
+it sends that summary to the partner as CARGO events of type 6 (at most 16 entries: item, slot, stack, level, count),
+once it has been the same for 0.5 s, at most once a second, and again after every reconnection. The partner's mod
+keeps the latest complete summary and logs `CARRY partner shows ...` (or `shows nothing` after a put-down or a
+disconnection). It never creates, moves or deletes cargo: a cargo record held by the partner body would be the game's
+real cargo, counted as this porter's. Drawing the items on the partner body needs a purely visual entity that is not
+found yet. `coop-partner --carry SPEC` plays the partner's side: SPEC is `hash[:slot[:count]],...` (slots 1 BackPack,
+6 LeftHand, 7 RightHand; `none` for nothing); `--carry-drop-after S` puts it all down S seconds after connecting; what the
+game's porter carries is printed as `CARRY the porter carries ...`. Tests: `carry_visual_test.cpp` (fake memory, two
+copies through the real core with loss and an outage, seven mutants in `test_game_thread_mutants.py`) and
+`test_partner_carry.py` (two stand-ins on loopback, one restarted).
 
 ## Live test commands (per process, stamp-guarded)
 

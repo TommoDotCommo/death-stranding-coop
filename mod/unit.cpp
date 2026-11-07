@@ -58,6 +58,9 @@ int main() {
     assert(!mod::parseConfig(good).selfTick);
     // Virtual pad: only on a ticking, required mod; off by default; never with discovery.
     assert(!mod::parseConfig(good).virtualPad);
+    assert(!mod::parseConfig(good).carryVisual&&!mod::parseConfig(threaded).carryVisual);   // ds3: off by default
+    assert(mod::parseConfig(withKeys(threaded,"\"carry_visual\":true")).carryVisual);
+    assert(refused(withKeys(good,"\"carry_visual\":true")));                                // needs the game provider
     assert(mod::parseConfig(withKeys(threaded,"\"virtual_pad\":true,\"required\":true")).virtualPad);
     assert(mod::parseConfig(withKeys(good,"\"virtual_pad\":true,\"required\":true,\"self_tick\":true")).virtualPad);
     assert(refused(withKeys(threaded,"\"virtual_pad\":true")));

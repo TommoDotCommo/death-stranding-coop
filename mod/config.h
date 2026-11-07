@@ -10,6 +10,7 @@ struct Config {
     uint32_t peerAddress=0x7f000001, bindAddress=0;                       // host byte order; 0 = choose the route's local address
     uint64_t session=0;
     bool logging=true, required=false, impairment=false, discovery=false, selfTick=false, gameThread=false, puppetProbe=false, virtualPad=false, autoContinue=false, joinAtHost=false;
+    bool carryVisual=false;   // ds3: send what the porter carries, show what the partner carries (carry_visual.h)
     unsigned presenceLogMaxMiB=8;
     discovery::Options discoveryOptions;
 };

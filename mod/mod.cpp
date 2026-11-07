@@ -34,6 +34,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "pad.h"
 #include "cargo.h"
 #include "marker.h"
+#include "carry_visual.h"
 #include "structures.h"
 #ifdef MOD_FAKE_NETWORK
 #include "fake_memory.h"
@@ -126,7 +127,7 @@ struct Cache final:ds::StateProvider {
 struct Runtime final:ds::Transport {
     mod::Config config;
     // Session progress and join-at-host: decision/logging only; no native porter move is approved.
-    mod::join::Decision joinDecision;uint64_t nextProgressRead=0,handshakeNoted=0;bool progressRefusalNoted=false;
+    mod::join::Decision joinDecision;uint64_t nextProgressRead=0,handshakeNoted=0;bool progressRefusalNoted=false;std::string progressReason;
     void noteHandshake() {
         if(!core->connected()||handshakeNoted==core->connectionSerial())return;
         handshakeNoted=core->connectionSerial();progressRefusalNoted=false;
@@ -189,6 +190,7 @@ struct Runtime final:ds::Transport {
         auto incoming=core->takeCargo();
         bool coop=partnerMode()&&cargoCreate&&cargoManagerSlot;
         for(auto& e:incoming) {
+            if(e.type==mod::carry::WireType){if(config.carryVisual)carry.incoming(e,carrySink);continue;}   // ds3: tickCarry
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
             if(!coop){note("CARGO partner event ignored (not in peer mode)\n");continue;}
@@ -276,6 +278,25 @@ struct Runtime final:ds::Transport {
         markers->tick(now,partner,hidden);
     }
     // --- end map markers
+    // --- ds3: what the partner carries (carry_visual.h); opt-in with carry_visual, read-only, the sink only logs ---
+    struct CarryLog final:mod::carry::Sink {
+        std::function<void(const std::string&)> log;explicit CarryLog(std::function<void(const std::string&)> f):log(std::move(f)){}
+        void attach(const mod::carry::Summary& s) override {log("CARRY partner shows "+mod::carry::describe(s)+"\n");}
+        void detach() override {log("CARRY partner shows nothing\n");}
+        void hold(uint32_t,uint8_t) override {log("CARRY refused: a cargo record on the partner body would be this porter's cargo\n");}
+    } carrySink{[this](const std::string& s){note(s.c_str());}};
+    mod::carry::Exchange carry;uint64_t carryReadAt=0,carrySent=0;std::string carryLast;
+    void tickCarry(uint64_t now) {
+        if(!config.carryVisual||!core||!sampler||!cargoManagerSlot||now-carryReadAt<250)return;
+        carryReadAt=now;uint64_t manager=0;std::optional<mod::carry::Summary> read;
+        auto anchor=mod::puppet::readLocalAnchor(*sampler);
+        if(anchor.entity&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
+            if(auto items=mod::carry::readCarried(*sampler,anchor.entity,sampler->base+mod::carry::ComponentVtable,manager))read=mod::carry::summarise(*items);
+        std::string d=read?"porter carries "+mod::carry::describe(*read):anchor.entity?"porter's carrier unreadable (layout or vtable check failed)":"";
+        if(!d.empty()&&d!=carryLast){carryLast=d;note(("CARRY "+d+"\n").c_str());}
+        for(auto& e:carry.tick(read,core->connected()&&partnerMode(),now,carrySink)){core->queueCargo(e);++carrySent;}
+    }
+    // --- end ds3 ---
     // Shared structures (structures.h): what this porter builds goes to the partner; theirs appear here as Net structures.
     mod::structures::Sync structSync;uint64_t structReadAt=0,structSent=0,structMade=0,structIdBase=0,imageSize=0;
     void tickStructures(uint64_t now) {
@@ -782,6 +803,8 @@ struct Runtime final:ds::Transport {
             // A bounded, read-only observation; never writes story or save state.
             if(game&&cache.available&&sampler&&now>=nextProgressRead){
                 auto progress=mod::join::ProgressReader(*sampler).read();cache.story=progress.value;cache.progressReady=true;nextProgressRead=now+1000;
+                if(progress.reason!=progressReason){progressReason=progress.reason;   // why an episode is (not) known, once per change
+                    note(("PROGRESS episode="+(progress.value.episode==ds::UnknownProgress?std::string("unknown"):std::to_string(progress.value.episode))+" reason="+progress.reason+"\n").c_str());}
             }
             if(game&&cache.available&&gameContext) {
                 // What the porter is doing, from his own animation variables (read-only): sprint and crouch.
@@ -838,6 +861,8 @@ struct Runtime final:ds::Transport {
             // End join dispatch.
             stage="cargo";
             if(twin&&gameContext)tickCargo(now);
+            stage="carry";   // ds3
+            if(twin&&gameContext)tickCarry(now);
             stage="structures";
             if(twin&&gameContext)tickStructures(now);
             stage="markers";
@@ -1047,6 +1072,7 @@ unsigned mod_status(char* out,unsigned cap) {
         o<<",\"game_thread\":{\"enabled\":"<<(r.config.gameThread?"true":"false")<<",\"verified\":"<<(r.dispatchVerified?"true":"false")<<",\"thread_id\":"<<r.gameGate.thread()<<",\"rejected\":"<<r.gameRejected<<"},\"puppet\":{\"enabled\":"<<(r.puppet?"true":"false")<<",\"stage\":\""<<(r.puppet?r.puppet->stage():"disabled")<<"\",\"actor\":"<<(r.puppet?r.puppet->actor():0)<<"}";
         o<<",\"pad\":{\"enabled\":"<<(r.config.virtualPad?"true":"false")<<",\"running\":"<<(r.padRunning?"true":"false")<<",\"calls\":"<<padShared.calls.load()<<",\"active_calls\":"<<padShared.active.load()<<"}";
         o<<",\"event\":"<<(r.inEvent?"true":"false")<<",\"cargo\":{\"sent\":"<<r.cargoSent<<",\"created\":"<<r.cargoMade<<",\"taken\":"<<r.cargoTaken<<",\"removed\":"<<r.cargoRemoved<<",\"shared\":"<<r.cargoSync.shared()<<",\"mirrored\":"<<r.cargoSync.mirrored()<<",\"structures_sent\":"<<r.structSent<<",\"structures_created\":"<<r.structMade<<",\"pending\":"<<(r.core?r.core->cargoPending():0)<<"}";
+        o<<",\"carry\":{\"enabled\":"<<(r.config.carryVisual?"true":"false")<<",\"events_sent\":"<<r.carrySent<<",\"shown_entries\":"<<r.carry.view().shown().size()<<"}";   // ds3
         o<<",\"double\":{\"stage\":\""<<(r.twin?r.twin->name():"disabled")<<"\",\"mode\":\""<<(r.twinMode==Runtime::TwinMode::Echo?"echo":r.twinMode==Runtime::TwinMode::Lead?"lead":r.twinMode==Runtime::TwinMode::Peer?"peer":r.twinMode==Runtime::TwinMode::Own?"own":"none")<<"\",\"entity\":"<<(r.twin?r.twin->entity():0)<<"}";
         o<<",\"timing\":{\"clock\":\""
 #ifdef _WIN32

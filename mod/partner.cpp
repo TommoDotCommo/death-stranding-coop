@@ -2,7 +2,7 @@
 // real protocol core, so the game cannot tell it from a second copy.
 //   coop-partner --slot 1 --peer-slot 0 --role client --session N [--follow | --replay FILE [--where-recorded]]
 //                [--drop SECONDS ITEM] [--take-after SECONDS] [--take-own-after SECONDS] [--build SECONDS TYPE] [--unbuild-after SECONDS]
-//                [--seconds N] [--stop FILE]
+//                [--carry SPEC] [--carry-drop-after SECONDS] [--seconds N] [--stop FILE]
 // --offset X Y Z shifts the follow target (adapter metres, Y up); --episode N|unknown and --progress-id N|unknown
 // set explicit handshake fixtures, --progress-mismatch warn|refuse chooses policy.
 // --where-recorded plays the walk where it was recorded (same save, same place) instead of beside the porter.
@@ -11,8 +11,13 @@
 // game places, SECONDS after it arrives; --take-own-after picks up the partner's own dropped item SECONDS after dropping.
 // --build builds one structure (a Player type of EDSConstructionPointType, e.g. 25 ladder) where the partner stands;
 // --unbuild-after dismantles it SECONDS later.
+// --carry tells the game what the partner carries (carry_visual.h; the game needs carry_visual true): SPEC is
+// "hash[:slot[:count]],..." (slot 1 BackPack, 6 LeftHand, 7 RightHand; default 1 and 1), sent once connected and again
+// after every reconnect; --carry-drop-after puts it all down SECONDS after connecting. What the game's porter carries
+// (with carry_visual on there) is printed as CARRY lines.
 #include "partner.h"
 #include "structures.h"
+#include "carry_visual.h"
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -71,11 +76,16 @@ struct Shell final:ds::StateProvider,ds::Transport {
         }
     }
 };
+struct CarryPrint final:mod::carry::Sink {
+    void attach(const mod::carry::Summary& s) override {std::printf("CARRY the porter carries %s\n",mod::carry::describe(s).c_str());std::fflush(stdout);}
+    void detach() override {std::printf("CARRY the porter carries nothing\n");std::fflush(stdout);}
+    void hold(uint32_t,uint8_t) override {}
+};
 [[noreturn]] void usage(const char* why){std::fprintf(stderr,"coop-partner: %s\n(see the comment at the top of partner.cpp)\n",why);std::exit(2);}
 }
 int main(int argc,char** argv){
     unsigned slot=1,peerSlot=0;ds::Role role=ds::Role::Client;uint64_t session=0;double seconds=3600,dropAfter=-1,takeAfter=-1,takeOwnAfter=-1,buildAfter=-1,unbuildAfter=-1;uint32_t dropItem=0,buildType=0;
-    std::string replayFile,stopFile;Shell shell;ds::ProgressPolicy progressPolicy=ds::ProgressPolicy::Warn;
+    std::string replayFile,stopFile;Shell shell;ds::ProgressPolicy progressPolicy=ds::ProgressPolicy::Warn;std::optional<mod::carry::Summary> carrySpec;double carryDropAfter=-1;
     for(int i=1;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc)usage(("missing value after "+a).c_str());return std::string(argv[++i]);};
         if(a=="--slot")slot=unsigned(std::stoul(next()));else if(a=="--peer-slot")peerSlot=unsigned(std::stoul(next()));
@@ -89,6 +99,8 @@ int main(int argc,char** argv){
         else if(a=="--drop"){dropAfter=std::stod(next());dropItem=uint32_t(std::stoul(next()));}
         else if(a=="--build"){buildAfter=std::stod(next());buildType=uint32_t(std::stoul(next()));if(buildType>255)usage("structure type is 0..255");}
         else if(a=="--unbuild-after")unbuildAfter=std::stod(next());
+        else if(a=="--carry"){carrySpec=mod::carry::parseSpec(next());if(!carrySpec)usage("--carry takes hash[:slot[:count]],... (cargo slots 1..9) or none");}
+        else if(a=="--carry-drop-after")carryDropAfter=std::stod(next());
         else if(a=="--take-after")takeAfter=std::stod(next());else if(a=="--take-own-after")takeOwnAfter=std::stod(next());
         else usage(("unknown option "+a).c_str());
     }
@@ -116,6 +128,7 @@ int main(int argc,char** argv){
     auto start=nowMs();uint64_t nextStatus=start+1000,connectedAt=0,refused=0,ownRef=0,droppedAt=0,builtRef=0,builtAt=0;bool dropped=false,built=false;std::array<double,3> builtAtPos{};
     uint64_t handshakeSerial=0;bool progressRefused=false;
     std::vector<std::pair<uint64_t,uint64_t>> toTake;   // (when, ref)
+    mod::carry::Exchange carry;CarryPrint carryPrint;uint64_t carryTickAt=0;bool carryDropped=false;
     std::printf("PARTNER slot %u -> %u session %llu mode %s\n",slot,peerSlot,(unsigned long long)session,shell.replay?"replay":"follow");std::fflush(stdout);
     while(nowMs()-start<seconds*1000){
         if(!stopFile.empty()&&std::ifstream(stopFile))break;
@@ -139,6 +152,7 @@ int main(int argc,char** argv){
         if(core.connected()&&!connectedAt)connectedAt=now;
         if(!core.connected())connectedAt=0;
         for(auto& e:core.takeCargo()){
+            if(carry.incoming(e,carryPrint))continue;   // what the game's porter carries (type 6)
             if(e.type==3){auto b=mod::structures::unpack(e.item,e.position,e.yaw);
                 std::printf("STRUCT received type %u ref %llu at %.2f,%.2f,%.2f yaw %.2f pitch %.2f roll %.2f\n",unsigned(b.type),(unsigned long long)e.ref,
                             e.position[0],e.position[1],e.position[2],b.yaw,b.pitch,b.roll);continue;}
@@ -167,6 +181,14 @@ int main(int argc,char** argv){
             ds::CargoEvent e;e.type=4;e.ref=builtRef;e.item=buildType;e.position=builtAtPos;e.id=(nowMs()<<4)|slot|10;core.queueCargo(e);
             std::printf("STRUCT dismantled ref %llu\n",(unsigned long long)builtRef);builtRef=0;
         }
+        if(carrySpec&&now>=carryTickAt){
+            carryTickAt=now+250;
+            if(carryDropAfter>=0&&!carryDropped&&connectedAt&&now-connectedAt>=carryDropAfter*1000){
+                carryDropped=true;carrySpec=mod::carry::Summary{};std::printf("CARRY put everything down\n");}
+            for(auto& e:carry.tick(carrySpec,core.connected(),now,carryPrint)){
+                if(e.ref%16==0)std::printf("CARRY sent %s\n",mod::carry::describe(*carrySpec).c_str());
+                core.queueCargo(e);}   // ids from the core: unique per event (entries of one summary share a millisecond)
+        } else if(!carrySpec)for(auto& e:carry.tick(std::nullopt,core.connected(),now,carryPrint))core.queueCargo(e);
         if(now>=nextStatus){
             nextStatus+=1000;
             if(shell.porter&&shell.mine){
