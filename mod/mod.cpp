@@ -128,7 +128,7 @@ struct Cache final:ds::StateProvider {
 struct Runtime final:ds::Transport {
     mod::Config config;
     // Session progress and join-at-host: a decision and a log, plus one native move only with join_move native.
-    mod::join::Decision joinDecision;uint64_t nextProgressRead=0,handshakeNoted=0;bool progressRefusalNoted=false;std::string progressReason;
+    mod::join::Decision joinDecision;uint64_t nextProgressRead=0,handshakeNoted=0;bool progressRefusalNoted=false;std::string progressReason;uint64_t firstProgressRead=0;
     std::unique_ptr<mod::join::Mover> joinMover;   // join_move native only (join.h)
     void noteHandshake() {
         if(!core->connected()||handshakeNoted==core->connectionSerial())return;
@@ -832,7 +832,11 @@ struct Runtime final:ds::Transport {
             cache.sampledAt=now;cache.available=provider->readLocal(cache.local);cache.gated=provider->isInCutsceneOrLoading();
             // A bounded, read-only observation; never writes story or save state.
             if(game&&cache.available&&sampler&&now>=nextProgressRead){
-                auto progress=mod::join::ProgressReader(*sampler).read();cache.story=progress.value;cache.progressReady=true;nextProgressRead=now+1000;
+                auto progress=mod::join::ProgressReader(*sampler).read();cache.story=progress.value;nextProgressRead=now+1000;
+                // Hold the first handshake until the episode is known (the first reads, before the world has loaded,
+                // return unknown), but never more than 20 s after the first read.
+                if(!firstProgressRead)firstProgressRead=now;
+                cache.progressReady=progress.value.episode!=ds::UnknownProgress||now-firstProgressRead>=20000;
                 if(progress.reason!=progressReason){progressReason=progress.reason;   // why an episode is (not) known, once per change
                     note(("PROGRESS episode="+(progress.value.episode==ds::UnknownProgress?std::string("unknown"):std::to_string(progress.value.episode))+" reason="+progress.reason+"\n").c_str());}
             }
