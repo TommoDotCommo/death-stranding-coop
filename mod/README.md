@@ -640,6 +640,10 @@ Each command is a file in the mod folder. The mod consumes it and accepts it onl
   needed, 40 a read-only report (`BODY report ...` rows). The body is made once per world, so the mask of the first
   `own` command of a process is the one used. The log confirms it with `DOUBLE own dress mask 0x..`.
 - `pad.script`: a virtual gamepad script (`pad.h`), requires `virtual_pad` and `COOP_VIRTUAL_PAD=1`.
+- `puppet.marker` (map markers, `marker.h`, OFF until armed; needs `puppet_probe` and a partner mode for the partner
+  marker): `on <stamp>` shows the partner as a map pin (group 4) and arms pings on V; `off <stamp>` removes the mod's
+  markers; `ping <stamp>` pings at the porter's position (group 3, here and, when connected, in the partner's world as a
+  CARGO event of type 5); `key <virtual-key code> <stamp>` changes the ping key (0 = none). Log lines start with `MARKER`.
 - `puppet.body`: `create <stamp>` asks the engine for a second Sam from the double's resource, 3 m to the porter's side,
   and logs what the request produces (`BODY ...` lines); `remove <stamp>` removes it (`body.h`, an experiment).
 - `puppet.vehicle`: `read <stamp>` logs one read-only vehicle observation; `watch <stamp>` logs at most four a second

@@ -3,8 +3,8 @@ CXX ?= g++
 MINGW ?= x86_64-w64-mingw32-g++-posix
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp pad.cpp cargo.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = join.h game_thread.h puppet.h double.h body.h auto_continue.h pad.h cargo.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp pad.cpp cargo.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = join.h game_thread.h puppet.h double.h body.h auto_continue.h pad.h cargo.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -89,6 +89,8 @@ build/structures-test: structures_test.cpp structures.cpp structures.h discovery
 	$(CXX) $(FLAGS) structures_test.cpp structures.cpp discovery.cpp -o $@
 build/cargo-test: cargo_test.cpp cargo.cpp cargo.h discovery.cpp | build
 	$(CXX) $(FLAGS) cargo_test.cpp cargo.cpp discovery.cpp -o $@
+build/marker-test: marker_test.cpp marker.cpp marker.h discovery.cpp | build
+	$(CXX) $(FLAGS) marker_test.cpp marker.cpp discovery.cpp -o $@
 build/pad-test: pad_test.cpp pad.cpp pad.h | build
 	$(CXX) $(FLAGS) pad_test.cpp pad.cpp -o $@
 build/body-test: body_test.cpp body.cpp body.h discovery.cpp | build
@@ -101,7 +103,7 @@ build/coop-partner: partner.cpp partner_logic.cpp partner.h identity.h structure
 	$(CXX) $(FLAGS) partner.cpp partner_logic.cpp structures.cpp discovery.cpp ../core/core.cpp -o $@
 build/coop-partner.exe: partner.cpp partner_logic.cpp partner.h identity.h structures.cpp structures.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(MINGW) $(WINFLAGS) partner.cpp partner_logic.cpp structures.cpp discovery.cpp ../core/core.cpp -o $@ -lws2_32 -lbcrypt
-game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test
+game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test
 	./build/game-thread-test
 	./build/puppet-test
 	./build/double-test
@@ -114,6 +116,7 @@ game-thread-test: build/game-thread-test build/puppet-test build/double-test bui
 	./build/partner-test
 	./build/body-test
 	./build/auto-continue-test
+	./build/marker-test
 	python3 -B test_game_thread_mutants.py
 .PHONY: game-thread-test
 

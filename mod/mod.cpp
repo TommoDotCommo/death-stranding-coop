@@ -33,6 +33,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "auto_continue.h"
 #include "pad.h"
 #include "cargo.h"
+#include "marker.h"
 #include "structures.h"
 #ifdef MOD_FAKE_NETWORK
 #include "fake_memory.h"
@@ -189,6 +190,7 @@ struct Runtime final:ds::Transport {
         bool coop=partnerMode()&&cargoCreate&&cargoManagerSlot;
         for(auto& e:incoming) {
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
+            if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
             if(!coop){note("CARGO partner event ignored (not in peer mode)\n");continue;}
             if(e.type==4) {   // the partner dismantled a structure: by ref, or by type and place when the ref is unknown here
                 if(netCopies.known(e.ref))netCopies.dismantled(e.ref,now);
@@ -230,6 +232,50 @@ struct Runtime final:ds::Transport {
             note(("CARGO took item "+std::to_string(tk.hash)+(tk.id?" shared "+std::to_string(tk.id):std::string(" (no shared id)"))+" -> partner\n").c_str());
         }
     }
+    // --- Map markers (marker.h): the partner on the map and pings. OFF until `puppet.marker` arms it for this process.
+    std::filesystem::path markerCommand;std::unique_ptr<mod::marker::Markers> markers;std::vector<ds::CargoEvent> pingIn;
+    mod::marker::KeyEdge pingEdge;unsigned pingKey=0;
+    void tickMarkers(uint64_t now) {
+        auto stamp=mod::runStamp();bool ping=false;
+        if(!markerCommand.empty()&&std::filesystem::exists(markerCommand)) {
+            auto text=readConfig(markerCommand);
+            if(!std::filesystem::remove(markerCommand))throw std::runtime_error("cannot consume marker command");
+            if(text=="on "+stamp+"\n"||text=="off "+stamp+"\n") {
+                bool on=text[1]=='n';
+                if(on&&!markers) {
+#ifdef MOD_FAKE_NETWORK
+                    note("MARKER unavailable: the fake world has no map markers\n");
+#else
+                    try{markers=std::make_unique<mod::marker::Markers>(mod::marker::nativeApi(*sampler),[this](const std::string& row){note(row.c_str());});
+                        markers->setRefBase((nonce()>>32)<<20);}
+                    catch(const std::exception& e){note((std::string("MARKER unavailable: ")+e.what()+"\n").c_str());}
+#endif
+                }
+                if(markers){markers->enable(on);pingKey=on?0x56:0;}   // V, the co-op standard's ping key (game_offsets.md, "Keys")
+            }
+            else if(text=="ping "+stamp+"\n")ping=true;
+            else if(auto vk=mod::puppet::parseCargoCommand(text,stamp,"key");vk&&*vk<=0xfe){pingKey=*vk;note(("MARKER ping key "+std::to_string(*vk)+"\n").c_str());}
+            else note("MARKER ignored command for another process\n");
+        }
+        auto incoming=std::move(pingIn);pingIn.clear();
+        if(!markers||!markers->enabled()){if(!incoming.empty())note("MARKER partner ping ignored (off)\n");return;}
+        auto anchor=mod::puppet::readLocalAnchor(*sampler);
+        bool hidden=inEvent||(anchor.entity&&twin&&twin->gameUsesDouble(anchor.entity));   // event, private room, cargo menu
+        std::optional<std::array<double,3>> partner;
+        if(partnerMode()&&cache.remote.visible&&core&&core->connected()){auto& p=cache.remote.state.position;partner=std::array<double,3>{p[0],p[2],p[1]};}   // adapter -> game axes
+        for(auto& e:incoming)markers->partnerPing({e.ref,{e.position[0],e.position[2],e.position[1]}},now);
+        if(pingEdge.pressed(pingKey&&mod::marker::keyDown(pingKey),now))ping=true;
+        if(ping) {
+            if(!anchor.entity||!anchor.pose.available)note("MARKER ping refused: no porter\n");
+            else if(auto p=markers->localPing(anchor.pose.position,now)) {
+                if(core&&core->connected()){ds::CargoEvent e;e.type=5;e.ref=p->ref;e.position={p->position[0],p->position[2],p->position[1]};core->queueCargo(e);   // game -> adapter axes
+                    note(("MARKER ping "+std::to_string(p->ref)+" -> partner\n").c_str());}
+                else note(("MARKER ping "+std::to_string(p->ref)+" shown here only (no partner)\n").c_str());
+            }
+        }
+        markers->tick(now,partner,hidden);
+    }
+    // --- end map markers
     // Shared structures (structures.h): what this porter builds goes to the partner; theirs appear here as Net structures.
     mod::structures::Sync structSync;uint64_t structReadAt=0,structSent=0,structMade=0,structIdBase=0,imageSize=0;
     void tickStructures(uint64_t now) {
@@ -478,6 +524,7 @@ struct Runtime final:ds::Transport {
 #endif
                 puppet=std::make_unique<mod::puppet::Probe>(std::move(api),[this](const std::string& row){note(row.c_str());});
                 twinCommand=path.parent_path()/"puppet.double";cargoCommand=path.parent_path()/"puppet.cargo";bodyCommand=path.parent_path()/"puppet.body";
+                markerCommand=path.parent_path()/"puppet.marker";
 #ifdef MOD_FAKE_NETWORK
                 // Fake tree: player entity 0x6000 -> CameraEntity 0xa000 -> parked double 0xa800.
                 fake->mutate([&]{auto B=fake->base;fake->put<uint64_t>(0x6078,B+0xa000);
@@ -793,6 +840,8 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickCargo(now);
             stage="structures";
             if(twin&&gameContext)tickStructures(now);
+            stage="markers";
+            if(twin&&gameContext)tickMarkers(now);
             stage="cargo command";
             if(cargoCreate&&gameContext&&std::filesystem::exists(cargoCommand)) {
                 auto text=readConfig(cargoCommand);

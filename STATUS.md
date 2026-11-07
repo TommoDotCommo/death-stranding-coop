@@ -155,6 +155,16 @@ now carries the sender's run tag, so the receiver prefers items from before that
 stacked on one spot around a restart can still be matched the wrong way round (6 in 2000 fuzzed sessions with
 restarts and sliding; none without restarts).
 
+## The partner on the map, and pings (built 2026-11-08, not yet run live)
+
+Off by default (`mod/marker.h`, armed with the `puppet.marker` command). The partner is shown as one of the game's own
+map pins, moved at most once a second and removed when he disconnects or either porter is in an event or private room;
+a ping (V) puts a pin at the porter's position in both worlds through a reliable CARGO event of type 5, shown once per
+ping. The pins are the game's user markers, found statically (`mod/game_offsets.md`, "Map markers"); they are saved with
+the game, so the mod uses two groups of its own, never touches the player's pins and removes its own leftovers after a
+reload. Tested game-free with a fake marker table and four mutants. Default key bindings are not in the executable, so
+whether V collides with a game key is unknown.
+
 ## Testing aids (built 2026-11-03, first run live 2026-11-07)
 
 Live 2026-11-07, one copy, unattended: `auto_continue` reached gameplay from the title with no input (62 s cold,

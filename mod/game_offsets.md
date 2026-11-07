@@ -1262,3 +1262,58 @@ vehicle refutes the candidate. Repeat for a truck and passenger seat; resource
 variants, reload/death, despawn/address reuse and scene changes need separate
 validation. No such live experiment ran for this provider.
 
+
+## Map markers (static, 2026-11-08, nothing called)
+
+Method as above: name strings in `.rdata`, their absolute pointers in reflection tables, RIP-relative references, `.pdata`
+bounds, direct `call` cross-references. Throwaway scripts only.
+
+- The names a search would try first are dead ends. `SetPlayerPlacedMarker` and `ClearPlayerPlacedMarker` are script
+  bindings of a map class (`FastTravelToCrosshair`, `SwitchToLowerFloor`...) whose implementation is `jmp 0x18e9b10`, the
+  retail `ret` stub. `AddUserMarker`, `RemoveUserMarker`, `RemoveAllUserMarker` and `AddUserMarkerLine` are fields
+  (+0x28..+0x40) of a map-menu command-text resource, not functions. `DSUINodeGraphBindings_sDisableMarkerLocator` is a
+  `ret` stub; `EnableMarkerLocator` (0x3054910) needs a marker locator placed in the level data.
+- `EDSMarkerType` (enum table 0x3e1c100, 35 values): None 0, Player 1, Baggage 2, Structure 3, Mule 4, Gimmic 5,
+  **UserMarker 6**, MuleLastKnown 7, MarkerLocator 8, Destination 9, Rope 10, Signboard 11, ...
+- The marker manager: global `ds.exe+0x7bfd940` (read by the `EnableMarkerLocator` export), built by 0x2f1e7d0. It holds
+  marker pointers at +0 (count +0x5dc0), per-type first index at +0x5dc4+4*type and count at +0x5e4c+4*type (0x2f28e80
+  searches one type within a radius, at most 25), a dirty mask at +0x5f08 and the id counter at +0x5f00. The constructor
+  gives type 6 a fixed pool of **50 records** (`+0x5e64 = 0x32`), allocated as one block at **+0x5ef8**, stride 0x50.
+- User-marker record (0x50 bytes): +0x00 vtable, +0x10 position 3 x f32 (game axes, z up) + pad, +0x20 id (u64, the
+  counter at manager+0x5f00, new on every set), +0x28 flags, +0x2c bit 0 in use, +0x2d type (6), +0x30/+0x38 type and id
+  of another marker it is attached to (the per-frame update removes it when that one goes), +0x40 reached, +0x41/+0x42
+  snap to ground (a `DSUserMarkerCollisionJob` ray, manager+0x5fe0, then corrects z), +0x43 flag, +0x44 a timer,
+  **+0x4c group (0..4), +0x4d point in the group (0..9)**. Five groups of ten: a group is one pin or a route (lines
+  between its points; `AddUserMarkerLine`).
+- Set: **0x2f22d00**(manager, `const float pos[4]*`, group, point, snap, flag) replaces that point (the old record is
+  switched off through its vtable+8), refuses when another point of the same group lies at the same x and y, then
+  writes the record. The map menu calls the wrapper **0x2f22c90** with the same arguments, which adds a u16 from
+  0x262a860(*0x7be6318) (a floor or layer value; meaning unknown). Map-menu flow (0x31c30a0..0x31c3300): group =
+  0x2f29320(manager) (the first empty group, else it clears the oldest single-pin group: a sixth pin replaces the
+  oldest), point = 0x2f29430(manager, group) (next free point), then 0x2f22c90(manager, cursor, group, point, 1, 0).
+- Remove one: **0x2f378b0**(manager, record*) (switches it off, then closes the gap in a route). Remove a group: tail of
+  0x2f29320 (loop at 0x2f293e0). Remove all: 0x2f37770(manager) (map menu "remove all", hold time from
+  `UserMarkerAllRemoveHoldStartSec`/`FinishSec`); 0x2f38270 also clears manager flag bit 7.
+- **Saved:** the load path (0x2f35a9e..0x2f35bc9) removes all user markers, checks a version (1) and reads 50 records of
+  12-byte position + flags (bit 0 used, bit 1 snap, bit 2 flag) + group + point + u16, calling 0x2f22d00 for each.
+  So a marker the mod sets is in the next save. The save writer and the moment of saving were not traced (unknown);
+  no "do not save" flag was found. The mod therefore uses its own two groups, removes its markers whenever they should
+  not show, and fingerprints their positions so a saved one is removed the next time the feature is armed
+  (`mod/marker.h`).
+- Reaching a user marker: the per-frame update (from 0x2f3dd02) compares each marker with the porter's position and
+  sets +0x40/+0x43; whether a reached pin is removed was not established (unknown). The mod re-places the partner
+  marker within a second if it disappears.
+- Not script exports: the mod calls these internal functions by RVA after checking unique code signatures
+  (0x2f22c90: 28 bytes, 0x2f378b0: 16 bytes), on the game thread only.
+
+### Keys (static, 2026-11-08)
+
+The co-op standard uses V / middle mouse for a ping, hold Tab for the player list and F1 for the guide. What the
+executable shows: the game's actions are the `EDSFunction` enum (table 0x3df10f0), including `kDSFunctionCommon_Marker`,
+`MarkerPrev`, `MarkerNext`, `Sensor` (the Odradek scan) and `Shout`; key assignments are `DSFunctionKeyBindDefinition`
+resources and the key-assign menu (`DSUIKeyAssignMenuKeyBindResource`). The **default keyboard and mouse bindings are not
+in `ds.exe`** (they are data resources in the packed archives), and the player's own bindings are in the profile's
+settings, which this pass did not read. So whether V, middle mouse, Tab or F1 is bound by default is **unknown** from
+static evidence. Middle mouse does have a menu meaning (`EMenuInputFunction_FUNCTION_MOUSE_MIDDLE`, map menu
+`OnMouseMiddle...` handlers). The mod's ping key is V by default and changeable at run time (`key <vk>` command), read
+only while the game window has the focus; a live check of the key-assign menu is the next step.

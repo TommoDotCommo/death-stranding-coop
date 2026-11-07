@@ -15,7 +15,8 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('partner',['TELEPORT','ACCEL','WIRE','WIRE_ANY','OFFSET','OFFSET_RANGE','PROGRESS_RANGE'],['partner_test.cpp','partner_logic.cpp','../core/core.cpp']),
           ('structure',['PACK','NET','REMOVED','EARLY'],['structures_test.cpp','structures.cpp','discovery.cpp']),
           ('body',['ANY_CLASS'],['body_test.cpp','body.cpp','discovery.cpp']),
-          ('auto',['ONCE_IN_GAME'],['auto_continue_test.cpp'])]
+          ('auto',['ONCE_IN_GAME'],['auto_continue_test.cpp']),
+          ('marker',['LEFT','TWICE','RATE','FOREIGN'],['marker_test.cpp','marker.cpp','discovery.cpp'])]
 with tempfile.TemporaryDirectory() as directory:
     executable=Path(directory)/'mutant'
     for family,mutants,sources in families:
