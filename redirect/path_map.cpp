@@ -1,6 +1,15 @@
 #include "redirect.h"
 #include <cwctype>
 namespace redirect {
+static bool nested_allowed(const Policy& c) {
+#ifdef MUTANT_NESTED_LAB
+    (void)c;return true;
+#elif defined(MUTANT_NESTED_RELEASE)
+    (void)c;return false;
+#else
+    return c.allowNestedInstance;
+#endif
+}
 std::wstring canonical(const std::wstring& input) {
     auto p = input;
     for (auto& c : p) {
@@ -130,7 +139,7 @@ Result map(const Policy& c,const std::wstring& raw,bool write,bool unsafe) {
     if(within(p,instance)) return {Action::allow,p};
     for(auto& r:c.roots) {
         auto real=canonical(r.real), target=canonical(r.target);
-        if(!within(target,instance) || within(instance,real)) return deny();
+        if(!within(target,instance) || (within(instance,real)&&!nested_allowed(c))) return deny();
         if(within(p,real)) {
 #ifdef MUTANT_ROOT
             return {Action::redirect,p};
@@ -197,7 +206,7 @@ Result map_query(const Policy& c,const std::wstring& raw,bool wildcard) {
         if(within(p,instance)) return {Action::allow,raw};
         for(auto& r:c.roots) {
             auto real=canonical(r.real), target=canonical(r.target);
-            if(!within(target,instance) || within(instance,real)) return {Action::deny,p};
+            if(!within(target,instance) || (within(instance,real)&&!nested_allowed(c))) return {Action::deny,p};
             if(within(p,real)) {
 #ifdef MUTANT_QUERY_READS
                 return {Action::allow,raw}; // the old behaviour: queries see the real folder

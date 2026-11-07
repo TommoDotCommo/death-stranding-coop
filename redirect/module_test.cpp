@@ -17,6 +17,16 @@ int main(int argc,char** argv) {
                 L"c:\\lab\\s0\\..\\evil.dll",L"c:\\lab\\S0~1\\x.dll",L"\\\\server\\s0\\x.dll",
                 L"x.dll",L"c:x.dll",L"\\\\?\\c:\\windows\\system32\\x.dll"}) check(!module_allowed(c,p,true));
     check(!module_allowed(c,L"c:\\windows\\system32\\junction\\x.dll",false));
+    {
+        auto release=c;
+        release.instance=L"c:\\users\\p\\local\\deathstrandingcoop";
+        release.release_game=L"c:\\steam\\steamapps\\common\\ds";
+        check(module_allowed(release,L"c:\\steam\\steamapps\\common\\ds\\bink2w64.dll",true));
+        check(!module_allowed(release,L"c:\\steam\\steamapps\\common\\ds\\bink2w64.dll",false));
+        check(!module_allowed(release,L"c:\\steam\\steamapps\\common\\other\\bink2w64.dll",true));
+        check(!module_allowed(release,L"c:\\steam\\steamapps\\common\\ds2\\bink2w64.dll",true));
+        check(!module_allowed(c,L"c:\\steam\\steamapps\\common\\ds\\bink2w64.dll",true));
+    }
     // Prefixed requests (live 2026-11-07: the new NVIDIA driver loads nvwgf2um.dll as \\?\C:\...): checked in plain form.
     {
         auto nv=module_request_path(L"\\\\?\\C:\\WINDOWS\\System32\\DriverStore\\FileRepository\\nvmdi.inf_amd64_c8fe3aa22cae8673\\nvwgf2um.dll");

@@ -12,6 +12,15 @@ bool module_allowed(const ModulePolicy& c,const std::wstring& raw,bool evidence)
     i=s;
 #endif
     if(within(p,i)) return true;
+#ifndef MUTANT_MODULE_RELEASE_ROOT
+    auto game=canonical(c.release_game);
+    if(!game.empty()) {
+#ifdef MUTANT_MODULE_RELEASE_WIDE
+        game=game.substr(0,game.find_last_of(L'\\'));
+#endif
+        if(within(p,game))return true;
+    }
+#endif
     if(within(p,w+L"\\system32") || within(p,w+L"\\syswow64")) return true;
     // DriverStore/FileRepository is inside System32 (not an arbitrary DriverStore).
     // Steam client code only: never steamapps, userdata, caches or arbitrary bin DLLs.

@@ -2,12 +2,17 @@
 #include <windows.h>
 #include <d3dcompiler.h>
 #include "redirect.h"
+#include <cstring>
+#include "release_startup_win.h"
 static volatile bool proxy_ready=false; // set once install_redirect has returned inside DllMain
 BOOL WINAPI DllMain(HINSTANCE self,DWORD reason,LPVOID) {
     if(reason==DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(self);
+        // avrt release installs may be started normally by Steam: leave the game alone
+        // unless a launcher ticket or an explicit test environment requests isolation.
+        if(!release_redirect_enabled()) return TRUE;
         // Synchronous redirection only. Mod startup happens after loader return.
-        try {install_redirect(self);} catch(...) {OutputDebugStringA("redirect: initialization exception");TerminateProcess(GetCurrentProcess(),125);return FALSE;}
+        try {install_redirect(self,release_ticket_selected);} catch(...) {OutputDebugStringA("redirect: initialization exception");TerminateProcess(GetCurrentProcess(),125);return FALSE;}
         proxy_ready=true;
     }
     if(reason==DLL_PROCESS_DETACH) flush_redirect_log();

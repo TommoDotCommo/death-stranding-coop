@@ -42,13 +42,14 @@ Uninstall removes the mod file only and keeps `redirect-data` and everything in 
 ## Package
 
 `make_package.py --out DIR --version V --proxy redirect/build/avrt.dll --mod mod/build/mod.dll` writes the
-drop-in folder with its `coop-mod.json` (schema 1: `id`, `version`, `game` with the supported `ds.exe` build hashes,
+drop-in folder. Add `--launcher launcher/build/deathstranding-coop.exe` to include the native launcher beside `ds.exe`.
+The manifest is `coop-mod.json` (schema 1: `id`, `version`, `game` with the supported `ds.exe` build hashes,
 `proxy`, `proton.dll_overrides`, `files` with SHA-256 and size, `user_data`). Entries with `"root": "data"` go to the
 data folder.
 
 ## Tests
 
-`make -C install test`: 17 behaviour tests (install adds only, shipped files byte-identical, uninstall restores the
+`make -C install test`: 18 behaviour tests (install adds only, shipped files byte-identical, uninstall restores the
 folder byte-for-byte, conflict, case variants, unsupported build, running game, rollback, update, repair, mod-manager
 detection, CLI exit codes) and 8 mutants that must fail them (uninstall leaving a file or folder, install
 overwriting, no rollback, status ignoring content, build not checked, running game ignored, uninstall deleting a
@@ -56,12 +57,10 @@ changed file).
 
 ## What a Setup program still needs (not built)
 
-- The proxy refuses to start (exit 125) unless its environment names the data folder and the real save folders
-  (`COOP_REDIRECT_INSTANCE`, `COOP_REAL_*`, `COOP_MODULE_INSTANCE`, `COOP_REDIRECT_STEAM`). Started from Steam, a
-  game with the proxy installed would therefore close at launch. The launcher must set them, or a release build of
-  the proxy needs a defined behaviour without them (pass through unchanged, co-op off) and defaults derived from the
-  known folders. Deliberately not changed here: the lab build must keep failing closed so a missing variable can
-  never run against real saves.
+- The release proxy now has a defined unconfigured path: `avrt.dll` forwards to System32, co-op off. The
+  [launcher](../launcher/README.md) publishes a short-lived, executable-bound ticket in the co-op data folder
+  before requesting a Steam launch. Explicit environment configurations and the `d3dcompiler_47.dll` lab build
+  keep their existing fail-closed behavior. Native Windows startup still needs the documented fixture/live checks.
 - Chain-loading a foreign `avrt.dll` (J3) is not implemented; install reports a conflict instead.
 - A native Setup exe: window, game discovery in Steam libraries, desktop shortcut, firewall rule, and the real
   "game running" check (this core asks the OS to open `ds.exe` for update; a Windows test with a running image is not done).

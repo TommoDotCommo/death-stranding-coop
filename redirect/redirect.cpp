@@ -877,14 +877,15 @@ HINTERNET WINAPI hook_WinHttpConnect(HINTERNET session,LPCWSTR server,INTERNET_P
 }
 }
 void flush_redirect_log() {flush_counts();}
-void install_redirect(void* self) {
+void install_redirect(void* self,bool releaseSession) {
     own=(HMODULE)self;game_thread_owner=GetCurrentThreadId();
+    policy.allowNestedInstance=releaseSession;
     policy.instance=env(L"COOP_REDIRECT_INSTANCE");policy.steam=env(L"COOP_REDIRECT_STEAM");
     for(auto pair:std::vector<std::pair<const wchar_t*,const wchar_t*>>{
         {L"COOP_REAL_LOCAL",L"local"},{L"COOP_REAL_ROAMING",L"roaming"},
         {L"COOP_REAL_DOCUMENTS",L"documents"},{L"COOP_REAL_SAVEDGAMES",L"savedgames"}}) {
         auto r=env(pair.first);auto t=policy.instance+L"\\"+pair.second;
-        if(redirect::within(policy.instance,r) || redirect::within(policy.instance,policy.steam) || !safe_tree(t,true)) fatal("redirect: unsafe roots\n");
+        if((redirect::within(policy.instance,r)&&!policy.allowNestedInstance) || redirect::within(policy.instance,policy.steam) || !safe_tree(t,true)) fatal("redirect: unsafe roots\n");
         policy.roots.push_back({r,t});
     }
     {
@@ -900,6 +901,13 @@ void install_redirect(void* self) {
     }
     if(!safe_tree(policy.instance,true)) fatal("redirect: unsafe instance\n");
     modules.instance=env(L"COOP_MODULE_INSTANCE");modules.windows=env(L"SystemRoot");modules.steam=policy.steam;
+    if(releaseSession) {
+        wchar_t exe[32768];auto count=GetModuleFileNameW(nullptr,exe,32768);
+        if(!count||count>=32768)fatal("redirect: release game path unavailable\n");
+        auto path=redirect::canonical(exe);auto slash=path.find_last_of(L'\\');
+        if(path.empty()||slash==std::wstring::npos)fatal("redirect: invalid release game path\n");
+        modules.release_game=path.substr(0,slash);
+    }
     if(policy.instance!=modules.instance+L"\\redirect-data" || !safe_tree(modules.instance,false)) fatal("redirect: module/redirect instance mismatch\n");
     wchar_t mode[32];DWORD mode_n=::GetEnvironmentVariableW(L"COOP_MODULE_POLICY",mode,32);
     if(!mode_n) modules.mode=redirect::ModuleMode::strict;
@@ -1134,7 +1142,7 @@ void* original_system_export(const wchar_t* dll,const char* name) {
         // The loader must have picked the System32 file, not this proxy (same base name).
         wchar_t got[32768];DWORD g=GetModuleFileNameW(original,got,32768);
         if(!g||g>=32768||original==own||_wcsicmp(got,p.c_str())) fatal("redirect: system DLL is not the System32 file\n");
-        drain_modules();patch(original);return TRUE;
+        if(own){drain_modules();patch(original);}return TRUE;
     };
     if(!InitOnceExecuteOnce(&once,load,nullptr,nullptr)) fatal("redirect: system DLL bootstrap failed\n");
     auto f=real_gpa(original,name);if(!f) fatal("redirect: system DLL export missing\n");return reinterpret_cast<void*>(f);

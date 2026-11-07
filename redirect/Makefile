@@ -2,8 +2,8 @@ CXX = x86_64-w64-mingw32-g++
 FLAGS = -std=c++17 -O2 -Wall -Wextra -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++
 LIBS = -lshell32 -lole32 -luuid -lws2_32 -lwinhttp -lbcrypt -lwinmm
 PROXY_SRC = path_map.cpp module_policy.cpp audit_throttle.cpp objects.cpp network_policy.cpp crash_record.cpp redirect.cpp proxy.cpp ../mod/config.cpp
-PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h virtual_pad.h frame_cap.h iat_patch.h crash_record.h ../mod/game_thread.h ../mod/mod.h
-all: build/thread_trace_probe_module.dll build/thread_trace_probe.exe build/d3dcompiler_47.dll build/avrt.dll build/mutant-avrt-forward-broken.dll build/proxy_fixture.exe build/redirect_probe.exe build/redirect_probe_module.dll build/hooks-disabled.dll build/mutant-queries-unmapped.dll build/mutant-find-unmapped.dll build/mutant-attributes-unmapped.dll build/mutant-net-unhooked.dll build/net_probe.exe build/pad_probe.exe build/research-crash-fault.dll
+PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h startup_policy.h release_startup_win.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h virtual_pad.h frame_cap.h iat_patch.h crash_record.h ../mod/game_thread.h ../mod/mod.h
+all: build/thread_trace_probe_module.dll build/thread_trace_probe.exe build/d3dcompiler_47.dll build/avrt.dll build/mutant-avrt-forward-broken.dll build/mutant-missing-config-closes.dll build/proxy_fixture.exe build/redirect_probe.exe build/redirect_probe_module.dll build/hooks-disabled.dll build/mutant-queries-unmapped.dll build/mutant-find-unmapped.dll build/mutant-attributes-unmapped.dll build/mutant-net-unhooked.dll build/net_probe.exe build/pad_probe.exe build/research-crash-fault.dll
 build:
 	mkdir -p build
 build/d3dcompiler_47.dll: $(PROXY_DEPS) d3dcompiler_47.def | build
@@ -14,6 +14,8 @@ build/avrt.dll: $(AVRT_DEPS) | build
 	$(CXX) $(FLAGS) -DCOOP_PROXY_AVRT -shared $(PROXY_SRC) avrt.def -o $@ $(LIBS)
 build/mutant-avrt-forward-broken.dll: $(AVRT_DEPS) | build
 	$(CXX) $(FLAGS) -DCOOP_PROXY_AVRT -DMUTANT_FORWARD_BROKEN -shared $(PROXY_SRC) avrt.def -o $@ $(LIBS)
+build/mutant-missing-config-closes.dll: $(AVRT_DEPS) | build
+	$(CXX) $(FLAGS) -DCOOP_PROXY_AVRT -DMUTANT_MISSING_CONFIG_CLOSES -shared $(PROXY_SRC) avrt.def -o $@ $(LIBS)
 build/proxy_fixture.exe: proxy_fixture.cpp | build
 	$(CXX) $(FLAGS) $< -o $@ -lavrt
 # Research only (never the default proxy): the crash recorder's stamp-guarded forced fault (crash_record.cpp).
@@ -86,7 +88,8 @@ crash-record-test: crash_record_test.cpp test_crash_record_windows.py build/cras
 	 for mutant in $(CRASH_WINDOWS_MUTANTS); do \
 	 if python3 -B -u test_crash_record_windows.py --exe build/mutant-crash-$$mutant.exe --work build/crash-fixture-mutant >build/mutant-crash-$$mutant.log 2>&1; then echo "SURVIVED CRASH_$$mutant"; exit 1; fi; done
 .PHONY: crash-record-test
-test: thread-trace-test iat-race-test avrt-proxy-test crash-record-test | build
+test: thread-trace-test iat-race-test avrt-proxy-test crash-record-test portable-test
+portable-test: thread-trace-test | build
 	g++ -std=c++17 -Wall -Wextra -Werror network_policy.cpp network_test.cpp -o build/network-test
 	./build/network-test
 	@for mutant in NET_ALLOW_ALL NET_EXACT_LOOPBACK NET_NO_PEERS NET_ANY_V6 NET_MAPPED_LOCAL NET_NAME_PREFIX NET_NEVER_REFUSE NET_REFUSE_LOG_ONLY; do \
@@ -99,7 +102,7 @@ test: thread-trace-test iat-race-test avrt-proxy-test crash-record-test | build
 	 if ./build/mutant-$$mutant >/dev/null; then echo "SURVIVED $$mutant"; exit 1; fi; done
 	g++ -std=c++17 -Wall -Wextra -Werror path_map.cpp module_policy.cpp module_test.cpp -o build/module-test
 	./build/module-test module_fixture.txt
-	@for mutant in MODULE_ALL MODULE_ROOT MODULE_PATCH MODULE_DEFENDER MODULE_REQUEST MODULE_FLAGS MODULE_NO_PREFIX MODULE_ANY_PREFIX; do \
+	@for mutant in MODULE_ALL MODULE_ROOT MODULE_PATCH MODULE_DEFENDER MODULE_REQUEST MODULE_FLAGS MODULE_NO_PREFIX MODULE_ANY_PREFIX MODULE_RELEASE_ROOT MODULE_RELEASE_WIDE; do \
 	 g++ -std=c++17 -DMUTANT_$$mutant path_map.cpp module_policy.cpp module_test.cpp -o build/mutant-$$mutant || exit 1; \
 	 if ./build/mutant-$$mutant module_fixture.txt; then echo "SURVIVED $$mutant"; exit 1; fi; done
 	g++ -std=c++17 -Wall -Wextra -Werror path_map.cpp path_test.cpp -o build/path-test
@@ -127,7 +130,7 @@ test: thread-trace-test iat-race-test avrt-proxy-test crash-record-test | build
 	@for mutant in NO_DEDUP NO_RATE; do \
 	 g++ -std=c++17 -DMUTANT_$$mutant audit_throttle.cpp audit_test.cpp -o build/mutant-$$mutant || exit 1; \
 	 if ./build/mutant-$$mutant >/dev/null 2>&1; then echo "SURVIVED $$mutant"; exit 1; fi; done
-.PHONY: all test
+.PHONY: all test portable-test
 
 build/thread_trace_probe.exe: thread_trace_probe.cpp | build
 	$(CXX) $(FLAGS) -municode $< -o $@ -luser32

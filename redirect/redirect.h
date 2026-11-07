@@ -4,7 +4,12 @@
 namespace redirect {
 enum class Action { deny, allow, redirect, device };
 struct Mapping { std::wstring real, target; };
-struct Policy { std::wstring instance, steam; std::vector<Mapping> roots; };
+struct Policy {
+    std::wstring instance, steam; std::vector<Mapping> roots;
+    // Release tickets may place the co-op data tree in LocalAppData. The instance
+    // exclusion is checked before any real-root mapping; lab environments keep false.
+    bool allowNestedInstance=false;
+};
 struct Result { Action action; std::wstring path; };
 // Win32 namespace prefixes. `\\?\X:\...` and `\\.\X:\...` are ordinary drive paths and are
 // classified after the prefix is removed. `\\?\hid#...#{HID interface guid}` is a device
@@ -35,7 +40,7 @@ Result map_query(const Policy&, const std::wstring&, bool wildcard=false);
 std::wstring hex_flags(unsigned long);
 }
 #ifdef _WIN32
-void install_redirect(void* self);
+void install_redirect(void* self,bool releaseSession=false);
 // Writes pending DENY/DEVICE counts. Safe to call at any time, never blocks.
 void flush_redirect_log();
 #endif

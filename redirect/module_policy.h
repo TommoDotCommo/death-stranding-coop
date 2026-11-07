@@ -6,6 +6,9 @@ enum class ModuleMode { strict, allowlist, log_only };
 struct ModulePolicy {
     ModuleMode mode=ModuleMode::strict;
     std::wstring instance, windows, steam, program_data;
+    // Only a validated release ticket supplies the executable's own directory;
+    // release data and game files live in different trees. Lab default stays empty.
+    std::wstring release_game=L"";
 };
 // Evidence means an absolute long path opened without reparse ancestors, whose
 // final DOS path equals its lexical path. Hard links are permitted for DLL reads.

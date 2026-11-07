@@ -6,8 +6,10 @@ test:
 	$(MAKE) -C mod discovery-test
 	$(MAKE) -C redirect test
 	$(MAKE) -C install test
+	$(MAKE) -C launcher test
 	cd mod && python3 -B -m unittest -q test_analyse_presence
 # Windows binaries (MinGW): the proxy, the mod, the probes and the mutant DLLs.
 all:
 	$(MAKE) -C mod all
 	$(MAKE) -C redirect all
+	$(MAKE) -C launcher all

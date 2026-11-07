@@ -54,6 +54,20 @@ class Base(unittest.TestCase):
 
 
 class InstallUninstall(Base):
+    def test_optional_launcher_is_installed_verified_and_uninstalled(self):
+        launcher = self.root/'launcher.exe'
+        launcher.write_bytes(b'MZ fake launcher')
+        self.package = self.root/'package-with-launcher'
+        make_package.build_package(self.package, '1.0', self.root/'src-1.0/proxy.dll',
+                                   self.root/'src-1.0/mod.dll', launcher=launcher,
+                                   builds=[dict(name='test build', sha256=EXE_HASH)])
+        before = snapshot(self.game)
+        self.install()
+        self.assertEqual((self.game/'deathstranding-coop.exe').read_bytes(), launcher.read_bytes())
+        self.assertEqual(ci.status(self.package, self.game, self.data)['state'], ci.UP_TO_DATE)
+        self.uninstall()
+        self.assertEqual(snapshot(self.game), before)
+
     def test_install_adds_files_and_never_touches_shipped_ones(self):
         before = snapshot(self.game)
         report = self.install()

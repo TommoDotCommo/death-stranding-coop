@@ -25,6 +25,33 @@ loaded module so that the copy:
 The proxy also starts the optional in-process mod (`../mod`) from `redirect-data\mod\mod.json` after the loader has
 returned, never inside `DllMain`.
 
+## Release startup (`avrt.dll`)
+
+The release proxy adds no hooks unless an explicit isolation environment or a
+valid single-use launcher ticket requests co-op. A normal Steam launch without
+that configuration remains a pure System32 `avrt.dll` pass-through: co-op off,
+no save redirection, no mod initialization, no runtime files, one debugger/stderr
+line. Expired, malformed and wrong-copy tickets also pass through.
+
+The [launcher](../launcher/README.md) writes the ticket to
+`%LOCALAPPDATA%\DeathStrandingCoop\launcher-session.ini`; it binds all roots and
+enforced policies to one executable and expires after 120 seconds. The proxy
+consumes it before installing any hook. Only this validated release path permits
+the co-op data tree inside LocalAppData; save opens and queries exclude that tree
+first to prevent recursive remapping. Its module allowlist also admits the exact
+executable directory (with the same path/reparse evidence), since release data
+lives outside the game folder. Adjacent game directories remain refused; two
+module-policy mutants cover this boundary. Explicit `COOP_*` isolation environments
+still select the existing fail-closed path, including incomplete environments.
+The `d3dcompiler_47.dll` lab proxy always requires that environment and still exits
+125 on missing configuration. Neither path weakens networking.
+
+The portable startup decision and malformed/expired/wrong-copy/network guards are
+tested with mutants in `make -C launcher test`. The native game-free
+`test_passthrough_windows.py` runs the release and the missing-config-closes
+mutant against `proxy_fixture.exe`; see the launcher's exact command. No actual
+Windows/game behavior is inferred from a cross-build.
+
 ## Configuration (environment of the game process)
 
 | Variable | Meaning |

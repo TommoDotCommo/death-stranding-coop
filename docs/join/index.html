@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Join a co-op game</title>
+<style>
+:root{--bg:#f3f4f2;--card:#fff;--ink:#1b2024;--dim:#59646b;--rule:#d9ddda;--accent:#0d6b73;--on:#fff;--bad:#a3372f}
+@media (prefers-color-scheme: dark){:root{--bg:#111517;--card:#181d20;--ink:#e7ecea;--dim:#a4b0b3;--rule:#2b3337;--accent:#5cc3c9;--on:#0b1416;--bad:#ec8a80}}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:560px;margin:0 auto;padding:48px 16px}
+.card{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:24px;display:grid;gap:14px}
+h1{font-size:26px;margin:0} p{margin:0} .dim{color:var(--dim);font-size:14px}
+.code{font:15px ui-monospace,Consolas,monospace;background:var(--bg);border:1px dashed var(--rule);border-radius:6px;padding:10px;word-break:break-all}
+.row{display:flex;flex-wrap:wrap;gap:10px}
+a.btn,button{font:600 15px system-ui,sans-serif;border-radius:6px;padding:10px 16px;border:1px solid var(--accent);cursor:pointer;text-decoration:none}
+a.primary{background:var(--accent);color:var(--on)} button,a.ghost{background:transparent;color:var(--accent)}
+.bad{color:var(--bad)} ol{margin:0;padding-left:20px}
+</style>
+</head>
+<body>
+<main>
+  <div class="card" id="card">
+    <h1 id="title">Join a co-op game</h1>
+    <p id="lead" class="dim">Reading the invite...</p>
+  </div>
+  <p class="dim" style="margin-top:16px">This page runs only in your browser. The invite code after the # in the address is never sent to any server.
+  Part of <a href="https://github.com/TommoDotCommo/coop-mod-kit">coop-mod-kit</a>.</p>
+</main>
+<script>
+(function(){
+  var GAMES={
+    DS:{name:'Death Stranding Co-op',game:'Death Stranding Director\'s Cut',scheme:'deathstranding-coop://join/',download:'https://github.com/TommoDotCommo/death-stranding-coop/releases'}
+  };
+  var card=document.getElementById('card');
+  var code=decodeURIComponent((location.hash||'').slice(1)).trim().toUpperCase();
+  var m=code.match(/^(DS)-[0-9A-Z]{5}(-[0-9A-Z]{1,5})+$/);
+  function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e;}
+  if(!m){
+    card.innerHTML='';
+    card.appendChild(el('h1',null,'Join a co-op game'));
+    card.appendChild(el('p','bad',code?'This invite looks incomplete. Ask your friend to copy the whole invite again.':'This link has no invite in it. Ask your friend for their invite.'));
+    return;
+  }
+  var g=GAMES[m[1]];
+  document.title='Join '+g.name;
+  card.innerHTML='';
+  card.appendChild(el('h1',null,'Join a friend in '+g.name));
+  card.appendChild(el('p','dim','If you have the mod installed, open it straight from here. If not, install it first, then come back to this link.'));
+  card.appendChild(el('div','code',code));
+  var row=el('div','row');
+  var open=el('a','btn primary','Open in the launcher'); open.href=g.scheme+code; row.appendChild(open);
+  var copy=el('button',null,'Copy the code'); copy.type='button';
+  copy.onclick=function(){var done=function(){copy.textContent='Copied';};
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(code).then(done,function(){});}};
+  row.appendChild(copy);
+  var dl=el('a','btn ghost','Get '+g.name); dl.href=g.download; row.appendChild(dl);
+  card.appendChild(row);
+  var steps=el('ol','dim');
+  ['If "Open in the launcher" does nothing, start '+g.game+' with the mod.','The launcher finds the copied code by itself and offers to join; or choose Join a friend and paste it.'].forEach(function(t){steps.appendChild(el('li',null,t));});
+  card.appendChild(steps);
+})();
+</script>
+</body>
+</html>
