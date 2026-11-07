@@ -1,4 +1,4 @@
-"""Join/provider mutants must fail the unchanged fake-world oracle, never crash."""
+"""Join/provider/native-move mutants must fail the unchanged fake-world oracle, never crash."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -6,7 +6,8 @@ ROOT = Path(__file__).resolve().parent
 with tempfile.TemporaryDirectory() as directory:
     executable = Path(directory) / 'mutant'
     for family, names in [('JOIN', ['ONCE', 'CONNECTION', 'ROLE', 'THREAD', 'GAMEPLAY', 'DISTANCE', 'SIDE']),
-                          ('PROGRESS', ['COHERENT', 'BOUNDS', 'KEY', 'UNIQUE', 'IDENTITY', 'ZERO'])]:
+                          ('PROGRESS', ['COHERENT', 'BOUNDS', 'KEY', 'UNIQUE', 'IDENTITY', 'ZERO']),
+                          ('MOVE', ['ONCE', 'EVENT', 'VEHICLE', 'BOUNDS', 'READBACK', 'SIGNATURE', 'IDENTITY'])]:
         for name in names:
             macro = 'MUTANT_' + family + '_' + name
             subprocess.run(['g++', '-std=c++17', '-O1', '-pthread', '-D' + macro,

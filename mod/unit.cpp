@@ -48,6 +48,13 @@ int main() {
     auto guest=good;guest.replace(guest.find("host"),4,"guest");assert(mod::parseConfig(guest).role=="guest");
     auto threaded=withKeys(gameBase,"\"game_thread\":true,"+pin);
     assert(mod::parseConfig(withKeys(threaded,"\"join_at_host\":true")).joinAtHost);
+    // join_move: log by default; native only with join_at_host; nothing else accepted.
+    assert(mod::parseConfig(withKeys(threaded,"\"join_at_host\":true")).joinMove=="log");
+    assert(mod::parseConfig(withKeys(threaded,"\"join_at_host\":true,\"join_move\":\"native\"")).joinMove=="native");
+    assert(mod::parseConfig(withKeys(threaded,"\"join_move\":\"log\"")).joinMove=="log");
+    assert(refused(withKeys(threaded,"\"join_move\":\"native\"")));
+    assert(refused(withKeys(threaded,"\"join_at_host\":true,\"join_move\":\"teleport\"")));
+    assert(refused(withKeys(threaded,"\"join_at_host\":true,\"join_move\":true")));
     assert(mod::parseConfig(threaded).gameThread&&!mod::parseConfig(threaded).selfTick);
     assert(refused(withKeys(threaded,"\"self_tick\":true")));
     assert(refused(withKeys(threaded,"\"discovery\":true")));

@@ -1069,6 +1069,68 @@ for the local player's contract. **No safe local-porter relocation path was
 established.** Join-at-host therefore produces a game-thread decision and a
 `JOIN would move ...; native teleport unavailable; no move performed` log only.
 
+(Superseded for the move itself by "Moving the porter" below.)
+
+### Moving the porter: the game's own player teleport (static, 2026-11-08, nothing called)
+
+Pinned build 13300582, `<game dir>/ds.exe` read-only; `.rdata` names, data pointers to them, `lea r8,[name]`
+script-export registrations, `.pdata` bounds and direct call/RIP references, as above. No game ran.
+
+Routes looked at, and why they were not chosen:
+
+| Route | Where | Reading |
+|---|---|---|
+| Fast travel (script) | `DSMissionLogicCommand_sFastTravel` -> 0x33c9a10 -> 0x341f760 | Takes one integer. Queues a request (type 8, the integer at +4) in a 32-entry queue of the game-flow manager at global 0x7c0d6c0. A destination id, not a position; ids for a host's arbitrary spot do not exist. Loading screen and facts (`Fact_FastTravelDisabled`, `IsUsingFastTravelFact`) belong to this path. |
+| Area change | `DSMissionLogicCommand_sChangeArea` -> 0x33cb320 | Same family; an area, not a position. |
+| Player PlaceOn (script) | `Player_ExportedPlaceOn` -> 0x18e9b10 | `ret`: a stub in retail. |
+| Spawn locator (debug) | `DSMissionLogicCommand_sDebugSetPlayerSpawnLocatorUUID` -> 0x18e9b10 | Stub. |
+| Sequence restore | `DSPlayerSystem_sExportedPop/PushWorldTransform` -> 0x26e9940 / 0x26e9a60 | Push saves the porter's transform into the player system (global 0x7be7980, +0x202c0, flag +0x206d0 bit 0); Pop needs a pushed transform and porter byte +0x678 == 0, then writes it raw (0x22dff80) and sends `MsgEntityTeleported` itself. Only returns to a saved spot. |
+| Movie and teleport | `GameMovie_ExportedPlayMovieAndTeleport` -> 0x362b550 | Queues a 60-byte transform behind a movie; needs a movie resource. |
+| FloatAndMovePlayer | `DSPlayerSystem_sExportedFloatAndMovePlayer` -> 0x26e8cd0 | Posts a message (vtable 0x3d6f5c8) with a 16-byte float vector and four floats to the dispatcher at 0x7bbb8c0; meaning unknown. |
+| Voidout return | `DSPlayerSystem_sExportedSetHighPrioReturnTransformAfterAnnihilationAttack` -> 0x26e7360 | Sets where a voidout returns the porter; needs a voidout. |
+| Raw transform | `Entity_ExportedSetWorldTransform` (0x2361ea0 -> 0x22dff80) | Writes the transform only; no teleport message, so no physics or mover reset. |
+
+**Chosen: PlayerGame's teleport virtual.** The world map's developer callbacks are a table at 0x4e7f0e0 (name,
+signature, function): `FastTravelToCrosshair` -> 0x3663ea0 -> 0x3668a10, `FastTravelToMarker` -> 0x3668b20.
+0x3668a10 returns false unless global byte 0x7c26e3c is set (a developer switch; off in retail), gets the local
+Player through the manager at 0x7bc7568 (type 0x4b1acd0), copies its entity's 60-byte transform (entity+c8..+103),
+replaces the position with the map cursor's three floats (cursor object +0x100, +0x80/+0x84/+0x88, widened to
+double), and calls `player->vtable[+0xa8](player, &transform, 2, 0)`. No fade, no loading screen, no other check.
+
+- Player class vtables (slot 0 is the type getter): `Player` 0x3d0f1c0 (getter 0x23c6120), `PlayerGame`
+  0x3d5c860 (getter 0x262b920). Slot +0xa8: Player 0x23c6940 (entity teleport, mode != 0 -> placement flag),
+  PlayerGame **0x2634f00**.
+- 0x2634f00 (player, const WorldTransform*, int mode): returns if `player+0x70` (the entity) is null; sends
+  `MsgDismount` (message vtable 0x3d03e48, type 0x4b07fe0) to the entity through 0x235c990; mode < 0 does
+  nothing more; mode 0 or 1 calls the entity teleport with placement = (mode == 1) and sets dword player+0x16c = 0;
+  mode 2 calls it with placement on and sets player+0x16c = 1. What reads player+0x16c is unknown.
+- Entity teleport **0x235a010** (entity, const WorldTransform*, bool place, bool): with `place`, the transform goes
+  through entity vtable slot +0x20 first. Then the rotation is re-orthonormalised (0x19c38d0), the transform written
+  to entity+c8 under the entity lock at +0x288, flag bit 0 set at +0x88, and `MsgEntityTeleported` (message vtable
+  0x3d03c68, type 0x4b03960) delivered to the entity's physics representation (entity+0x60, via 0x2376490 and the
+  physics world at 0x7bc7df8) and to its message handlers (entity+0x2b0, 0x237c430). `Entity_ExportedPlaceOnWorldTransform`
+  (0x2361c00) is the same call with the last argument zero. The Entity handler 0x2357520 (which sends
+  `MsgEntityRepTeleported` and marks the subtree changed through 0x235bf60) is the kind of reset this message
+  triggers: previous transform saved at +0x108, children walked, physics bodies moved.
+- `DSPlayerEntity` vtable 0x3d7d0d8 (getter 0x2711b40), slot +0x20 **0x3737930**: ground placement. It casts a
+  ray from 2 m above the target to 2 m below (constants 0x3bb8360 / 0x3d19e20, z up) in the physics world at
+  0x578c140, up to 5 hits, ignoring the porter's own entity tree (it walks to the root through +0x70), and puts
+  the porter on the hit. With no hit the target is used as given (branch at 0x3737ad2).
+- Thread: the map callback runs in the game's menu update on the main thread; the mod calls from its verified
+  game-thread callback. The entity write takes the entity lock; nothing here waits.
+- Streaming: nothing in this path loads the world. Decima streams around the camera/porter on later frames, so at
+  600 m the ground's collision may not be loaded yet when the porter arrives; whether he then falls, is held, or is
+  caught by the game's fall recovery is **unknown**. The ground probe only reaches 2 m.
+- Cargo and orders: the move carries the entity tree (carried cargo is attached to the porter); fast-travel facts
+  are not consulted, because this is not fast travel. Whether a story order that forbids fast travel misbehaves
+  after a move is unknown; the live check uses an ordinary early save.
+
+`join::Mover` (join_move `native`) calls 0x2634f00 with mode 2 and the porter's own rotation, as the map callback
+does, once per session, only in normal gameplay, on foot (`vehicle::Reader`), with a target inside a sanity box,
+after checking the three code prefixes (40 bytes each, unique in the code), the call from 0x2634f7f to 0x235a010,
+both vtables' type getters and slots, and the live objects' vtables. It reads the porter back (same player and
+entity, within 5 m of the target) and checks again 3 s later that he has not dropped more than 5 m. It never retries.
+
 ### Dressing the own body: the engine's model swap (static, 2026-11-07, nothing called)
 
 Read from `<game dir>/ds.exe` with the PE and name-reference method (objdump, `.pdata` bounds, rel32 call and

@@ -713,7 +713,7 @@ attempt, and with it the offline notices of an isolated copy.
 
 The mod log records `POSE available|unavailable reason=...` on every change, so an outside driver can wait for gameplay.
 
-## Session progress and join-at-host (experimental, move is a stub)
+## Session progress and join-at-host (experimental; the move is opt-in)
 
 `progress_mismatch` accepts `"warn"` (default) or `"refuse"`. The handshake carries
 the exact wire build and the local progress observation. A known difference
@@ -742,11 +742,24 @@ opportunity. Over 300 m in adapter space, the target is 2 m right of the host at
 the host's height. A nearer first observation consumes the opportunity too;
 walking away or reconnecting cannot trigger a later join.
 
-**No native move is implemented.** The verified game callback logs
+With `join_move:"log"` (the default) nothing moves: the verified game callback logs
 `JOIN would move local porter to ...; native teleport unavailable; no move performed`
-once, without writing Sam's transform or controller. See `game_offsets.md` for
-the unresolved native teleport contract. Host tests and mutants cover decisions
-and the guarded progress reader (`make -C mod join-test`).
+once, without writing Sam's transform or controller.
+
+`join_move:"native"` (needs `join_at_host:true`, and `puppet_probe:true` for the gameplay gates) moves the porter
+once with the game's own player teleport: the call the world map's developer "fast travel to crosshair" makes
+(`game_offsets.md`, "Moving the porter"). At start the mod checks the code (three pinned prefixes, the call between
+them and both class vtables) and logs `JOIN native move armed: code identity verified`, or refuses to start. On
+the plan it logs `JOIN moving local porter to ...`, then rechecks right before the call: normal gameplay (no game
+event, cutscene, loading or private room), on foot (the vehicle reader; unknown refuses), a readable porter whose
+objects are a PlayerGame and a DSPlayerEntity, and a target inside a sanity box (|x|, |z| <= 16 km, height
+-500..3000 m in adapter axes; the real world bounds are not known). Any refusal logs
+`JOIN native move refused: <reason>; no move performed` and uses up the session's one move. After the call it reads
+the porter back: `JOIN moved local porter: readback D m from the target` within 5 m, else
+`JOIN readback failed: ...; stopping`. Three seconds later `JOIN settle check: porter holding, ...` or
+`JOIN settle check failed: porter dropped D m after the move (ground not streamed in?)`. It never retries and never
+moves the porter back. Host tests and mutants cover decisions, the move's gates and readback, the code checks and
+the guarded progress reader (`make -C mod join-test`).
 
 For a one-copy live experiment by an authorized operator, retain the normal pinned
 config, enforced networking, instance save isolation and fresh proxy probes.
@@ -776,8 +789,20 @@ coop-partner --slot 1 --peer-slot 0 --role host --session <session> --follow --o
 axis); replay mode uses its existing placement options instead. Expect
 `HANDSHAKE progress=unknown` or a discovered partial value on both peers, then
 one `JOIN would move ... distance ...` over 300 m once the partner is fresh.
-Read the local porter position independently before/after: it must remain at its
-original location, because this is a stub. The host must stay roughly 600 m away.
+Read the local porter position independently before/after: with `join_move:"log"` it must remain at its
+original location. The host must stay roughly 600 m away.
+
+Native move (one copy and the stand-in; about 2 minutes of gameplay): add `"join_move":"native"` to the config
+above, rebuild and deploy the proxy (it embeds the config parser) and the mod, and run the same stand-in command
+(`--offset 600 0 0`, now with `--seconds 120`). Expect, in order: `JOIN native move armed: code identity verified`
+at start, `HANDSHAKE ...`, `JOIN moving local porter to ... distance 600.xx m ...`, `JOIN native move called: ...`,
+`JOIN moved local porter: readback D m` (D under 5) and `JOIN settle check: porter holding`. Confirm from the
+process, not the log: the local pose (presence log or a memory read of the porter entity +c8) jumps by about
+600 m and lies within 5 m of the target printed in `JOIN native move called` (game axes), and stays near it. The
+stand-in follows with the offset, so it lands 600 m away again: the porter must not jump a second time. The game must keep running (presence log rows keep
+coming, no `STALL` line) for 90 s after the move. A `STALL ... in 'join move'` line means the native call faulted:
+stop the copy and report it; do not retry. A `readback failed` or `settle check failed` line is a result, not a
+fault: record it with the positions.
 Expect no JOIN with join disabled, host/none role, private-room/event flags, stale
 presence or a near partner, and no second JOIN after reconnect. Allow about 90 s
 for loaded gameplay plus 2 s for pairing; title/loading time is additional.

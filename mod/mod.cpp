@@ -126,8 +126,9 @@ struct Cache final:ds::StateProvider {
 };
 struct Runtime final:ds::Transport {
     mod::Config config;
-    // Session progress and join-at-host: decision/logging only; no native porter move is approved.
+    // Session progress and join-at-host: a decision and a log, plus one native move only with join_move native.
     mod::join::Decision joinDecision;uint64_t nextProgressRead=0,handshakeNoted=0;bool progressRefusalNoted=false;std::string progressReason;
+    std::unique_ptr<mod::join::Mover> joinMover;   // join_move native only (join.h)
     void noteHandshake() {
         if(!core->connected()||handshakeNoted==core->connectionSerial())return;
         handshakeNoted=core->connectionSerial();progressRefusalNoted=false;
@@ -600,6 +601,20 @@ struct Runtime final:ds::Transport {
 #endif
                 twin=std::make_unique<mod::puppet::Double>(std::move(twinApi),[this](const std::string& row){note(row.c_str());});
                 twin->walk(true);   // borrow the porter's animation network so the partner walks (game_offsets.md)
+                // Join at host, join_move native: the game's player teleport, once per session (join.h). Code checked here.
+                if(config.joinAtHost&&config.joinMove=="native") {
+#if defined(_WIN32) && !defined(MOD_FAKE_NETWORK)
+                    mod::join::MoveApi move;auto* sp=&*sampler;auto vehicles=std::make_shared<mod::vehicle::Reader>(*sampler);
+                    move.porter=[sp]{return mod::join::readPorter(*sp);};
+                    move.gameplay=[this,sp]{auto a=mod::puppet::readLocalAnchor(*sp);
+                        return provider&&!provider->isInCutsceneOrLoading()&&gameEvent&&!gameEvent()&&a.entity&&twin&&!twin->gameUsesDouble(a.entity);};
+                    move.riding=[vehicles]()->std::optional<bool>{auto o=vehicles->read(mod::nowUs());if(!o.available||!o.coherent)return std::nullopt;return o.riding;};
+                    move.teleport=mod::join::nativeTeleport(*sampler);
+                    joinMover=std::make_unique<mod::join::Mover>(std::move(move));note("JOIN native move armed: code identity verified\n");
+#else
+                    note("JOIN native move unavailable in this build; join_move native logs only\n");
+#endif
+                }
 #ifndef MOD_FAKE_NETWORK
                 {
                     auto made=mod::puppet::nativeApi(*sampler);auto driver=mod::puppet::nativeDoubleApi(*sampler);
@@ -850,13 +865,17 @@ struct Runtime final:ds::Transport {
             }
             stage="double";
             if(twin&&gameContext)tickTwin(now);
-            // Join-at-host: runs only in the verified game callback. No engine relocation is called.
+            // Join-at-host: runs only in the verified game callback. Moves the porter only with join_move native.
             if(config.joinAtHost&&gameContext){
                 mod::join::Input input;input.enabled=true;input.gameThread=true;input.connected=core->connected();input.connection=core->connectionSerial();
                 input.role=(config.role=="guest"||config.role=="client")?mod::join::Role::Guest:config.role=="host"?mod::join::Role::Host:mod::join::Role::None;
                 input.localGameplay=cache.available&&!cache.gated&&twin&&gameEvent&&!inEvent;
                 input.local=cache.local;input.host=core->latestPresence(now);
-                if(auto plan=joinDecision.tick(input))note(mod::join::wouldMove(*plan).c_str());
+                if(auto plan=joinDecision.tick(input)){
+                    if(!joinMover)note(mod::join::wouldMove(*plan).c_str());
+                    else{note(mod::join::willMove(*plan).c_str());stage="join move";note(joinMover->start(*plan,now).c_str());}
+                }
+                if(joinMover){stage="join settle";auto line=joinMover->tick(now);if(!line.empty())note(line.c_str());}
             }
             // End join dispatch.
             stage="cargo";
