@@ -135,6 +135,8 @@ ArtPartsSwapPlan planArtPartsSwap(const discovery::Sampler&,uint64_t body,uint64
 constexpr uint64_t StreamingDoubleGlobal=0x7be79b0,StreamingDoubleRef=0x30;
 uint64_t readStreamingDouble(const discovery::Sampler&,uint64_t global);
 // Plan, one call of setArtParts(body, wanted), then dressedLike. True when the body ends dressed like the double.
+// Parts in the entity's primary ArtPartsData (component vtable artPartsVtable at entity+180), 0 if unreadable.
+unsigned wornParts(const discovery::Sampler&,uint64_t entity,uint64_t artPartsVtable);
 bool dressInPlace(const discovery::Sampler&,uint64_t body,uint64_t resident,uint64_t artPartsVtable,
                   const std::function<void(uint64_t body,uint64_t resource)>& setArtParts,const std::function<void(const std::string&)>& note,uint64_t porter=0);
 // DSConstructionPointManager_sExportedRemoveConstructionsInArea (2cd1bf0 -> 2cd9760), read statically: (const float4*
@@ -153,10 +155,14 @@ struct OwnBodyApi {
     // its double; the body's ArtPartsData component (entity+180) creates them on request. Optional; true when done.
     std::function<bool(uint64_t body)> dress;
     std::function<void(uint64_t body)> remove;                           // the game's queued removal
+    // Optional: the game has dressed the porter (his ArtPartsData holds the full set). Right after a load it has not
+    // (live 2026-11-08), and a body made then cannot be dressed; creation waits, at most ReadyWaitTicks.
+    std::function<bool(uint64_t porter)> ready;
 };
 class OwnBody {
 public:
     static constexpr unsigned MaxFailures=3;
+    static constexpr unsigned ReadyWaitTicks=600;   // about 30 s at the 20 Hz game-thread tick
     explicit OwnBody(OwnBodyApi api,std::function<void(const std::string&)> record):api_(std::move(api)),record_(std::move(record)) {}
     // One call per game-thread tick while own-body mode is wanted. Returns the body to drive (0: none yet, or given
     // up after MaxFailures refusals: the caller falls back to the resident double). A new porter entity means a new
@@ -166,7 +172,7 @@ public:
     bool exhausted() const {return failures_>=MaxFailures;}
     uint64_t body() const {return body_;}
 private:
-    OwnBodyApi api_;std::function<void(const std::string&)> record_;uint64_t porter_=0,body_=0;unsigned failures_=0;
+    OwnBodyApi api_;std::function<void(const std::string&)> record_;uint64_t porter_=0,body_=0;unsigned failures_=0;unsigned waited_=0;
 };
 class Double {
 public:

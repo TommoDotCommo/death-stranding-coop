@@ -640,6 +640,7 @@ struct Runtime final:ds::Transport {
                     oa.alive=[sp,akukan](uint64_t b){uint64_t v=0;return sp->read(b,&v,8)&&v==akukan;};
                     auto hide=driver.visible;auto rest=driver.sleep;oa.park=[hide,rest](uint64_t b){hide(b,false);rest(b,true);};
                     oa.dress=mod::puppet::nativeDress(*sampler,[this]{return dressMask;},[this](const std::string& row){note(row.c_str());});
+                    oa.ready=[sp](uint64_t porter){return mod::puppet::wornParts(*sp,porter,sp->base+0x3cf2b18)>1;};   // dressed by the game
                     own=std::make_unique<mod::puppet::OwnBody>(std::move(oa),[this](const std::string& row){note(row.c_str());});
                     driver.find=[this](uint64_t){return ownEntity;};
                     ownTwin=std::make_unique<mod::puppet::Double>(std::move(driver),[this](const std::string& row){note(row.c_str());});

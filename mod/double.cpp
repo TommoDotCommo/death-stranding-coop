@@ -267,6 +267,13 @@ uint64_t OwnBody::tick(const Anchor& porter){
     if(body_&&!api_.alive(body_)){record_("BODY lost: a new body will be made\n");body_=0;}
 #endif
     if(body_||exhausted())return body_;
+#ifndef MUTANT_OWNBODY_READY
+    if(api_.ready&&waited_<ReadyWaitTicks&&!api_.ready(porter.entity)){
+        if(!waited_++)record_("BODY waiting: the game has not dressed the porter yet\n");
+        if(waited_==ReadyWaitTicks)record_("BODY waited long enough; making the body anyway\n");
+        return 0;
+    }
+#endif
     auto resource=api_.resource(porter.entity);if(!resource)return 0;
     // Made 3 m in front of the porter (the placement tried live), then parked at once.
     auto t=transform(porter.pose);double l=std::hypot(t.rotation[3],t.rotation[4]);
@@ -421,6 +428,11 @@ uint64_t readStreamingDouble(const discovery::Sampler& s,uint64_t global){
 #else
     return ref;
 #endif
+}
+unsigned wornParts(const discovery::Sampler& s,uint64_t entity,uint64_t artParts){
+    uint64_t c=ownSlot(s,entity,EntityArtPartsOffset,artParts);uint32_t parts=0;
+    if(!c||!s.read(c+0x100,&parts,4)||parts>4096)return 0;
+    return parts;
 }
 bool dressInPlace(const discovery::Sampler& s,uint64_t body,uint64_t resident,uint64_t artParts,
                   const std::function<void(uint64_t,uint64_t)>& setArtParts,const std::function<void(const std::string&)>& note,uint64_t porter){

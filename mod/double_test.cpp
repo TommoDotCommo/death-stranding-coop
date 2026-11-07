@@ -131,6 +131,13 @@ void ownBody(){
     // No resident double resource (yet): not counted as a failure.
     auto x=std::make_shared<World>();x->resource=0;OwnBodyApi a2=api;a2.resource=[x](uint64_t){return x->resource;};
     OwnBody n(a2,[&](const std::string&){});for(unsigned i=0;i<5;++i)CHECK(n.tick(porter)==0);CHECK(!n.exhausted());
+    // The porter not dressed yet (right after a load): nothing made until he is, logged once; bounded wait.
+    {auto ready=std::make_shared<bool>(false);OwnBodyApi a3=api;a3.ready=[ready](uint64_t){return *ready;};
+     std::vector<std::string> lines;OwnBody g(a3,[&](const std::string& r){lines.push_back(r);});auto before=w->creates;w->refuse=false;
+     for(unsigned i=0;i<20;++i)CHECK(g.tick(porter)==0);CHECK(w->creates==before&&lines.size()==1&&lines[0].find("waiting")!=std::string::npos);
+     *ready=true;CHECK(g.tick(porter)!=0&&w->creates==before+1);
+     OwnBody h(a3,[&](const std::string&){});*ready=false;unsigned made=0;
+     for(unsigned i=0;i<=OwnBody::ReadyWaitTicks+1;++i)made+=h.tick(porter)!=0;CHECK(made>0&&w->creates==before+2);}
 }
 void ownCommand(){
     CHECK(parseOwnCommand("own S1\n"," S1\n")==DressArtPartsInPlace);CHECK(parseOwnCommand("own9 S1\n"," S1\n")==9u);
