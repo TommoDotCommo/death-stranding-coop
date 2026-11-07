@@ -44,7 +44,8 @@ public:
     // StagedMove: how far the porter must walk (path length) before a pick-up is reported (the cargo menu stages the
     // items next to him exactly like a pick-up and puts back what he leaves; he cannot move while it is open).
     static constexpr double HeldRange=2.5, AwayRange=3.0, NearRange=15.0, Still=0.05, MatchRange=0.5, FindRange=0.5, DropRange=40.0,
-                            StagedMove=0.5;
+                            StagedMove=0.5, MoveRange=1.0;   // MoveRange: a shared item that settles farther than
+                            // this from its known place (slid down a slope, carried off by a river) is moved for the partner
     // CarryWait: how long a just-put-down item may keep its carried position before it counts as its real place (the
     // carry frame lasted over a second live; it lies far from the porter, so it never counts while he is elsewhere).
     static constexpr uint64_t Settle=1000, HeldMemory=30000, ExpectFor=10000, CarryWait=5000;
@@ -64,16 +65,22 @@ public:
     // Items not shared (kind other than SharedKind) that were put down or picked up since the last call.
     std::vector<Kept> takeKept();
     // Ids for this porter's placements: base + 1, base + 2, ... (keep below 2^53: they travel as a wire t-field).
-    void setIdBase(uint64_t base){nextId_=base;}
+    void setIdBase(uint64_t base){nextId_=base;idBase_=base;}
+    // What to send as the ref of a pick-up: its shared id, or for an item without one this run's tag (the id base: low
+    // 20 bits zero, never an id), so the partner can tell items placed in this run apart (partnerTook decodes it).
+    uint64_t wireRef(const Taken& t) const {return t.id?t.id:(idBase_&~uint64_t(0xfffff));}
     size_t mirrored() const;
     size_t pending() const {return expected_.size()+cancelled_.size();}   // expectations and cancellations still held
     size_t shared() const;
 private:
     struct Track { uint32_t hash=0,index=0; std::array<double,3> position{}, carriedAt{}, stagedFrom{}, stagedPorter{};
+                   std::array<double,3> restAt{}; bool resting=false;   // where the partner knows it lies
                    double stagedPath=0; uint64_t stillSince=0, heldAt=0, id=0, downAt=0; uint8_t where=0;
                    bool fresh=false, announced=false, mirror=false, putDown=false, learned=false, removed=false, local=false,
                         staged=false, lostToPartner=false; };
     std::map<uint32_t,Track> tracks_; bool primed_=false; uint64_t nextId_=0;
+    uint64_t idBase_=0;
+    uint64_t nextIdNow(){if(((++nextId_)&0xfffff)==0)++nextId_;return nextId_;}   // never a run tag
     std::vector<std::pair<Placement,uint64_t>> expected_; std::vector<Taken> taken_; std::vector<Kept> kept_;std::vector<uint64_t> cancelled_; std::vector<uint32_t> doomed_;
 };
 }

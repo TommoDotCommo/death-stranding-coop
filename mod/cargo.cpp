@@ -27,14 +27,16 @@ std::vector<Taken> Sync::takeTaken(){std::vector<Taken> out;out.swap(taken_);ret
 std::vector<uint32_t> Sync::takeDoomed(){std::vector<uint32_t> out;out.swap(doomed_);return out;}
 std::vector<Kept> Sync::takeKept(){std::vector<Kept> out;out.swap(kept_);return out;}
 std::optional<uint32_t> Sync::partnerTook(uint64_t id,uint32_t hash,const std::array<double,3>& at){
+    // A ref with the low 20 bits zero is not an id but the partner's run tag (Sync::wireRef): an item it had no id for.
+    uint64_t run=0;if(id&&(id&0xfffff)==0){run=id>>20;id=0;}
 #ifndef MUTANT_CARGO_DOOM
     // Taken before its copy appeared here: the copy is deleted when it appears.
     if(id)for(auto& e:expected_)if(e.first.id==id){cancelled_.push_back(id);return std::nullopt;}
 #endif
-    auto forget=[](Track& t){t.id=0;t.mirror=false;t.announced=true;t.learned=false;t.removed=true;};   // never announced or reported again
+    auto forget=[](Track& t){t.id=0;t.mirror=false;t.announced=true;t.learned=false;t.removed=true;t.resting=false;};   // never announced or reported again
     if(id)for(auto& [slot,t]:tracks_)if(t.id==id){
 #ifndef MUTANT_CARGO_TOOK_ECHO
-        (void)slot;t.id=0;t.mirror=false;t.announced=true;   // never announced or reported again
+        (void)slot;t.id=0;t.mirror=false;t.announced=true;t.resting=false;   // never announced or reported again
 #else
         (void)slot;
 #endif
@@ -45,9 +47,21 @@ std::optional<uint32_t> Sync::partnerTook(uint64_t id,uint32_t hash,const std::a
     }
 #ifndef MUTANT_CARGO_FIND
     // Not known by id here (either mod restarted since it was shared): the nearest same item on the ground.
-    if(hash){Track* best=nullptr;double bd=FindRange;
+    if(hash){Track* best=nullptr;
+        // Taken without an id: the partner had that item at its start. Best: an item both worlds had at the first look
+        // here, or a copy of the partner's item from an earlier run of its mod; then ours; last a copy of an item it placed
+        // in its current run (it would have sent that id). Nearest within each rank.
+        int bestRank=3;double bd=FindRange;
         for(auto& [slot,t]:tracks_){(void)slot;if(t.hash!=hash||(t.where==OnPorter&&!t.staged)||t.removed||t.local)continue;
-            double d=distance(t.staged?t.stagedFrom:t.position,at);if(d<=bd){bd=d;best=&t;}}
+#ifndef MUTANT_CARGO_OTHER_ID
+            if(id&&t.id&&t.id!=id)continue;   // another shared item (found by the world fuzz once items could slide)
+#endif
+            int rank=0;
+#ifndef MUTANT_CARGO_RUN
+            if(!id&&!t.learned){bool theirs=t.mirror&&t.id;rank=!theirs?1:(run&&(t.id>>20)==run)?2:0;}
+#endif
+            double d=distance(t.staged?t.stagedFrom:t.position,at);if(d>FindRange)continue;
+            if(rank<bestRank||(rank==bestRank&&d<=bd)){bestRank=rank;bd=d;best=&t;}}
         if(best&&best->staged){best->lostToPartner=true;return std::nullopt;}
         if(best){forget(*best);return best->index;}}
 #endif
@@ -63,7 +77,8 @@ std::vector<Placement> Sync::observe(const std::vector<Record>& records,const st
     for(auto& r:records){
         auto old=tracks_.find(r.slot);bool same=old!=tracks_.end()&&old->second.hash==r.hash;
         Track t=same?old->second:Track{};
-        if(!same){t.hash=r.hash;t.position=r.position;t.stillSince=now;t.fresh=primed_;t.learned=!primed_&&location(r)==InWorld;}
+        if(!same){t.hash=r.hash;t.position=r.position;t.stillSince=now;t.fresh=primed_;t.learned=!primed_&&location(r)==InWorld;
+                  if(t.learned){t.resting=true;t.restAt=r.position;}}
         t.index=r.index;
 #ifndef MUTANT_CARGO_LOCAL
         t.local=kind(r)!=SharedKind;
@@ -86,21 +101,21 @@ std::vector<Placement> Sync::observe(const std::vector<Record>& records,const st
             if(!t.staged){t.stagedFrom=t.position;t.stagedPath=0;t.lostToPartner=false;}   // picked up again while pending: same pick-up
             t.staged=true;t.stagedPorter=porter;
 #else
-            taken_.push_back({t.id,t.hash,t.position});t.id=0;t.mirror=false;t.announced=false;t.fresh=false;t.learned=false;
+            taken_.push_back({t.id,t.hash,t.resting?t.restAt:t.position});t.id=0;t.mirror=false;t.announced=false;t.fresh=false;t.learned=false;t.resting=false;
 #endif
         }
 #endif
         bool returned=false;
         if(t.staged){
             auto taken=[&]{   // a real pick-up
-                if(!t.lostToPartner)taken_.push_back({t.id,t.hash,t.stagedFrom});   // (the partner already took theirs)
-                t.id=0;t.mirror=false;t.announced=false;t.fresh=false;t.learned=false;t.staged=false;t.lostToPartner=false;};
+                if(!t.lostToPartner)taken_.push_back({t.id,t.hash,t.resting?t.restAt:t.stagedFrom});   // where the partner has it
+                t.id=0;t.mirror=false;t.announced=false;t.fresh=false;t.learned=false;t.staged=false;t.lostToPartner=false;t.resting=false;};
             if(where==OnPorter){t.stagedPath+=distance(porter,t.stagedPorter);t.stagedPorter=porter;if(t.stagedPath>StagedMove)taken();}
             else if(where==InWorld){
                 if(carryFrame){}                                                  // the real place comes later
                 else if(distance(r.position,t.stagedFrom)<=MatchRange){           // back where it lay: never taken
                     returned=true;t.staged=false;t.heldAt=0;
-                    if(t.lostToPartner){doomed_.push_back(r.index);t.id=0;t.mirror=false;t.announced=true;t.learned=false;t.removed=true;t.lostToPartner=false;}}
+                    if(t.lostToPartner){doomed_.push_back(r.index);t.id=0;t.mirror=false;t.announced=true;t.learned=false;t.removed=true;t.lostToPartner=false;t.resting=false;}}
                 else{taken();t.putDown=true;}}                                    // put down elsewhere: a new placement
             else taken();
         }
@@ -120,7 +135,7 @@ std::vector<Placement> Sync::observe(const std::vector<Record>& records,const st
             for(auto it=expected_.begin();it!=expected_.end();++it)
 #ifndef MUTANT_CARGO_ECHO
                 if(it->first.hash==r.hash&&distance(it->first.position,r.position)<=MatchRange){
-                    t.mirror=true;t.id=it->first.id;
+                    t.mirror=true;t.id=it->first.id;t.resting=true;t.restAt=it->first.position;
                     auto c=std::find(cancelled_.begin(),cancelled_.end(),t.id);
                     if(c!=cancelled_.end()){cancelled_.erase(c);doomed_.push_back(r.index);t.id=0;t.announced=true;}
                     expected_.erase(it);break;}
@@ -142,16 +157,22 @@ std::vector<Placement> Sync::observe(const std::vector<Record>& records,const st
 #endif
         if(primed_&&!t.mirror&&!t.announced&&settled&&ours&&letGo){
             if(t.local)kept_.push_back({r.hash,kind(r),false});   // not shared: noted once
-            else{t.id=++nextId_;out.push_back({r.hash,r.position,t.id});}
+            else{t.id=nextIdNow();out.push_back({r.hash,r.position,t.id});t.resting=true;t.restAt=r.position;}
             t.announced=true;t.fresh=false;t.putDown=false;}
+#ifndef MUTANT_CARGO_MOVED
+        // Moved on the ground (slope, river): the partner's copy goes from the old place and comes back at the new one.
+        else if(primed_&&t.resting&&!t.local&&!t.staged&&where==InWorld&&settled&&distance(r.position,t.restAt)>MoveRange){
+            taken_.push_back({t.id,t.hash,t.restAt});t.id=nextIdNow();out.push_back({r.hash,r.position,t.id});
+            t.mirror=false;t.learned=false;t.announced=true;t.restAt=r.position;}
+#endif
         next[r.slot]=t;
     }
     // Gone: a shared item that vanished from the world while this porter was near (used, delivered, destroyed here).
     for(auto& [slot,t]:tracks_){
         auto n=next.find(slot);bool gone=n==next.end()||n->second.hash!=t.hash;
         if(!gone)continue;
-        if(t.staged){if(!t.lostToPartner)taken_.push_back({t.id,t.hash,t.stagedFrom});continue;}   // used from the cargo menu
-        if(t.id&&t.where==InWorld&&distance(t.position,porter)<=NearRange)taken_.push_back({t.id,t.hash,t.position});
+        if(t.staged){if(!t.lostToPartner)taken_.push_back({t.id,t.hash,t.resting?t.restAt:t.stagedFrom});continue;}   // used from the cargo menu
+        if(t.id&&t.where==InWorld&&distance(t.position,porter)<=NearRange)taken_.push_back({t.id,t.hash,t.resting?t.restAt:t.position});
     }
     tracks_.swap(next);primed_=true;
     return out;

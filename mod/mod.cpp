@@ -202,7 +202,7 @@ struct Runtime final:ds::Transport {
             std::ostringstream o;o<<"CARGO not shared: item "<<k.hash<<" kind "<<unsigned(k.kind)<<(k.pickedUp?" picked up":" put down")<<"\n";note(o.str().c_str());
         }
         for(auto& tk:cargoSync.takeTaken()) {
-            ds::CargoEvent e;e.type=2;e.ref=tk.id;e.item=tk.hash;e.position={tk.position[0],tk.position[2],tk.position[1]};   // game -> adapter axes
+            ds::CargoEvent e;e.type=2;e.ref=cargoSync.wireRef(tk);e.item=tk.hash;e.position={tk.position[0],tk.position[2],tk.position[1]};   // game -> adapter axes
             core->queueCargo(e);++cargoTaken;
             note(("CARGO took item "+std::to_string(tk.hash)+(tk.id?" shared "+std::to_string(tk.id):std::string(" (no shared id)"))+" -> partner\n").c_str());
         }

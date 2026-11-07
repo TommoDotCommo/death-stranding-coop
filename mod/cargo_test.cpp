@@ -109,6 +109,38 @@ int main(){
     // Staged and used up (gone from the records): taken.
     { Sync s;s.setIdBase(10);s.observe({},porter,0);s.observe({world(3,30,1)},porter,100);s.observe({world(3,30,1)},porter,1200);
       s.observe({staged(3,30)},porter,1300);s.observe({},porter,1400);auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==11); }
+    // A shared item that settles more than 1 m from its known place (slope, river) is moved for the partner: taken from
+    // the old place, placed at the new one. Small nudges are not.
+    { Sync s;s.setIdBase(10);s.observe({},porter,0);s.observe({world(3,30,1)},porter,100);CHECK(s.observe({world(3,30,1)},porter,1200).size()==1);
+      s.observe({world(3,30,1.6)},porter,1300);CHECK(s.observe({world(3,30,1.6)},porter,2500).empty()&&s.takeTaken().empty());   // 0.6 m
+      s.observe({world(3,30,4)},porter,2600);CHECK(s.observe({world(3,30,4)},porter,3000).empty());                              // not settled
+      auto a=s.observe({world(3,30,4)},porter,3700);auto t=s.takeTaken();
+      CHECK(a.size()==1&&a[0].id==12&&a[0].position[0]==4&&t.size()==1&&t[0].id==11&&t[0].position[0]==1);
+      CHECK(s.observe({world(3,30,4)},porter,5000).empty()&&s.takeTaken().empty()); }                                            // once
+    { Sync s;s.observe({},porter,0);s.expect({60,{2,0,100},777},100);s.observe({world(6,60,2)},porter,200);   // the partner's, moved here
+      s.observe({world(6,60,9)},porter,300);auto a=s.observe({world(6,60,9)},porter,1500);auto t=s.takeTaken();
+      CHECK(a.size()==1&&t.size()==1&&t[0].id==777&&t[0].position[0]==2&&s.mirrored()==0); }
+    { Sync s;s.observe({world(5,50,1)},porter,0);s.observe({carried(5,50,0)},porter,100);s.observe({carried(5,50,0)},moved,200);s.takeTaken();
+      for(uint64_t t=300;t<=3000;t+=300){s.observe({carried(5,50,0)},moved,t);}CHECK(s.takeTaken().empty()); }   // carried: not "moved"
+    // The partner took an item by an id unknown here: the fallback by item and place never takes another shared item.
+    { Sync s;s.setIdBase(10);s.observe({},porter,0);s.observe({world(3,30,1)},porter,100);s.observe({world(3,30,1)},porter,1200);   // ours, id 11
+      CHECK(!s.partnerTook(99,30,{1,0,100}));                                                    // their item 99 was here too
+      auto i=s.partnerTook(0,30,{1,0,100});CHECK(i&&*i==103); }                                   // no id given: the nearest
+    // Two identical items at one place, one from the partner's earlier run and one placed in its current run (9): a
+    // pick-up it reports without an id (with its run tag) is the earlier one; it would know the id of the other.
+    { Sync s;s.observe({},porter,0);uint64_t old=(5ull<<20)+1,cur=(9ull<<20)+1;
+      s.expect({60,{2,0,100},cur},100);s.observe({world(7,60,2)},porter,200);
+      s.expect({60,{2,0,100},old},300);s.observe({world(7,60,2),world(6,60,2)},porter,400);
+      auto i=s.partnerTook(9ull<<20,60,{2,0,100});CHECK(i&&*i==106);
+      Sync u;u.setIdBase(9ull<<20);CHECK(u.wireRef({0,60,{}})==9ull<<20&&u.wireRef({77,60,{}})==77); }
+    // Our own placement and a copy of the partner's earlier item at one place: a run-tagged pick-up is the copy.
+    { Sync s;s.setIdBase(3ull<<20);s.observe({},porter,0);s.expect({60,{2,0,100},(5ull<<20)+1},50);s.observe({world(6,60,2)},porter,100);
+      s.observe({world(6,60,2),world(7,60,2)},porter,200);s.observe({world(6,60,2),world(7,60,2)},porter,1300);   // 7 is ours, announced
+      auto i=s.partnerTook(9ull<<20,60,{2,0,100});CHECK(i&&*i==106); }
+    // Slid and picked up before it settled: the pick-up names the place the partner knows, not where it slid to.
+    { Sync s;s.setIdBase(10);s.observe({},porter,0);s.observe({world(3,30,1)},porter,100);s.observe({world(3,30,1)},porter,1200);
+      s.observe({world(3,30,3)},porter,1300);s.observe({carried(3,30,0)},porter,1400);s.observe({carried(3,30,0)},moved,1500);
+      auto t=s.takeTaken();CHECK(t.size()==1&&t[0].id==11&&t[0].position[0]==1); }
     // Both picked it up at once: ours stays with us (nothing to delete here).
     { Sync s;s.setIdBase(70);s.observe({},porter,0);s.observe({world(7,70,1)},porter,100);s.observe({world(7,70,1)},porter,1200);
       s.observe({carried(7,70,0.1)},porter,1300);s.takeTaken();CHECK(!s.partnerTook(71));

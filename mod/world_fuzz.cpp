@@ -53,12 +53,15 @@ int main(){
             for(int s=0;s<2;++s){auto& me=w[s];
                 for(auto& p:me.sync.observe(me.list(),me.porter,now)){if(trace)std::fprintf(stderr,"t%llu w%d placed h%u at %.0f,%.0f id %llx\n",(unsigned long long)now,s,p.hash,p.position[0],p.position[1],(unsigned long long)p.id);me.out.push_back({1,p.hash,p.position,p.id,now+250+rng()%1000});}
                 for(auto idx:me.sync.takeDoomed())me.records.erase(idx);
-                for(auto tk:me.sync.takeTaken()){if(trace)std::fprintf(stderr,"t%llu w%d took id %llx h%u at %.0f,%.0f\n",(unsigned long long)now,s,(unsigned long long)tk.id,tk.hash,tk.position[0],tk.position[1]);me.out.push_back({2,tk.hash,tk.position,tk.id,now+250+rng()%1000});}}
+                for(auto tk:me.sync.takeTaken()){if(trace)std::fprintf(stderr,"t%llu w%d took id %llx h%u at %.0f,%.0f\n",(unsigned long long)now,s,(unsigned long long)tk.id,tk.hash,tk.position[0],tk.position[1]);me.out.push_back({2,tk.hash,tk.position,me.sync.wireRef(tk),now+250+rng()%1000});}}
             primed=true;}};
         settle(1);
         for(int step=0;step<120;++step){
-            int s=int(rng()%2);auto& me=w[s];int a=me.browsing?-1:int(rng()%5);
+            int s=int(rng()%2);auto& me=w[s];int a=me.browsing?-1:int(rng()%6);
             if(a==-1){}   // in the cargo menu: nothing else
+            else if(a==5){   // an item on the ground slides or floats away (slope, river): only in this world
+                std::vector<uint32_t> g;for(auto& [k,r]:me.records)if((r.state>>8)==InWorld&&kind(r)==SharedKind)g.push_back(k);
+                if(!g.empty()){auto& r=me.records[g[rng()%g.size()]];r.position[0]+=2+double(rng()%4);if(trace)std::fprintf(stderr,"t%llu w%d slide h%u to %.0f,%.0f\n",(unsigned long long)now,s,r.hash,r.position[0],r.position[1]);}}
             else if(a==4){me.browsing=true;me.browseUntil=now+250*(1+rng()%30);
                 for(auto& [k,r]:me.records)if((r.state>>8)==InWorld&&std::hypot(r.position[0]-me.porter[0],r.position[1]-me.porter[1])<3){
                     me.browsed.push_back({k,r.position});r.state=OnPorter<<8|(r.state&0xff);r.position={99.6,100.7,20};}}

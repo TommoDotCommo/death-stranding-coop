@@ -146,6 +146,15 @@ centimetre) and picked it up again (the other game removed it by its shared id).
 down and put the corpse down meanwhile; it stayed local. While a porter's cargo menu is open the game uses the
 double for its preview, so the partner is hidden there and comes back when the menu closes.
 
+Shared cargo that moves on its own (slides down a slope, floats down a river) is followed: once it settles more than
+1 m from where the partner has it, the partner's copy goes and comes back at the new place. Walking into a crate
+moved it about 1 cm live, so this is for physics, not for porters. Found by the world fuzz once items could slide: a
+pick-up named the item's current place instead of the one the partner knows, and the search by item and place (used
+after a restart, when ids are unknown) could take another shared item lying at the same spot. A pick-up without an id
+now carries the sender's run tag, so the receiver prefers items from before that run. Known limit: identical items
+stacked on one spot around a restart can still be matched the wrong way round (6 in 2000 fuzzed sessions with
+restarts and sliding; none without restarts).
+
 ## Testing aids (built 2026-11-03, first run live 2026-11-07)
 
 Live 2026-11-07, one copy, unattended: `auto_continue` reached gameplay from the title with no input (62 s cold,
