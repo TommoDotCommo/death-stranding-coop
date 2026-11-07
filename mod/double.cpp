@@ -390,6 +390,49 @@ bool dressByModel(const discovery::Sampler& s,uint64_t body,uint64_t resident,ui
     say(done?"BODY dressed like the double: one ArtPartsData, the double's\n":"BODY not dressed like the double after the model swap\n");
     return done;
 }
+ArtPartsSwapPlan planArtPartsSwap(const discovery::Sampler& s,uint64_t body,uint64_t resident,uint64_t artParts){
+    ArtPartsSwapPlan p;
+    if(!body||!resident||body==resident){p.refusal="no resident double";return p;}
+    std::vector<uint64_t> all;uint64_t primary=ownSlot(s,body,EntityArtPartsOffset,artParts);
+    if(!ownComponents(s,body,artParts,all)||!primary||!q(s,primary+ComponentResourceOffset,p.wears)||!p.wears){p.refusal="body's art parts unreadable";return p;}
+#ifndef MUTANT_OWNBODY_INPLACE_SINGLE
+    // A second ArtPartsData (from mask 8's apply) would stay beside the replaced one: the drawing this mask is meant to avoid.
+    if(all.size()!=1||all[0]!=primary){p.refusal="body has more than one ArtPartsData";return p;}
+#endif
+    uint64_t wanted=0;
+#ifndef MUTANT_OWNBODY_INPLACE_RESOURCE
+    uint64_t worn=ownSlot(s,resident,EntityArtPartsOffset,artParts);
+    if(!worn||!q(s,worn+ComponentResourceOffset,wanted)||!wanted){p.refusal="double's art parts unreadable";return p;}
+#else
+    // What the double's model builds (its ModelResource+30), not what the double wears.
+    uint64_t model=ownSlot(s,resident,EntityModelOffset,0),resource=0;
+    if(!model||!q(s,model+ComponentResourceOffset,resource)||!q(s,resource+ModelArtPartsOffset,wanted)||!wanted){p.refusal="double's art parts unreadable";return p;}
+#endif
+#ifndef MUTANT_OWNBODY_INPLACE_SAME
+    if(wanted==p.wears){p.refusal="body already wears the double's art parts";return p;}
+#endif
+    p.wanted=wanted;return p;
+}
+uint64_t readStreamingDouble(const discovery::Sampler& s,uint64_t global){
+    uint64_t object=0,ref=0;
+    if(!q(s,global,object)||!object||!q(s,object+StreamingDoubleRef,ref)||ref<0x20)return 0;
+#ifndef MUTANT_OWNBODY_STREAMING_REF
+    return ref-0x20;   // a reference points at entity+20
+#else
+    return ref;
+#endif
+}
+bool dressInPlace(const discovery::Sampler& s,uint64_t body,uint64_t resident,uint64_t artParts,
+                  const std::function<void(uint64_t,uint64_t)>& setArtParts,const std::function<void(const std::string&)>& note){
+    auto say=[&](const std::string& row){if(note)note(row);};
+    auto plan=planArtPartsSwap(s,body,resident,artParts);
+    if(!plan.wanted){say("BODY art-parts swap refused: "+plan.refusal+" (wears "+hex(plan.wears)+")\n");return false;}
+    say("BODY art-parts swap: the game's in-place replacement with the double's art parts "+hex(plan.wanted)+" (wears "+hex(plan.wears)+")\n");
+    setArtParts(body,plan.wanted);
+    bool done=dressedLike(s,body,artParts,plan.wanted);
+    say(done?"BODY dressed like the double: one ArtPartsData, the double's\n":"BODY not dressed like the double after the art-parts swap\n");
+    return done;
+}
 std::optional<uint32_t> parseCargoCommand(const std::string& text,const std::string& stamp,const char* expected){
     std::istringstream in(text);std::string verb,id,tail,extra;
     if(!(in>>verb>>id>>tail)||(in>>extra)||verb!=expected||tail!=stamp)return std::nullopt;
@@ -530,13 +573,25 @@ std::function<bool(uint64_t)> nativeDress(discovery::Sampler& s,std::function<un
         0x4c,0x8b,0xb1,0xb8,0x00,0x00,0x00};
     bool setModelOk=false;{std::vector<uint8_t> at(setModelSig.size());setModelOk=s.read(s.base+0x235e010,at.data(),at.size())&&at==setModelSig;}
     using SetModelFn=void(*)(uint64_t,uint64_t,float);auto setModel=reinterpret_cast<SetModelFn>(s.base+0x235e010);
-    return [&s,artParts,make,entries,mask,apply,camera,twin,note,setModelOk,setModel](uint64_t body){
+    // The in-place art-parts replacement (235d320: entity, ArtPartsDataResource, force) that the porter's
+    // DSPlayerStreamingControlComponent calls on the porter and on the resident double (game_offsets.md). Mask 0x80 only.
+    const std::vector<uint8_t> inPlaceSig={0x40,0x55,0x57,0x41,0x56,0x48,0x8b,0xec,0x48,0x83,0xec,0x70,0x48,0x8b,0x05,0xfd,0x3c,0xc0,0x02,0x48,0x33,0xc4,
+        0x48,0x89,0x45,0xe0,0x48,0x8b,0x81,0x80,0x01,0x00,0x00,0x4c,0x8b,0xf2,0x48,0x8b,0xf9,0x48,0x85,0xc0,0x74,0x0f,0x48,0x39,0x50,0x30};
+    bool inPlaceOk=false;{std::vector<uint8_t> at(inPlaceSig.size());inPlaceOk=s.read(s.base+0x235d320,at.data(),at.size())&&at==inPlaceSig;}
+    using InPlaceFn=void(*)(uint64_t,uint64_t,bool);auto inPlace=reinterpret_cast<InPlaceFn>(s.base+0x235d320);
+    return [&s,artParts,make,entries,mask,apply,camera,twin,note,setModelOk,setModel,inPlaceOk,inPlace](uint64_t body){
         unsigned m=mask?mask():7;
         auto say=[&note](const std::string& row){if(note)note(row);};
         auto resident=[&]{auto porter=readLocalAnchor(s);return porter.entity?findDouble(s,porter.entity,camera,twin):uint64_t(0);};
         auto report=[&](bool result){
-            if(m&DressReport){say(describeBody(s,"made",body,artParts));auto r=resident();if(r&&r!=body)say(describeBody(s,"double",r,artParts));}
+            if(m&DressReport){say(describeBody(s,"made",body,artParts));auto r=resident();if(r&&r!=body)say(describeBody(s,"double",r,artParts));
+                auto streaming=readStreamingDouble(s,s.base+StreamingDoubleGlobal);
+                say("BODY report streaming double "+hex(streaming)+(streaming&&streaming==r?" (the double)\n":" (not the double)\n"));}
             return result;};
+        if(m&DressArtPartsInPlace){
+            if(!inPlaceOk){say("BODY art-parts swap refused: in-place replacement signature differs\n");return report(false);}
+            return report(dressInPlace(s,body,resident(),artParts,[inPlace](uint64_t b,uint64_t res){inPlace(b,res,true);},say));
+        }
         if(m&(DressModelExact|DressModelThenApply)){
             if(!setModelOk){say("BODY model swap refused: SetModel signature differs\n");return report(false);}
             ModelSwapCalls calls;calls.setModel=[setModel](uint64_t b,uint64_t model){setModel(b,model,0.f);};

@@ -81,7 +81,9 @@ std::function<bool(uint64_t body,unsigned index,bool on)> nativePartToggle(disco
 // ArtPartsData's part off and 1 removes it (hangs). Research bits (game_offsets.md, "Dressing the own body: the engine's
 // model swap"): 0x10 the engine's model swap (235e010) with the resident double's ModelResource, only when that resource
 // builds exactly the double's art-parts resource; 0x20 the same swap without that condition, then the variation apply
-// only when the body is still not dressed like the double; 0x40 a read-only report of both bodies. note receives rows.
+// only when the body is still not dressed like the double; 0x40 a read-only report of both bodies; 0x80 the game's own
+// in-place art-parts replacement (235d320) with the double's art-parts resource, the call that dresses the resident double
+// (game_offsets.md, "Who dresses the resident double"); 0x80 runs alone (only 0x40 still applies). note receives rows.
 std::function<bool(uint64_t)> nativeDress(discovery::Sampler&,std::function<unsigned()> mask,std::function<void(const std::string&)> note={});
 // Own-mode mask from a `puppet.double` command: "own<stamp>" = 8, "own<h><stamp>" or "own<hh><stamp>" (lowercase hex;
 // own0 dresses nothing). Nothing for any other command.
@@ -115,6 +117,26 @@ struct ModelSwapCalls {
 // double. True when the body ends dressed like the double (dressedLike). Rows go to note.
 bool dressByModel(const discovery::Sampler&,uint64_t body,uint64_t resident,uint64_t artPartsVtable,unsigned mask,
                   const ModelSwapCalls&,const std::function<void(const std::string&)>& note);
+// Mask 0x80. The porter's DSPlayerStreamingControlComponent (update 27caae0) dresses the resident double with
+// 235d320(entity, ArtPartsDataResource, force): it announces MsgArtPartsWillChange, takes the old primary ArtPartsData's
+// parts off the model (22b4310), removes it, builds one from the resource, caches it at entity+180 and announces
+// MsgModelPartsChanged and MsgArtPartsChanged. The mod replays that call once on a made body.
+constexpr unsigned DressArtPartsInPlace=0x80;
+struct ArtPartsSwapPlan {
+    uint64_t wears=0;      // the body's primary art-parts resource now
+    uint64_t wanted=0;     // the resident double's (its primary ArtPartsData's resource); 0 = refused
+    std::string refusal;
+};
+// Reads only. Refused unless the body has exactly one ArtPartsData of its own and it is the primary one, the double
+// wears art parts of its own, and the body does not wear those already.
+ArtPartsSwapPlan planArtPartsSwap(const discovery::Sampler&,uint64_t body,uint64_t resident,uint64_t artPartsVtable);
+// Reads only: the entity the streaming control dresses as the double, 269c560(*global): the reference at +30 minus 0x20
+// (global = image + 7be79b0). 0 when unreadable or empty. The 0x40 report compares it with the double the mod found.
+constexpr uint64_t StreamingDoubleGlobal=0x7be79b0,StreamingDoubleRef=0x30;
+uint64_t readStreamingDouble(const discovery::Sampler&,uint64_t global);
+// Plan, one call of setArtParts(body, wanted), then dressedLike. True when the body ends dressed like the double.
+bool dressInPlace(const discovery::Sampler&,uint64_t body,uint64_t resident,uint64_t artPartsVtable,
+                  const std::function<void(uint64_t body,uint64_t resource)>& setArtParts,const std::function<void(const std::string&)>& note);
 // DSConstructionPointManager_sExportedRemoveConstructionsInArea (2cd1bf0 -> 2cd9760), read statically: (const float4*
 // box min, const float4* box max, const world transform*, bool, bool, bool). It collects the structures in the box and
 // marks for removal those whose owner byte (+b2) is 1 (first bool), 0 (second) or 2 (third). Unverified live.

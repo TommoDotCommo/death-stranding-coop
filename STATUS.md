@@ -21,7 +21,9 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
   partner with the double backend. The mod now has an `own` mode that makes, parks and drives that body (resident
   double handed back) and holds the partner's exact position. With the porter's art parts applied to it, the body
   is drawn and walks, stable over 90 s, but with stretched-polygon artifacts still to fix (`mod/game_offsets.md`,
-  "Drawing the own body"). `peer` stays the default.
+  "Drawing the own body"). Static follow-up (2026-11-08): the game dresses its own double with the in-place art-parts
+  replacement that the porter's body-variant streaming makes on the porter and the double; research mask `own80`
+  replays it on the made body (untested live). `peer` stays the default.
 - BTs, vehicles, cutscenes, death and voidouts, saves of a shared world,
   the partner's gear and outfit, and the partner's own controller input.
 - A real two-PC session. The mod now accepts any unicast IPv4 peer (LAN or VPN) and binds only the address that

@@ -1171,7 +1171,8 @@ the main thread waits forever. The engine's own removal of a primary `ArtPartsDa
 `AddComponentFromResource` (234ae90) in replace mode also uses the plain 235b930. That removal is used only for
 same-resource variation components, which are not at +180.
 
-**Who dresses the resident double.** Not found. `ApplyArtPartsVariation` (22bc100) has no direct callers (script
+**Who dresses the resident double.** Not found in this pass; found on 2026-11-08 (next section: the porter's
+`DSPlayerStreamingControlComponent` with the in-place replacement 235d320). `ApplyArtPartsVariation` (22bc100) has no direct callers (script
 only); the art-parts apply (22bae20) is called from 22bb6c0, 32e1730 and the porter's update 2cc2ea0 (a component of
 type 4ae3af0 on the porter). None of the six code references to the double's type (2711a83, 29115fc/291160f,
 2922d49/2922d5e, 2cc37a3/2cc37b6) dresses it. Of SetModel's 13 callers, 2cb7f10 is the cargo manager (entities with a
@@ -1207,6 +1208,86 @@ Host-tested in `double_test.cpp` (`modelSwap`, `bodyReport`, `ownCommand`). Muta
 - `0x40`, read-only: after dressing, one log row per component of the made body and the resident double (vtable as an
   image offset, owner, resource), the primary `ArtPartsData`, each `ArtPartsData`'s part count and part 20's state
   byte and name hash. Combine it with the other bits (`50`, `60`, `48`).
+
+### Who dresses the resident double: the porter's streaming control (static, 2026-11-08, not called yet)
+
+Live facts this starts from (2026-11-08): the resident double has exactly one `ArtPartsData` (vtable 3cf2b18), whose
+resource has 52 parts (part 20 state 0xf, name hash 0x5acbbf14), but its own model's `ModelResource` (component vtable
+3d0adb8) builds a different, one-part art-parts resource. So the game replaces the double's primary `ArtPartsData` in
+place after the double is made. With mask 0x60, SetModel ran safely but also left two `ArtPartsData` (the model builds
+the one-part one, then the apply adds the 52-part one).
+
+Read from `<game dir>/ds.exe` with the PE and name-reference method (full objdump, `.pdata` bounds, rel32 call index,
+Decima type descriptors and their names at descriptor+0x40).
+
+**The only code that rebuilds an entity's primary `ArtPartsData` from a resource in place** is 235d320
+`(Entity*, ArtPartsDataResource*, bool force)`. The builder of an `ArtPartsData` from a resource, 22b5970, has six
+callers: the entity initialiser 234f3e0, SetModel 235e010, `AddComponentFromResource` 234ae90, a variation-group
+builder 2353a33 (not +180), a message handler 2352700 (attach only, not +180) and 235d320. 235d320, in order:
+1. returns at once when entity+180 is set, its resource (+30) is the given one and `force` is false;
+2. announces `MsgArtPartsWillChange` (message vtable 3d03f18, type 4b0ae60) to the scene (2376490 on entity+60 +208,
+   then 23d4660 on global 7bc7df8) and to the entity's own listeners (237c430 on entity+2b0), as SetModel step 3 does;
+3. under the entity lock (entity+288; skipped while the byte at 7bc4e7c is set, which 36448b0 clears after the
+   frame's scene jobs): **22b4310(old ArtPartsData)**, then the plain removal 235b930, then clears +180;
+4. builds the new one (22b5970), attaches it (2348220), caches it at +180;
+5. announces `MsgModelPartsChanged` (3d03bc0, type 4b03f60) and `MsgArtPartsChanged` (3d03f00, type 4b0ada0) with the
+   new component, the same two messages SetModel sends (its 235c990 calls).
+It does not deactivate the entity, unregister or replace the model, or mark the transform changed (SetModel's steps 4,
+6 and 7). 22b4310 is the step a plain `EntityComponent_ExportedRemove` lacks: for the entity's model (owner+b8) it opens
+an update (2391620(model, 1)), takes every part of the old `ArtPartsData` off the model (each part's mesh from part+20
++38 +48, or the resource's +20 +48 for an empty slot: 23948f0(model, mesh), or 23948a0 when there is none; parts whose
+virtual +60 is non-zero are skipped) and closes the update (23966a0). Reading, unverified: the hang after removing the
+one-part `ArtPartsData` came from the model still holding parts of a component that no longer exists.
+
+**The caller.** 235d320 has exactly three call sites, all in 27caae0 (chunk 27cae90), the update of
+`DSPlayerStreamingControlComponent` (type 4bcf890, size 0xb0; the porter keeps it at porter+54f8, filled at 271fc90 by
+the component lookup 22b2a60, and the porter's update calls it at 26d64aa). It is a small state machine on
+component+70:
+- state 0: when the wanted body variant (component+76; 8 means "ask" 298d7e0) differs from the current one (+74), it
+  picks `Variants[n]` of its resource (component+30, `DSPlayerStreamingControlComponentResource` 4bd0560, array
+  data at resource+50) into the reference at +80 and asks the streaming manager (global 7ae90e0, virtuals +28 and +38)
+  to load it; state 1;
+- state 1: waits for the loaded flag (+a1 bit 0), then state 2;
+- state 2 (27cae74): with the loaded `DSPlayerBodyVariant` (type 4bd03e0: `SkinnedModelResource` +38,
+  `BootsSkinnedModelResource` +40, `ShoesArtPartsVariation` +58, `ReflectShoesArtPartsVariation` +60):
+  `235d320(porter, variant+38 -> +30, true)`, then **`235d320(resident double, variant+38 -> +30, true)`**, then
+  `235d320(owner of the component at (porter+54c8)+4d88, variant+40 -> +30, true)` (the boots) and stores +58/+60
+  in that component; it tells a manager at global 7bf6e78 (name unknown; 2dcdae0, 2dcd360, 2dcd770 read entity+180's
+  resource) about the old and new resources of the porter only, releases the previous variant and keeps the new one
+  at +78; state 3 with a 1.0 timer at +98;
+- state 3: counts the timer down and returns to 0.
+The second entity is `269c560(global 7be79b0)`: the global's reference at +30, minus 0x20 (a reference points at
+entity+20). Read statically as the resident double, three ways: 273bb10, which 2757d40 calls with it, uses its
+resource's array at +118/+120, where `DSPlayerAKukanEntityResource` (4bca0e0) keeps `SentenceResourceContainers`;
+273bb10 locks entity+790, inside the 0x7a0-byte `DSPlayerAKukanEntity`; and 26c7760 skips its work while that
+entity's flags (reference+68 = entity+88) have bit 8, sleeping, set, as the parked double does. The global is the
+object `DSPlayerEntity_sExportedHasBaggage` also reads (above). No writer of the global's +30 reference was found by the
+direct-access scan. The 0x40 report now logs `BODY report streaming double <address> (the double)` when this entity is
+the double the mod found, which settles it live.
+So the game dresses its double exactly like the porter, whenever the porter's body variant streams in (at load and
+at every outfit variant change), and a body the mod makes is not on that list.
+
+**Replaying it: research mask bit 0x80** (`puppet.double` command `own80 <stamp>`, or `ownc0 <stamp>` with the
+report). After the body is made and before it is parked, the mod reads the resident double's primary `ArtPartsData`
+resource and calls `235d320(body, that resource, true)` once, the game's own sequence. Refused, with nothing called,
+unless the body has exactly one `ArtPartsData` of its own and it is the primary one, the double's primary one is its
+own, and the body does not wear that resource already; refused too when the function's first 48 bytes differ. Success
+is checked by reading: the body then has one `ArtPartsData`, cached at +180, built from the double's resource. 0x80
+runs alone: with it, bits 1, 2, 8, 0x10 and 0x20 are ignored (0x40 still reports). Host test `inPlaceSwap` in
+`double_test.cpp`; mutants that must fail: `MUTANT_OWNBODY_INPLACE_{SINGLE,RESOURCE,SAME}` (accept a body with a second
+`ArtPartsData`, take the art parts the double's model builds instead of those it wears, repeat on a dressed body) and
+`MUTANT_OWNBODY_STREAMING_REF` (the report's reading of the global without the 0x20 adjustment).
+Not replayed: the boots entity and the 7bf6e78 manager calls, which the game makes for the porter only. Unknown: whether
+the made body's cover, cover+animation and facial-rig components appear after this swap (the apply built them; the
+attach here is the same 2348220), and whether a later outfit change should be replayed on the body too.
+
+**What the hang at 1a0873b waits for.** 1a086a0 is the job system's wait for a counter to reach zero (it runs other
+jobs, 1a07fa0, while it waits). On the hung main thread it is called from 1cd4890, whose profiling label is the string
+`RenderSystem::FinishDraw` (3c02398): it waits on the counter at (render system, global 578c148)+e0 -> +5ba280, with
+the job system at 577b780. That counter is raised when 36448b0 submits the frame's jobs (1a06860 with the counter) and
+lowered by them (lock xadd -1). So the main thread waits for the frame's draw jobs, and one of them never finished.
+Which job, and why, is unknown; a draw job touching the parts of the removed `ArtPartsData` fits the 22b4310 reading
+above.
 
 ## Vehicles (static, 2026-11-07; read-only provider, no vehicle created or live vehicle checked)
 

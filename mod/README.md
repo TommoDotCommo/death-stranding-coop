@@ -654,7 +654,8 @@ Each command is a file in the mod folder. The mod consumes it and accepts it onl
   double's own private-room animation network on the next acquire instead of the porter's). Requires `puppet_probe`.
   `own <stamp>` drives a Sam the mod makes (dress mask 8); `own<hex> <stamp>` (one or two lowercase hex digits, e.g.
   `own10 <stamp>`) sets a research dress mask (`double.h`): 10 the engine's model swap, 20 the swap then the apply if
-  needed, 40 a read-only report (`BODY report ...` rows). The body is made once per world, so the mask of the first
+  needed, 40 a read-only report (`BODY report ...` rows), 80 the game's own in-place art-parts replacement with the
+  double's art parts, the call that dresses the resident double (runs alone; `ownc0` adds the report). The body is made once per world, so the mask of the first
   `own` command of a process is the one used. The log confirms it with `DOUBLE own dress mask 0x..`.
 - `pad.script`: a virtual gamepad script (`pad.h`), requires `virtual_pad` and `COOP_VIRTUAL_PAD=1`.
 - `puppet.marker` (map markers, `marker.h`, OFF until armed; needs `puppet_probe` and a partner mode for the partner

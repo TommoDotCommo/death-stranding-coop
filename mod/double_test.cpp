@@ -173,7 +173,45 @@ struct Wardrobe {
     }
     bool dress(unsigned mask,std::vector<std::string>* rows=nullptr){auto s=f.sampler();
         return dressByModel(s,B+0xb000,B+0xa000,art,mask,calls(),[rows](const std::string& r){if(rows)rows->push_back(r);});}
+    // The engine's in-place replacement 235d320 as read statically: the primary ArtPartsData is replaced by one built from
+    // the resource and cached at +180; the model component stays. keepOld: a broken engine that adds instead.
+    unsigned inPlaces=0;bool keepOld=false;
+    bool inPlace(std::vector<std::string>* rows=nullptr,uint64_t body=0,uint64_t resident=0){auto s=f.sampler();
+        return dressInPlace(s,body?body:B+0xb000,resident?resident:B+0xa000,art,[this](uint64_t b,uint64_t resource){
+            CHECK(b==B+0xb000);++inPlaces;artParts(0xb600,0xb000,resource-B,resource==B+0xa400?52:1,0xa600);f.put<uint64_t>(0xb000+0x180,B+0xb600);
+            if(keepOld)list(0xb000,0xb800,{0xb100,0xb300,0xb600});else list(0xb000,0xb800,{0xb100,0xb600});},
+            [rows](const std::string& r){if(rows)rows->push_back(r);});}
 };
+// Mask 0x80: as live, the double's model resource builds the one-part art parts (the body's) while the double wears the
+// 52-part ones that the porter's streaming control gave it.
+void inPlaceSwap(){
+    {Wardrobe w;w.f.put<uint64_t>(0xa200+0x30,w.B+0xb400);auto s=w.f.sampler();
+     auto p=planArtPartsSwap(s,w.B+0xb000,w.B+0xa000,w.art);CHECK(p.wanted==w.B+0xa400&&p.wears==w.B+0xb400);
+     std::vector<std::string> rows;CHECK(w.inPlace(&rows)&&w.inPlaces==1);
+     auto t=w.f.sampler();CHECK(dressedLike(t,w.B+0xb000,w.art,w.B+0xa400));
+     auto made=describeBody(t,"made",w.B+0xb000,w.art);CHECK(made.find("parts 52")!=std::string::npos&&made.find("parts 1\n")==std::string::npos);
+     CHECK(!rows.empty()&&rows.back().find("dressed like the double")!=std::string::npos);
+     // Once dressed, a repeat calls nothing.
+     CHECK(!w.inPlace()&&w.inPlaces==1);}
+    // A body that already carries a second ArtPartsData (mask 8's apply): refused, nothing called.
+    {Wardrobe w;w.artParts(0xb700,0xb000,0xa400,52,0xa600);w.list(0xb000,0xb800,{0xb100,0xb300,0xb700});
+     std::vector<std::string> rows;CHECK(!w.inPlace(&rows)&&w.inPlaces==0);CHECK(!rows.empty()&&rows.back().find("more than one")!=std::string::npos);}
+    // The double's art parts not its own, or no double, or the double itself: refused.
+    {Wardrobe w;w.f.put<uint64_t>(0xa300+0x48,w.B+0xb000);CHECK(!w.inPlace()&&w.inPlaces==0);}
+    {Wardrobe w;CHECK(!w.inPlace(nullptr,0,0x1)&&w.inPlaces==0);CHECK(!w.inPlace(nullptr,w.B+0xb000,w.B+0xb000)&&w.inPlaces==0);}
+    // The body's primary ArtPartsData not its own: refused.
+    {Wardrobe w;w.f.put<uint64_t>(0xb300+0x48,w.B+0xa000);CHECK(!w.inPlace()&&w.inPlaces==0);}
+    // An engine that adds instead of replacing is not reported as dressed.
+    {Wardrobe w;w.keepOld=true;CHECK(!w.inPlace()&&w.inPlaces==1);}
+    // The entity the streaming control dresses: global -> object, object+30 -> entity+20.
+    {Wardrobe w;auto s=w.f.sampler();CHECK(readStreamingDouble(s,w.B+0xc000)==0);
+     w.f.put<uint64_t>(0xc000,w.B+0xc100);auto t=w.f.sampler();CHECK(readStreamingDouble(t,w.B+0xc000)==0);
+     w.f.put<uint64_t>(0xc100+0x30,w.B+0xa020);auto u=w.f.sampler();CHECK(readStreamingDouble(u,w.B+0xc000)==w.B+0xa000);
+     CHECK(readStreamingDouble(u,w.B+0xfffff0)==0);}
+    // The new bit is its own: own80 and ownc0 parse, the default stays 8.
+    CHECK(parseOwnCommand("own80 S1\n"," S1\n")==DressArtPartsInPlace);CHECK(parseOwnCommand("ownc0 S1\n"," S1\n")==(DressArtPartsInPlace|DressReport));
+    CHECK(parseOwnCommand("own S1\n"," S1\n")==8u&&!(8u&DressArtPartsInPlace));
+}
 void modelSwap(){
     {Wardrobe w;auto s=w.f.sampler();
      auto p=planModelSwap(s,w.B+0xb000,w.B+0xa000,w.art,true);CHECK(p.model==w.B+0xa200&&p.builds==w.B+0xa400&&p.wanted==w.B+0xa400);
@@ -314,7 +352,7 @@ void hold(){
     c.found=0x7100;f.tick(true,&t,0,0,true);CHECK(f.stage()==Double::Stage::Parked&&c.calls.size()==n&&c.last("double_changed"));
 }
 int main(){
-    lifecycle();mover();animation();network();refusedUpgrade();actions();effects();releasedByGame();cargoCommand();privateRoom();ownBody();ownCommand();modelSwap();bodyReport();
+    lifecycle();mover();animation();network();refusedUpgrade();actions();effects();releasedByGame();cargoCommand();privateRoom();ownBody();ownCommand();modelSwap();inPlaceSwap();bodyReport();
     try{transient();}catch(const std::exception& e){std::fprintf(stderr,"double oracle: transient threw %s\n",e.what());++failures;}
     hold();busy();yields(true);yields(false);identity();unconfirmed();tree();conversion();
     if(!failures)std::puts("double borrow, yield, release and pointer-path checks passed");
