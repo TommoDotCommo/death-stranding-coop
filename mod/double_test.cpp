@@ -176,11 +176,11 @@ struct Wardrobe {
     // The engine's in-place replacement 235d320 as read statically: the primary ArtPartsData is replaced by one built from
     // the resource and cached at +180; the model component stays. keepOld: a broken engine that adds instead.
     unsigned inPlaces=0;bool keepOld=false;
-    bool inPlace(std::vector<std::string>* rows=nullptr,uint64_t body=0,uint64_t resident=0){auto s=f.sampler();
+    bool inPlace(std::vector<std::string>* rows=nullptr,uint64_t body=0,uint64_t resident=0,uint64_t porter=0){auto s=f.sampler();
         return dressInPlace(s,body?body:B+0xb000,resident?resident:B+0xa000,art,[this](uint64_t b,uint64_t resource){
             CHECK(b==B+0xb000);++inPlaces;artParts(0xb600,0xb000,resource-B,resource==B+0xa400?52:1,0xa600);f.put<uint64_t>(0xb000+0x180,B+0xb600);
             if(keepOld)list(0xb000,0xb800,{0xb100,0xb300,0xb600});else list(0xb000,0xb800,{0xb100,0xb600});},
-            [rows](const std::string& r){if(rows)rows->push_back(r);});}
+            [rows](const std::string& r){if(rows)rows->push_back(r);},porter);}
 };
 // Mask 0x80: as live, the double's model resource builds the one-part art parts (the body's) while the double wears the
 // 52-part ones that the porter's streaming control gave it.
@@ -193,6 +193,13 @@ void inPlaceSwap(){
      CHECK(!rows.empty()&&rows.back().find("dressed like the double")!=std::string::npos);
      // Once dressed, a repeat calls nothing.
      CHECK(!w.inPlace()&&w.inPlaces==1);}
+    // The double not dressed yet (it wears the made body's one-part set, live after a load): the porter's set is used.
+    {Wardrobe w;w.f.put<uint64_t>(0xa300+0x30,w.B+0xb400);
+     w.artParts(0xd300,0xd000,0xa400,52,0xa600);w.f.put<uint64_t>(0xd000+0x180,w.B+0xd300);w.list(0xd000,0xd800,{0xd300});
+     CHECK(!w.inPlace()&&w.inPlaces==0);                                      // without the porter: refused as before
+     std::vector<std::string> rows;CHECK(w.inPlace(&rows,0,0,w.B+0xd000)&&w.inPlaces==1);
+     auto t=w.f.sampler();CHECK(dressedLike(t,w.B+0xb000,w.art,w.B+0xa400));
+     bool said=false;for(auto& r:rows)said|=r.find("using the porter's art parts")!=std::string::npos;CHECK(said);}
     // A body that already carries a second ArtPartsData (mask 8's apply): refused, nothing called.
     {Wardrobe w;w.artParts(0xb700,0xb000,0xa400,52,0xa600);w.list(0xb000,0xb800,{0xb100,0xb300,0xb700});
      std::vector<std::string> rows;CHECK(!w.inPlace(&rows)&&w.inPlaces==0);CHECK(!rows.empty()&&rows.back().find("more than one")!=std::string::npos);}

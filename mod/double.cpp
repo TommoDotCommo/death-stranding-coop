@@ -423,9 +423,18 @@ uint64_t readStreamingDouble(const discovery::Sampler& s,uint64_t global){
 #endif
 }
 bool dressInPlace(const discovery::Sampler& s,uint64_t body,uint64_t resident,uint64_t artParts,
-                  const std::function<void(uint64_t,uint64_t)>& setArtParts,const std::function<void(const std::string&)>& note){
+                  const std::function<void(uint64_t,uint64_t)>& setArtParts,const std::function<void(const std::string&)>& note,uint64_t porter){
     auto say=[&](const std::string& row){if(note)note(row);};
     auto plan=planArtPartsSwap(s,body,resident,artParts);
+#ifndef MUTANT_OWNBODY_INPLACE_PORTER
+    // Live 2026-11-08 (two copies): right after a load the game had not dressed its double yet (it still wore the
+    // one-part set, like a made body). The streaming control dresses the double with the porter's own set, so take
+    // that one directly.
+    if(!plan.wanted&&porter&&plan.wears&&plan.refusal=="body already wears the double's art parts") {
+        auto fromPorter=planArtPartsSwap(s,body,porter,artParts);
+        if(fromPorter.wanted){say("BODY art-parts swap: the double is not dressed yet; using the porter's art parts\n");plan=fromPorter;}
+    }
+#endif
     if(!plan.wanted){say("BODY art-parts swap refused: "+plan.refusal+" (wears "+hex(plan.wears)+")\n");return false;}
     say("BODY art-parts swap: the game's in-place replacement with the double's art parts "+hex(plan.wanted)+" (wears "+hex(plan.wears)+")\n");
     setArtParts(body,plan.wanted);
@@ -590,7 +599,7 @@ std::function<bool(uint64_t)> nativeDress(discovery::Sampler& s,std::function<un
             return result;};
         if(m&DressArtPartsInPlace){
             if(!inPlaceOk){say("BODY art-parts swap refused: in-place replacement signature differs\n");return report(false);}
-            return report(dressInPlace(s,body,resident(),artParts,[inPlace](uint64_t b,uint64_t res){inPlace(b,res,true);},say));
+            return report(dressInPlace(s,body,resident(),artParts,[inPlace](uint64_t b,uint64_t res){inPlace(b,res,true);},say,readLocalAnchor(s).entity));
         }
         if(m&(DressModelExact|DressModelThenApply)){
             if(!setModelOk){say("BODY model swap refused: SetModel signature differs\n");return report(false);}

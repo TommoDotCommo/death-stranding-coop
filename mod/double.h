@@ -136,7 +136,7 @@ constexpr uint64_t StreamingDoubleGlobal=0x7be79b0,StreamingDoubleRef=0x30;
 uint64_t readStreamingDouble(const discovery::Sampler&,uint64_t global);
 // Plan, one call of setArtParts(body, wanted), then dressedLike. True when the body ends dressed like the double.
 bool dressInPlace(const discovery::Sampler&,uint64_t body,uint64_t resident,uint64_t artPartsVtable,
-                  const std::function<void(uint64_t body,uint64_t resource)>& setArtParts,const std::function<void(const std::string&)>& note);
+                  const std::function<void(uint64_t body,uint64_t resource)>& setArtParts,const std::function<void(const std::string&)>& note,uint64_t porter=0);
 // DSConstructionPointManager_sExportedRemoveConstructionsInArea (2cd1bf0 -> 2cd9760), read statically: (const float4*
 // box min, const float4* box max, const world transform*, bool, bool, bool). It collects the structures in the box and
 // marks for removal those whose owner byte (+b2) is 1 (first bool), 0 (second) or 2 (third). Unverified live.
