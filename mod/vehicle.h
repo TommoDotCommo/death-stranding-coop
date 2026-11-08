@@ -4,29 +4,30 @@
 #include <string>
 
 namespace mod::vehicle {
-// Pinned build 13300582. Static evidence only: see game_offsets.md, "Vehicles".
-// No engine calls, heap scan, writes, actor creation, or protocol changes.
-enum class Kind {Unknown, None, Motorbike, Truck};
+// Pinned build 13300582. See game_offsets.md, "Vehicles" (riding = the porter is a child entity of a vehicle, live 2026-11-08).
+// Read-only: no engine calls, heap scan, writes or actor creation.
+enum class Kind {Unknown, None, Motorbike, Truck, Car};
 enum class Seat {Unknown, None, Driver, Passenger};
 struct Observation {
     bool available=false, coherent=false, riding=false, speedAvailable=false;
     Kind kind=Kind::Unknown;
     Seat seat=Seat::Unknown;
-    int seatIndex=-1; // Static helper selection: 0 driver; 1..4 passenger. Not a wire enum.
-    uint64_t sampledAtUs=0, porter=0, component=0, vehicle=0;
+    int seatIndex=-1; // 0 driver (a player always drives); -1 unknown/none.
+    uint64_t sampledAtUs=0, porter=0, parent=0, vehicle=0;
     std::array<double,3> position{}; // Vehicle world transform, game axes (z up).
     std::array<float,9> rotation{};  // Row-major, same layout as Entity.
     double speed=0;                 // Magnitude of position delta / time; never native velocity.
     std::string reason="not read";
+    unsigned expectedKindValue() const; // vehicle+0x4c4 written by the constructors: bike 3, truck 2, car 1
 };
 
 class Reader {
     const discovery::Sampler& sampler_;
-    uint64_t previousPorter_=0, previousComponent_=0, previousVehicle_=0, previousSeat_=0, previousTime_=0;
-    int previousSeatIndex_=-1;
+    uint64_t previousPorter_=0, previousVehicle_=0, previousTime_=0;
     std::array<double,3> previousPosition_{};
 public:
-    static constexpr unsigned MaxComponents=256;
+    static constexpr uint64_t ParentOffset=0x70, FirstChildOffset=0x78, NextSiblingOffset=0x80;
+    static constexpr unsigned MaxChildren=64;
     static constexpr uint64_t MinGapUs=10000, MaxGapUs=500000;
     static constexpr double MaxSpeed=200; // Reject discontinuities; do not turn a teleport into speed.
     explicit Reader(const discovery::Sampler& s):sampler_(s) {}

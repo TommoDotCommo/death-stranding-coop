@@ -678,6 +678,17 @@ struct Runtime final:ds::Transport {
             presence=std::make_unique<mod::PresenceLog>([this](const std::string& line){return writePresence(line);},uint64_t(config.presenceLogMaxMiB)*1024*1024,[this](const char* s){note(s);});
             auto* raw=sampler.get();
             auto g=std::make_unique<mod::GameProvider>([raw]{return mod::PoseReader(*raw).read();},mod::nowUs,presence.get());
+            // What the porter rides travels in every presence packet (read-only; vehicle.h). Kind changes are logged.
+            {auto rides=std::make_shared<mod::vehicle::Reader>(*raw);auto lastKind=std::make_shared<int>(-1);
+             g->ride([this,rides,lastKind](const mod::Pose& p){
+                auto o=rides->read(mod::nowUs());mod::Ride r;
+                if(o.available&&o.riding){
+                    uint8_t kind=o.kind==mod::vehicle::Kind::Motorbike?ds::Motorbike:o.kind==mod::vehicle::Kind::Truck?ds::Truck:o.kind==mod::vehicle::Kind::Car?ds::Car:0;
+                    r=mod::rideFrom(kind,o.position,o.rotation,p.position);
+                }
+                if(o.available&&int(r.kind)!=*lastKind){*lastKind=r.kind;
+                    std::ostringstream m;m<<"RIDE local kind="<<int(r.kind)<<" vehicle=0x"<<std::hex<<o.vehicle<<"\n";note(m.str().c_str());}
+                return r;});}
             game=g.get();provider=std::move(g);
         } else provider=std::make_unique<mod::SyntheticProvider>(config.slot);
         padCommand=path.parent_path()/"pad.script";padShared.enabled=config.virtualPad;

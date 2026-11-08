@@ -36,6 +36,26 @@ struct Fixture {
     Packet presence(uint32_t seq,uint64_t time,double x=0) { Packet p; p.role=Role::Client; p.kind=Kind::Presence; p.session=42; p.nonce=200; p.echo=100; p.sequence=seq; p.stamp=time; p.state.position[0]=x; return p; }
     Error receive(Packet p,uint64_t now) { auto b=encode(p); return core.receive(b.data(),b.size(),now); }
 };
+// The vehicle block in presence packets: round trip, reserved bytes, range and flag consistency, interpolation.
+void vehicleTests(const Bytes& onFoot) {
+    Packet q; auto parse=[&](const Bytes& wire){return decodeForTest(wire.data(),wire.size(),q,protection);};
+    check(parse(onFoot)==Error::None&&q.state.vehicle==0&&!(q.state.flags&Vehicle),"vehicle_on_foot");
+    Packet p; p.kind=Kind::Presence; p.state.vehicle=Truck; p.state.flags=Vehicle; p.state.vehicleOffset={-19.99,0.5,3.21}; p.state.vehicleAngles={-3.14159,0.25,-1.5};
+    auto b=encode(p);
+    check(parse(b)==Error::None&&q.state.vehicle==Truck&&(q.state.flags&Vehicle)&&std::abs(q.state.vehicleOffset[0]+19.99)<.006&&std::abs(q.state.vehicleOffset[2]-3.21)<.006,"vehicle_roundtrip");
+    check(std::abs(q.state.vehicleAngles[0]+3.14159)<.0002&&std::abs(q.state.vehicleAngles[1]-.25)<.0002&&std::abs(q.state.vehicleAngles[2]+1.5)<.0002,"vehicle_roundtrip");
+    for(size_t at:{size_t(97),size_t(110),size_t(111)}) { auto bad=b; patch(bad,at,1,1); check(parse(bad)==Error::Reserved,"reserved"); }
+    auto bad=b; patch(bad,96,4,1); check(parse(bad)==Error::Range,"vehicle");                       // unknown kind
+    bad=b; patch(bad,60,0,2); check(parse(bad)==Error::Range,"vehicle");                            // riding without the flag
+    bad=onFoot; patch(bad,60,Vehicle,2); check(parse(bad)==Error::Range,"vehicle");                 // flag without a vehicle
+    bad=b; patch(bad,98,uint64_t(uint16_t(int16_t(2001))),2); check(parse(bad)==Error::Range,"vehicle");   // offset over 20 m
+    bad=onFoot; patch(bad,100,50,2); check(parse(bad)==Error::Range,"vehicle");                     // offset while on foot
+    bad=b; patch(bad,106,uint64_t(uint16_t(int16_t(-32768))),2); check(parse(bad)==Error::Range,"vehicle");  // angle beyond pi
+    // Local values: unknown kinds and non-finite blocks drop to on foot; offsets clamp; the flag follows the kind.
+    State s; s.vehicle=9; s.flags=Vehicle; s.vehicleOffset={1,2,3}; check(sanitise(s)&&s.vehicle==0&&!(s.flags&Vehicle)&&s.vehicleOffset[0]==0,"vehicle_sanitise");
+    s=State{}; s.vehicle=Motorbike; s.vehicleOffset={100,0,std::nan("")}; check(sanitise(s)&&s.vehicle==0&&!(s.flags&Vehicle),"vehicle_sanitise");
+    s=State{}; s.vehicle=Motorbike; s.vehicleOffset={100,0,0}; s.vehicleAngles={7,0,0}; check(sanitise(s)&&s.vehicle==Motorbike&&(s.flags&Vehicle)&&s.vehicleOffset[0]==VehicleOffsetMax&&std::abs(s.vehicleAngles[0]-(7-2*3.141592653589793))<1e-9,"vehicle_sanitise");
+}
 void parserTests() {
     Packet p, q; p.kind=Kind::Presence; p.state.position={-100000,100000,1.23}; p.state.velocity={-50,0,50}; p.state.yaw=-3.141592653589793; p.state.phase=1; p.state.action=31; p.state.flags=63;
     auto b=encode(p); auto parse=[&](const Bytes& wire){return decodeForTest(wire.data(),wire.size(),q,protection);};
@@ -55,12 +75,14 @@ void parserTests() {
     for(size_t at:{size_t(12),size_t(16)}) { bad=b; patch(bad,at,0,4); check(parse(bad)==Error::Build,"build"); }
     bad=b; patch(bad,32,0,8); check(parse(bad)==Error::Nonce,"zero_session");
     bad=b; patch(bad,40,0,8); check(parse(bad)==Error::Nonce,"zero_nonce");
-    for(size_t at:{size_t(64),size_t(96),size_t(104),size_t(112)}) { bad=b; patch(bad,at,UINT64_MAX,8); check(parse(bad)==Error::Time,"clock_range"); }
+    for(size_t at:{size_t(64),size_t(112)}) { bad=b; patch(bad,at,UINT64_MAX,8); check(parse(bad)==Error::Time,"clock_range"); }
+    { Packet ping; ping.kind=Kind::Ping; auto pb=encode(ping); for(size_t at:{size_t(96),size_t(104)}) { bad=pb; patch(bad,at,UINT64_MAX,8); check(parse(bad)==Error::Time,"clock_range"); } }
+    vehicleTests(b);
     for(size_t at:{size_t(72),size_t(76),size_t(80)}) { bad=b; patch(bad,at,10000001,4); check(parse(bad)==Error::Range,"range"); }
     for(size_t at:{size_t(84),size_t(86),size_t(88)}) { bad=b; patch(bad,at,32767,2); check(parse(bad)==Error::Range,"range"); }
     for(auto field:std::vector<std::pair<size_t,uint64_t>>{{90,32768},{60,128},{62,32},{94,4}}) { bad=b; patch(bad,field.first,field.second,field.first==90||field.first==60?2:1); check(parse(bad)==Error::Range,"range"); }
     State s; s.position={-1e20,1e20,0}; s.velocity={1e20,-1e20,1e20}; s.yaw=1000; s.phase=10; s.flags=65535; s.action=255;
-    check(sanitiseForTest(s,protection)&&s.position[0]==-100000&&s.position[1]==100000&&s.phase==1&&s.flags==127&&s.action==31,"clamp");
+    check(sanitiseForTest(s,protection)&&s.position[0]==-100000&&s.position[1]==100000&&s.phase==1&&s.flags==(127&~Vehicle)&&s.action==31,"clamp");
     check(std::sqrt(s.velocity[0]*s.velocity[0]+s.velocity[1]*s.velocity[1]+s.velocity[2]*s.velocity[2])<=100.00001,"clamp");
     s.phase=-1; sanitiseForTest(s,protection); check(s.phase==0,"clamp");
     for(double value:{std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity(),-std::numeric_limits<double>::infinity()}) {
@@ -174,6 +196,11 @@ void sessionTests() {
     { Fixture f; f.receive(f.presence(1,100),100); check(f.receive(f.presence(2,150,1000),150)==Error::Speed,"speed"); }
     { Fixture f; auto p=f.presence(1,100,1000); p.state.flags=Teleport; check(f.receive(p,100)==Error::None,"first_teleport"); p.sequence=2; p.stamp=200; p.state.position[0]=2000; check(f.receive(p,200)==Error::Teleport,"teleport"); p.sequence=3; p.stamp=5100; check(f.receive(p,5100)==Error::None,"teleport_recovery"); }
     { Fixture f; f.receive(f.presence(1,100,0),100); f.receive(f.presence(2,200,1),200); check(std::abs(f.core.render(270).state.position[0]-.5)<.001,"delay"); }
+    { Fixture f; auto a=f.presence(1,100,0); a.state.vehicle=Motorbike; a.state.flags=Vehicle; a.state.vehicleOffset={1,0,0}; a.state.vehicleAngles={3.0,0,.1};
+      auto z=f.presence(2,200,1); z.state.vehicle=Motorbike; z.state.flags=Vehicle; z.state.vehicleOffset={2,0,0}; z.state.vehicleAngles={-3.0,0,.3};
+      f.receive(a,100); f.receive(z,200); auto r=f.core.render(270);
+      check(r.state.vehicle==Motorbike&&std::abs(r.state.vehicleOffset[0]-1.5)<.01&&std::abs(std::abs(r.state.vehicleAngles[0])-3.14159)<.01&&std::abs(r.state.vehicleAngles[2]-.2)<.001,"vehicleLerp");
+      z.state.vehicle=Truck; Fixture g; g.receive(a,100); z.sequence=2; g.receive(z,200); r=g.core.render(270); check(r.state.vehicle==Motorbike&&std::abs(r.state.vehicleOffset[0]-1)<.001,"vehicle_kind_change"); }
     // Ledge or fall: 2 m in one 100 ms interval holds the old height, then snaps at the new sample time.
     { Fixture f; f.receive(f.presence(1,100,0),100); auto p=f.presence(2,200,1); p.state.position[1]=2.0; f.receive(p,200); check(f.core.render(270).state.position[1]==0,"floor"); check(f.core.render(320).state.position[1]==2.0,"floor_boundary"); }
     // Lift or jump pad: 0.9 m in 100 ms (9 m/s vertical) also snaps.
@@ -256,7 +283,7 @@ int main(int argc,char** argv) {
     auto start=std::chrono::steady_clock::now(); std::string mutant=argc>1?argv[1]:"";
 #define MUTATE(name) if(mutant==#name) protection.name=false
     MUTATE(version); MUTATE(range); MUTATE(teleport); MUTATE(duplicate); MUTATE(delay); MUTATE(session); MUTATE(build);
-    MUTATE(magic); MUTATE(checksum); MUTATE(reserved); MUTATE(nonce); MUTATE(time); MUTATE(speed); MUTATE(floor); MUTATE(extrapolate); MUTATE(stale); MUTATE(gate); MUTATE(timeout); MUTATE(buffer); MUTATE(rate); MUTATE(length); MUTATE(kind); MUTATE(role); MUTATE(handshake); MUTATE(ping); MUTATE(pingHistory); MUTATE(clamp); MUTATE(finite); MUTATE(cargoOrder); MUTATE(cargoAck); MUTATE(cargoOnce); MUTATE(progressReady); MUTATE(progress); MUTATE(progressUnknown); MUTATE(progressFlag); MUTATE(progressPolicy);
+    MUTATE(magic); MUTATE(checksum); MUTATE(reserved); MUTATE(nonce); MUTATE(time); MUTATE(speed); MUTATE(floor); MUTATE(extrapolate); MUTATE(stale); MUTATE(gate); MUTATE(timeout); MUTATE(buffer); MUTATE(rate); MUTATE(length); MUTATE(kind); MUTATE(role); MUTATE(handshake); MUTATE(ping); MUTATE(pingHistory); MUTATE(clamp); MUTATE(finite); MUTATE(cargoOrder); MUTATE(cargoAck); MUTATE(cargoOnce); MUTATE(progressReady); MUTATE(progress); MUTATE(progressUnknown); MUTATE(progressFlag); MUTATE(progressPolicy); MUTATE(vehicle); MUTATE(vehicleLerp);
 #undef MUTATE
     parserTests(); cargoTests(); progressTests(); sessionTests(); if(mutant.empty()&&failures==0) fuzz();
     std::printf("%s failures=%d runtime=%.3fs\n",failures?"FAILED":"PASSED",failures,std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());

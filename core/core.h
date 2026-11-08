@@ -22,7 +22,15 @@ struct State {
     double yaw=0, phase=0; // radians [-pi,pi], normalised [0,1]
     uint16_t flags=0;
     uint8_t action=0, health=255, stamina=255;
+    // Riding (Presence only): the vehicle the porter sits on. 0 on foot, else VehicleKind; flag Vehicle is set exactly
+    // when it is nonzero. vehicleOffset = vehicle origin minus position (adapter axes, metres); vehicleAngles = the
+    // vehicle's yaw, pitch and roll in radians (yaw like State::yaw; pitch nose up; roll right side down).
+    uint8_t vehicle=0;
+    std::array<double,3> vehicleOffset{}, vehicleAngles{};
 };
+enum VehicleKind : uint8_t { OnFoot=0, Motorbike=1, Truck=2, Car=3, VehicleKindMax=3 };
+constexpr double VehicleOffsetMax=20; // metres between the rider and the vehicle origin
+bool vehicleValid(const State&);
 // Local inputs: reject nonfinite transforms; clamp finite values to the wire envelope.
 bool sanitise(State&);
 constexpr uint32_t UnknownProgress=0xffffffffu;
@@ -58,6 +66,7 @@ struct Protection {
     bool length=true, kind=true, role=true, handshake=true, ping=true, clamp=true, finite=true;
     bool pingRetry=true, pingHistory=true, cargoOrder=true, cargoAck=true, cargoOnce=true;
     bool progressReady=true, progress=true, progressUnknown=true, progressFlag=true, progressPolicy=true;
+    bool vehicle=true, vehicleLerp=true;
     bool environmentRange=true, environmentRole=true, environmentOrder=true, environmentFresh=true, environmentRate=true;
     bool floor=true, extrapolate=true, stale=true, gate=true, timeout=true, buffer=true, rate=true;
 };

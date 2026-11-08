@@ -138,6 +138,34 @@ int main(int argc,char** argv) {
             check(burst==0,"self_tick oracle: no replay of missed ticks after a stall");
             check(r.deadline>10000000&&r.deadline<=10050000,"self_tick oracle: the next deadline lies in the future");
             check(!r.due(10049999)&&r.due(10050000),"self_tick oracle: cadence resumes on the original grid");});
+        // ---- (4) vehicle block: rotation <-> wire angles, rider offset, provider -----------------------------------------
+        run("ride_angles",[]{
+            const double pi=3.14159265358979323846;
+            for(double y:{-3.,-1.,0.,0.5,2.9})for(double pt:{-.6,0.,.3})for(double r:{-.5,0.,.4}){
+                auto m=mod::rotationFromAngles({y,pt,r});auto a=mod::anglesFromRotation(m);
+                check(std::abs(std::remainder(a[0]-y,2*pi))<1e-5&&std::abs(a[1]-pt)<1e-5&&std::abs(a[2]-r)<1e-5,"ride oracle: angles round trip");
+                double det=double(m[0])*(m[4]*m[8]-m[5]*m[7])-m[1]*(m[3]*m[8]-m[5]*m[6])+m[2]*(m[3]*m[7]-m[4]*m[6]);
+                check(std::abs(det-1)<1e-5,"ride oracle: proper rotation");}
+            // Level, facing game +y: identity rows (right +x, forward +y, up +z); yaw agrees with the porter's yaw.
+            auto a=mod::anglesFromRotation({1,0,0,0,1,0,0,0,1});check(std::abs(a[0])<1e-9&&std::abs(a[1])<1e-9&&std::abs(a[2])<1e-9,"ride oracle: level");
+            a=mod::anglesFromRotation({0,-1,0,1,0,0,0,0,1});check(std::abs(a[0]-pi/2)<1e-6,"ride oracle: facing +x is yaw +90 like yawFromForward");
+            // Nose up: forward z > 0; right side down: right z < 0.
+            auto m=mod::rotationFromAngles({0,.3,0});check(m[5]>0,"ride oracle: pitch is nose up");
+            m=mod::rotationFromAngles({0,0,.3});check(m[2]<0,"ride oracle: roll is right side down");});
+        run("ride_offset",[]{
+            auto r=mod::rideFrom(2,{1056.16,421.00,143.63},{1,0,0,0,1,0,0,0,1},{1055.36,420.56,145.58});
+            check(r.kind==2&&std::abs(r.offset[0]-.8)<1e-9&&std::abs(r.offset[1]+1.95)<1e-9&&std::abs(r.offset[2]-.44)<1e-9,"ride oracle: game axes to adapter axes (x, up, y)");
+            check(mod::rideFrom(0,{1,2,3},{1,0,0,0,1,0,0,0,1},{0,0,0}).kind==0&&mod::rideFrom(9,{1,2,3},{1,0,0,0,1,0,0,0,1},{0,0,0}).kind==0,"ride oracle: unknown kinds are on foot");});
+        run("ride_provider",[]{
+            mod::Pose p;p.available=p.coherent=true;p.position={10,20,30};p.rotation={1,0,0,0,1,0,0,0,1};uint64_t t=1000000;
+            mod::GameProvider g([&]{return p;},[&]{return t;});ds::State s;
+            check(g.readLocal(s)&&!s.vehicle&&!(s.flags&ds::Vehicle),"ride oracle: no ride callback is on foot");
+            mod::Ride ride;g.ride([&](const mod::Pose&){return ride;});t+=50000;
+            check(g.readLocal(s)&&!s.vehicle&&!(s.flags&ds::Vehicle),"ride oracle: kind 0 is on foot");
+            ride=mod::rideFrom(1,{11,20,29},{1,0,0,0,1,0,0,0,1},p.position);t+=50000;
+            check(g.readLocal(s)&&s.vehicle==1&&(s.flags&ds::Vehicle)&&s.vehicleOffset[0]==1&&s.vehicleOffset[1]==-1,"ride oracle: riding sets the block and the flag");
+            ds::Packet q;q.kind=ds::Kind::Presence;q.state=s;auto b=ds::encode(q);ds::Packet back;
+            check(ds::decode(b.data(),b.size(),back)==ds::Error::None&&back.state.vehicle==1,"ride oracle: the provider's state passes the wire checks");});
         std::cout<<"pose tests passed: "<<which<<'\n';
         return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

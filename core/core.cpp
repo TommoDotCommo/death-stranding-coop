@@ -13,6 +13,14 @@ int64_t signedGet(const uint8_t* b,size_t at,size_t n) { uint64_t v=get(b,at,n);
 uint32_t checksum(const uint8_t* b) { uint32_t h=2166136261u; for(size_t i=0;i<WireSize;++i) { h^=(i>=120 && i<124)?0:b[i]; h*=16777619u; } return h; }
 double distance(const State& a,const State& b) { double d=0; for(int i=0;i<3;++i) d+=std::pow(a.position[i]-b.position[i],2); return std::sqrt(d); }
 double speed(const State& a) { double v=0; for(double x:a.velocity) v+=x*x; return std::sqrt(v); }
+}
+bool vehicleValid(const State& s) {
+    if(s.vehicle>VehicleKindMax || bool(s.flags&Vehicle)!=(s.vehicle!=0)) return false;
+    for(double x:s.vehicleOffset) if(!std::isfinite(x)||std::abs(x)>VehicleOffsetMax||(!s.vehicle&&x!=0)) return false;
+    for(double x:s.vehicleAngles) if(!std::isfinite(x)||std::abs(x)>Pi+1e-9||(!s.vehicle&&x!=0)) return false;
+    return true;
+}
+namespace {
 bool valid(const State& s) {
     for(double x:s.position) if(!std::isfinite(x)||std::abs(x)>100000) return false;
     for(double x:s.velocity) if(!std::isfinite(x)||std::abs(x)>100) return false;
@@ -40,11 +48,17 @@ Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
         q.progressPolicy=ProgressPolicy(b[104]);
         if(p.range&&b[104]>1)return Error::Range;
         if(p.reserved&&(get(b,105,7)||get(b,112,8)))return Error::Reserved;
+    } else if(q.kind==Kind::Presence) {
+        if(p.reserved&&(b[97]||get(b,110,2)))return Error::Reserved;
+        q.state.vehicle=b[96];
+        for(int i=0;i<3;++i) { q.state.vehicleOffset[i]=signedGet(b,98+2*i,2)/100.; q.state.vehicleAngles[i]=signedGet(b,104+2*i,2)*Pi/32767.; }
+        q.t2=get(b,112,8);
     } else { q.t0=get(b,96,8); q.t1=get(b,104,8); q.t2=get(b,112,8); }
     if(p.time && (q.stamp>(1ull<<53)||q.t0>(1ull<<53)||q.t1>(1ull<<53)||q.t2>(1ull<<53))) return Error::Time;
     for(int i=0;i<3;++i) { q.state.position[i]=signedGet(b,72+4*i,4)/100.; q.state.velocity[i]=signedGet(b,84+2*i,2)/100.; }
     q.state.yaw=signedGet(b,90,2)*Pi/32767.; q.state.health=b[92]; q.state.stamina=b[93]; q.byeReason=b[94];
     if(p.range && (!valid(q.state)||q.byeReason>3)) return Error::Range;
+    if(p.vehicle && q.kind==Kind::Presence && !vehicleValid(q.state)) return Error::Range;
     if(q.kind==Kind::Environment) {
         if(p.environmentRange && q.t0>=EnvironmentDayMs)return Error::Range;
         if(p.reserved && (q.t1||q.t2||q.state.flags||q.state.action||b[63]||q.byeReason||
@@ -83,6 +97,10 @@ Render sampling(const std::deque<Snapshot>& b,uint64_t now,uint32_t delay,uint32
                 double dy=std::remainder(z.state.yaw-a.state.yaw,2*Pi);
                 r.state.yaw=std::remainder(a.state.yaw+t*dy,2*Pi);
                 if(a.state.action==z.state.action) r.state.phase=std::fmod(a.state.phase+t*std::remainder(z.state.phase-a.state.phase,1.)+1.,1.);
+                if(p.vehicleLerp && a.state.vehicle && a.state.vehicle==z.state.vehicle) for(int k=0;k<3;++k) {
+                    r.state.vehicleOffset[k]+=(z.state.vehicleOffset[k]-a.state.vehicleOffset[k])*t;
+                    r.state.vehicleAngles[k]=std::remainder(a.state.vehicleAngles[k]+t*std::remainder(z.state.vehicleAngles[k]-a.state.vehicleAngles[k],2*Pi),2*Pi);
+                }
             }
             return r;
         }
@@ -109,7 +127,14 @@ bool sanitiseImpl(State& s,const Protection& p) {
     for(double& x:s.position) x=std::clamp(x,-100000.,100000.);
     for(double& x:s.velocity) x=std::clamp(x,-100.,100.);
     double v=speed(s); if(v>100) for(double& x:s.velocity) x*=100/v;
-    s.yaw=std::remainder(s.yaw,2*Pi); s.phase=std::clamp(s.phase,0.,1.); s.flags&=127; s.action=std::min<uint8_t>(s.action,31); return true;
+    s.yaw=std::remainder(s.yaw,2*Pi); s.phase=std::clamp(s.phase,0.,1.); s.flags&=127; s.action=std::min<uint8_t>(s.action,31);
+    bool riding=s.vehicle>0&&s.vehicle<=VehicleKindMax;
+    for(double x:s.vehicleOffset) if(!std::isfinite(x)) riding=false;
+    for(double x:s.vehicleAngles) if(!std::isfinite(x)) riding=false;
+    if(!riding) { s.vehicle=0; s.vehicleOffset={}; s.vehicleAngles={}; s.flags&=uint16_t(~Vehicle); return true; }
+    for(double& x:s.vehicleOffset) x=std::clamp(x,-VehicleOffsetMax,VehicleOffsetMax);
+    for(double& x:s.vehicleAngles) x=std::remainder(x,2*Pi);
+    s.flags|=Vehicle; return true;
 }
 }
 bool sanitise(State& s) { return sanitiseImpl(s,{}); }
@@ -124,6 +149,11 @@ Bytes encode(Packet q) {
     put(b,90,uint16_t(int16_t(std::lround(q.state.yaw*32767/Pi))),2); b[92]=q.state.health; b[93]=q.state.stamina; b[94]=q.byeReason;
     if(q.kind==Kind::Hello||q.kind==Kind::Ack) {
         put(b,96,q.progress.episode,4);put(b,100,q.progress.id,4);b[104]=uint8_t(q.progressPolicy);
+    } else if(q.kind==Kind::Presence) {
+        // Vehicle block: [96] kind, [97] 0, [98..103] offset cm (int16 x3), [104..109] yaw/pitch/roll (int16 x3), [110..111] 0.
+        b[96]=q.state.vehicle;
+        for(int i=0;i<3;++i) { put(b,98+2*i,uint16_t(int16_t(std::lround(q.state.vehicleOffset[i]*100))),2); put(b,104+2*i,uint16_t(int16_t(std::lround(q.state.vehicleAngles[i]*32767/Pi))),2); }
+        put(b,112,q.t2,8);
     } else { put(b,96,q.t0,8); put(b,104,q.t1,8); put(b,112,q.t2,8); }
     put(b,120,checksum(b.data()),4); return b;
 }
@@ -175,7 +205,7 @@ void Core::tick(uint64_t now) {
     State s; if(!provider_.readLocal(s)||!sanitiseImpl(s,protections_)) return;
     s.flags&=uint16_t(~ProgressMismatch);
     if(protections_.progressFlag&&progressStatus_==ProgressStatus::Mismatch)s.flags|=ProgressMismatch;
-    bool changed=!haveSent_||distance(s,sentState_)>=0.01||std::abs(s.yaw-sentState_.yaw)>=0.01||s.flags!=sentState_.flags||s.action!=sentState_.action||std::abs(s.phase-sentState_.phase)>=1./255.||s.health!=sentState_.health||s.stamina!=sentState_.stamina||s.velocity!=sentState_.velocity;
+    bool changed=!haveSent_||distance(s,sentState_)>=0.01||std::abs(s.yaw-sentState_.yaw)>=0.01||s.flags!=sentState_.flags||s.action!=sentState_.action||std::abs(s.phase-sentState_.phase)>=1./255.||s.health!=sentState_.health||s.stamina!=sentState_.stamina||s.velocity!=sentState_.velocity||s.vehicle!=sentState_.vehicle||s.vehicleOffset!=sentState_.vehicleOffset||s.vehicleAngles!=sentState_.vehicleAngles;
     if(protections_.rate && (now<nextSend_ || (!changed && now<lastStamp_+500))) return;
     auto sampleTime=provider_.localSampleTime(now);
     if(sampleTime>now || (haveSent_ && sampleTime<=lastLocalSample_)) return;

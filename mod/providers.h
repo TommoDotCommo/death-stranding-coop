@@ -46,11 +46,22 @@ public:
     bool stopped() const {return stopped_;}
     bool record(uint64_t us,const std::string& line);
 };
+// The vehicle the porter rides, in wire terms (ds::State vehicle block): kind 0 = on foot.
+struct Ride { uint8_t kind=0; std::array<double,3> offset{}, angles{}; };
+// Wire angles from a game rotation (row-major rows right, forward, up; z up): yaw like stateFromPose, pitch = nose up,
+// roll = right side down. rotationFromAngles is the inverse (a proper rotation).
+std::array<double,3> anglesFromRotation(const std::array<float,9>&);
+std::array<float,9> rotationFromAngles(const std::array<double,3>&);
+// Game-axis vehicle origin and rotation + game-axis rider position -> wire block (adapter axes: x, up, y).
+Ride rideFrom(uint8_t kind,const std::array<double,3>& vehicle,const std::array<float,9>& rotation,const std::array<double,3>& rider);
 class GameProvider final : public ds::StateProvider {
     std::function<Pose()> pose_; std::function<uint64_t()> clock_; PresenceLog* log_;
+    std::function<Ride(const Pose&)> ride_; Ride lastRide_{};
     VelocityTracker tracker_; bool available_=false; double yaw_=0; std::string reason_="not read"; ds::State local_{};
 public:
     GameProvider(std::function<Pose()> pose,std::function<uint64_t()> clockUs,PresenceLog* log=nullptr):pose_(std::move(pose)),clock_(std::move(clockUs)),log_(log) {}
+    // Optional: what the porter rides, read after each coherent pose (absent = always on foot).
+    void ride(std::function<Ride(const Pose&)> r) {ride_=std::move(r);}
     // Unavailable (menu, loading, death, any failed read check) is a normal result, never a fabricated pose.
     bool readLocal(ds::State& s) override;
     // True while readLocal is unavailable. The visual cutscene gate itself is UNKNOWN: a cutscene with a valid pose is not gated.

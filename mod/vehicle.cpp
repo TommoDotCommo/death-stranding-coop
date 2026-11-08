@@ -11,16 +11,16 @@ namespace {
 // These are checked loaded table/getter pairs, never callable function pointers.
 struct Type {uint64_t table, getter, metadata;};
 constexpr Type Porter{0x3d7d0d8,0x2711b40,0x4bc6e00};
-constexpr Type Ride{0x3dfe930,0x2dbbe70,0x4c6b160};
 constexpr Type Bike{0x3e25db8,0x2f6bb60,0x4ca65a0};
 constexpr Type Truck{0x3e26790,0x2f6bcb0,0x4ca6d60};
+constexpr Type Car{0x3e274d8,0x2f6bc10,0x4ca7660};
 void require(bool ok,const char* reason) {if(!ok)throw std::runtime_error(reason);}
 bool pointer(uint64_t p) {return p>=0x10000&&p<0x0000800000000000ULL&&p%8==0;}
 uint64_t add(uint64_t p,uint64_t offset) {
     require(pointer(p)&&offset<0x0000800000000000ULL-p,"invalid pointer");return p+offset;
 }
 // Sampler copies twice. Retain bounded read dependencies and check them again
-// after the observation, including component membership, activation and seat.
+// after the observation, including the parent link and the vehicle's child list.
 // Repeated equality is not an atomic snapshot or a proof against address reuse.
 struct Copies {
     const discovery::Sampler& s;
@@ -64,8 +64,9 @@ bool rotationValid(const std::array<float,9>& r) {
 }
 }
 void Reader::reset() {
-    previousPorter_=previousComponent_=previousVehicle_=previousSeat_=previousTime_=0;previousSeatIndex_=-1;previousPosition_={};
+    previousPorter_=previousVehicle_=previousTime_=0;previousPosition_={};
 }
+unsigned Observation::expectedKindValue() const {return kind==Kind::Motorbike?3u:kind==Kind::Truck?2u:kind==Kind::Car?1u:0u;}
 Observation Reader::read(uint64_t us) {
     Observation o;o.sampledAtUs=us;
     try {
@@ -83,53 +84,32 @@ Observation Reader::read(uint64_t us) {
         require(c.value<uint16_t>(add(player,0x78))==1,"not local human");
         o.porter=c.value<uint64_t>(add(player,0x70));
         require(c.type(o.porter,Porter),"porter type unverified");
-        auto count=c.value<uint32_t>(add(o.porter,0x90));
-        require(count&&count<=MaxComponents,"component count invalid");
-        auto list=c.value<uint64_t>(add(o.porter,0x98));
-        require(pointer(list),"component list invalid");
-        for(unsigned i=0;i<count;++i) {
-            auto component=c.value<uint64_t>(add(list,8ull*i));
-            require(pointer(component),"component pointer invalid");
-            auto table=c.value<uint64_t>(component);
-            if(table!=s.base+Ride.table)continue;
-            require(!o.component,"ambiguous ride component");
-            require(c.type(component,Ride),"ride type unverified");
-            require(c.value<uint64_t>(add(component,0x48))==o.porter,"ride owner differs");
-            o.component=component;
+        // Live 2026-11-08 (Episode 3, a truck): a seated porter is a child entity of the vehicle (porter+0x70 = parent,
+        // vehicle+0x78 = first child, +0x80 = next sibling); on foot the parent is null. The static ride-component path
+        // was refuted there (the porter has no DSRideVehicleMovementComponent while driving).
+        auto parent=c.value<uint64_t>(add(o.porter,ParentOffset));
+        o.parent=parent;
+        if(parent) {
+            require(pointer(parent),"parent pointer invalid");
+            require(parent!=o.porter,"parent aliases porter");
+            auto table=c.value<uint64_t>(parent);
+            unsigned expected=0;
+            if(table==s.base+Bike.table) {require(c.type(parent,Bike),"vehicle type unverified");o.kind=Kind::Motorbike;expected=3;}
+            else if(table==s.base+Truck.table) {require(c.type(parent,Truck),"vehicle type unverified");o.kind=Kind::Truck;expected=2;}
+            else if(table==s.base+Car.table) {require(c.type(parent,Car),"vehicle type unverified");o.kind=Kind::Car;expected=1;}
         }
-        if(!o.component) {
-            // No ride component at all (early in the story, before any vehicle: live 2026-11-08, Episode 1): the porter
-            // cannot be riding. Still only after every other check and an unchanged, re-selected observation.
-            o.riding=false;o.kind=Kind::None;o.seat=Seat::None;
-            require(c.unchanged(),"observation changed (no ride component)");
-            auto again=s.selectPlayer(manager);
-            require(!*again.reason&&again.player==player&&again.slot==selected.slot,"player selection changed (no ride component)");
-            o.available=o.coherent=true;o.reason="no ride component";reset();return o;
-        }
-        auto active=c.value<uint8_t>(add(o.component,0x60));
-        auto mover=c.value<uint64_t>(add(o.porter,0xb0));
-        require(pointer(mover),"active mover unavailable");
-        o.riding=(active&1)!=0;
-        require(o.riding==(mover==o.component),"ride activation changing");
-        uint64_t seatState=0;
-        if(o.riding) {
-            auto reference=c.value<uint64_t>(add(o.component,0xe0));
-            require(pointer(reference)&&reference>=0x10020,"vehicle reference invalid");
-            o.vehicle=reference-0x20; // Decima reference points at the Entity's secondary base.
-            require(o.vehicle!=o.porter,"vehicle aliases porter");
-            auto table=c.value<uint64_t>(o.vehicle);
-            if(table==s.base+Bike.table) {
-                require(c.type(o.vehicle,Bike),"vehicle type unverified");o.kind=Kind::Motorbike;
-            } else if(table==s.base+Truck.table) {
-                require(c.type(o.vehicle,Truck),"vehicle type unverified");o.kind=Kind::Truck;
-            } else require(false,"vehicle type unsupported");
-            auto kind=c.value<uint32_t>(add(o.vehicle,0x4c4));
-            require(kind==(o.kind==Kind::Motorbike?3u:2u),"vehicle kind differs");
-            seatState=c.value<uint64_t>(add(o.component,0x318));
-            require(pointer(seatState),"seat state unavailable");
-            require(c.value<uint64_t>(add(seatState,0xa68))==reference,"seat vehicle differs");
-            auto seat=c.value<uint32_t>(seatState);
-            if(seat<=4) {o.seatIndex=int(seat);o.seat=seat==0?Seat::Driver:Seat::Passenger;}
+        if(o.kind!=Kind::Unknown) {
+            o.vehicle=parent;
+            require(c.value<uint32_t>(add(o.vehicle,0x4c4))==o.expectedKindValue(),"vehicle kind differs");
+            // The vehicle must list the porter among its children (bounded walk).
+            bool child=false;uint64_t next=c.value<uint64_t>(add(o.vehicle,FirstChildOffset));
+            for(unsigned i=0;next&&i<MaxChildren;++i) {
+                require(pointer(next),"child pointer invalid");
+                if(next==o.porter){child=true;break;}
+                next=c.value<uint64_t>(add(next,NextSiblingOffset));
+            }
+            require(child,"porter not among the vehicle's children");
+            o.riding=true;o.seat=Seat::Driver;o.seatIndex=0; // A player always drives in this game (no passenger seats for players).
             c.read(add(o.vehicle,0xc8),o.position.data(),sizeof(o.position));
             c.read(add(o.vehicle,0xe0),o.rotation.data(),sizeof(o.rotation));
             for(double x:o.position)require(std::isfinite(x),"vehicle position non-finite");
@@ -138,27 +118,26 @@ Observation Reader::read(uint64_t us) {
         require(c.unchanged(),"observation changed");
         auto selectedAgain=s.selectPlayer(manager);
         require(!*selectedAgain.reason&&selectedAgain.player==player&&selectedAgain.slot==selected.slot,"player selection changed");
-        o.available=o.coherent=true;o.reason="";
+        o.available=o.coherent=true;o.reason=parent&&!o.riding?"parent is not a vehicle":"";
         if(!o.riding) {reset();return o;}
-        if(previousPorter_==o.porter&&previousComponent_==o.component&&previousVehicle_==o.vehicle&&previousSeat_==seatState&&previousSeatIndex_==o.seatIndex
+        if(previousPorter_==o.porter&&previousVehicle_==o.vehicle
            &&us>previousTime_&&us-previousTime_>=MinGapUs&&us-previousTime_<=MaxGapUs) {
             double distance=0;for(unsigned i=0;i<3;++i)distance=std::hypot(distance,o.position[i]-previousPosition_[i]);
             double speed=distance/(double(us-previousTime_)/1000000.);
             if(std::isfinite(speed)&&speed<=MaxSpeed) {o.speed=speed;o.speedAvailable=true;}
         }
-        previousPorter_=o.porter;previousComponent_=o.component;previousVehicle_=o.vehicle;
-        previousSeat_=seatState;previousSeatIndex_=o.seatIndex;previousTime_=us;previousPosition_=o.position;
+        previousPorter_=o.porter;previousVehicle_=o.vehicle;previousTime_=us;previousPosition_=o.position;
         return o;
     } catch(const std::exception& error) {
         reset();Observation unavailable;unavailable.sampledAtUs=us;unavailable.reason=error.what();return unavailable;
     }
 }
 std::string row(const Observation& o) {
-    const char* kind=o.kind==Kind::None?"none":o.kind==Kind::Motorbike?"motorbike":o.kind==Kind::Truck?"truck":"unknown";
+    const char* kind=o.kind==Kind::None?"none":o.kind==Kind::Motorbike?"motorbike":o.kind==Kind::Truck?"truck":o.kind==Kind::Car?"car":"unknown";
     const char* seat=o.seat==Seat::None?"none":o.seat==Seat::Driver?"driver":o.seat==Seat::Passenger?"passenger":"unknown";
     std::ostringstream s;s<<std::setprecision(12)<<"VEHICLE {\"t_us\":"<<o.sampledAtUs<<",\"provisional\":true,\"available\":"<<(o.available?"true":"false")
         <<",\"riding\":"<<(o.available?(o.riding?"true":"false"):"null")<<",\"kind\":\""<<kind<<"\",\"seat\":\""<<seat
-        <<"\",\"seat_index\":"<<o.seatIndex<<",\"porter\":\"0x"<<std::hex<<o.porter<<"\",\"component\":\"0x"<<o.component
+        <<"\",\"seat_index\":"<<o.seatIndex<<",\"porter\":\"0x"<<std::hex<<o.porter<<"\",\"parent\":\"0x"<<o.parent
         <<"\",\"vehicle\":\"0x"<<o.vehicle<<std::dec<<"\",\"position\":";
     if(o.available&&o.riding) {s<<'[';for(unsigned i=0;i<3;++i)s<<(i?",":"")<<o.position[i];s<<']';} else s<<"null";
     s<<",\"rotation\":";
