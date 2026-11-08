@@ -27,7 +27,12 @@ inline uint8_t location(const Record& r){return uint8_t(r.state>>8);}
 constexpr uint8_t SharedKind=7;
 inline uint8_t kind(const Record& r){return uint8_t(r.state);}
 // Every record in use. Empty when the manager is absent or does not look like one (wrong vtable).
-std::vector<Record> readRecords(const discovery::Sampler&, uint64_t manager, uint64_t managerVtable);
+// The game scans 0x1e98 records (0x2c55180) and a late save used records past 511 (live 2026-11-09: index 557).
+// limit: how many records to read (at most MaxRecords); read in chunks to keep the copies few.
+constexpr unsigned MaxRecords=0x1e98, FirstRecords=511;
+std::vector<Record> readRecords(const discovery::Sampler&, uint64_t manager, uint64_t managerVtable, unsigned limit=FirstRecords);
+// How far the next quick scans must reach after a full one: past the highest record in use, never below FirstRecords.
+unsigned scanLimit(const std::vector<Record>& fullScan);
 struct Placement { uint32_t hash=0; std::array<double,3> position{}; uint64_t id=0; };   // game axes; id = shared id
 // A pick-up (or a shared item gone) to report: the shared id when there is one, and the item and its last place on the
 // ground, so the partner can find its copy even when the id is not known there (after a restart of either mod).

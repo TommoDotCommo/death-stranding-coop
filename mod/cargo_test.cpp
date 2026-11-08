@@ -1,5 +1,7 @@
 #include "cargo.h"
 #include <cstdio>
+#include <cstring>
+#include <vector>
 using namespace mod::cargo;
 unsigned failures=0;
 #define CHECK(x) do{if(!(x)){std::fprintf(stderr,"cargo oracle: %s\n",#x);++failures;}}while(0)
@@ -7,6 +9,17 @@ Record rec(uint32_t slot,uint32_t hash,double x,double y=0,uint8_t where=0){Reco
 Record world(uint32_t slot,uint32_t hash,double x,double y=0){return rec(slot,hash,x,y,InWorld);}
 Record carried(uint32_t slot,uint32_t hash,double x,double y=0){return rec(slot,hash,x,y,OnPorter);}
 int main(){
+    {   // The record table: the first 511 records by default, every record the game scans when asked, in chunks;
+        // the quick-scan mark reaches past the highest record in use.
+        const uint64_t base=0x10000000,vt=0x77,manager=base+0x100;std::vector<unsigned char> mem(0x100+0x20+0x240*size_t(MaxRecords)+0x1000);
+        auto put=[&](uint64_t a,uint64_t v){std::memcpy(mem.data()+(a-base),&v,8);};
+        mod::discovery::Sampler sm{[&](uint64_t a,void* o,size_t n){if(a<base||a-base+n>mem.size())return false;std::memcpy(o,mem.data()+(a-base),n);return true;},base};
+        put(manager,vt);for(unsigned i:{10u,600u,7000u}){uint64_t r=manager+0x20+0x240ull*i;put(r+0x28,0x1234);put(r+0xc8,1000+i);}
+        auto quick=readRecords(sm,manager,vt);CHECK(quick.size()==1&&quick[0].index==10);
+        auto full=readRecords(sm,manager,vt,MaxRecords);CHECK(full.size()==3&&full[1].index==600&&full[2].index==7000&&full[2].hash==8000);
+        CHECK(scanLimit(full)==7065&&scanLimit(quick)==FirstRecords&&scanLimit({})==FirstRecords);
+        CHECK(readRecords(sm,manager,0x78,MaxRecords).empty());   // wrong manager vtable: nothing
+    }
     std::array<double,3> porter{0,0,100},moved{2,0,100};
     // Existing cargo is learnt, never announced.
     { Sync s;CHECK(s.observe({rec(1,10,1),rec(2,20,500)},porter,0).empty());

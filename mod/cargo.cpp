@@ -4,19 +4,32 @@
 #include <cmath>
 namespace mod::cargo {
 namespace {
-constexpr uint64_t Records=0x20,Stride=0x240;constexpr unsigned Slots=511;
+constexpr uint64_t Records=0x20,Stride=0x240;constexpr unsigned Chunk=512;   // 295 KB per copy
 double distance(const std::array<double,3>& a,const std::array<double,3>& b){double d=0;for(int i=0;i<3;++i)d+=(a[i]-b[i])*(a[i]-b[i]);return std::sqrt(d);}
 bool placed(const std::array<double,3>& p){return std::isfinite(p[0])&&std::isfinite(p[1])&&std::isfinite(p[2])&&(p[0]!=0||p[1]!=0||p[2]!=0);}
 }
-std::vector<Record> readRecords(const discovery::Sampler& s,uint64_t manager,uint64_t vtable){
+unsigned scanLimit(const std::vector<Record>& full){
+    unsigned high=0;for(auto& r:full)high=std::max(high,r.index+1);
+    return std::min(MaxRecords,std::max(FirstRecords,high+64));
+}
+std::vector<Record> readRecords(const discovery::Sampler& s,uint64_t manager,uint64_t vtable,unsigned limit){
     std::vector<Record> out;uint64_t v=0;
     if(!manager||!s.read(manager,&v,8)||v!=vtable)return out;
-    std::vector<uint8_t> block(Stride);
-    for(unsigned i=0;i<Slots;++i){
-        if(!s.read(manager+Records+Stride*i,block.data(),block.size()))break;
-        uint64_t item=0;std::memcpy(&item,block.data()+0x28,8);if(!item)continue;
-        Record r;std::memcpy(&r.slot,block.data()+0x18,4);std::memcpy(&r.state,block.data()+0x20,4);std::memcpy(&r.hash,block.data()+0xc8,4);
-        std::memcpy(r.position.data(),block.data()+0x38,24);std::memcpy(&r.holder,block.data()+0x1c,4);r.index=i;out.push_back(r);
+#ifndef MUTANT_CARGO_FIRST511
+    limit=std::min(limit,MaxRecords);
+#else
+    limit=std::min(limit,FirstRecords);
+#endif
+    std::vector<uint8_t> chunk(Stride*Chunk);
+    for(unsigned at=0;at<limit;at+=Chunk){
+        unsigned n=std::min(Chunk,limit-at);
+        // One copy per chunk (readOnce): a full double-checked scan cost 126 ms on the game thread (live 2026-11-09).
+        if(!s.readOnce(manager+Records+Stride*at,chunk.data(),Stride*n))break;
+      for(unsigned k=0;k<n;++k){unsigned i=at+k;const uint8_t* block=chunk.data()+Stride*k;
+        uint64_t item=0;std::memcpy(&item,block+0x28,8);if(!item)continue;
+        Record r;std::memcpy(&r.slot,block+0x18,4);std::memcpy(&r.state,block+0x20,4);std::memcpy(&r.hash,block+0xc8,4);
+        std::memcpy(r.position.data(),block+0x38,24);std::memcpy(&r.holder,block+0x1c,4);r.index=i;out.push_back(r);
+      }
     }
     return out;
 }

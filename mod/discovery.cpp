@@ -50,6 +50,10 @@ bool Sampler::read(uint64_t a,void* out,size_t n) const {
     if(!read_(a,x.data(),n)||!read_(a,y.data(),n)||x!=y)return false;
     memcpy(out,x.data(),n);return true;
 }
+bool Sampler::readOnce(uint64_t a,void* out,size_t n) const {
+    if(!a||!n||n>128*1024*1024||n>UINT64_MAX-a)return false;
+    return read_(a,out,n);
+}
 bool Sampler::region(uint64_t a,size_t n,bool nonExecutable) const {
     if(!n||n>UINT64_MAX-a)return false;
     for(auto s:sections)if(a>=s.address&&a-s.address<s.size&&n<=s.size-(a-s.address)&&(!nonExecutable||!s.executable))return true;

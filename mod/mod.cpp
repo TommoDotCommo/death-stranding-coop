@@ -196,6 +196,7 @@ struct Runtime final:ds::Transport {
     std::function<bool()> gameEvent;bool inEvent=false;uint64_t eventOverAt=0;std::atomic<bool> fakeEvent{false};
     // Shared cargo (cargo.h): placements read from the game's cargo map go to the partner; theirs are created here.
     mod::cargo::Sync cargoSync;uint64_t cargoReadAt=0,cargoManagerSlot=0,cargoManagerVtable=0,cargoSent=0,cargoMade=0,cargoTaken=0,cargoRemoved=0;
+    uint64_t cargoFullAt=0;unsigned cargoLimit=mod::cargo::FirstRecords;   // a full record scan every 4 s, quick scans up to its mark
     bool cargoIdsSet=false;
     void tickCargo(uint64_t now) {
         // Watch the world even while the partner is away: what is placed or taken meanwhile is queued by the core and
@@ -240,7 +241,12 @@ struct Runtime final:ds::Transport {
         if(!coop||now-cargoReadAt<250)return;
         cargoReadAt=now;uint64_t manager=0;if(!sampler->read(cargoManagerSlot,&manager,8))return;
         auto anchor=mod::puppet::readLocalAnchor(*sampler);if(!anchor.entity||!anchor.pose.available)return;
-        auto records=mod::cargo::readRecords(*sampler,manager,cargoManagerVtable);if(records.empty())return;
+        bool full=!cargoFullAt||now-cargoFullAt>=4000;auto scanStart=mod::nowUs();
+        auto records=mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,full?mod::cargo::MaxRecords:cargoLimit);if(records.empty())return;
+        if(full){auto limit=mod::cargo::scanLimit(records);
+            if(!cargoFullAt||limit!=cargoLimit){std::ostringstream o;o<<"CARGO full scan: "<<records.size()<<" records in use, quick scans to "<<limit
+                <<", took "<<(mod::nowUs()-scanStart)/1000.<<" ms\n";note(o.str().c_str());}
+            cargoFullAt=now;cargoLimit=limit;}
         for(auto& p:cargoSync.observe(records,anchor.pose.position,now)) {
             ds::CargoEvent e;e.type=1;e.item=p.hash;e.ref=p.id;e.position={p.position[0],p.position[2],p.position[1]};   // game -> adapter axes
             core->queueCargo(e);++cargoSent;
