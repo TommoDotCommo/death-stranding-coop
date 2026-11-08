@@ -81,7 +81,7 @@ void actions(){
      Double e(api,[&](const std::string& r){v.events.push_back(r);});e.enable();auto w=at(5);
      e.steering(12.5);e.tick(true,&w,3,FlagSprintBit);CHECK(steered.empty());
      v.frame();auto w2=at(6);e.tick(true,&w2,0,2u<<VehicleShift);CHECK(!steered.empty()&&steered.back()==12.5f);
-     e.steering(NAN);v.frame();auto w3=at(7);e.tick(true,&w3,0,2u<<VehicleShift);CHECK(steered.back()==0.f);}
+     e.steering(NAN);v.frame();auto w3=at(7);e.tick(true,&w3,0,2u<<VehicleShift);CHECK(!steered.empty()&&steered.back()==0.f);}
     // The partner's vehicle kind passes to the body (riding pose); kinds map to the game's Vehicle_Type values.
     {Scene v;auto e=v.make();e.enable();auto w=at(5);e.tick(true,&w,3,FlagSprintBit|(2u<<VehicleShift));CHECK(v.actions==(FlagSprintBit|(2u<<VehicleShift)));}
     CHECK(vehicleAnimationType(0)<0&&vehicleAnimationType(1)==0&&vehicleAnimationType(2)==1&&vehicleAnimationType(3)==3&&vehicleAnimationType(4)<0);
