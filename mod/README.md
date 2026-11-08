@@ -674,7 +674,14 @@ removed with `off <stamp>`, when `own` mode ends or when the body changes,
 and forgotten (never touched) when a new world loads. Each side also sends what its porter shows (CARGO events of type
 7: each piece as its helper's hash and its place among the porter's pieces with that helper), and the partner's body
 wears that set, copied from the matching pieces of the local porter, shown or hidden; until a set arrives, the local
-porter's visible gear is used. Live, two copies: `GEAR the partner shows 2 pieces` on both. Carried cargo is not drawn. The resident double (`peer` mode) is never given gear.
+porter's visible gear is used. Live, two copies: `GEAR the partner shows 2 pieces` on both. Carried cargo is not drawn.
+
+The outfit goes with it (`outfit.h`): each side sends its porter's enabled art parts (hood, caps, suit pieces: one CARGO
+event of type 8, a 52-bit mask in this build), and the partner's body switches the parts that differ with the game's own
+part worker, at most four a second, while the body is shown; part 20 (a cable part that drew stretched polygons on a
+made body) is never switched. The body is dressed from the resident double, whose parts are not the porter's: live, 3
+of 52 differed, `OUTFIT switched 3 of 3 parts on the body`, and afterwards each body's mask equalled the other porter's.
+Both senders wait until a load has been over for 8 s, because right after one the porter shows gear he then hides. The resident double (`peer` mode) is never given gear.
 Log lines start with `GEAR`. Tests: `gear_test.cpp` (the porter's tree in fake memory, the plan, the mirror in a fake
 world, the empty carrier and its slot lookup; six mutants in `test_game_thread_mutants.py`) and `make
 gear-windows-test` (the carrier's critical sections on Windows, with an uninitialised mutant).

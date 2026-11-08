@@ -87,12 +87,13 @@ void cargoTests() {
       f.receive(cargo(1,11),110); f.receive(cargo(1,11),120); f.receive(cargo(2,22),130);
       auto got=f.core.takeCargo(); check(got.size()==2&&got[0].item==11&&got[1].item==22&&got[0].ref==5011,"cargoOrder");
       unsigned acks=0; for(auto& b:f.transport.packets) acks+=b[6]==uint8_t(Kind::CargoAck); check(acks==3,"cargo_ack_repeats");
-      auto bad=cargo(3,33); bad.state.action=0; check(f.receive(bad,140)==Error::Range,"cargo_type_range"); bad.state.action=8; check(f.receive(bad,140)==Error::Range,"cargo_type_range");
+      auto bad=cargo(3,33); bad.state.action=0; check(f.receive(bad,140)==Error::Range,"cargo_type_range"); bad.state.action=9; check(f.receive(bad,140)==Error::Range,"cargo_type_range");
       check(f.core.takeCargo().empty(),"cargo_taken_once");
       auto noid=cargo(3,33); noid.t1=0; check(f.receive(noid,150)==Error::Range,"cargo_id_required");
       auto carry=cargo(3,33); carry.state.action=6; check(f.receive(carry,160)==Error::None,"cargo_carry_type");   // what the porter carries (optional)
       auto gear=cargo(4,34); gear.state.action=7; check(f.receive(gear,170)==Error::None,"cargo_gear_type");       // the gear the porter wears (optional)
-      auto carried=f.core.takeCargo(); check(carried.size()==2&&carried[0].type==6&&carried[1].type==7&&carried[1].item==34,"cargo_carry_type"); }
+      auto outfit=cargo(5,35); outfit.state.action=8; check(f.receive(outfit,175)==Error::None,"cargo_outfit_type"); // the porter's art parts (optional)
+      auto carried=f.core.takeCargo(); check(carried.size()==3&&carried[0].type==6&&carried[1].type==7&&carried[1].item==34&&carried[2].type==8,"cargo_carry_type"); }
     // A ping (type 5) travels like any cargo event: delivered once, with its place and ref.
     { Fixture f; Packet p=f.presence(1,0); p.kind=Kind::Cargo; p.state.action=5; p.t0=0; p.t1=91; p.t2=4242; p.state.position={1,2,3};
       check(f.receive(p,100)==Error::None,"cargo_ping"); f.receive(p,110);

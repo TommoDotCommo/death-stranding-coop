@@ -37,6 +37,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "marker.h"
 #include "carry_visual.h"
 #include "gear.h"
+#include "outfit.h"
 #include "structures.h"
 #ifdef MOD_FAKE_NETWORK
 #include "fake_memory.h"
@@ -178,6 +179,8 @@ struct Runtime final:ds::Transport {
     // The porter's visible gear on the partner's own body (gear.h); config partner_gear or puppet.gear "on <stamp>".
     std::filesystem::path gearCommand;std::unique_ptr<mod::gear::Mirror> gear;bool gearOn=false;
     // The partner's own gear (gear.h, CARGO type 7): what they show, and what this porter shows sent to them.
+    // The partner's outfit (outfit.h, CARGO type 8): their enabled art parts, and this porter's sent to them.
+    std::optional<mod::outfit::Parts> partnerParts;mod::outfit::Sender outfitTx;uint64_t outfitAt=0;
     std::optional<mod::gear::WornSet> partnerWorn;mod::gear::WornReceiver wornRx;mod::gear::WornSender wornTx;uint64_t wornReadAt=0;
     // Read-only vehicle diagnostics. No changes to presence or actor control (vehicle.h).
     std::filesystem::path vehicleCommand;std::unique_ptr<mod::vehicle::Monitor> vehicleMonitor;
@@ -187,7 +190,7 @@ struct Runtime final:ds::Transport {
     std::function<void(uint32_t)> cargoGive,cargoDelete;std::function<void(uint8_t,const mod::puppet::Transform&,bool)> construct;std::function<bool(uint64_t,unsigned,bool)> partToggle;
     std::function<void(const std::array<float,4>&,const std::array<float,4>&,const mod::puppet::Transform&,bool,bool,bool)> unconstruct;
     std::function<void()> continueLastSave;mod::AutoContinue autoContinue;bool autoNoted=false;
-    std::function<bool()> gameEvent;bool inEvent=false;std::atomic<bool> fakeEvent{false};
+    std::function<bool()> gameEvent;bool inEvent=false;uint64_t eventOverAt=0;std::atomic<bool> fakeEvent{false};
     // Shared cargo (cargo.h): placements read from the game's cargo map go to the partner; theirs are created here.
     mod::cargo::Sync cargoSync;uint64_t cargoReadAt=0,cargoManagerSlot=0,cargoManagerVtable=0,cargoSent=0,cargoMade=0,cargoTaken=0,cargoRemoved=0;
     bool cargoIdsSet=false;
@@ -203,6 +206,10 @@ struct Runtime final:ds::Transport {
             if(e.type==mod::carry::WireType){if(config.carryVisual)carry.incoming(e,carrySink);continue;}   // ds3: tickCarry
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
+            if(e.type==mod::outfit::WireType){               // the partner's art parts (tickGear, outfit.h)
+                if(auto p=mod::outfit::decode(e)){if(!partnerParts||*partnerParts!=*p)note(("OUTFIT the partner wears "+std::to_string(__builtin_popcountll(p->enabled))+" of "+std::to_string(p->count)+" parts\n").c_str());partnerParts=*p;}
+                continue;
+            }
             if(e.type==mod::gear::GearWireType){             // the gear the partner shows (tickGear, gear.h)
                 if(auto s=wornRx.feed(e)){bool changed=!partnerWorn||*partnerWorn!=*s;partnerWorn=*s;
                     if(changed)note(("GEAR the partner shows "+std::to_string(s->size())+" pieces\n").c_str());}
@@ -803,10 +810,22 @@ struct Runtime final:ds::Transport {
         }
         if(!gearOn||!anchor.entity)return;
         // What this porter shows goes to the partner (read once a second; sent when it holds still, and on every connection).
-        if(core&&now-wornReadAt>=1000){wornReadAt=now;
+        // Nothing is read until a load (a game event) has been over for SettleMs: right after one the porter shows gear
+        // and parts he hides seconds later (live: 7 pieces sent, then 2).
+        constexpr uint64_t SettleMs=8000;
+        bool settled=!inEvent&&now-eventOverAt>=SettleMs&&anchor.pose.available;
+        if(core&&settled&&now-wornReadAt>=1000){wornReadAt=now;
             auto mine=mod::gear::worn(mod::gear::snapshot(*sampler,anchor.entity),sampler->base);
-            for(auto& e:wornTx.observe(mine,core->connected(),now))core->queueCargo(e);}
+            auto events=wornTx.observe(mine,core->connected(),now);
+            if(!events.empty()){note(("GEAR sent "+std::to_string(mine.size())+" pieces\n").c_str());for(auto& e:events)core->queueCargo(e);}}
         uint64_t flags=0;bool shown=bodyEntity&&sampler->read(bodyEntity+mod::gear::Flags,&flags,8)&&(flags&mod::gear::FlagVisible);
+        // The outfit: this porter's art parts go to the partner; the body takes the partner's, a few parts a second.
+        if(core&&now-outfitAt>=1000){outfitAt=now;
+            if(settled)if(auto e=outfitTx.observe(mod::outfit::read(*sampler,anchor.entity),core->connected(),now)){note("OUTFIT sent\n");core->queueCargo(*e);}
+            if(bodyEntity&&shown&&partnerParts&&partToggle)if(auto mine=mod::outfit::read(*sampler,bodyEntity)){
+                auto todo=mod::outfit::changes(*mine,*partnerParts,4);unsigned done=0;
+                for(auto& [index,on]:todo)done+=partToggle(bodyEntity,index,on);
+                if(!todo.empty())note(("OUTFIT switched "+std::to_string(done)+" of "+std::to_string(todo.size())+" parts on the body\n").c_str());}}
         auto pose=bodyEntity?mod::puppet::readEntityPose(*sampler,bodyEntity):anchor.pose;
         if(bodyEntity&&!(pose.available&&pose.coherent))return;   // never make pieces at an unreadable place
         auto at=bodyEntity?mod::puppet::transform(pose):mod::puppet::Transform{};
@@ -856,7 +875,7 @@ struct Runtime final:ds::Transport {
         if(twinMode==TwinMode::None)echo.clear();
         // During a local game event or cutscene the double goes back to the game, so it never appears in one.
         bool event=gameEvent&&gameEvent();
-        if(event!=inEvent){inEvent=event;note(event?"DOUBLE game event: double handed back\n":"DOUBLE game event over\n");}
+        if(event!=inEvent){inEvent=event;if(!event)eventOverAt=now;note(event?"DOUBLE game event: double handed back\n":"DOUBLE game event over\n");}
         // A partner who is only missing for now (late packets, private room) is hidden, not handed back; a game event
         // or the mode switched off hands the double back.
         const mod::puppet::Transform* goal=(target&&!event)?&*target:nullptr;bool hold=twinMode!=TwinMode::None&&!event;
