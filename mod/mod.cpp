@@ -1000,13 +1000,17 @@ struct Runtime final:ds::Transport {
         // dropped while borrowed. Until the body exists, or if the game refuses to make one, the resident double is used.
         bool useOwn=twinMode==TwinMode::Own&&own&&ownTwin&&!own->exhausted();
         auto anchor=anchorNow();
+        stages.enter("body make",mod::nowUs());
         if(useOwn)ownEntity=own->tick(anchor);
+        stages.enter("body drive",mod::nowUs());
         {double steer=partnerMode()&&cache.remote.visible?cache.remote.state.steer:0;twin->steering(steer);if(ownTwin)ownTwin->steering(steer);}
         if(useOwn&&ownEntity){
             twin->tick(true,nullptr);ownTwin->tick(true,goal,speed,actions,hold);
         }
         else{twin->tick(true,goal,speed,actions,hold);if(ownTwin)ownTwin->tick(true,nullptr);}
+        stages.enter("gear",mod::nowUs());
         tickGear(useOwn?ownEntity:0,anchor,now);
+        stages.enter("ride",mod::nowUs());
         tickRide(anchor,now);
     }
     bool tickOnce(std::string& err,bool gameContext=false) {
@@ -1017,7 +1021,9 @@ struct Runtime final:ds::Transport {
             auto clock=mod::nowUs();auto now=clock/1000;
             if(lastProvider)providerTick.add(clock-lastProvider);
             lastProvider=clock;++ticks;
+            stages.enter("provider",mod::nowUs());
             cache.sampledAt=now;cache.available=provider->readLocal(cache.local);cache.gated=provider->isInCutsceneOrLoading();
+            stages.enter("start",mod::nowUs());
             // A bounded, read-only observation; never writes story or save state.
             if(game&&cache.available&&sampler&&now>=nextProgressRead){
                 auto progress=mod::join::ProgressReader(*sampler).read();cache.story=progress.value;nextProgressRead=now+1000;
@@ -1036,11 +1042,13 @@ struct Runtime final:ds::Transport {
             if(game&&cache.available&&gameContext) {
                 // What the porter is doing, from his own animation variables (read-only): sprint and crouch.
                 auto anchor=anchorNow();
+                stages.enter("actions",mod::nowUs());
                 if(anchor.entity){auto a=mod::puppet::readActions(*sampler,anchor.entity,animatorVtable,actionCache);
                     cache.local.flags|=uint16_t(a&0xffff);cache.local.action=uint8_t((a>>16)&31);}
                 // In the private room the game uses this porter's own double: tell the partner, whose core then hides us.
                 // Same for a game event or cutscene: the partner hides us instead of showing a porter in a cutscene pose.
                 if(anchor.entity&&twin&&(doubleBusy(anchor.entity)||inEvent))cache.local.flags|=ds::PrivateRoom;
+                stages.enter("start",mod::nowUs());
             }
             if(cache.available) {
                 // A jump flag must survive until a presence packet carrying it has been sent.

@@ -767,7 +767,18 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
         return VirtualQuery(reinterpret_cast<void*>(at),&info,sizeof info)==sizeof info&&info.State==MEM_COMMIT&&info.Protect==PAGE_READWRITE
                &&at+n<=reinterpret_cast<uint64_t>(info.BaseAddress)+info.RegionSize;};
     auto check=[&s,twin](uint64_t e){uint64_t v=0;require(e&&q(s,e,v)&&v==twin,"double identity changed");};
-    DoubleApi api{[&s]{return readLocalAnchor(s);},[&s,camera,twin](uint64_t p){return findDouble(s,p,camera,twin);},
+    // The double found last time is re-checked through its links (class, parent camera, the camera's class and its
+    // parent porter: 4 reads) instead of walking both child lists every tick; the full walk, with its uniqueness
+    // check, still runs at least every 2 s and whenever the link check fails.
+    struct FoundDouble{uint64_t player=0,found=0,fullAt=0;};auto foundCache=std::make_shared<FoundDouble>();
+    auto findCached=[&s,camera,twin,foundCache](uint64_t p)->uint64_t{
+        uint64_t now=GetTickCount64();auto& c=*foundCache;
+        if(c.player==p&&c.found&&now>=c.fullAt&&now-c.fullAt<2000){
+            uint64_t v=0,cam=0,camVt=0,owner=0;
+            if(q(s,c.found,v)&&v==twin&&q(s,c.found+ParentOffset,cam)&&cam&&q(s,cam,camVt)&&camVt==camera&&q(s,cam+ParentOffset,owner)&&owner==p)return c.found;
+        }
+        c={p,findDouble(s,p,camera,twin),now};return c.found;};
+    DoubleApi api{[&s]{return readLocalAnchor(s);},findCached,
         [&s,check](uint64_t e){check(e);return readFlags(s,e);},[&s,check](uint64_t e){check(e);return readEntityPose(s,e);},
         [sleep,check](uint64_t e,bool b){check(e);sleep(e,b,0);},[visible,check](uint64_t e,bool b){check(e);visible(e,b);},
         [place,check](uint64_t e,const Transform& t){check(e);place(e,&t);},
