@@ -26,7 +26,9 @@ constexpr unsigned MaxChildren=64;
 uint64_t readFlags(const discovery::Sampler& s,uint64_t e){uint64_t f=0;require(q(s,e+FlagsOffset,f),"double flags unreadable");return f;}
 uint32_t readActions(const discovery::Sampler& s,uint64_t e,uint64_t animator,ActionCache& c){
     uint32_t components=0;uint64_t list=0,manager=0;
-    if(!s.read(e+0x90,&components,4)||components>4096||!q(s,e+0x98,list))return 0;
+    // The manager found last time, if it is still this entity's (2 reads instead of a walk over every component).
+    if(c.manager&&c.entity==e){uint64_t v=0,owner=0;if(q(s,c.manager,v)&&v==animator&&q(s,c.manager+0x48,owner)&&owner==e)manager=c.manager;}
+    if(!manager&&(!s.read(e+0x90,&components,4)||components>4096||!q(s,e+0x98,list)))return 0;
     for(uint32_t i=0;i<components&&!manager;++i){uint64_t m=0,v=0,owner=0;
 #ifndef MUTANT_DOUBLE_ACTION_OWNER
         if(q(s,list+8*i,m)&&q(s,m,v)&&v==animator&&q(s,m+0x48,owner)&&owner==e)manager=m;
@@ -36,8 +38,8 @@ uint32_t readActions(const discovery::Sampler& s,uint64_t e,uint64_t animator,Ac
     }
     uint32_t count=0;uint64_t slots=0;
     if(!manager||!s.read(manager+0x50,&count,4)||!count||count>4096||!q(s,manager+0x58,slots))return 0;
-    if(c.manager!=manager||c.count!=count){
-        c=ActionCache{};c.manager=manager;c.count=count;
+    if(c.manager!=manager||c.count!=count||c.entity!=e){
+        c=ActionCache{};c.manager=manager;c.count=count;c.entity=e;
         for(uint32_t i=0;i<count;++i){
             uint64_t name=0;char text[24]{};if(!q(s,slots+48ull*i,name)||!s.read(name,text,sizeof text-1))continue;
             for(unsigned k=0;k<7;++k)if(!std::strcmp(text,ActionNames[k]))c.index[k]=int(i);
@@ -49,13 +51,14 @@ uint32_t readActions(const discovery::Sampler& s,uint64_t e,uint64_t animator,Ac
 }
 std::optional<float> readFloatVariable(const discovery::Sampler& s,uint64_t e,uint64_t animator,const char* want,FloatVariable& c){
     uint32_t components=0;uint64_t list=0,manager=0;
-    if(!s.read(e+0x90,&components,4)||components>4096||!q(s,e+0x98,list))return std::nullopt;
+    if(c.manager&&c.entity==e){uint64_t v=0,owner=0;if(q(s,c.manager,v)&&v==animator&&q(s,c.manager+0x48,owner)&&owner==e)manager=c.manager;}
+    if(!manager&&(!s.read(e+0x90,&components,4)||components>4096||!q(s,e+0x98,list)))return std::nullopt;
     for(uint32_t i=0;i<components&&!manager;++i){uint64_t m=0,v=0,owner=0;
         if(q(s,list+8*i,m)&&q(s,m,v)&&v==animator&&q(s,m+0x48,owner)&&owner==e)manager=m;}
     uint32_t count=0;uint64_t slots=0;
     if(!manager||!s.read(manager+0x50,&count,4)||!count||count>4096||!q(s,manager+0x58,slots))return std::nullopt;
-    if(c.manager!=manager||c.count!=count){
-        c=FloatVariable{};c.manager=manager;c.count=count;
+    if(c.manager!=manager||c.count!=count||c.entity!=e){
+        c=FloatVariable{};c.manager=manager;c.count=count;c.entity=e;
         for(uint32_t i=0;i<count;++i){uint64_t name=0;char text[32]{};
             if(q(s,slots+48ull*i,name)&&s.read(name,text,sizeof text-1)&&!std::strcmp(text,want)){c.index=int(i);break;}}
     }
@@ -751,10 +754,13 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
     require(q(s,managerResource,g)&&g==s.base+0x2398f00&&q(s,networkDef,g)&&g==s.base+0x1a4c150&&q(s,floorEffect,g)&&g==s.base+0x2711a40,"animation vtables differ from pinned image");
     struct Effect{uint64_t child=0;bool visible=false,sleeping=false;};
     struct Effects{uint64_t entity=0;std::vector<Effect> recorded;};auto effects=std::make_shared<Effects>();
-    auto managerOf=[&s,animator](uint64_t e)->uint64_t{
+    auto managerCache=std::make_shared<std::pair<uint64_t,uint64_t>>(0,0);   // entity, its manager
+    auto managerOf=[&s,animator,managerCache](uint64_t e)->uint64_t{
+        if(managerCache->first==e&&managerCache->second){uint64_t v=0,owner=0;auto m=managerCache->second;
+            if(q(s,m,v)&&v==animator&&q(s,m+0x48,owner)&&owner==e)return m;}
         uint32_t count=0;uint64_t list=0;
         require(s.read(e+0x90,&count,4)&&count<=4096&&q(s,e+0x98,list),"entity components unreadable");
-        for(uint32_t i=0;i<count;++i){uint64_t c=0,v=0,owner=0;if(q(s,list+8*i,c)&&q(s,c,v)&&v==animator&&q(s,c+0x48,owner)&&owner==e)return c;}
+        for(uint32_t i=0;i<count;++i){uint64_t c=0,v=0,owner=0;if(q(s,list+8*i,c)&&q(s,c,v)&&v==animator&&q(s,c+0x48,owner)&&owner==e){*managerCache={e,c};return c;}}
         return 0;
     };
     auto writable=[](uint64_t at,size_t n){MEMORY_BASIC_INFORMATION info{};

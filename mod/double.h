@@ -52,10 +52,10 @@ float vehicleAnimationType(uint32_t kind);
 // The porter's bool variable for each bit, in this order.
 constexpr const char* ActionNames[]={"Sprint","Is_Crouch","Is_Jump","Action_Move","Is_Actions","Is_Fall","Is_Landed"};
 constexpr uint32_t ActionBits[]={FlagSprintBit,FlagCrouchBit,JumpBit,ActionMoveBit,ActionsBit,FallBit,LandedBit};
-struct ActionCache {uint64_t manager=0;uint32_t count=0;int index[7]={-1,-1,-1,-1,-1,-1,-1};};
+struct ActionCache {uint64_t manager=0,entity=0;uint32_t count=0;int index[7]={-1,-1,-1,-1,-1,-1,-1};};
 uint32_t readActions(const discovery::Sampler&,uint64_t entity,uint64_t animatorVtable,ActionCache&);
 // One float animation control of an entity by name (the manager's slot table, as readActions); nothing when absent.
-struct FloatVariable {uint64_t manager=0;uint32_t count=0;int index=-1;};
+struct FloatVariable {uint64_t manager=0,entity=0;uint32_t count=0;int index=-1;};
 std::optional<float> readFloatVariable(const discovery::Sampler&,uint64_t entity,uint64_t animatorVtable,const char* name,FloatVariable&);
 // Adapter state (Y up) to a game transform (Z up), facing yaw; inverse of stateFromPose.
 Transform fromState(const std::array<double,3>& position,double yaw);

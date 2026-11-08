@@ -43,7 +43,11 @@ std::string block(const Sampler& m,uint64_t a,size_t n) {
 }
 }
 bool Sampler::read(uint64_t a,void* out,size_t n) const {
+    ++reads;
     if(!a||!n||n>128*1024*1024||n>UINT64_MAX-a)return false;
+    // A naturally aligned value of up to 8 bytes is copied in one piece on x86-64 and cannot tear: one read.
+    if((n==1||n==2||n==4||n==8)&&a%n==0){
+        unsigned char x[8];if(!read_(a,x,n))return false;memcpy(out,x,n);return true;}
     // Never expose a partially copied buffer. Two reads reject observed tearing;
     // this is NOT an atomic engine snapshot or a lifetime/type guarantee.
     std::vector<unsigned char> x(n),y(n);
@@ -51,6 +55,7 @@ bool Sampler::read(uint64_t a,void* out,size_t n) const {
     memcpy(out,x.data(),n);return true;
 }
 bool Sampler::readOnce(uint64_t a,void* out,size_t n) const {
+    ++reads;
     if(!a||!n||n>128*1024*1024||n>UINT64_MAX-a)return false;
     return read_(a,out,n);
 }
@@ -199,12 +204,25 @@ namespace {
 // ReadProcessMemory is a kernel-guarded copy: races after VirtualQuery fail as
 // an error/short read instead of causing an in-process access violation (MinGW
 // does not support MSVC __try). Never dereference any game pointer in C++.
+// Readable regions seen by VirtualQuery are remembered per thread for RegionTtlMs: the mod reads hundreds of
+// values per tick from the same few heap regions, and a VirtualQuery per read cost most of the tick (live
+// 2026-11-09). ReadProcessMemory still guards every copy; a region that changed within the TTL fails there.
+constexpr uint64_t RegionTtlMs=100;constexpr unsigned RegionSlots=64;
+struct Region{uint64_t start=0,end=0,at=0;};
+thread_local Region regions[RegionSlots];
+bool readableCached(uint64_t p,uint64_t end,uint64_t now){
+    auto& r=regions[(p>>16)%RegionSlots];
+    return r.end&&p>=r.start&&end<=r.end&&now>=r.at&&now-r.at<RegionTtlMs;
+}
 bool windowsRead(uint64_t a,void* out,size_t n) {
     if(!a||n>UINT64_MAX-a)return false;
-    uint64_t end=a+n;
+    uint64_t end=a+n,now=GetTickCount64();
+    if(!readableCached(a,end,now))
     for(uint64_t p=a;p<end;) {MEMORY_BASIC_INFORMATION m{};if(!VirtualQuery(reinterpret_cast<void*>(p),&m,sizeof m)||m.State!=MEM_COMMIT||(m.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;
         auto protection=m.Protect&0xff;if(protection!=PAGE_READONLY&&protection!=PAGE_READWRITE&&protection!=PAGE_WRITECOPY&&protection!=PAGE_EXECUTE_READ&&protection!=PAGE_EXECUTE_READWRITE&&protection!=PAGE_EXECUTE_WRITECOPY)return false;
-        auto start=reinterpret_cast<uint64_t>(m.BaseAddress);if(m.RegionSize>UINT64_MAX-start||start+m.RegionSize<=p)return false;p=std::min(end,start+m.RegionSize);
+        auto start=reinterpret_cast<uint64_t>(m.BaseAddress);if(m.RegionSize>UINT64_MAX-start||start+m.RegionSize<=p)return false;
+        regions[(p>>16)%RegionSlots]={start,start+m.RegionSize,now};
+        p=std::min(end,start+m.RegionSize);
     }
     SIZE_T copied=0;return ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(a),out,n,&copied)&&copied==n;
 }

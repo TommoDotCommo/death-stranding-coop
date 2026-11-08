@@ -15,8 +15,13 @@ int main(int argc,char** argv){
         run("clean",[]{Fake f;auto m=f.sampler();m.scan(PinnedHash,PinnedHash);check(m.signatures.size()==6,"six signatures");Options o;o.roots["player"]=0x3800;auto s=m.sample(100,o);check(s.find("\"position_c8\":null")==std::string::npos,"position present");check(s.find("\"coherent\":true")!=std::string::npos,"coherent");});
         run("hash",[]{Fake f;auto m=f.sampler();rejected([&]{m.scan("wrong",PinnedHash);},"hash oracle");check(f.calls==0,"hash-before-read oracle");rejected([&]{m.scan(PinnedHash,"wrong");},"expected hash oracle");});
         run("unmapped",[]{Fake f;auto m=f.sampler();m.scan(PinnedHash,PinnedHash);f.blocked=f.base+0x60c8;Options o;o.roots["player"]=0x3800;check(m.sample(1,o).find("\"position_c8\":null")!=std::string::npos,"unmapped oracle");});
-        run("torn",[]{Fake f;auto m=f.sampler();m.scan(PinnedHash,PinnedHash);f.torn=true;unsigned char b=42;check(!m.read(f.base+0x4000,&b,1)&&b==42,"torn oracle");});
-        run("short",[]{Fake f;auto m=f.sampler();f.deny=true;unsigned char b=42;check(!m.read(f.base,&b,1)&&b==42,"short read oracle");});
+        run("torn",[]{Fake f;auto m=f.sampler();m.scan(PinnedHash,PinnedHash);f.torn=true;unsigned char b[16];std::memset(b,42,16);
+            check(!m.read(f.base+0x4000,b,16)&&b[0]==42,"torn oracle");
+            // One aligned value of up to 8 bytes cannot tear: it is read once, and a change between samples is just data.
+            uint64_t v=7;check(m.read(f.base+0x4000,&v,8),"aligned single read");unsigned char one=0;check(m.read(f.base+0x4001,&one,1),"byte single read");
+            uint32_t odd=0;check(!m.read(f.base+0x4001,&odd,4),"unaligned value still double-read");});
+        run("short",[]{Fake f;auto m=f.sampler();f.deny=true;unsigned char b=42;check(!m.read(f.base,&b,1)&&b==42,"short read oracle");
+            unsigned char w[16];std::memset(w,42,16);check(!m.read(f.base,w,16)&&w[0]==42,"short read oracle");});
         run("null",[]{Fake f;auto m=f.sampler();m.scan(PinnedHash,PinnedHash);f.put<uint64_t>(0x3800,0);Options o;o.roots["player"]=0x3800;check(m.sample(1,o).find("\"position_c8\":null")!=std::string::npos,"null chain oracle");rejected([&]{m.pointer(f.base+0x3800);},"null pointer oracle");});
         run("duplicate",[]{Fake f;memcpy(f.data.data()+0x1800,f.data.data()+0x1100,32);f.put<int32_t>(0x1807,0x3000-0x180b);f.put<int32_t>(0x181a,0x3000-0x181e);auto m=f.sampler();rejected([&]{m.scan(PinnedHash,PinnedHash);},"duplicate oracle");});
         run("zero",[]{Fake f;f.data[0x1300]=0;auto m=f.sampler();rejected([&]{m.scan(PinnedHash,PinnedHash);},"zero oracle");});

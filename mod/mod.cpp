@@ -158,6 +158,24 @@ struct Runtime final:ds::Transport {
     std::timed_mutex mutex;std::atomic<bool> running{false};std::thread worker;
     // Where the game-thread tick is, for a stall report: a native game call that faults is resumed by the game's own
     // exception handling above the mod, so the mod's lock stays held and the mod stops (live 2026-11-07).
+    // Time spent in each stage of the tick; once a minute, the stages whose slowest tick took over 1 ms are logged.
+    struct StageClock {
+        struct Stat{uint64_t n=0,total=0,max=0,reads=0;};
+        const char* name=nullptr;uint64_t at=0,since=0,readsAt=0;std::map<std::string,Stat> stats;const mod::discovery::Sampler* sampler=nullptr;
+        void enter(const char* next,uint64_t us){uint64_t r=sampler?sampler->reads:0;
+            if(name&&us>=at){auto& t=stats[name];auto d=us-at;++t.n;t.total+=d;t.max=std::max(t.max,d);t.reads+=r-readsAt;}
+            name=next;at=us;readsAt=r;if(!since)since=us;}
+        std::string report(uint64_t us){
+            if(!since||us<since||us-since<60000000)return {};
+            std::ostringstream o;bool any=false;o<<std::fixed<<std::setprecision(2)<<"TICK slow stages over 60 s:";
+            for(auto& [k,t]:stats)if(t.max>1000){any=true;o<<' '<<k<<" max "<<t.max/1000.<<" ms avg "<<double(t.total)/t.n/1000.<<" ms "<<double(t.reads)/t.n<<" reads;";}
+            stats.clear();since=us;return any?o.str()+"\n":std::string();}
+    } stages;
+    // The local porter's anchor and whether the game uses its double, read once per tick (every stage used to read
+    // them again: hundreds of reads a tick; live 2026-11-09). tickId advances at the start of each tick.
+    uint64_t tickId=1,anchorTick=0,busyTick=0,busyEntity=0;mod::puppet::Anchor anchorMemo;bool busyMemo=false;
+    mod::puppet::Anchor anchorNow(){if(anchorTick!=tickId){anchorMemo=mod::puppet::readLocalAnchor(*sampler);anchorTick=tickId;}return anchorMemo;}
+    bool doubleBusy(uint64_t entity){if(!twin)return false;if(busyTick!=tickId||busyEntity!=entity){busyMemo=twin->gameUsesDouble(entity);busyTick=tickId;busyEntity=entity;}return busyMemo;}
     std::atomic<const char*> stage{"idle"};bool stallNoted=false;uint64_t ownedBody=0;std::function<void(uint64_t,bool)> parkSleep,parkVisible;
 #ifdef MOD_FAKE_NETWORK
     std::unique_ptr<fakemem::Fake> fake;   // declared before the sampler that reads it
@@ -240,7 +258,7 @@ struct Runtime final:ds::Transport {
         }
         if(!coop||now-cargoReadAt<250)return;
         cargoReadAt=now;uint64_t manager=0;if(!sampler->read(cargoManagerSlot,&manager,8))return;
-        auto anchor=mod::puppet::readLocalAnchor(*sampler);if(!anchor.entity||!anchor.pose.available)return;
+        auto anchor=anchorNow();if(!anchor.entity||!anchor.pose.available)return;
         bool full=!cargoFullAt||now-cargoFullAt>=4000;auto scanStart=mod::nowUs();
         auto records=mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,full?mod::cargo::MaxRecords:cargoLimit);if(records.empty())return;
         if(full){auto limit=mod::cargo::scanLimit(records);
@@ -353,8 +371,8 @@ struct Runtime final:ds::Transport {
         }
         auto incoming=std::move(pingIn);pingIn.clear();
         if(!markers||!markers->enabled()){if(!incoming.empty())note("MARKER partner ping ignored (off)\n");return;}
-        auto anchor=mod::puppet::readLocalAnchor(*sampler);
-        bool hidden=inEvent||(anchor.entity&&twin&&twin->gameUsesDouble(anchor.entity));   // event, private room, cargo menu
+        auto anchor=anchorNow();
+        bool hidden=inEvent||(anchor.entity&&twin&&doubleBusy(anchor.entity));   // event, private room, cargo menu
         std::optional<std::array<double,3>> partner;
         if(partnerMode()&&cache.remote.visible&&core&&core->connected()){auto& p=cache.remote.state.position;partner=std::array<double,3>{p[0],p[2],p[1]};}   // adapter -> game axes
         for(auto& e:incoming)markers->partnerPing({e.ref,{e.position[0],e.position[2],e.position[1]}},now);
@@ -382,7 +400,7 @@ struct Runtime final:ds::Transport {
     void tickCarry(uint64_t now) {
         if(!config.carryVisual||!core||!sampler||!cargoManagerSlot||now-carryReadAt<250)return;
         carryReadAt=now;uint64_t manager=0;std::optional<mod::carry::Summary> read;
-        auto anchor=mod::puppet::readLocalAnchor(*sampler);
+        auto anchor=anchorNow();
         if(anchor.entity&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
             if(auto items=mod::carry::readCarried(*sampler,anchor.entity,sampler->base+mod::carry::ComponentVtable,manager))read=mod::carry::summarise(*items);
         std::string d=read?"porter carries "+mod::carry::describe(*read):anchor.entity?"porter's carrier unreadable (layout or vtable check failed)":"";
@@ -605,7 +623,7 @@ struct Runtime final:ds::Transport {
             // Real failures (cannot create the log, hash mismatch, signature scan failure) throw and refuse startup.
             // An unavailable pose (main menu, loading) is NORMAL: presence stays gated until a pose is available.
             openPresenceLog(path);
-            sampler=openSampler();
+            sampler=openSampler();stages.sampler=sampler.get();
             vehicleCommand=path.parent_path()/"puppet.vehicle";
             vehicleMonitor=std::make_unique<mod::vehicle::Monitor>(*sampler);
             environmentCommand=path.parent_path()/"puppet.environment";
@@ -644,7 +662,7 @@ struct Runtime final:ds::Transport {
                 puppetCommand=path.parent_path()/"puppet.spawn";
 #ifdef MOD_FAKE_NETWORK
                 mod::puppet::Api api;
-                api.local=[this]{return mod::puppet::readLocalAnchor(*sampler);};
+                api.local=[this]{return anchorNow();};
                 api.read=[this](uint64_t e){return mod::puppet::readEntityPose(*sampler,e);};
                 api.canCreate=[](uint64_t){return true;};
                 api.resource=[this](uint64_t){return fake->base+0x9000;};
@@ -671,7 +689,7 @@ struct Runtime final:ds::Transport {
                     const double origin[3]{};const float identity[9]{1,0,0,0,1,0,0,0,1};
                     memcpy(fake->data.data()+0xa8c8,origin,24);memcpy(fake->data.data()+0xa8e0,identity,36);});
                 mod::puppet::DoubleApi twinApi;
-                twinApi.local=[this]{return mod::puppet::readLocalAnchor(*sampler);};
+                twinApi.local=[this]{return anchorNow();};
                 twinApi.find=[this](uint64_t p){return mod::puppet::findDouble(*sampler,p,fake->base+0xff00,fake->base+0xff10);};
                 twinApi.flags=[this](uint64_t e){return mod::puppet::readFlags(*sampler,e);};
                 twinApi.read=[this](uint64_t e){return mod::puppet::readEntityPose(*sampler,e);};
@@ -722,8 +740,8 @@ struct Runtime final:ds::Transport {
 #if defined(_WIN32) && !defined(MOD_FAKE_NETWORK)
                     mod::join::MoveApi move;auto* sp=&*sampler;auto vehicles=std::make_shared<mod::vehicle::Reader>(*sampler);
                     move.porter=[sp]{return mod::join::readPorter(*sp);};
-                    move.gameplay=[this,sp]{auto a=mod::puppet::readLocalAnchor(*sp);
-                        return provider&&!provider->isInCutsceneOrLoading()&&gameEvent&&!gameEvent()&&a.entity&&twin&&!twin->gameUsesDouble(a.entity);};
+                    move.gameplay=[this,sp]{(void)sp;auto a=anchorNow();
+                        return provider&&!provider->isInCutsceneOrLoading()&&gameEvent&&!gameEvent()&&a.entity&&twin&&!doubleBusy(a.entity);};
                     move.riding=[vehicles]()->std::optional<bool>{auto o=vehicles->read(mod::nowUs());if(!o.available||!o.coherent)return std::nullopt;return o.riding;};
                     move.teleport=mod::join::nativeTeleport(*sampler);
                     joinMover=std::make_unique<mod::join::Mover>(std::move(move));note("JOIN native move armed: code identity verified\n");
@@ -878,7 +896,7 @@ struct Runtime final:ds::Transport {
                 note("BODY refused: the direct creator route froze the mod live (build with MOD_BODY_CREATE_EXPERIMENT to retry)\n");
                 return;
 #endif
-                auto anchor=mod::puppet::readLocalAnchor(*sampler);
+                auto anchor=anchorNow();
                 auto twinEntity=anchor.entity?mod::puppet::findDouble(*sampler,anchor.entity,sampler->base+0x3d198e8,sampler->base+0x3d7de48):0;
                 if(!anchor.entity||!anchor.pose.available||!twinEntity)note("BODY refused: no porter or no double\n");
                 else {
@@ -981,7 +999,7 @@ struct Runtime final:ds::Transport {
         // Own body: made (once per world) and driven by its own backend; the resident double is released, never
         // dropped while borrowed. Until the body exists, or if the game refuses to make one, the resident double is used.
         bool useOwn=twinMode==TwinMode::Own&&own&&ownTwin&&!own->exhausted();
-        auto anchor=mod::puppet::readLocalAnchor(*sampler);
+        auto anchor=anchorNow();
         if(useOwn)ownEntity=own->tick(anchor);
         {double steer=partnerMode()&&cache.remote.visible?cache.remote.state.steer:0;twin->steering(steer);if(ownTwin)ownTwin->steering(steer);}
         if(useOwn&&ownEntity){
@@ -993,6 +1011,7 @@ struct Runtime final:ds::Transport {
     }
     bool tickOnce(std::string& err,bool gameContext=false) {
         std::lock_guard<std::timed_mutex> guard(mutex);
+        stages.enter("start",mod::nowUs());++tickId;
         if(failed) {err=failure;return false;}
         try {
             auto clock=mod::nowUs();auto now=clock/1000;
@@ -1016,12 +1035,12 @@ struct Runtime final:ds::Transport {
             }
             if(game&&cache.available&&gameContext) {
                 // What the porter is doing, from his own animation variables (read-only): sprint and crouch.
-                auto anchor=mod::puppet::readLocalAnchor(*sampler);
+                auto anchor=anchorNow();
                 if(anchor.entity){auto a=mod::puppet::readActions(*sampler,anchor.entity,animatorVtable,actionCache);
                     cache.local.flags|=uint16_t(a&0xffff);cache.local.action=uint8_t((a>>16)&31);}
                 // In the private room the game uses this porter's own double: tell the partner, whose core then hides us.
                 // Same for a game event or cutscene: the partner hides us instead of showing a porter in a cutscene pose.
-                if(anchor.entity&&twin&&(twin->gameUsesDouble(anchor.entity)||inEvent))cache.local.flags|=ds::PrivateRoom;
+                if(anchor.entity&&twin&&(doubleBusy(anchor.entity)||inEvent))cache.local.flags|=ds::PrivateRoom;
             }
             if(cache.available) {
                 // A jump flag must survive until a presence packet carrying it has been sent.
@@ -1039,7 +1058,7 @@ struct Runtime final:ds::Transport {
             }
             // Render at the actual apply time, not the preceding network iteration.
             core->frame(now);provider->applyRemote(cache.remote);
-            stage="puppet";
+            stage="puppet";stages.enter("puppet",mod::nowUs());
             if(puppet&&gameContext) {
                 if(!puppet->armed()&&std::filesystem::exists(puppetCommand)) {
                     auto command=readConfig(puppetCommand);
@@ -1056,7 +1075,7 @@ struct Runtime final:ds::Transport {
                     note("BODY own body parked and ready for the double backend\n");}
 #endif
             }
-            stage="double";
+            stage="double";stages.enter("double",mod::nowUs());
             if(twin&&gameContext)tickTwin(now);
             // Join-at-host: runs only in the verified game callback. Moves the porter only with join_move native.
             if(config.joinAtHost&&gameContext){
@@ -1066,9 +1085,9 @@ struct Runtime final:ds::Transport {
                 input.local=cache.local;input.host=core->latestPresence(now);
                 if(auto plan=joinDecision.tick(input)){
                     if(!joinMover)note(mod::join::wouldMove(*plan).c_str());
-                    else{note(mod::join::willMove(*plan).c_str());stage="join move";note(joinMover->start(*plan,now).c_str());}
+                    else{note(mod::join::willMove(*plan).c_str());stage="join move";stages.enter("join move",mod::nowUs());note(joinMover->start(*plan,now).c_str());}
                 }
-                if(joinMover){stage="join settle";auto line=joinMover->tick(now);if(!line.empty())note(line.c_str());}
+                if(joinMover){stage="join settle";stages.enter("join settle",mod::nowUs());auto line=joinMover->tick(now);if(!line.empty())note(line.c_str());}
             }
             // End join dispatch.
             // Environment dispatch: reads are optional; writes require the independently attested callback.
@@ -1080,9 +1099,9 @@ struct Runtime final:ds::Transport {
                     requested=mod::environment::readCommand(command,mod::runStamp());
                     if(!requested)note("ENVIRONMENT ignored command for another process or malformed command\n");
                 }
-                auto anchor=environmentSend&&gameContext?mod::puppet::readLocalAnchor(*sampler):mod::puppet::Anchor{};
+                auto anchor=environmentSend&&gameContext?anchorNow():mod::puppet::Anchor{};
                 bool gameplay=cache.available&&!cache.gated&&gameContext&&gameEvent&&!gameEvent()&&!(cache.local.flags&ds::PrivateRoom)&&
-                    anchor.entity&&twin&&!twin->gameUsesDouble(anchor.entity);
+                    anchor.entity&&twin&&!doubleBusy(anchor.entity);
                 std::array<double,3> position{cache.local.position[0],cache.local.position[2],cache.local.position[1]};
                 if(!cache.available)position.fill(std::nan("")); // no stale porter position for a weather query in menus
                 if(requested||(environmentSend&&gameplay&&now>=environmentReadAt)) {
@@ -1111,19 +1130,19 @@ struct Runtime final:ds::Transport {
                 }
             }
             // End environment dispatch.
-            stage="cargo";
+            stage="cargo";stages.enter("cargo",mod::nowUs());
             if(twin&&gameContext)tickCargo(now);
-            stage="carry";   // ds3
+            stage="carry";stages.enter("carry",mod::nowUs());   // ds3
             if(twin&&gameContext)tickCarry(now);
-            stage="structures";
+            stage="structures";stages.enter("structures",mod::nowUs());
             if(twin&&gameContext)tickStructures(now);
-            stage="markers";
+            stage="markers";stages.enter("markers",mod::nowUs());
             if(twin&&gameContext)tickMarkers(now);
-            stage="cargo command";
+            stage="cargo command";stages.enter("cargo command",mod::nowUs());
             if(cargoCreate&&gameContext&&std::filesystem::exists(cargoCommand)) {
                 auto text=readConfig(cargoCommand);
                 if(!std::filesystem::remove(cargoCommand))throw std::runtime_error("cannot consume cargo command");
-                auto id=mod::puppet::parseCargoCommand(text,mod::runStamp());auto anchor=mod::puppet::readLocalAnchor(*sampler);
+                auto id=mod::puppet::parseCargoCommand(text,mod::runStamp());auto anchor=anchorNow();
                 auto give=mod::puppet::parseCargoCommand(text,mod::runStamp(),"give");
                 auto erase=mod::puppet::parseCargoCommand(text,mod::runStamp(),"delete");
                 auto list=mod::puppet::parseCargoCommand(text,mod::runStamp(),"list");
@@ -1177,17 +1196,18 @@ struct Runtime final:ds::Transport {
                     note(("CARGO create id="+std::to_string(*id)+"\n").c_str());
                 }
             }
-            stage="continue";
+            stage="continue";stages.enter("continue",mod::nowUs());
             if(continueLastSave&&gameContext) {
                 if(autoContinue.tick(now-startedAt,cache.available)){continueLastSave();if(autoContinue.calls()==1)note("AUTO continue: asking the game to load the last save\n");}
                 if(autoContinue.done()&&!autoNoted){autoNoted=true;note(("AUTO in game after "+std::to_string((now-startedAt)/1000)+" s, "+std::to_string(autoContinue.calls())+" requests\n").c_str());}
             }
-            stage="body";
+            stage="body";stages.enter("body",mod::nowUs());
             if(body&&gameContext)tickBody();
-            stage="pad";
+            stage="pad";stages.enter("pad",mod::nowUs());
             tickPad();notePose();
-            stage="idle";
+            stage="idle";stages.enter("idle",mod::nowUs());
             if(unappliedReceive) {receiveApply.add(clock-unappliedReceive);unappliedReceive=0;}
+            if(gameContext){auto line=stages.report(mod::nowUs());if(!line.empty())note(line.c_str());}
             if(!cache.available && !game) {err="provider unavailable during tick";note(err.c_str());return false;}
             if(now-startedAt>1000 && config.provider=="synthetic" && cache.remote.visible && core->connected()) {
                 auto truth=mod::trajectory(now>120?now-120:0,config.peerSlot);double e=0;

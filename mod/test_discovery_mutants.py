@@ -9,6 +9,7 @@ mutants = [
  ('unmapped', 'if(!a||!m.read(a,b.data(),n))return "null";', 'if(!a)return "null";m.read(a,b.data(),n);'),
  ('torn', '||x!=y', ''),
  ('short', '!read_(a,x.data(),n)||!read_(a,y.data(),n)||x!=y', 'false'),
+ ('short', 'unsigned char x[8];if(!read_(a,x,n))return false;', 'unsigned char x[8]{};read_(a,x,n);'),
  ('null', 'p&&p<0x0000800000000000ULL', 'true'),
  ('duplicate', 'require(matches==1,"duplicate signature")', 'require(true,"duplicate signature")'),
  ('zero', 'require(matches>0,"zero signature matches")', 'require(true,"zero signature matches")'),

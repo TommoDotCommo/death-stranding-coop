@@ -168,12 +168,17 @@ Api nativeApi(discovery::Sampler& s){
     api.alive=[table,sp,pool](uint64_t e,uint8_t kind){
         bool inPool=false;for(unsigned i=0;i<4;++i)if(*reinterpret_cast<uint64_t*>(pool+8*i)==e)inPool=true;
         uint64_t v=0;return inPool&&q(*sp,e,v)&&v==table(kind);};
-    api.place=[target,sp,mover](uint64_t e,const Transform& t){
-        // The VehicleMover among the entity's components (count +0x90, array +0x98), owned by it (+0x48).
+    auto moverCache=std::make_shared<std::pair<uint64_t,uint64_t>>(0,0);   // vehicle, its VehicleMover
+    api.place=[target,sp,mover,moverCache](uint64_t e,const Transform& t){
+        // The VehicleMover among the entity's components (count +0x90, array +0x98), owned by it (+0x48); the one
+        // found last time is re-checked (2 reads) instead of walking every component each tick.
+        uint64_t v=0,owner=0;
+        if(moverCache->first==e&&moverCache->second&&q(*sp,moverCache->second,v)&&v==mover&&q(*sp,moverCache->second+0x48,owner)&&owner==e){
+            target(moverCache->second,&t);return true;}
         uint32_t count=0;uint64_t list=0;
         if(!sp->read(e+0x90,&count,4)||!count||count>512||!q(*sp,e+0x98,list))return false;
-        for(uint32_t i=0;i<count;++i){uint64_t c=0,v=0,owner=0;
-            if(q(*sp,list+8*i,c)&&q(*sp,c,v)&&v==mover&&q(*sp,c+0x48,owner)&&owner==e){target(c,&t);return true;}}
+        for(uint32_t i=0;i<count;++i){uint64_t c=0;
+            if(q(*sp,list+8*i,c)&&q(*sp,c,v)&&v==mover&&q(*sp,c+0x48,owner)&&owner==e){*moverCache={e,c};target(c,&t);return true;}}
         return false;};
     return api;
 #endif
