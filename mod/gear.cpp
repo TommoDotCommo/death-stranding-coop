@@ -18,25 +18,51 @@ std::string name(const discovery::Sampler& s,uint64_t at){
     for(char c:text){if(!c)return out;if(c<32||c>126)return {};out+=c;}
     return {};   // no terminator within MaxHelper
 }
+// One copy of the fields the walk uses (an entity: vtable, links, flags, mover; a mover: vtable, helper name): one read
+// per entity instead of one per field (live 2026-11-09: about 9 reads a node, ~1000 a second with a full cargo stack).
+// A block that cannot be copied whole (its end on an unreadable page) is read field by field as before.
+struct Block {uint64_t at=0;bool whole=false;unsigned char bytes[0xb8]{};};
+static_assert(Mover+8<=sizeof Block::bytes&&HelperName+8<=sizeof Block::bytes&&Flags+8<=sizeof Block::bytes,"block covers the fields");
+bool load(const discovery::Sampler& s,uint64_t at,Block& b){
+    b.at=at;
+#ifndef MUTANT_GEAR_FIELDS
+    b.whole=at&&at<0x800000000000ULL&&s.readOnce(at,b.bytes,sizeof b.bytes);
+#endif
+    return b.whole||(at&&at<0x800000000000ULL);
+}
+bool field(const discovery::Sampler& s,const Block& b,uint64_t offset,uint64_t& v){
+    if(b.whole){std::memcpy(&v,b.bytes+offset,8);return true;}
+    return q(s,b.at+offset,v);
+}
+// The helper name is static resource text: one copy (tearing cannot happen to it).
+std::string helperName(const discovery::Sampler& s,uint64_t at){
+    char text[MaxHelper+1]{};if(!at||at>=0x800000000000ULL||!s.readOnce(at,text,sizeof text))return name(s,at);
+    std::string out;
+    for(char c:text){if(!c)return out;if(c<32||c>126)return {};out+=c;}
+    return {};
+}
 }
 std::vector<Node> snapshot(const discovery::Sampler& s,uint64_t porter){
     std::vector<Node> out;
-    struct Frame{uint64_t entity;int parent;unsigned depth;};
-    // Depth first, parents before children, siblings in list order: a stack of (first child, parent index).
-    std::vector<Frame> todo;uint64_t first=0;
-    auto push=[&](uint64_t from,int parent,unsigned depth){
-        std::vector<Frame> kids;uint64_t c=0;if(!q(s,from+FirstChild,c))return;
-        for(unsigned n=0;c&&n<MaxSiblings;++n){kids.push_back({c,parent,depth});if(!q(s,c+NextSibling,c))break;}
+    struct Frame{Block block;int parent;unsigned depth;};
+    // Depth first, parents before children, siblings in list order: a stack of (child, parent index).
+    std::vector<Frame> todo;
+    auto push=[&](const Block& from,int parent,unsigned depth){
+        std::vector<Frame> kids;uint64_t c=0;if(!field(s,from,FirstChild,c))return;
+        for(unsigned n=0;c&&n<MaxSiblings;++n){Frame f{{},parent,depth};if(!load(s,c,f.block))break;kids.push_back(f);
+            if(!field(s,kids.back().block,NextSibling,c))break;}
         for(auto k=kids.rbegin();k!=kids.rend();++k)todo.push_back(*k);
     };
-    (void)first;push(porter,-1,1);
+    Block root;if(!load(s,porter,root))return out;
+    push(root,-1,1);
     while(!todo.empty()&&out.size()<MaxNodes){
         auto f=todo.back();todo.pop_back();
-        Node n;n.entity=f.entity;n.parent=f.parent;
-        if(!q(s,f.entity,n.vtable)||!q(s,f.entity+Flags,n.flags))continue;
-        uint64_t mover=0;if(q(s,f.entity+Mover,mover)&&mover&&q(s,mover,n.moverVtable)){uint64_t text=0;if(q(s,mover+HelperName,text))n.helper=name(s,text);}
+        Node n;n.entity=f.block.at;n.parent=f.parent;
+        if(!field(s,f.block,0,n.vtable)||!field(s,f.block,Flags,n.flags))continue;
+        uint64_t mover=0;Block m;
+        if(field(s,f.block,Mover,mover)&&mover&&load(s,mover,m)&&field(s,m,0,n.moverVtable)){uint64_t text=0;if(field(s,m,HelperName,text))n.helper=helperName(s,text);}
         out.push_back(n);
-        if(f.depth<MaxDepth)push(f.entity,int(out.size()-1),f.depth+1);
+        if(f.depth<MaxDepth)push(f.block,int(out.size()-1),f.depth+1);
     }
     return out;
 }

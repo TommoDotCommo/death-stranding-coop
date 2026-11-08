@@ -3,16 +3,28 @@ namespace mod::outfit {
 namespace {
 bool q(const discovery::Sampler& s,uint64_t a,uint64_t& v){v=0;return a&&a<0x800000000000ULL&&s.read(a,&v,8);}
 }
+// The component and part pointer arrays are copied whole (one read each, not one per element; checked per element
+// as before); an array that cannot be copied whole is read element by element.
+static bool array(const discovery::Sampler& s,uint64_t at,uint32_t n,std::vector<uint64_t>& out){
+    out.assign(n,0);if(!n)return true;
+#ifndef MUTANT_OUTFIT_ELEMENTS
+    if(s.readOnce(at,out.data(),8*size_t(n)))return true;
+#endif
+    for(uint32_t i=0;i<n;++i)if(!q(s,at+8*i,out[i]))return false;
+    return true;
+}
 std::optional<Parts> read(const discovery::Sampler& s,uint64_t entity){
     uint32_t n=0;uint64_t list=0;
     if(!entity||!s.read(entity+ComponentCount,&n,4)||n>MaxComponents||!q(s,entity+ComponentArray,list)||!list)return std::nullopt;
-    for(uint32_t i=0;i<n;++i){
-        uint64_t c=0,v=0,owner=0,arr=0;uint32_t parts=0;
-        if(!q(s,list+8*i,c)||!q(s,c,v)||v!=s.base+ArtPartsVtable||!q(s,c+ComponentOwner,owner)||owner!=entity)continue;
+    std::vector<uint64_t> components;if(!array(s,list,n,components))return std::nullopt;
+    for(uint64_t c:components){
+        uint64_t v=0,owner=0,arr=0;uint32_t parts=0;
+        if(!q(s,c,v)||v!=s.base+ArtPartsVtable||!q(s,c+ComponentOwner,owner)||owner!=entity)continue;
         if(!s.read(c+PartCount,&parts,4)||parts<2||parts>MaxParts||!q(s,c+PartArray,arr)||!arr)return std::nullopt;
+        std::vector<uint64_t> list2;if(!array(s,arr,parts,list2))return std::nullopt;
         Parts p;p.count=uint8_t(parts);
-        for(uint32_t k=0;k<parts;++k){uint64_t part=0;uint8_t state=0;
-            if(!q(s,arr+8*k,part)||!part||!s.read(part+PartState,&state,1))return std::nullopt;
+        for(uint32_t k=0;k<parts;++k){uint8_t state=0;uint64_t part=list2[k];
+            if(!part||part>=0x800000000000ULL||!s.read(part+PartState,&state,1))return std::nullopt;
             if(state&1)p.enabled|=1ull<<k;}
         return p;
     }

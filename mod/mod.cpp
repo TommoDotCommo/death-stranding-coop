@@ -927,18 +927,20 @@ struct Runtime final:ds::Transport {
         // and parts he hides seconds later (live: 7 pieces sent, then 2).
         constexpr uint64_t SettleMs=8000;
         bool settled=!inEvent&&now-eventOverAt>=SettleMs&&anchor.pose.available;
-        if(core&&settled&&now-wornReadAt>=1000){wornReadAt=now;
+        if(core&&settled&&now-wornReadAt>=1000){wornReadAt=now;stages.enter("gear worn",mod::nowUs());
             auto mine=mod::gear::worn(mod::gear::snapshot(*sampler,anchor.entity),sampler->base);
             auto events=wornTx.observe(mine,core->connected(),now);
             if(!events.empty()){note(("GEAR sent "+std::to_string(mine.size())+" pieces\n").c_str());for(auto& e:events)core->queueCargo(e);}}
+        stages.enter("gear",mod::nowUs());
         uint64_t flags=0;bool shown=bodyEntity&&sampler->read(bodyEntity+mod::gear::Flags,&flags,8)&&(flags&mod::gear::FlagVisible);
         // The outfit: this porter's art parts go to the partner; the body takes the partner's, a few parts a second.
-        if(core&&now-outfitAt>=1000){outfitAt=now;
+        if(core&&now-outfitAt>=1000){outfitAt=now;stages.enter("gear outfit",mod::nowUs());
             if(settled)if(auto e=outfitTx.observe(mod::outfit::read(*sampler,anchor.entity),core->connected(),now)){note("OUTFIT sent\n");core->queueCargo(*e);}
             if(bodyEntity&&shown&&partnerParts&&partToggle)if(auto mine=mod::outfit::read(*sampler,bodyEntity)){
                 auto todo=mod::outfit::changes(*mine,*partnerParts,4);unsigned done=0;
                 for(auto& [index,on]:todo)done+=partToggle(bodyEntity,index,on);
                 if(!todo.empty())note(("OUTFIT switched "+std::to_string(done)+" of "+std::to_string(todo.size())+" parts on the body\n").c_str());}}
+        stages.enter("gear mirror",mod::nowUs());
         auto pose=bodyEntity?mod::puppet::readEntityPose(*sampler,bodyEntity):anchor.pose;
         if(bodyEntity&&!(pose.available&&pose.coherent))return;   // never make pieces at an unreadable place
         auto at=bodyEntity?mod::puppet::transform(pose):mod::puppet::Transform{};

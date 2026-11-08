@@ -216,10 +216,18 @@ namespace {
 // 2026-11-09). ReadProcessMemory still guards every copy; a region that changed within the TTL fails there.
 constexpr uint64_t RegionTtlMs=100;constexpr unsigned RegionSlots=64;
 struct Region{uint64_t start=0,end=0,at=0;};
+// Any cached region that holds the whole read answers it, not only the one filed under the address's 64 KiB granule:
+// a heap region spans many megabytes, and the porter's gear tree (hundreds of scattered entities) missed on almost
+// every node (live 2026-11-09: ~30 us a read, 6-10 ms a walk). A new region replaces the oldest entry.
 thread_local Region regions[RegionSlots];
 bool readableCached(uint64_t p,uint64_t end,uint64_t now){
-    auto& r=regions[(p>>16)%RegionSlots];
-    return r.end&&p>=r.start&&end<=r.end&&now>=r.at&&now-r.at<RegionTtlMs;
+    for(auto& r:regions)if(r.end&&p>=r.start&&end<=r.end&&now>=r.at&&now-r.at<RegionTtlMs)return true;
+    return false;
+}
+void remember(uint64_t start,uint64_t end,uint64_t now){
+    Region* oldest=&regions[0];
+    for(auto& r:regions){if(r.start==start&&r.end==end){r.at=now;return;}if(!r.end||r.at<oldest->at)oldest=&r;if(!r.end)break;}
+    *oldest={start,end,now};
 }
 bool windowsRead(uint64_t a,void* out,size_t n) {
     if(!a||n>UINT64_MAX-a)return false;
@@ -228,7 +236,7 @@ bool windowsRead(uint64_t a,void* out,size_t n) {
     for(uint64_t p=a;p<end;) {MEMORY_BASIC_INFORMATION m{};if(!VirtualQuery(reinterpret_cast<void*>(p),&m,sizeof m)||m.State!=MEM_COMMIT||(m.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;
         auto protection=m.Protect&0xff;if(protection!=PAGE_READONLY&&protection!=PAGE_READWRITE&&protection!=PAGE_WRITECOPY&&protection!=PAGE_EXECUTE_READ&&protection!=PAGE_EXECUTE_READWRITE&&protection!=PAGE_EXECUTE_WRITECOPY)return false;
         auto start=reinterpret_cast<uint64_t>(m.BaseAddress);if(m.RegionSize>UINT64_MAX-start||start+m.RegionSize<=p)return false;
-        regions[(p>>16)%RegionSlots]={start,start+m.RegionSize,now};
+        remember(start,start+m.RegionSize,now);
         p=std::min(end,start+m.RegionSize);
     }
     SIZE_T copied=0;return ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(a),out,n,&copied)&&copied==n;

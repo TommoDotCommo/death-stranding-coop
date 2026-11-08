@@ -24,6 +24,12 @@ int main(){
     uint64_t expect=0;
     for(unsigned k=0;k<52;++k){uint64_t part=m.alloc(0x40);m.put(arr+8*k,part);bool on=k%3!=1;m.put<uint8_t>(part+PartState,on?0x0f:0x0c);if(on)expect|=1ull<<k;}
     auto p=read(m.sampler,e);CHECK(p&&p->count==52&&p->enabled==expect);
+    // Cost: the component and part arrays are one copy each (2+3+1+52+3 reads, not 2+3*... per element); a reader
+    // refusing anything over 8 bytes gets the same mask element by element.
+    {auto before=m.sampler.reads;auto again=read(m.sampler,e);CHECK(again&&*again==*p&&m.sampler.reads-before<=64);
+     mod::discovery::Sampler narrow{[&m](uint64_t a,void* out,size_t n){if(n>8||a<m.base||a-m.base+n>m.mem.size())return false;
+         std::memcpy(out,m.mem.data()+(a-m.base),n);return true;},Image};
+     auto slow=read(narrow,e);CHECK(slow&&*slow==*p);}
     m.put<uint32_t>(own+PartCount,65);CHECK(!read(m.sampler,e));m.put<uint32_t>(own+PartCount,52);
     m.put<uint32_t>(e+ComponentCount,2);CHECK(!read(m.sampler,e));m.put<uint32_t>(e+ComponentCount,3);   // only the foreign one
     // Changes: the differing parts, at most `limit`, never part 20; nothing across part counts.

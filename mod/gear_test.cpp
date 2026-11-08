@@ -75,6 +75,17 @@ int main(){
     std::map<uint64_t,int> at;for(int i=0;i<int(nodes.size());++i)at[nodes[i].entity]=i;
     CHECK(at.count(p.pouch)&&nodes[at[p.pouch]].parent==at[p.backpack]&&at[p.backpack]<at[p.pouch]);
     CHECK(at.count(p.bare)&&nodes[at[p.bare]].helper.empty());
+    // Cost: one copy per entity and per mover, one per helper name (not one read per field; live, ~1000 reads a
+    // second with a full cargo stack). A reader that refuses anything over 8 bytes (each block's end on an unreadable
+    // page) gets the same tree field by field.
+    {
+        auto before=p.m.sampler.reads;auto again=snapshot(p.m.sampler,p.porter);auto cost=p.m.sampler.reads-before;
+        CHECK(again.size()==nodes.size()&&cost<=3*nodes.size()+1);
+        Porter f;mod::discovery::Sampler narrow{[&f](uint64_t a,void* out,size_t n){if(n>8||a<f.m.base||a-f.m.base+n>f.m.mem.size())return false;
+            std::memcpy(out,f.m.mem.data()+(a-f.m.base),n);return true;},Image};
+        auto slow=snapshot(narrow,f.porter);CHECK(slow.size()==nodes.size());
+        for(size_t i=0;i<slow.size()&&i<nodes.size();++i)CHECK(slow[i].vtable==nodes[i].vtable&&slow[i].flags==nodes[i].flags&&slow[i].parent==nodes[i].parent&&slow[i].moverVtable==nodes[i].moverVtable);
+    }
     // Plan: visible cuffs, backpack, pouch and item; not the armour (hidden), the corpse (cargo), the Odradek and
     // its child, the bare entity, or the visible child of a hidden pouch.
     auto pieces=plan(nodes,Image);
