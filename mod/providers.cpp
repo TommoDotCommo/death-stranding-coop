@@ -84,7 +84,7 @@ bool GameProvider::readLocal(ds::State& s) {
     if(motion.teleport) s.flags|=ds::Teleport;
     if(ride_) {
         auto r=ride_(p);
-        if(r.kind) {s.vehicle=r.kind;s.vehicleOffset=r.offset;s.vehicleAngles=r.angles;s.flags|=ds::Vehicle;}
+        if(r.kind) {s.vehicle=r.kind;s.vehicleOffset=r.offset;s.vehicleAngles=r.angles;s.steer=r.steer;s.flags|=ds::Vehicle;}
         lastRide_=r;
     }
     local_=s;

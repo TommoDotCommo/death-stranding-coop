@@ -44,7 +44,10 @@ void vehicleTests(const Bytes& onFoot) {
     auto b=encode(p);
     check(parse(b)==Error::None&&q.state.vehicle==Truck&&(q.state.flags&Vehicle)&&std::abs(q.state.vehicleOffset[0]+19.99)<.006&&std::abs(q.state.vehicleOffset[2]-3.21)<.006,"vehicle_roundtrip");
     check(std::abs(q.state.vehicleAngles[0]+3.14159)<.0002&&std::abs(q.state.vehicleAngles[1]-.25)<.0002&&std::abs(q.state.vehicleAngles[2]+1.5)<.0002,"vehicle_roundtrip");
-    for(size_t at:{size_t(97),size_t(110),size_t(111)}) { auto bad=b; patch(bad,at,1,1); check(parse(bad)==Error::Reserved,"reserved"); }
+    { auto bad=b; patch(bad,97,1,1); check(parse(bad)==Error::Reserved,"reserved"); }
+    { Packet st=p; st.state.steer=-37.25; auto sb=encode(st); check(parse(sb)==Error::None&&std::abs(q.state.steer+37.25)<0.006,"vehicle_steer_roundtrip");
+      auto bad=sb; patch(bad,110,uint64_t(uint16_t(int16_t(18001))),2); check(parse(bad)==Error::Range,"vehicle");       // beyond 180 degrees
+      bad=onFoot; patch(bad,110,100,2); check(parse(bad)==Error::Range,"vehicle"); }                                       // steering on foot
     auto bad=b; patch(bad,96,4,1); check(parse(bad)==Error::Range,"vehicle");                       // unknown kind
     bad=b; patch(bad,60,0,2); check(parse(bad)==Error::Range,"vehicle");                            // riding without the flag
     bad=onFoot; patch(bad,60,Vehicle,2); check(parse(bad)==Error::Range,"vehicle");                 // flag without a vehicle

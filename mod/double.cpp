@@ -47,6 +47,22 @@ uint32_t readActions(const discovery::Sampler& s,uint64_t e,uint64_t animator,Ac
     for(unsigned k=0;k<7;++k){uint8_t b=0;if(c.index[k]>=0&&s.read(slots+48ull*unsigned(c.index[k])+0x20,&b,1)&&b)out|=ActionBits[k];}
     return out;
 }
+std::optional<float> readFloatVariable(const discovery::Sampler& s,uint64_t e,uint64_t animator,const char* want,FloatVariable& c){
+    uint32_t components=0;uint64_t list=0,manager=0;
+    if(!s.read(e+0x90,&components,4)||components>4096||!q(s,e+0x98,list))return std::nullopt;
+    for(uint32_t i=0;i<components&&!manager;++i){uint64_t m=0,v=0,owner=0;
+        if(q(s,list+8*i,m)&&q(s,m,v)&&v==animator&&q(s,m+0x48,owner)&&owner==e)manager=m;}
+    uint32_t count=0;uint64_t slots=0;
+    if(!manager||!s.read(manager+0x50,&count,4)||!count||count>4096||!q(s,manager+0x58,slots))return std::nullopt;
+    if(c.manager!=manager||c.count!=count){
+        c=FloatVariable{};c.manager=manager;c.count=count;
+        for(uint32_t i=0;i<count;++i){uint64_t name=0;char text[32]{};
+            if(q(s,slots+48ull*i,name)&&s.read(name,text,sizeof text-1)&&!std::strcmp(text,want)){c.index=int(i);break;}}
+    }
+    float v=0;
+    if(c.index<0||!s.read(slots+48ull*unsigned(c.index)+0x20,&v,4)||!std::isfinite(v))return std::nullopt;
+    return v;
+}
 uint64_t findDouble(const discovery::Sampler& s,uint64_t player,uint64_t cameraVtable,uint64_t doubleVtable){
     // Visits the children of parent; false when a link is unreadable, a child disowns its parent or the list is too long.
     auto children=[&s](uint64_t parent,auto&& visit){
@@ -161,6 +177,7 @@ void Double::drive(const Anchor& source,const Transform& target){
     api_.place(double_,target);
 #endif
     api_.animate(double_,speed_,flags_);
+    if(api_.steer&&(flags_&VehicleMask))api_.steer(double_,float(steer_));
     if(hidEffects_)api_.effects(double_,false);   // keep them hidden as the show propagates
     checkLocal(source);
 }
@@ -199,6 +216,7 @@ bool Double::stillOurs(const Anchor& source){
 void Double::reveal(const Anchor& source,const Transform& target){
     placed_=target;api_.anchor(double_,target);api_.place(double_,target);api_.visible(double_,true);api_.sleep(double_,false);
     api_.animate(double_,speed_,flags_);
+    if(api_.steer&&(flags_&VehicleMask))api_.steer(double_,float(steer_));
     if(hidEffects_)api_.effects(double_,false);
     auto after=api_.flags(double_);auto p=api_.read(double_);checkLocal(source);
     if(!driven(after)||!atTarget(p,target)){note("reveal_unconfirmed",after,p);release(source,true);stage_=Stage::Failed;return;}
@@ -723,7 +741,7 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
     const uint64_t animator=s.base+0x3d09910;   // MorphemeAnimationManager
     // Handles are per manager; the double's network (sam/references/akukan) has these locomotion controls.
     struct Handles{uint64_t manager=0;int speed=-1,move=-1,moveFloat=-1,moveInterp=-1,crouchRate=-1,basic=-1,isVehicle=-1,vehicleType=-1,vehicleSeat=-1,
-        rewind=-1,rewindNoInter=-1,upperReset=-1;bool riding=false;int action[7]={-1,-1,-1,-1,-1,-1,-1};};auto handles=std::make_shared<Handles>();
+        rewind=-1,rewindNoInter=-1,upperReset=-1,turnHeading=-1;bool riding=false;int action[7]={-1,-1,-1,-1,-1,-1,-1};};auto handles=std::make_shared<Handles>();
     using TriggerFn=void(*)(uint64_t,int,float);auto trigger=reinterpret_cast<TriggerFn>(s.base+entries[8].rva);
     // The borrowed instance is kept after release and swapped back in on the next borrow of the same manager,
     // so repeated borrows build one instance per double, not one per borrow.
@@ -743,7 +761,7 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
         return VirtualQuery(reinterpret_cast<void*>(at),&info,sizeof info)==sizeof info&&info.State==MEM_COMMIT&&info.Protect==PAGE_READWRITE
                &&at+n<=reinterpret_cast<uint64_t>(info.BaseAddress)+info.RegionSize;};
     auto check=[&s,twin](uint64_t e){uint64_t v=0;require(e&&q(s,e,v)&&v==twin,"double identity changed");};
-    return {[&s]{return readLocalAnchor(s);},[&s,camera,twin](uint64_t p){return findDouble(s,p,camera,twin);},
+    DoubleApi api{[&s]{return readLocalAnchor(s);},[&s,camera,twin](uint64_t p){return findDouble(s,p,camera,twin);},
         [&s,check](uint64_t e){check(e);return readFlags(s,e);},[&s,check](uint64_t e){check(e);return readEntityPose(s,e);},
         [sleep,check](uint64_t e,bool b){check(e);sleep(e,b,0);},[visible,check](uint64_t e,bool b){check(e);visible(e,b);},
         [place,check](uint64_t e,const Transform& t){check(e);place(e,&t);},
@@ -772,6 +790,7 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
                 handles->isVehicle=initBool(manager,"Is_Vehicle");handles->vehicleType=initFloat(manager,"Vehicle_Type");
                 handles->vehicleSeat=initFloat(manager,"Vehicle_Seat");handles->rewind=initBool(manager,"Action_Rewind");
                 handles->rewindNoInter=initBool(manager,"Action_Rewind_NoInter");handles->upperReset=initBool(manager,"Is_Force_Upper_Reset");
+                handles->turnHeading=initFloat(manager,"Turn_Heading");
                 if(swapped)std::memcpy(reinterpret_cast<void*>(res+0xd8),&resDef,8);}
             // Riding: the porter network's own vehicle controls (enum 0x19 / 0x1b, set by the game's mount at 0x2772ee9 and
             // 0x2774469); locomotion stays at rest underneath.
@@ -845,6 +864,12 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
                 if(!q(s,c+NextSiblingOffset,c))break;
             }
         }};
+    // The rider's steering (Turn_Heading, enum 0x04 in the porter's network; the game writes it from the vehicle's
+    // steering at 0x2776680..0x27766c0) while the partner rides.
+    api.steer=[check,managerOf,handles,setFloat](uint64_t e,float degrees){
+        check(e);auto manager=managerOf(e);
+        if(manager&&handles->manager==manager&&handles->turnHeading>=0)setFloat(manager,handles->turnHeading,degrees);};
+    return api;
 #endif
 }
 }

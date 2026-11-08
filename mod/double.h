@@ -7,6 +7,7 @@
 // frame (game_offsets.md). Everything it changes is restored on release.
 #include "puppet.h"
 #include <functional>
+#include <cmath>
 #include <optional>
 #include <string>
 namespace mod::puppet {
@@ -30,6 +31,7 @@ struct DoubleApi {
     // Private-room floor effects (DSPlayerAKukanEffFloorEntity children): hide(false) records which were visible and
     // hides them; show(true) restores exactly those.
     std::function<void(uint64_t,bool)> effects;
+    std::function<void(uint64_t,float)> steer;   // optional: the rider's Turn_Heading (degrees) while the partner rides
 };
 constexpr double MovingSpeed=.3;   // m/s; below this the double plays its standing animation
 constexpr uint64_t MoverOffset=0xb0,MoverOwnerOffset=0x48,MoverTransformOffset=0x58;
@@ -52,6 +54,9 @@ constexpr const char* ActionNames[]={"Sprint","Is_Crouch","Is_Jump","Action_Move
 constexpr uint32_t ActionBits[]={FlagSprintBit,FlagCrouchBit,JumpBit,ActionMoveBit,ActionsBit,FallBit,LandedBit};
 struct ActionCache {uint64_t manager=0;uint32_t count=0;int index[7]={-1,-1,-1,-1,-1,-1,-1};};
 uint32_t readActions(const discovery::Sampler&,uint64_t entity,uint64_t animatorVtable,ActionCache&);
+// One float animation control of an entity by name (the manager's slot table, as readActions); nothing when absent.
+struct FloatVariable {uint64_t manager=0;uint32_t count=0;int index=-1;};
+std::optional<float> readFloatVariable(const discovery::Sampler&,uint64_t entity,uint64_t animatorVtable,const char* name,FloatVariable&);
 // Adapter state (Y up) to a game transform (Z up), facing yaw; inverse of stateFromPose.
 Transform fromState(const std::array<double,3>& position,double yaw);
 DoubleApi nativeDoubleApi(discovery::Sampler&);
@@ -184,6 +189,7 @@ public:
     Double(DoubleApi api,std::function<void(const std::string&)> record):api_(std::move(api)),record_(std::move(record)) {}
     void enable(){if(stage_==Stage::Off)stage_=Stage::Parked;}
     void walk(bool on){walk_=on;}   // use upgrade/downgrade on the next acquire
+    void steering(double degrees){steer_=std::isfinite(degrees)?degrees:0;}   // the partner's Turn_Heading while he rides
     // True when the game itself is using this porter's double (it does so for the private room): the double has been
     // yielded to the game, or it is awake or shown while we are not driving it. Reads only; game thread.
     bool gameUsesDouble(uint64_t porter);
@@ -200,7 +206,7 @@ private:
     DoubleApi api_;std::function<void(const std::string&)> record_;
     Stage stage_=Stage::Off;uint64_t player_=0,double_=0,parkedFlags_=0;
     Transform parked_{},placed_{};
-    double speed_=0;uint32_t flags_=0;bool walk_=false,hidEffects_=false;uint64_t original_=0;
+    double speed_=0,steer_=0;uint32_t flags_=0;bool walk_=false,hidEffects_=false;uint64_t original_=0;
     void restoreNetwork();
     void acquire(const Anchor&,const Transform&);
     void drive(const Anchor&,const Transform&);

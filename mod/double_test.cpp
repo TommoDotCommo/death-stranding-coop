@@ -76,6 +76,12 @@ void actions(){
     CHECK(s.actions==(FlagSprintBit|FlagCrouchBit|JumpBit));               // only the replayed bits pass
     s.frame();auto u=at(6);d.tick(true,&u,3,FlagCrouchBit);CHECK(s.actions==FlagCrouchBit);
     d.tick(true,nullptr,3,FlagSprintBit);CHECK(s.actions==0&&s.speed==0);  // released standing
+    // Steering reaches the body only while the partner rides.
+    {Scene v;auto api=v.api();std::vector<float> steered;api.steer=[&](uint64_t,float d){steered.push_back(d);};
+     Double e(api,[&](const std::string& r){v.events.push_back(r);});e.enable();auto w=at(5);
+     e.steering(12.5);e.tick(true,&w,3,FlagSprintBit);CHECK(steered.empty());
+     v.frame();auto w2=at(6);e.tick(true,&w2,0,2u<<VehicleShift);CHECK(!steered.empty()&&steered.back()==12.5f);
+     e.steering(NAN);v.frame();auto w3=at(7);e.tick(true,&w3,0,2u<<VehicleShift);CHECK(steered.back()==0.f);}
     // The partner's vehicle kind passes to the body (riding pose); kinds map to the game's Vehicle_Type values.
     {Scene v;auto e=v.make();e.enable();auto w=at(5);e.tick(true,&w,3,FlagSprintBit|(2u<<VehicleShift));CHECK(v.actions==(FlagSprintBit|(2u<<VehicleShift)));}
     CHECK(vehicleAnimationType(0)<0&&vehicleAnimationType(1)==0&&vehicleAnimationType(2)==1&&vehicleAnimationType(3)==3&&vehicleAnimationType(4)<0);
@@ -91,6 +97,11 @@ void actions(){
     CHECK(readActions(sm,B+0x6000,B+0x1f40,c)==0&&c.index[0]==1&&c.index[1]==2&&c.index[2]==3&&c.index[3]==-1);
     f.data[0x8000+48+0x20]=1;CHECK(readActions(sm,B+0x6000,B+0x1f40,c)==FlagSprintBit);
     f.data[0x8000+96+0x20]=1;f.data[0x8000+144+0x20]=1;CHECK(readActions(sm,B+0x6000,B+0x1f40,c)==(FlagSprintBit|FlagCrouchBit|JumpBit));
+    {   // one float control by name: the slot's value at +0x20; absent names and other entities give nothing
+        FloatVariable v;float speed=3.5f;memcpy(f.data.data()+0x8000+0x20,&speed,4);
+        auto got=readFloatVariable(sm,B+0x6000,B+0x1f40,"Speed",v);CHECK(got&&*got==3.5f&&v.index==0);
+        FloatVariable w;CHECK(!readFloatVariable(sm,B+0x6000,B+0x1f40,"Turn_Heading",w));
+        FloatVariable x;CHECK(!readFloatVariable(sm,B+0x6000,B+0x1f00,"Speed",x));}
     CHECK(readActions(sm,B+0x6000,B+0x1f00,c)==0);                         // wrong animator vtable: nothing
     f.put<uint64_t>(0x7248,B+0x6100);ActionCache d2;CHECK(readActions(sm,B+0x6000,B+0x1f40,d2)==0);   // not owned by this entity
 }

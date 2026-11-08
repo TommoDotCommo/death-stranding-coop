@@ -750,11 +750,14 @@ struct Runtime final:ds::Transport {
             auto g=std::make_unique<mod::GameProvider>([raw]{return mod::PoseReader(*raw).read();},mod::nowUs,presence.get());
             // What the porter rides travels in every presence packet (read-only; vehicle.h). Kind changes are logged.
             {auto rides=std::make_shared<mod::vehicle::Reader>(*raw);auto lastKind=std::make_shared<int>(-1);
-             g->ride([this,rides,lastKind](const mod::Pose& p){
+             auto steerVar=std::make_shared<mod::puppet::FloatVariable>();
+             g->ride([this,rides,lastKind,steerVar,raw](const mod::Pose& p){
                 auto o=rides->read(mod::nowUs());mod::Ride r;
                 if(o.available&&o.riding){
                     uint8_t kind=o.kind==mod::vehicle::Kind::Motorbike?ds::Motorbike:o.kind==mod::vehicle::Kind::Truck?ds::Truck:o.kind==mod::vehicle::Kind::Car?ds::Car:0;
                     r=mod::rideFrom(kind,o.position,o.rotation,p.position);
+                    // The rider's steering: the porter's own Turn_Heading control (read-only).
+                    if(auto t=mod::puppet::readFloatVariable(*raw,o.porter,raw->base+0x3d09910,"Turn_Heading",*steerVar))r.steer=std::clamp(double(*t),-ds::SteerMax,ds::SteerMax);
                 }
                 if(o.available&&int(r.kind)!=*lastKind){*lastKind=r.kind;
                     std::ostringstream m;m<<"RIDE local kind="<<int(r.kind)<<" vehicle=0x"<<std::hex<<o.vehicle<<"\n";note(m.str().c_str());}
@@ -969,6 +972,7 @@ struct Runtime final:ds::Transport {
         bool useOwn=twinMode==TwinMode::Own&&own&&ownTwin&&!own->exhausted();
         auto anchor=mod::puppet::readLocalAnchor(*sampler);
         if(useOwn)ownEntity=own->tick(anchor);
+        {double steer=partnerMode()&&cache.remote.visible?cache.remote.state.steer:0;twin->steering(steer);if(ownTwin)ownTwin->steering(steer);}
         if(useOwn&&ownEntity){
             twin->tick(true,nullptr);ownTwin->tick(true,goal,speed,actions,hold);
         }
