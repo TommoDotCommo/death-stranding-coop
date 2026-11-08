@@ -74,7 +74,7 @@ std::vector<Test> tests={
     {"fixed",[]{CHECK(fixedTime("0")==0&&fixedTime("12.5")==45000000&&fixedTime("23.99999999")<ds::EnvironmentDayMs);for(auto x:{"","-1","24","nan","inf","12x","1e1","1.2.3"," 12","12 "}){bool refused=false;try{fixedTime(x);}catch(const std::exception&){refused=true;}CHECK(refused);}}},
     {"config",[]{
         const std::string base=R"({"role":"guest","peer":"127.0.0.1","slot":0,"peer_slot":1,"nickname":"test","provider":"game","session":123,"game_thread":true,"required":true,"puppet_probe":true,"discovery_sha256":")"+std::string(mod::discovery::PinnedHash)+"\"";
-        CHECK(mod::parseConfig(base+"}").shareEnvironment=="off");CHECK(mod::parseConfig(base+",\"share_environment\":\"host\"}").shareEnvironment=="host");
+        CHECK(mod::parseConfig(base+"}").shareEnvironment=="off");CHECK(mod::parseConfig(base+",\"share_environment\":\"host\"}").shareEnvironment=="host");CHECK(mod::parseConfig(base+",\"share_environment\":\"rain\"}").shareEnvironment=="rain");
         for(auto value:{"true","1","\"on\"","\"guest\""}){bool refused=false;try{mod::parseConfig(base+",\"share_environment\":"+value+"}");}catch(const std::exception&){refused=true;}CHECK(refused);}
         for(auto key:{"\"game_thread\":true","\"required\":true","\"puppet_probe\":true","\"role\":\"guest\""}){auto bad=base;auto at=bad.find(key);CHECK(at!=std::string::npos);bad.replace(at,std::strlen(key),std::string(key).substr(0,std::string(key).find(':')+1)+(std::string(key).find("role")!=std::string::npos?"\"none\"":"false"));bool refused=false;try{mod::parseConfig(bad+",\"share_environment\":\"host\"}");}catch(const std::exception&){refused=true;}CHECK(refused);}
     }},

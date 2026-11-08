@@ -871,7 +871,7 @@ is needed for these experiments. No live result is claimed here.
 
 ## Shared time, rain and environment (opt-in; rain live verified 2026-11-09)
 
-With `share_environment:"host"` the host's time sample also carries its rain condition (`ds::Environment::rain`), and
+With `share_environment:"host"` (or `"rain"`, the same without ever applying the host's hour) the host's time sample also carries its rain condition (`ds::Environment::rain`), and
 a guest places the game's own local rain or clear influence around the host when its world disagrees there
 (`weather.h`; `WEATHER ...` log lines). `coop-partner --environment-time H --weather V` plays such a host (V: the map
 condition, lower is wetter; -1.8 heavy rain, 1.5 clear).

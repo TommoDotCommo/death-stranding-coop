@@ -50,7 +50,7 @@ game-thread callback (`game_thread`, `puppet_probe`), the partner drawn as the m
 own Sam (`partner:"own"`, the game's resident double until it exists) wearing the
 porter's visible gear (`partner_gear`), the partner's map pin (`partner_marker`, no
 ping key), his vehicle while he rides (`partner_vehicle`), the host's rain and timefall in the guest's world
-(`share_environment:"host"`), and with them shared cargo and structures.
+(`share_environment:"rain"`: rain only, never the host's hour), and with them shared cargo and structures.
 Automatic Continue and the virtual pad stay off. Existing environment-driven test
 tools still work independently of this app.
 
@@ -154,7 +154,7 @@ Look for proxy `READY` and `MOD_STARTED` (network only), then mod `POSE availabl
 after continuing a co-op save, and `handshake:true` / `connected:true` in the
 partner/mod state. Inspect `<instance>/redirect-data/mod/mod.json`: role host,
 slots 0/1, peer 127.0.0.1, session 123, game provider, game_thread, puppet_probe,
-partner own, partner_gear, partner_marker, partner_vehicle, share_environment host, required. Repeat
+partner own, partner_gear, partner_marker, partner_vehicle, share_environment rain, required. Repeat
 with `--dev-client` and a host stand-in to check opposite slots. This launcher
 setup shows the partner without any command; no `puppet.double`, `pad.script` or
 `puppet.body` command is armed. If a later test sends them independently, use

@@ -18,7 +18,7 @@ struct Config {
     bool partnerGear=false;   // the porter's visible gear copied onto the partner's own body (gear.h)
     bool carryVisual=false;   // ds3: send what the porter carries, show what the partner carries (carry_visual.h)
     unsigned presenceLogMaxMiB=8;
-    std::string shareEnvironment="off"; // host-authoritative time only; weather contract remains unknown
+    std::string shareEnvironment="off"; // "host": the host's time and rain; "rain": its rain only (weather.h)
     discovery::Options discoveryOptions;
 };
 // Deliberately small strict flat JSON schema. No paths from JSON are used for writes.

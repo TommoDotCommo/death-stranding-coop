@@ -37,7 +37,7 @@ std::string config(const Session& s) {
     // the host's rain and timefall shown in the guest's world, and shared
     // cargo and structures (mod/README.md). The network-only self_tick setup draws nothing.
 #ifndef MUTANT_CONFIG_PLAY
-    const std::string play="\"game_thread\":true,\"puppet_probe\":true,\"partner\":\"own\",\"partner_gear\":true,\"partner_marker\":true,\"partner_vehicle\":true,\"share_environment\":\"host\"";
+    const std::string play="\"game_thread\":true,\"puppet_probe\":true,\"partner\":\"own\",\"partner_gear\":true,\"partner_marker\":true,\"partner_vehicle\":true,\"share_environment\":\"rain\"";
 #else
     const std::string play="\"self_tick\":true";
 #endif

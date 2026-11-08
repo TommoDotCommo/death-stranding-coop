@@ -50,8 +50,8 @@ Config parseConfig(const std::string& s) {
     if(c.gameThread&&(c.provider!="game"||c.discovery||c.selfTick))throw std::runtime_error("game_thread requires game provider, no discovery or self_tick");
     if(c.puppetProbe&&(!c.gameThread||!c.required))throw std::runtime_error("puppet_probe requires game_thread and required true");
     if(values.count("share_environment"))c.shareEnvironment=text("share_environment");
-    if(c.shareEnvironment!="off"&&c.shareEnvironment!="host")throw std::runtime_error("share_environment must be off or host");
-    if(c.shareEnvironment=="host"&&(c.provider!="game"||!c.gameThread||!c.puppetProbe||!c.required||c.role=="none"))throw std::runtime_error("share_environment host requires game_thread, puppet_probe, required and explicit role");
+    if(c.shareEnvironment!="off"&&c.shareEnvironment!="host"&&c.shareEnvironment!="rain")throw std::runtime_error("share_environment must be off, host or rain");
+    if(c.shareEnvironment!="off"&&(c.provider!="game"||!c.gameThread||!c.puppetProbe||!c.required||c.role=="none"))throw std::runtime_error("share_environment host/rain requires game_thread, puppet_probe, required and explicit role");
     c.joinAtHost=boolean("join_at_host",false);
     if(values.count("progress_mismatch"))c.progressMismatch=text("progress_mismatch");
     if(c.progressMismatch!="warn"&&c.progressMismatch!="refuse")throw std::runtime_error("progress_mismatch must be warn or refuse");

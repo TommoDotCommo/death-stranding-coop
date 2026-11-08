@@ -188,7 +188,7 @@ struct Runtime final:ds::Transport {
     std::filesystem::path vehicleCommand;std::unique_ptr<mod::vehicle::Monitor> vehicleMonitor;
     // Optional environment sampling and host time setter. Only the verified callback can call the export.
     std::filesystem::path environmentCommand;std::unique_ptr<mod::environment::Reader> environmentReader;
-    std::unique_ptr<mod::environment::Sync> environmentSync;uint64_t environmentReadAt=0,environmentApplyAt=0;
+    std::unique_ptr<mod::environment::Sync> environmentSync;uint64_t environmentReadAt=0,environmentApplyAt=0;bool environmentSend=false;
     std::unique_ptr<mod::weather::Share> weatherShare;std::optional<float> hostRain;uint64_t hostRainAt=0;   // guest: shared rain
     std::function<void(uint32_t)> cargoGive,cargoDelete;std::function<void(uint8_t,const mod::puppet::Transform&,bool)> construct;std::function<bool(uint64_t,unsigned,bool)> partToggle;
     std::function<void(const std::array<float,4>&,const std::array<float,4>&,const mod::puppet::Transform&,bool,bool,bool)> unconstruct;
@@ -603,14 +603,17 @@ struct Runtime final:ds::Transport {
             vehicleMonitor=std::make_unique<mod::vehicle::Monitor>(*sampler);
             environmentCommand=path.parent_path()/"puppet.environment";
             environmentReader=std::make_unique<mod::environment::Reader>(*sampler);
-            if(config.shareEnvironment=="host") {
+            if(config.shareEnvironment!="off") {
                 std::function<void(float,float)> setter;
 #if defined(_WIN32) && !defined(MOD_FAKE_NETWORK)
                 auto address=environmentReader->setterAddress();
                 setter=[address](float hour,float seconds){reinterpret_cast<void(*)(float,float)>(address)(hour,seconds);};
 #endif
-                environmentSync=std::make_unique<mod::environment::Sync>(*sampler,std::move(setter));
-                note("ENVIRONMENT host sync enabled: time, and the host's rain (weather.h)\n");
+                // "rain" shares the host's rain only: the guest never applies the host's hour (the time setter can
+                // advance the day counter, and the game shows no change of light; STATUS.md).
+                if(config.shareEnvironment=="host")environmentSync=std::make_unique<mod::environment::Sync>(*sampler,std::move(setter));
+                environmentSend=true;
+                note(config.shareEnvironment=="host"?"ENVIRONMENT host sync enabled: time, and the host's rain (weather.h)\n":"ENVIRONMENT rain sharing enabled (no time)\n");
 #if defined(_WIN32) && !defined(MOD_FAKE_NETWORK)
                 if(config.role=="guest"||config.role=="client") {
                     try{auto api=mod::weather::nativeApi(*sampler);auto* reader=environmentReader.get();
@@ -1061,7 +1064,7 @@ struct Runtime final:ds::Transport {
             }
             // End join dispatch.
             // Environment dispatch: reads are optional; writes require the independently attested callback.
-            if(environmentReader&&(environmentSync||std::filesystem::exists(environmentCommand))) {
+            if(environmentReader&&(environmentSend||std::filesystem::exists(environmentCommand))) {
                 bool requested=false;
                 if(std::filesystem::exists(environmentCommand)) {
                     auto command=readConfig(environmentCommand);
@@ -1069,15 +1072,15 @@ struct Runtime final:ds::Transport {
                     requested=mod::environment::readCommand(command,mod::runStamp());
                     if(!requested)note("ENVIRONMENT ignored command for another process or malformed command\n");
                 }
-                auto anchor=environmentSync&&gameContext?mod::puppet::readLocalAnchor(*sampler):mod::puppet::Anchor{};
+                auto anchor=environmentSend&&gameContext?mod::puppet::readLocalAnchor(*sampler):mod::puppet::Anchor{};
                 bool gameplay=cache.available&&!cache.gated&&gameContext&&gameEvent&&!gameEvent()&&!(cache.local.flags&ds::PrivateRoom)&&
                     anchor.entity&&twin&&!twin->gameUsesDouble(anchor.entity);
                 std::array<double,3> position{cache.local.position[0],cache.local.position[2],cache.local.position[1]};
                 if(!cache.available)position.fill(std::nan("")); // no stale porter position for a weather query in menus
-                if(requested||(environmentSync&&gameplay&&now>=environmentReadAt)) {
+                if(requested||(environmentSend&&gameplay&&now>=environmentReadAt)) {
                     auto observation=environmentReader->read(position);note(mod::environment::row(observation).c_str());
                     environmentReadAt=now+1000;
-                    if(environmentSync&&gameplay&&observation.available&&config.role=="host"){
+                    if(environmentSend&&gameplay&&observation.available&&config.role=="host"){
                         ds::Environment sample{uint32_t(std::min<double>(ds::EnvironmentDayMs-1,std::llround(double(observation.hour)*3600000)))};
                         if(observation.weatherAvailable&&std::isfinite(observation.rainFromMap)){sample.haveRain=true;sample.rain=std::clamp(observation.rainFromMap,-ds::EnvironmentRainMax,ds::EnvironmentRainMax);}
                         core->sendEnvironment(sample,now);}
