@@ -12,6 +12,8 @@
 // game places, SECONDS after it arrives; --take-own-after picks up the partner's own dropped item SECONDS after dropping.
 // --build builds one structure (a Player type of EDSConstructionPointType, e.g. 25 ladder) where the partner stands;
 // --unbuild-after dismantles it SECONDS later.
+// --vehicle KIND ON OFF: from ON to OFF seconds after connecting the partner rides vehicle KIND (1 motorbike, 2 truck): its
+// presence carries the vehicle block (origin at the stand-in's feet, level, facing its way).
 // --carry tells the game what the partner carries (carry_visual.h; the game needs carry_visual true): SPEC is
 // "hash[:slot[:count]],..." (slot 1 BackPack, 6 LeftHand, 7 RightHand; default 1 and 1), sent once connected and again
 // after every reconnect; --carry-drop-after puts it all down SECONDS after connecting. What the game's porter carries
@@ -51,9 +53,11 @@ struct Shell final:ds::StateProvider,ds::Transport {
     ds::Progress readProgress() const override {return progress;}
     Follower follower;std::optional<Replay> replay;std::optional<ds::State> porter,mine;
     uint64_t started=0,last=0;double replayLoop=0;bool stickyTeleport=false;std::array<double,3> replayOrigin{};bool replayPlaced=false,whereRecorded=false;
+    uint8_t rideKind=0;bool riding=false;
     bool readLocal(ds::State& s) override {
         if(!mine)return false;
         s=*mine;if(stickyTeleport)s.flags|=ds::Teleport;
+        if(riding&&rideKind){s.vehicle=rideKind;s.flags|=ds::Vehicle;s.vehicleOffset={0,0,0};s.vehicleAngles={s.yaw,0,0};}
         return true;
     }
     bool isInCutsceneOrLoading() const override {return false;}
@@ -88,7 +92,7 @@ struct CarryPrint final:mod::carry::Sink {
 int main(int argc,char** argv){
     unsigned slot=1,peerSlot=0;ds::Role role=ds::Role::Client;uint64_t session=0;double seconds=3600,dropAfter=-1,takeAfter=-1,takeOwnAfter=-1,buildAfter=-1,unbuildAfter=-1;uint32_t dropItem=0,buildType=0;
     std::string replayFile,stopFile;Shell shell;ds::ProgressPolicy progressPolicy=ds::ProgressPolicy::Warn;std::optional<mod::carry::Summary> carrySpec;double carryDropAfter=-1;
-    std::optional<ds::Environment> fixedEnvironment;
+    std::optional<ds::Environment> fixedEnvironment;double rideOn=-1,rideOff=-1;
     for(int i=1;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc)usage(("missing value after "+a).c_str());return std::string(argv[++i]);};
         if(a=="--slot")slot=unsigned(std::stoul(next()));else if(a=="--peer-slot")peerSlot=unsigned(std::stoul(next()));
@@ -109,6 +113,7 @@ int main(int argc,char** argv){
         else if(a=="--unbuild-after")unbuildAfter=std::stod(next());
         else if(a=="--carry"){carrySpec=mod::carry::parseSpec(next());if(!carrySpec)usage("--carry takes hash[:slot[:count]],... (cargo slots 1..9) or none");}
         else if(a=="--carry-drop-after")carryDropAfter=std::stod(next());
+        else if(a=="--vehicle"){auto k=std::stoul(next());if(k<1||k>ds::VehicleKindMax)usage("vehicle kind is 1..3");shell.rideKind=uint8_t(k);rideOn=std::stod(next());rideOff=std::stod(next());}
         else if(a=="--take-after")takeAfter=std::stod(next());else if(a=="--take-own-after")takeOwnAfter=std::stod(next());
         else usage(("unknown option "+a).c_str());
     }
@@ -169,6 +174,8 @@ int main(int argc,char** argv){
         }
         if(core.connected()&&!connectedAt)connectedAt=now;
         if(!core.connected())connectedAt=0;
+        if(shell.rideKind){bool on=connectedAt&&now-connectedAt>=rideOn*1000&&now-connectedAt<rideOff*1000;
+            if(on!=shell.riding){shell.riding=on;std::printf("RIDE the partner %s vehicle kind %d\n",on?"rides":"gets off",int(shell.rideKind));std::fflush(stdout);}}
         for(auto& e:core.takeCargo()){
             if(carry.incoming(e,carryPrint))continue;   // what the game's porter carries (type 6)
             if(e.type==3){auto b=mod::structures::unpack(e.item,e.position,e.yaw);

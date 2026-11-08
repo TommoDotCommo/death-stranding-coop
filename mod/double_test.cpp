@@ -76,6 +76,9 @@ void actions(){
     CHECK(s.actions==(FlagSprintBit|FlagCrouchBit|JumpBit));               // only the replayed bits pass
     s.frame();auto u=at(6);d.tick(true,&u,3,FlagCrouchBit);CHECK(s.actions==FlagCrouchBit);
     d.tick(true,nullptr,3,FlagSprintBit);CHECK(s.actions==0&&s.speed==0);  // released standing
+    // The partner's vehicle kind passes to the body (riding pose); kinds map to the game's Vehicle_Type values.
+    {Scene v;auto e=v.make();e.enable();auto w=at(5);e.tick(true,&w,3,FlagSprintBit|(2u<<VehicleShift));CHECK(v.actions==(FlagSprintBit|(2u<<VehicleShift)));}
+    CHECK(vehicleAnimationType(0)<0&&vehicleAnimationType(1)==0&&vehicleAnimationType(2)==1&&vehicleAnimationType(3)==3&&vehicleAnimationType(4)<0);
     // Reading the porter's own variables: entity 0x6000 -> components -> manager -> named slots.
     fakemem::Fake f;auto B=f.base;
     f.put<uint32_t>(0x6090,2);f.put<uint64_t>(0x6098,B+0x7000);f.put<uint64_t>(0x7000,B+0x7100);f.put<uint64_t>(0x7008,B+0x7200);

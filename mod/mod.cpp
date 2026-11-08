@@ -30,6 +30,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "double.h"
 #include "body.h"
 #include "vehicle.h"
+#include "ride.h"
 #include "environment.h"
 #include "auto_continue.h"
 #include "pad.h"
@@ -257,6 +258,62 @@ struct Runtime final:ds::Transport {
         }
     }
     // --- Map markers (marker.h): the partner on the map and pings. OFF until `puppet.marker` arms it for this process.
+    // --- The partner's vehicle (ride.h): opt-in (partner_vehicle, or `puppet.ride on`). `lead K` is a one-copy test: the
+    // vehicle of kind K drives 8 m ahead of this porter as if a partner rode it.
+    std::filesystem::path rideCommand;std::unique_ptr<mod::ride::PartnerVehicle> ride;bool rideOn=false,rideConfigDone=false;
+    uint8_t rideLead=0;uint64_t ridePorter=0;
+    std::function<void(uint64_t,const mod::puppet::Transform&)> rideTeleport;   // lab test: `goto X Y Z` (game axes)
+    void makeRide() {
+#ifdef MOD_FAKE_NETWORK
+        note("RIDE unavailable: the fake world has no vehicles\n");
+#else
+        try{ride=std::make_unique<mod::ride::PartnerVehicle>(mod::ride::nativeApi(*sampler),[this](const std::string& row){note(row.c_str());});}
+        catch(const std::exception& e){note((std::string("RIDE unavailable: ")+e.what()+"\n").c_str());}
+#ifdef _WIN32
+        try{rideTeleport=mod::join::nativeTeleport(*sampler);}catch(const std::exception& e){note((std::string("RIDE goto unavailable: ")+e.what()+"\n").c_str());}
+#endif
+#endif
+    }
+    void tickRide(const mod::puppet::Anchor& anchor,uint64_t now) {
+        auto stamp=" "+mod::runStamp()+"\n";
+        if(config.partnerVehicle&&!rideConfigDone){rideConfigDone=true;if(!ride)makeRide();rideOn=ride!=nullptr;if(rideOn)note("RIDE partner vehicle on (config)\n");}
+        if(!rideCommand.empty()&&std::filesystem::exists(rideCommand)) {
+            auto text=readConfig(rideCommand);
+            if(!std::filesystem::remove(rideCommand))throw std::runtime_error("cannot consume ride command");
+            if(text=="on"+stamp){if(!ride)makeRide();rideOn=ride!=nullptr;rideLead=0;}
+            else if(text=="off"+stamp){rideOn=false;rideLead=0;}
+            else if(text=="park"+stamp){rideLead=0xff;}   // test: the lead vehicle stops where it is
+            else if(text.rfind("goto ",0)==0&&text.size()>stamp.size()&&text.compare(text.size()-stamp.size(),stamp.size(),stamp)==0){
+                // Lab test: move this porter with the game's own player teleport (join.h), once, in normal gameplay.
+                double x=0,y=0,z=0;auto porter=mod::join::readPorter(*sampler);
+                if(rideTeleport&&std::sscanf(text.c_str()+5,"%lf %lf %lf",&x,&y,&z)==3&&std::isfinite(x)&&std::isfinite(y)&&std::isfinite(z)
+                   &&porter.readable&&!inEvent){mod::puppet::Transform t;t.position={x,y,z};t.rotation=porter.rotation;rideTeleport(porter.player,t);
+                    note("RIDE goto done\n");}
+                else note("RIDE goto refused\n");
+                return;}
+            else if(auto k=mod::puppet::parseCargoCommand(text,mod::runStamp(),"lead");k&&*k<=3){if(!ride)makeRide();rideOn=ride!=nullptr;rideLead=uint8_t(*k);}
+            else {note("RIDE ignored command for another process\n");return;}
+            note(("RIDE command "+text.substr(0,text.find(' '))+(rideLead?" "+std::to_string(rideLead):std::string())+"\n").c_str());
+        }
+        if(!ride)return;
+        if(anchor.entity!=ridePorter){if(ridePorter)ride->forget("world changed");ridePorter=anchor.entity;}
+        if(!rideOn){ride->tick(now,false,0,nullptr);return;}
+        if(rideLead==0xff){ride->tick(now,true,0,nullptr);return;}
+        if(rideLead){
+            bool ok=anchor.entity&&anchor.pose.available&&anchor.pose.coherent&&!inEvent;
+            if(!ok){ride->tick(now,true,0,nullptr);return;}
+            auto t=mod::puppet::transform(anchor.pose);
+            // Forward is the rotation's second row (game axes, z up).
+            for(int i=0;i<3;++i)t.position[i]+=8*double(t.rotation[3+i]);
+            ride->tick(now,true,rideLead,&t);return;
+        }
+        bool connected=core&&core->connected();
+        const auto& r=cache.remote;
+        if(!connected||inEvent){ride->tick(now,false,0,nullptr);return;}
+        if(!r.visible||!r.state.vehicle){ride->tick(now,true,0,nullptr);return;}
+        auto t=mod::ride::vehicleTransform(r.state.position,r.state.vehicleOffset,r.state.vehicleAngles);
+        ride->tick(now,true,r.state.vehicle,&t);
+    }
     std::filesystem::path markerCommand;std::unique_ptr<mod::marker::Markers> markers;std::vector<ds::CargoEvent> pingIn;
     mod::marker::KeyEdge pingEdge;unsigned pingKey=0;bool markerConfigDone=false;
     void makeMarkers() {
@@ -582,7 +639,7 @@ struct Runtime final:ds::Transport {
 #endif
                 puppet=std::make_unique<mod::puppet::Probe>(std::move(api),[this](const std::string& row){note(row.c_str());});
                 twinCommand=path.parent_path()/"puppet.double";cargoCommand=path.parent_path()/"puppet.cargo";bodyCommand=path.parent_path()/"puppet.body";gearCommand=path.parent_path()/"puppet.gear";
-                markerCommand=path.parent_path()/"puppet.marker";
+                markerCommand=path.parent_path()/"puppet.marker";rideCommand=path.parent_path()/"puppet.ride";
 #ifdef MOD_FAKE_NETWORK
                 // Fake tree: player entity 0x6000 -> CameraEntity 0xa000 -> parked double 0xa800.
                 fake->mutate([&]{auto B=fake->base;fake->put<uint64_t>(0x6078,B+0xa000);
@@ -866,7 +923,9 @@ struct Runtime final:ds::Transport {
         std::optional<mod::puppet::Transform> target;double speed=0;uint32_t actions=0;
         auto packed=[](const ds::State& s){return uint32_t(s.flags)|(uint32_t(s.action&31)<<16);};
         auto horizontal=[](const ds::State& s){return std::hypot(s.velocity[0],s.velocity[2]);};
-        if(partnerMode()&&cache.remote.visible){target=mod::puppet::fromState(cache.remote.state.position,cache.remote.state.yaw);speed=horizontal(cache.remote.state);actions=packed(cache.remote.state);}
+        if(partnerMode()&&cache.remote.visible){target=mod::puppet::fromState(cache.remote.state.position,cache.remote.state.yaw);speed=horizontal(cache.remote.state);actions=packed(cache.remote.state);
+            // Riding: the body sits on the seat with the vehicle's pitch and roll, in the game's riding pose.
+            if(auto kind=cache.remote.state.vehicle){target->rotation=mod::rotationFromAngles(cache.remote.state.vehicleAngles);actions|=uint32_t(kind)<<mod::puppet::VehicleShift;}}
         if(twinMode==TwinMode::Echo&&cache.available) {
             echo.emplace_back(now,cache.local);
             while(echo.size()>1&&now-echo[1].first>=1000)echo.pop_front();
@@ -890,6 +949,9 @@ struct Runtime final:ds::Transport {
         // A partner who is only missing for now (late packets, private room) is hidden, not handed back; a game event
         // or the mode switched off hands the double back.
         const mod::puppet::Transform* goal=(target&&!event)?&*target:nullptr;bool hold=twinMode!=TwinMode::None&&!event;
+        // While the partner's vehicle is drawn the body is hidden (kept, not handed back): the game's seated pose is not
+        // reproduced yet, and a standing Sam on the seat reads worse than an empty one.
+        if(goal&&partnerMode()&&cache.remote.state.vehicle&&ride&&ride->entity()&&ride->kind()==cache.remote.state.vehicle)goal=nullptr;
         // Own body: made (once per world) and driven by its own backend; the resident double is released, never
         // dropped while borrowed. Until the body exists, or if the game refuses to make one, the resident double is used.
         bool useOwn=twinMode==TwinMode::Own&&own&&ownTwin&&!own->exhausted();
@@ -900,6 +962,7 @@ struct Runtime final:ds::Transport {
         }
         else{twin->tick(true,goal,speed,actions,hold);if(ownTwin)ownTwin->tick(true,nullptr);}
         tickGear(useOwn?ownEntity:0,anchor,now);
+        tickRide(anchor,now);
     }
     bool tickOnce(std::string& err,bool gameContext=false) {
         std::lock_guard<std::timed_mutex> guard(mutex);

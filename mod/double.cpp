@@ -70,6 +70,7 @@ uint64_t findDouble(const discovery::Sampler& s,uint64_t player,uint64_t cameraV
 #endif
     return ok&&count==1?found:0;
 }
+float vehicleAnimationType(uint32_t kind){return kind==1?0.f:kind==2?1.f:kind==3?3.f:-1.f;}
 Transform fromState(const std::array<double,3>& p,double yaw){
     require(std::isfinite(p[0])&&std::isfinite(p[1])&&std::isfinite(p[2])&&std::isfinite(yaw),"double target not finite");
     float c=float(std::cos(yaw)),n=float(std::sin(yaw));
@@ -719,7 +720,7 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
     auto setFloat=reinterpret_cast<SetFloatFn>(s.base+entries[5].rva);auto setBool=reinterpret_cast<SetBoolFn>(s.base+entries[6].rva);
     const uint64_t animator=s.base+0x3d09910;   // MorphemeAnimationManager
     // Handles are per manager; the double's network (sam/references/akukan) has these locomotion controls.
-    struct Handles{uint64_t manager=0;int speed=-1,move=-1,moveFloat=-1,moveInterp=-1,crouchRate=-1,basic=-1;int action[7]={-1,-1,-1,-1,-1,-1,-1};};auto handles=std::make_shared<Handles>();
+    struct Handles{uint64_t manager=0;int speed=-1,move=-1,moveFloat=-1,moveInterp=-1,crouchRate=-1,basic=-1,isVehicle=-1,vehicleType=-1;int action[7]={-1,-1,-1,-1,-1,-1,-1};};auto handles=std::make_shared<Handles>();
     // The borrowed instance is kept after release and swapped back in on the next borrow of the same manager,
     // so repeated borrows build one instance per double, not one per borrow.
     struct Borrowed{uint64_t manager=0,own=0,instance=0,def=0;};auto borrowed=std::make_shared<Borrowed>();
@@ -757,7 +758,15 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
                 handles->speed=initFloat(manager,"Speed");handles->move=initBool(manager,"DSMove");
                 handles->moveFloat=initFloat(manager,"Move_Float");handles->moveInterp=initFloat(manager,"Move_Float_Interp");
                 for(unsigned k=0;k<7;++k)handles->action[k]=initBool(manager,ActionNames[k]);
-                handles->crouchRate=initFloat(manager,"Crouch_Rate");handles->basic=initBool(manager,"Is_BasicAction");}
+                handles->crouchRate=initFloat(manager,"Crouch_Rate");handles->basic=initBool(manager,"Is_BasicAction");
+                handles->isVehicle=initBool(manager,"Is_Vehicle");handles->vehicleType=initFloat(manager,"Vehicle_Type");}
+            // Riding: the porter network's own vehicle controls (enum 0x19 / 0x1b, set by the game's mount at 0x2772ee9 and
+            // 0x2774469); locomotion stays at rest underneath.
+            auto type=vehicleAnimationType((flags&VehicleMask)>>VehicleShift);bool riding=type>=0;
+            if(handles->isVehicle>=0)setBool(manager,handles->isVehicle,riding);
+            if(riding&&handles->vehicleType>=0)setFloat(manager,handles->vehicleType,type);
+            // A seated porter shows Is_Actions and Is_Landed (live 2026-11-08, driving a truck); locomotion at rest.
+            if(riding){speed=0;flags=(flags&VehicleMask)|ActionsBit|LandedBit;}
             bool moving=speed>MovingSpeed;
             if(handles->speed>=0)setFloat(manager,handles->speed,float(speed));
             if(handles->move>=0)setBool(manager,handles->move,moving);
