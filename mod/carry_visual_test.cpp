@@ -25,9 +25,9 @@ struct Game {
     // slots: type -> stacks (bottom first) of (record index, hash)
     void carry(const std::vector<std::pair<uint8_t,std::vector<std::vector<std::pair<unsigned,uint32_t>>>>>& slots,uint64_t holder=0){
         std::vector<uint64_t> slotPtrs;
-        for(auto& [type,stacks]:slots){uint64_t slot=alloc(0x80);put<uint8_t>(slot+SlotType,type);std::vector<uint64_t> stackPtrs;
+        for(auto& [type,stacks]:slots){uint64_t slot=alloc(0x80);put<uint8_t>(slot+SlotType,type);put<uint64_t>(slot+SlotCarrier,carrier);std::vector<uint64_t> stackPtrs;
             for(auto& st:stacks){uint64_t stack=alloc(0x40),items=alloc(8*st.size()+8);
-                for(size_t i=0;i<st.size();++i)put<uint64_t>(items+8*i,record(st[i].first,st[i].second,holder?holder:carrier));
+                for(size_t i=0;i<st.size();++i)put<uint64_t>(items+8*i,record(st[i].first,st[i].second,holder?holder:slot));
                 put<int32_t>(stack+Items,int32_t(st.size()));put<uint64_t>(stack+ItemArray,items);stackPtrs.push_back(stack);}
             uint64_t arr=alloc(8*stackPtrs.size()+8);for(size_t i=0;i<stackPtrs.size();++i)put<uint64_t>(arr+8*i,stackPtrs[i]);
             put<int32_t>(slot+Stacks,int32_t(stackPtrs.size()));put<uint64_t>(slot+StackArray,arr);slotPtrs.push_back(slot);}
@@ -68,6 +68,10 @@ int main(){
         // A stale record: still in the stack array, but the record names another holder.
         uint64_t other=g.alloc(0x40);g.carry({{1,{{{3,100}},{{4,200}}}}});g.record(4,200,other);
         auto t=g.read();CHECK(t&&t->size()==1&&(*t)[0].hash==100);
+        // The live layout: records beyond index 511 count; a slot that names another carrier does not.
+        {Game h;h.carry({{1,{{{557,700}}}}});auto u=h.read();CHECK(u&&u->size()==1&&(*u)[0].hash==700);
+         uint64_t slots=0;std::memcpy(&slots,h.mem.data()+(h.carrier+SlotArray-h.base),8);uint64_t slot=0;std::memcpy(&slot,h.mem.data()+(slots-h.base),8);
+         h.put<uint64_t>(slot+SlotCarrier,h.alloc(0x40));auto v=h.read();CHECK(v&&v->empty());}
         // Wrong vtable, absurd counts, no component: unreadable (nullopt), never a guess.
         g.put(g.component,uint64_t(0x1234));CHECK(!g.read());g.put(g.component,Image+ComponentVtable);
         g.put<int32_t>(g.carrier+Slots,100000);CHECK(!g.read());g.put<int32_t>(g.carrier+Slots,-1);CHECK(!g.read());

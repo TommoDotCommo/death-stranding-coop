@@ -27,8 +27,8 @@ std::optional<std::vector<Item>> readCarried(const discovery::Sampler& s,uint64_
     if(!load(s,carrier+Slots,slotCount)||!load(s,carrier+SlotArray,slotArray)||!pointers(s,slotArray,slotCount,MaxSlots,slots))return std::nullopt;
     std::vector<Item> out;
     for(auto slot:slots){
-        uint8_t type=0;int32_t stackCount=0;uint64_t stackArray=0;std::vector<uint64_t> stacks;
-        if(!slot||!load(s,slot+SlotType,type))return std::nullopt;
+        uint8_t type=0;int32_t stackCount=0;uint64_t stackArray=0,slotCarrier=0;std::vector<uint64_t> stacks;
+        if(!slot||!load(s,slot+SlotType,type)||!load(s,slot+SlotCarrier,slotCarrier))return std::nullopt;
         if(!cargoSlot(type))continue;
         if(!load(s,slot+Stacks,stackCount)||!load(s,slot+StackArray,stackArray)||!pointers(s,stackArray,stackCount,MaxStacks,stacks))return std::nullopt;
         for(size_t c=0;c<stacks.size();++c){
@@ -41,7 +41,9 @@ std::optional<std::vector<Item>> readCarried(const discovery::Sampler& s,uint64_
                 uint64_t holder=0;Item it;uint32_t kind=0;
                 if(!load(s,r+RecordHolder,holder)||!load(s,r+RecordHash,it.hash)||!load(s,r+RecordKind,kind))return std::nullopt;
 #ifndef MUTANT_CARRY_HOLDER
-                if(holder!=carrier)continue;   // a stale pointer, or an item already handed to another carrier
+                // Held by this slot of this carrier (or, older layout, by the carrier itself); anything else is a stale
+                // pointer or an item already handed to another carrier.
+                if(!((holder==slot&&slotCarrier==carrier)||holder==carrier))continue;
 #endif
                 it.index=uint32_t((r-manager-RecordBase)/RecordStride);it.slot=type;it.column=uint8_t(c);it.level=uint8_t(l);it.kind=uint8_t(kind);
 #ifndef MUTANT_CARRY_CAP
