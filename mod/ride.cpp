@@ -134,6 +134,11 @@ Api nativeApi(discovery::Sampler& s){
         if(!table(kind))return 0;
         unsigned used=0;for(unsigned i=0;i<4;++i)if(*reinterpret_cast<uint64_t*>(pool+8*i))++used;
         if(used==4)return 0;   // the creator does not check capacity itself
+        // The wrapper reads the unit table without null checks (0x2f6c86f, 0x2f532f3): before the story unlocks a vehicle
+        // its unit (or the table) can be missing. Require the manager, the unit of the right class and its resource.
+        uint64_t manager=0,unit=0,unitVtable=0,unitResource=0;
+        if(!q(*sp,sp->base+0x7bfecc0,manager)||!manager||!q(*sp,manager+0x28+8ull*(kind==1?3:2),unit)||!unit
+           ||!q(*sp,unit,unitVtable)||unitVtable!=sp->base+(kind==1?0x3e261c0:0x3e26b98)||!q(*sp,unit+0x80,unitResource)||!unitResource)return 0;
         alignas(8) uint16_t descriptor[2]={uint16_t(kind==1?3:2),0};   // unit type: truck 2, motorbike 3; variant 0
         auto e=create(pool,descriptor,&t,0.f);
         uint64_t v=0;if(!e||!q(*sp,e,v)||v!=table(kind))return 0;
