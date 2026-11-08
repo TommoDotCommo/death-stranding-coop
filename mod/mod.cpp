@@ -244,23 +244,27 @@ struct Runtime final:ds::Transport {
     }
     // --- Map markers (marker.h): the partner on the map and pings. OFF until `puppet.marker` arms it for this process.
     std::filesystem::path markerCommand;std::unique_ptr<mod::marker::Markers> markers;std::vector<ds::CargoEvent> pingIn;
-    mod::marker::KeyEdge pingEdge;unsigned pingKey=0;
+    mod::marker::KeyEdge pingEdge;unsigned pingKey=0;bool markerConfigDone=false;
+    void makeMarkers() {
+#ifdef MOD_FAKE_NETWORK
+        note("MARKER unavailable: the fake world has no map markers\n");
+#else
+        try{markers=std::make_unique<mod::marker::Markers>(mod::marker::nativeApi(*sampler),[this](const std::string& row){note(row.c_str());});
+            markers->setRefBase((nonce()>>32)<<20);}
+        catch(const std::exception& e){note((std::string("MARKER unavailable: ")+e.what()+"\n").c_str());}
+#endif
+    }
     void tickMarkers(uint64_t now) {
         auto stamp=mod::runStamp();bool ping=false;
+        // partner_marker: the pin and the partner's pings from the start; no ping key (whether V is free is unverified).
+        if(config.partnerMarker&&!markerConfigDone){markerConfigDone=true;if(!markers)makeMarkers();
+            if(markers){markers->enable(true);pingKey=0;note("MARKER on (config), no ping key\n");}}
         if(!markerCommand.empty()&&std::filesystem::exists(markerCommand)) {
             auto text=readConfig(markerCommand);
             if(!std::filesystem::remove(markerCommand))throw std::runtime_error("cannot consume marker command");
             if(text=="on "+stamp+"\n"||text=="off "+stamp+"\n") {
                 bool on=text[1]=='n';
-                if(on&&!markers) {
-#ifdef MOD_FAKE_NETWORK
-                    note("MARKER unavailable: the fake world has no map markers\n");
-#else
-                    try{markers=std::make_unique<mod::marker::Markers>(mod::marker::nativeApi(*sampler),[this](const std::string& row){note(row.c_str());});
-                        markers->setRefBase((nonce()>>32)<<20);}
-                    catch(const std::exception& e){note((std::string("MARKER unavailable: ")+e.what()+"\n").c_str());}
-#endif
-                }
+                if(on&&!markers)makeMarkers();
                 if(markers){markers->enable(on);pingKey=on?0x56:0;}   // V, the co-op standard's ping key (game_offsets.md, "Keys")
             }
             else if(text=="ping "+stamp+"\n")ping=true;

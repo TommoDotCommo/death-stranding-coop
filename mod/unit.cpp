@@ -77,6 +77,8 @@ int main() {
     assert(refused(withKeys(threaded,"\"partner\":\"own\"")));                             // no puppet_probe
     {auto none=probe;none.erase(none.find("\"role\":\"host\","),14);assert(refused(withKeys(none,"\"partner\":\"own\"")));}
     assert(mod::parseConfig(withKeys(threaded,"\"partner\":\"off\"")).partner=="off");
+    assert(!mod::parseConfig(probe).partnerMarker&&mod::parseConfig(withKeys(probe,"\"partner_marker\":true")).partnerMarker);
+    assert(refused(withKeys(threaded,"\"partner_marker\":true")));                          // no puppet_probe
     assert(mod::parseConfig(withKeys(threaded,"\"virtual_pad\":true,\"required\":true")).virtualPad);
     assert(mod::parseConfig(withKeys(good,"\"virtual_pad\":true,\"required\":true,\"self_tick\":true")).virtualPad);
     assert(refused(withKeys(threaded,"\"virtual_pad\":true")));

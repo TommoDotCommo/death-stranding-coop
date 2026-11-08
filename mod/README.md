@@ -650,7 +650,14 @@ copies through the real core with loss and an outage, seven mutants in `test_gam
 game's resident double. It requires `puppet_probe` and an explicit role; the default is `"off"`. The log says
 `DOUBLE start mode own (config)`. The launcher writes `partner:"own"` and `partner_gear:true` with the game-thread hook
 for every co-op session (`launcher/README.md`). Live (2026-11-08): two copies started that way, with no command, each
-made its body, drew the other porter at the other's place and copied the gear; no fault in the crash recorder.
+made its body, drew the other porter at the other's place and copied the gear; no fault in the crash recorder. A return to
+the title screen and Continue in that setup made a new body with its gear in the new world (the old pieces were
+forgotten, not touched).
+
+`"partner_marker": true` (requires `puppet_probe`) arms the map markers from the start, as `puppet.marker` `on` would,
+but binds no ping key (whether V is free in the game's default keys is unverified): the partner's pin follows them on
+the map and the partner's pings arrive. The launcher writes it too. Live, two copies: `MARKER on (config), no ping key`
+and each placed the other's pin at the other porter's position.
 
 ## The partner's gear (`partner_gear`, off by default)
 

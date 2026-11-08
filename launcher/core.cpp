@@ -36,7 +36,7 @@ std::string config(const Session& s) {
     // Play setup: the game-thread hook, the partner drawn as the mod's own Sam wearing the porter's gear, and shared
     // cargo and structures (mod/README.md). The network-only self_tick setup draws nothing.
 #ifndef MUTANT_CONFIG_PLAY
-    const std::string play="\"game_thread\":true,\"puppet_probe\":true,\"partner\":\"own\",\"partner_gear\":true";
+    const std::string play="\"game_thread\":true,\"puppet_probe\":true,\"partner\":\"own\",\"partner_gear\":true,\"partner_marker\":true";
 #else
     const std::string play="\"self_tick\":true";
 #endif
