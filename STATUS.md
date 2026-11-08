@@ -26,7 +26,8 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 
 ## Not done
 
-- Passengers; steering lean and wheel animation on the partner's vehicle; real driving at speed between two copies
+- Passengers; collision, steering lean and wheel animation on the partner's vehicle (it is display-only: a porter
+  walks through it); real driving at speed between two copies
   (only a short drive up a ramp ran live, before the vehicle was drawn); no carried cargo drawn on the partner (the backpack and cuff are,
   and they follow what the partner shows), no cutscene sharing.
 - BTs, MULEs, death and voidouts, shared orders and deliveries, saves of a shared world, shared weather (time of day
