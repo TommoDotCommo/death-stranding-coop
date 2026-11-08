@@ -315,7 +315,7 @@ struct Runtime final:ds::Transport {
         if(!connected||inEvent){ride->tick(now,false,0,nullptr);return;}
         if(!r.visible||!r.state.vehicle){ride->tick(now,true,0,nullptr);return;}
         auto t=mod::ride::vehicleTransform(r.state.position,r.state.vehicleOffset,r.state.vehicleAngles);
-        ride->tick(now,true,r.state.vehicle,&t);
+        ride->tick(now,true,r.state.vehicle,&t,{r.state.vehicleVariant,r.state.vehicleLook});
     }
     std::filesystem::path markerCommand;std::unique_ptr<mod::marker::Markers> markers;std::vector<ds::CargoEvent> pingIn;
     mod::marker::KeyEdge pingEdge;unsigned pingKey=0;bool markerConfigDone=false;
@@ -761,6 +761,7 @@ struct Runtime final:ds::Transport {
                     r=mod::rideFrom(kind,o.position,o.rotation,p.position);
                     // The rider's steering: the porter's own Turn_Heading control (read-only).
                     if(auto t=mod::puppet::readFloatVariable(*raw,o.porter,raw->base+0x3d09910,"Turn_Heading",*steerVar))r.steer=std::clamp(double(*t),-ds::SteerMax,ds::SteerMax);
+                    if(o.variant<=ds::VehicleVariantMax){r.variant=uint8_t(o.variant);r.look=o.appearance;}
                 }
                 if(o.available&&int(r.kind)!=*lastKind){*lastKind=r.kind;
                     std::ostringstream m;m<<"RIDE local kind="<<int(r.kind)<<" vehicle=0x"<<std::hex<<o.vehicle<<"\n";note(m.str().c_str());}

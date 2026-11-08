@@ -17,6 +17,8 @@ struct Observation {
     std::array<double,3> position{}; // Vehicle world transform, game axes (z up).
     std::array<float,9> rotation{};  // Row-major, same layout as Entity.
     double speed=0;                 // Magnitude of position delta / time; never native velocity.
+    uint32_t variant=0;  // vehicle +0x4c8 (six-bit configuration), read when riding
+    uint16_t appearance=0; // vehicle +0x664 (paint channels: bits 0-5 and 6-11), read when riding
     std::string reason="not read";
     unsigned expectedKindValue() const; // vehicle+0x4c4 written by the constructors: bike 3, truck 2, car 1
 };

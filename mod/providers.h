@@ -47,7 +47,7 @@ public:
     bool record(uint64_t us,const std::string& line);
 };
 // The vehicle the porter rides, in wire terms (ds::State vehicle block): kind 0 = on foot.
-struct Ride { uint8_t kind=0; std::array<double,3> offset{}, angles{}; double steer=0; };
+struct Ride { uint8_t kind=0; std::array<double,3> offset{}, angles{}; double steer=0; uint8_t variant=0; uint16_t look=0; };
 // Wire angles from a game rotation (row-major rows right, forward, up; z up): yaw like stateFromPose, pitch = nose up,
 // roll = right side down. rotationFromAngles is the inverse (a proper rotation).
 std::array<double,3> anglesFromRotation(const std::array<float,9>&);

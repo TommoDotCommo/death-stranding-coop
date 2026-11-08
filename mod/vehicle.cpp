@@ -110,6 +110,7 @@ Observation Reader::read(uint64_t us) {
             }
             require(child,"porter not among the vehicle's children");
             o.riding=true;o.seat=Seat::Driver;o.seatIndex=0; // A player always drives in this game (no passenger seats for players).
+            o.variant=c.value<uint32_t>(add(o.vehicle,0x4c8));o.appearance=c.value<uint16_t>(add(o.vehicle,0x664));
             c.read(add(o.vehicle,0xc8),o.position.data(),sizeof(o.position));
             c.read(add(o.vehicle,0xe0),o.rotation.data(),sizeof(o.rotation));
             for(double x:o.position)require(std::isfinite(x),"vehicle position non-finite");

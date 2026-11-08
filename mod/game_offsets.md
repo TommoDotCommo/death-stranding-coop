@@ -2570,3 +2570,427 @@ host reporting -1.8: the guest's map at the porter went from 0 to -1.2, the game
 Sam pulled his hood up and the ground turned wet. With the host gone the influence lapsed and the map read 0 again
 (about 100 s later). No fault record; real saves unchanged. Whether the forced rain can bring BTs is unknown (none
 appeared in that run).
+
+## Partner vehicle appearance, collision and wheels — static follow-up
+
+Inspected build 13300582, SHA-256
+`9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b`.
+All addresses are RVAs relative to image base `0x140000000`. Static analysis only; no native calls or live validation.
+
+### Variant and appearance are separate inputs
+
+For both `DSVehicleTruck` and `DSVehicleMotorbike`:
+
+| Location | Established meaning |
+|---|---|
+| Entity `+0x4c8`, u32 | Six-bit variant/configuration selector. |
+| Entity `+0x664`, u16 | Retained appearance/customization word. |
+| Entity `+0x8a8`, pointer | Linked vehicle GameActor, when present. |
+| GameActor `+0x198`, u32, bits 22–27 | Actor’s variant selector. |
+| GameActor `+0x1a2`, u16 | Actor’s appearance/customization word. |
+
+Creator evidence:
+
+```asm
+0x2f5333c  lea   r9,[rsi+2]             ; appearance-word pointer
+0x2f53340  shr   r8d,6
+0x2f53347  and   r8d,0x3f               ; variant from descriptor word
+0x2f535c1  mov   [rdi+0x4c8],ebp
+0x2f535d4  call  [r8+0x228]
+```
+
+Concrete appearance implementations:
+
+| Class | Entity vtable | Virtual `+0x228` |
+|---|---:|---:|
+| DSVehicleMotorbike | `0x3e25db8` | `0x2f80e00` |
+| DSVehicleTruck | `0x3e26790` | `0x2f81400` |
+
+The motorbike stores the supplied word at entity `+0x664` (`0x2f80e53`) and, when its GameActor exists, actor `+0x1a2` (`0x2f80e63`). The ordinary truck path reaches common routine `0x2f81790`, which performs the corresponding stores at `0x2f81a7a` and `0x2f81a8a`.
+
+The ordinary initialization path independently establishes the actor-to-entity relationship:
+
+```asm
+0x2f77010  mov   rdx,[rsi+0x8a8]
+0x2f77023  mov   eax,[rdx+0x198]
+0x2f77029  shr   eax,22
+0x2f7702c  and   eax,0x3f
+0x2f77037  mov   [rsi+0x4c8],eax
+...
+0x2f77087  add   rdx,0x1a2
+0x2f77091  call  [rax+0x228]
+```
+
+There is also a native copy precedent: wrapper `0x2f533a0` extracts `(actor+0x198 >> 22) & 0x3f`, resolves the source entity’s resource, and passes `actor+0x1a2` to the same pooled creator `0x2f534e0` (`0x2f533c2–0x2f53407`).
+
+Thus the candidate read-only sampling and descriptor construction are:
+
+```cpp
+variant = read_u32(sourceVehicle + 0x4c8);
+appearance = read_u16(sourceVehicle + 0x664);
+
+// Require the pinned truck/bike class and variant < 64.
+uint16_t descriptor[2] = {
+    uint16_t(unitType | (variant << 6)), // truck 2; motorbike 3
+    appearance
+};
+```
+
+**Inference:** this reproduces ordinary player-vehicle customization more faithfully than `{unitType, 0}`. It has not been tested live. Matching appearance words do not establish matching entity resources for enemy or special configurations. The native copy wrapper uses the source resource; `0x2f532c0` instead selects from the unit table.
+
+### What the appearance word selects
+
+Common routine `0x2f81790` calls entity virtuals `+0x158` and `+0x160` before retaining the complete word:
+
+```asm
+0x2f81a5a  call  [rax+0x158]
+0x2f81a69  call  [rax+0x160]
+```
+
+| Class | Word bits 0–5, virtual `+0x158` | Word bits 6–11, virtual `+0x160` |
+|---|---:|---:|
+| Motorbike | `0x2f82690` | `0x2f827f0` |
+| Truck | `0x2f82750` | `0x2f828d0` |
+
+These routines extract six-bit indices and call `0x2b96220(entity, &materialSelectorHash, index)`. That helper finds a model material selector, converts the integer index to float, and updates its material parameter.
+
+For the non-broken ordinary truck:
+
+- Low six bits reach selectors `0x4ab08872`, `0x3bd8a365`, and `0x182eff2d`.
+- Bits 6–11 reach selector `0x6fd0472a`.
+- The motorbike uses `0x4ab08872`/`0x3bd8a365` for the low channel and `0x0bf2faea`/`0x2ac3b3f5` for the next channel.
+
+**Inference:** these are colour channels, likely primary/secondary. Their exact primary/secondary ordering and colour-index mapping remain **unknown**.
+
+Additional established branches:
+
+- Low-channel values `30` and `31` select resource fields `GoldApv` and `SilverApv` (`resource+0x1f8/+0x200`) in `0x2f81790`; broken variants use `BrokenGoldApv`/`BrokenSilverApv` (`+0x210/+0x218`).
+- The truck’s enemy branch is selected through resource virtual `+0xb8`, getter `0x2f6f7a0`, which reads reflected field `IsEnemy` at resource `+0x30c`. This branch accepts low-channel indices below 10 and follows a different material path.
+- Preserve the complete u16 appearance word. The reviewed channel consumers do not establish the meaning of its upper four bits.
+
+The reflected `VehicleEntityResource.PaintResource` field at **resource `+0x1d8` is weathering configuration**. Its target `DSVehiclePaintResource`, descriptor `0x4ca5a60`, contains `MudHeight`, `MudFade`, `MudSpeed`, `TarSpeed`, `SnowSpeed`, and related fields. It is not the established source of the selected green colour.
+
+UI reflection corroborates indexed customization:
+
+- `DSUIVehicleCustomizeColor`, descriptor `0x4cd4bb0`, contains `ShaderColorIndex` at `+0`, `PaletteColor` at `+4`, and default/primary-only flags.
+- `DSUIVehicleCustomizeResource`, descriptor `0x4cd1870`, contains named colour records, including `CustomizeColor_GRASS_GREEN` at `+0xf0`.
+
+Those are resource-layout offsets, not green’s shader index. The actual index for the supplied live green truck is **unknown**; copying its retained appearance word avoids guessing it.
+
+Variant is broader than colour: truck variant 6 selects reflected `HalflifeApv` at resource `+0x2b0`; bike variant 3 selects `RideTypeApv`/`BrokenRideTypeApv`; bike variant 8 can create `HitchCarrier`. Variant 7 also selects the wrapper’s alternate unit-resource path. A complete variant enumeration remains **unknown**.
+
+### Collision setup and mode-1 playback
+
+The skipped function starts at `0x2f73170`. Its early checks skip setup when flag `0x08000000` is set or entity `+0x330` is already non-null.
+
+The reviewed block does not simply create one collision component:
+
+| RVA | Established action |
+|---|---|
+| `0x2f731e4–0x2f731f4` | Obtains an existing model collision instance through `0x234dcd0`; caches it at entity `+0x340/+0x358`. |
+| `0x2f73280` | Calls vehicle virtual `+0x250` to obtain pose data. |
+| `0x2f73294` | Calls vehicle virtual `+0x150`, constructing vehicle-physics state at entity `+0x330`. |
+| `0x2f732ff` | Calls `0x2f688e0` with motion type 3; retains an auxiliary collision instance at entity `+0x348`. |
+| `0x2f73580–0x2f73596` | Passes the primary body to `0x23d3a00(..., true)` and sets entity `+0x564` bit 3. |
+
+`0x234dcd0` forwards to model helper `0x2390260`, which searches model entries for an existing collision instance. `PhysicsCollisionInstance` is identified by descriptor `0x48c7d50`, getter `0x1c3ee90`, vtable `0x3bdde88`.
+
+Concrete virtual `+0x150` implementations:
+
+- Truck: `0x2f6e0e0`; allocates a `0x170`-byte object, constructs it with `0x1c145e0`, stores it at `+0x330`, initializes it with the primary body through `0x1c20970`, and registers it through `0x1c174c0`. It also creates an auxiliary keyframed collision instance retained at truck `+0xcd0`.
+- Motorbike: `0x2f6dc30`; creates an auxiliary keyframed instance retained at `+0xd00`, constructs a `0x1f0`-byte vehicle-physics object through `0x1c146f0`, and initializes it with `0x1c20a60`.
+
+The exact class names of those vehicle-physics objects remain **unknown**.
+
+`EPhysicsMotionType`, descriptor `0x48c6578`, establishes:
+
+```text
+1 = Dynamic
+2 = Keyframed
+3 = Static
+```
+
+For `PhysicsCollisionInstance`, virtual `+0xe8` resolves to `0x1be4fd0`:
+
+```asm
+0x1be4fd0  mov [rcx+0x5c],edx
+0x1be4fd3  jmp 0x1c3b590
+```
+
+The latter applies the selected motion type to the physics body.
+
+Crucially, an existing native caller updates the collision body separately from the mode-1 mover:
+
+```asm
+0x2fa5a02  mov  rcx,[rdi+0x340]
+0x2fa5a09  lea  rdx,[rdi+0x8f8]       ; WorldTransform
+0x2fa5a10  xor  r8d,r8d
+0x2fa5a19  call [rax+0xb0]            ; collision transform
+0x2fa5a1f  mov  rcx,[rdi+0xb0]
+0x2fa5a26  lea  rdx,[rdi+0x8f8]
+0x2fa5a2d  call 0x2f801b0             ; mover target
+```
+
+Collision virtual `+0xb0` resolves to `0x1c46ee0`. Mode 1 itself reaches `0x22e97f0`, which updates the entity transform and dirty flag.
+
+**Candidate, untested:** retain the pooled suppression flags, acquire the model’s primary collision instance, select Keyframed motion, establish its activation/filtering, and update its collision transform alongside each mover target. This could avoid constructing the ordinary driving simulation.
+
+**A sufficient minimal recipe is unknown.** The pooled instance’s body availability, activation, collision filtering against the porter, teardown ownership, and persistence behavior were not established. Calling the entire skipped setup would construct normal vehicle-physics state and auxiliary bodies; it is not a proven static display-body solution. No claim of infeasibility is established either.
+
+### Wheel rotation and steering
+
+The reviewed native wheel-pose paths consume vehicle-physics state:
+
+- Bike update `0x2fa3370`, called at `0x2f9d1fd`, reads entity `+0x330`.
+- At `0x2fa39ed`, it calls `0x1c1e6a0` to obtain per-wheel orientations. That helper reads `*(physics+0x28)+0x88`, uses wheel-record stride `0xc0`, and derives orientations from record `+0x70/+0xa8`.
+- At `0x2fa3a2b`, it calls `0x1c1dd10` for per-wheel positions/contact state from the physics structures.
+- Bike resource fields `FrontWheelLeftIndex`, `FrontWheelRightIndex`, `BackWheelIndex`, and `HandleIndex` occupy `+0x2e8..+0x2f4`; they identify bones, not current wheel angles.
+- Entity `+0x58c` feeds the seated porter’s `Turn_Heading` animation calculation. That does not establish it as a sufficient wheel-visual setter.
+
+**Conclusion:** the reviewed wheel visuals depend on physics-derived pose data. A supported scalar wheel-spin/steer field or physics-free setter for pooled display vehicles is **unknown**. Direct bone-pose playback is a possible separate approach, but its update phase and overwrite behavior are unverified.
+
+### The partner's vehicle paint, live (2026-11-09)
+
+The reader takes the riding vehicle's variant (`+0x4c8`) and paint word (`+0x664`); the vehicle block carries them
+(byte 97, bytes 112-113) and the partner's world passes them to the creator as `type | variant << 6` and the data
+word, as the game's copy wrapper `0x2f533a0` does. Only ordinary looks are copied (variant 0 for a truck, 0 or 1 for
+the bike, both colour channels below 30): anything else is drawn in the default finish. Live, two copies: the driver's
+green truck had paint word `0x04d3` (both channels 19); the partner's truck in the other world got the same word and
+drove up the ramp green instead of unpainted grey.
+
+## Carried cargo mesh realization and native slot insertion — static follow-up
+
+Pinned executable SHA-256:
+`9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b`.
+PE headers and section mappings parsed independently; image base `0x140000000`.
+All addresses below are **RVAs**. Evidence comes from
+`x86_64-w64-mingw32-objdump -d -M intel`; nothing was called.
+
+### Corrections to the previous layout
+
+**Record `+0x90` points to its slot, not directly to its carrier.**
+The slot points back to the carrier at `+0x28`.
+
+The native stack append routine `0x2c2b530` establishes this chain:
+
+```asm
+; r14 = stack, rsi = cargo record
+2c2b60e  mov r15,[r14+0xc0]       ; stack's slot
+2c2b615  mov rax,[r15+0x28]       ; slot's carrier
+2c2b619  movzx r13d,byte [r15]    ; carrier type
+2c2b61d  mov edi,[rax+0x38]       ; carrier ID
+2c2b63c  mov [rsi+0x80],r13b
+2c2b643  mov [rsi+0x84],edi
+2c2b649  mov [rsi+0x90],r15
+```
+
+Consequences:
+
+- `carry_visual.cpp::readCarried` currently compares record `+0x90` with the
+  carrier. Normally inserted records would fail this check. Validate against the
+  current slot, then validate slot `+0x28` against the carrier.
+- Record `+0x84` is written with the current carrier ID on this path. It must not
+  be treated as an independently stable cargo identity.
+- Slot `+0x04` is accumulated cargo **volume units**, rather than a literal case
+  count. Insertion adds the volume result there; slot `+0x0c` increments once per
+  appended record.
+
+The executable also scans **`0x1e98` records (7,832)**, exceeding the reader’s
+511-entry bound. For example, `0x2c55180`:
+
+```asm
+2c55183  lea rax,[rcx+0x38]       ; first record +0x18
+2c551a1  add rax,0x240
+2c551a7  cmp r8,0x1e98
+...
+2c551b6  lea rcx,[rax+rax*8]
+2c551ba  shl rcx,6               ; index * 0x240
+2c551be  lea rax,[r10+0x20]
+```
+
+This establishes the native scan extent, not how many records are occupied.
+
+### What draws ordinary cases
+
+The cargo code realizes a **`DSAnimatingSkinnedMeshInstance`** and retains its
+pointer at **record `+0x148`**. An entity is not required by this branch.
+
+Type evidence: getter `0x2c5d2a0` resolves descriptor `0x4c36e70`, whose name at
+descriptor `+0x40` is `DSAnimatingSkinnedMeshInstance`. Its constructor
+`0x2c1fd40` installs the RTTI-bearing interface vtable `0x3dd92d0` at object
+`+0x168`; the full allocation size in the descriptor is `0x1e0`.
+
+The relevant realization path is:
+
+| RVA | Observed behavior |
+|---|---|
+| `0x2c47b50` area | Enumerates a carrier’s records through `0x2c53340`; calls `0x2c488c0` for eligible records at `0x2c47c4e`. |
+| `0x2c488c0` | Returns an existing record `+0x148` instance; refuses category byte `+0x20 == 5`; selects resources and builds a mesh instance. |
+| `0x2c5acc0` | Selects the model resource from the item definition and variant flag. |
+| `0x2cd4660` | Allocates and initializes `DSAnimatingSkinnedMeshInstance` from a visual parameter structure. |
+| `0x2c49328` | Stores the resulting instance at record `+0x148`. |
+| `0x2c4e6b0` | Releases the instance through virtual `+0x80`, clears record `+0x148`, and handles additional visual objects. |
+
+Concrete realization evidence:
+
+```asm
+2c48931  mov rax,[rdi+0x148]      ; existing instance
+...
+2c48978  mov rdx,[rdi+0x28]       ; DSGameBaggageListItem
+2c4897f  shr r8d,5
+2c4898b  and r8b,1               ; record +0x204 bit 5 variant
+2c489a0  call 2c5acc0
+...
+2c489e5  mov rax,[rsi+0x30]      ; selected resource's loaded object
+2c48a6e  mov [r14],rax           ; visual parameter +0
+...
+2c48cb5  mov rcx,r14
+2c48cb8  call 2cd4660
+...
+2c49328  mov [rdi+0x148],rbx
+```
+
+**Inference:** this explains ordinary cases being visible without corresponding
+cargo entities. Whether the renderer ultimately batches them into GPU instanced
+draw calls is **unknown**; the established object is a mesh instance per realized
+record.
+
+There is also a separate queued visual path:
+
+- `0x2c49b90` maintains record-keyed entries of stride `0x28` at manager
+  `+0x46da10/+0x46da18`, each containing visual descriptions of stride `0x150`.
+- `0x2c4a1e0` fills a description, including record pointer at description
+  `+0x110`, then submits it through `0x32f7980` using global `0x7c09dd8`.
+- Submission writes a handle at description `+0x148`.
+- `0x32f4fc4` also calls `0x2cd4660`.
+
+The queued path’s exact role in ordinary rendering versus visual transitions or
+effects is **unknown**. Do not equate it with the permanent record `+0x148`
+instance path.
+
+### Where model and size come from
+
+`DSBaggage2Config` RTTI establishes:
+
+- `ModelResources`: config `+0x198` array, pointer at `+0x1a0`.
+- `DeadBodyBagModelResources`: config `+0x250`.
+- Manager `+0x08` points to the config used by model selection.
+
+`DSGameBaggageListItem` RTTI establishes:
+
+| Offset | Field |
+|---:|---|
+| `+0x3b` | `TypeOfCase` |
+| `+0x3c` | `TypeOfContentsDamage` |
+| `+0x3e` | `TypeOfVolume` |
+| `+0x50` | `Weight` |
+
+Selector `0x2c5acc0(manager,item,variant)` first searches the manager’s additional
+asset list at `+0x46dfb0/+0x46dfb8`, matching item definition `+0x34`. A matching
+asset can supply its model at `+0x38`. Otherwise it calls
+`0x2c5ad70(config,item,variant)`.
+
+The fallback selects model entries using case type, volume type, damage type,
+specific definition hashes and the variant flag. In its generic volume branch,
+volume values 0/1/2 select array byte offsets `0x08/0x10/0x18`, or
+`0x20/0x28/0x30` for the variant; volume 3 selects `+0x68`. Special-case branches
+override these choices.
+
+`0x2c563a0(record)` converts ordinary volume values 0/1/2/3/4 to
+**1/2/4/6/8 volume units**, with a case-type exception returning 8.
+
+Resource lifetime matters: `0x2c6b8d0` walks the 31 model entries, takes each
+resource’s `+0x30`, and registers it through `0x2dcd770` with argument 5.
+**Inference:** the normal path expects resource/streaming setup before mesh
+construction. Safe reproduction of that lifetime contract is **unknown**;
+a model pointer alone is insufficient evidence of readiness.
+
+### Native insertion calls
+
+Two slot-level wrappers are established:
+
+```cpp
+// Inferred names; Microsoft x64 ABI.
+bool insertInlineBatch(Slot* slot, InlineBatch* batch,
+                       int placementMode, bool realize); // RVA 0x2c7dd50
+
+bool insertPointerArray(Slot* slot, PointerArray* records,
+                        int placementMode, bool realize); // RVA 0x2c7dde0
+```
+
+Observed contracts:
+
+- Inline batch: signed count at `+0x00`, inline record pointers beginning
+  `+0x10`.
+- Pointer array: signed count at `+0x00`, array pointer at `+0x08`.
+- Both wrappers enter slot `+0x78` and return the worker’s boolean.
+- `0x2c7dd50` calls worker `0x2c7e280`.
+- `0x2c7dde0` calls `0x2c7e9b0`, which converts the pointer array into an inline
+  batch and calls `0x2c7e280`.
+- Calls at `0x2cffd6a`, `0x2cffd7d` and `0x2cffdb6` demonstrate native use.
+- Exact placement-mode meanings remain **unknown**. Native callers use 0 and 2.
+- The final boolean is combined with slot eligibility at
+  `0x2c7e2be–0x2c7e2ca`, then reaches the append routine’s mesh-realization gate.
+  “Realize” is an inferred name.
+
+Worker `0x2c7e280` checks compatibility through `0x2cd22c0`, checks record
+location byte `+0x21` for 1 or 8, chooses or allocates stacks, and calls
+`0x2c2b530(stack,record,realize,-1)`.
+
+The append routine:
+
+- inserts into stack `+0x10/+0x18`;
+- updates stack volume `+0x34` and weight `+0x38`;
+- updates slot volume `+0x04`, weight `+0x14`, and count `+0x0c`;
+- updates carrier volume `+0x04` and weight `+0x0c`;
+- writes record carrier type `+0x80`, carrier ID `+0x84`, and slot `+0x90`;
+- changes applicable record locations to 2;
+- can call `0x2c488c0` to realize the mesh;
+- subsequently calls global cargo bookkeeping.
+
+These are gameplay mutations. Slot locking does not establish arbitrary-thread
+safety. The exact permitted thread/job phase is **unknown**; retain the game-thread
+mutation boundary and do not invoke them from the networking worker.
+
+### Requirements and remaining risks for a display carrier
+
+Established layout requirements beyond the existing empty carrier include:
+
+| Object | Fields consumed by the native path |
+|---|---|
+| Slot | carrier type `+0x00`, slot type `+0x01`, counters above, stack array `+0x18/+0x20`, carrier backpointer `+0x28`, initialized lock `+0x78` |
+| Stack | shape/capacity pointer `+0x00`, record array `+0x10/+0x18`, volume `+0x34`, weight `+0x38`, slot backpointer `+0xc0`, flags near `+0xf0` |
+| Record | valid item definition `+0x28`, state/location, initialized lock `+0x210`, holder fields and visual lifetime state |
+
+`0x2c4bd90` creates a slot-appropriate stack and writes stack `+0xc0` at
+`0x2c4bf1b`. A zeroed stack is therefore not an established substitute.
+
+**Minimal sufficient initialization is unknown.** Merely inserting N pointers
+into the copied backpack’s slot arrays is not proven to trigger realization or
+maintain moving case transforms. The complete stack-to-world transform update
+chain remains unresolved.
+
+**Mod-owned records:** the mesh factory itself accepts visual parameters rather
+than requiring a manager-table address. That is a candidate route for independent
+visuals. However, native carrier insertion reaches global cargo systems, carrier
+IDs, counters and record bookkeeping. Safe use with mod-owned records is
+**unknown**.
+
+**Allocation/free:** creation requests reach `0x2c470e0` through queue processing
+(`0x2c957da`); this stages work and returns no demonstrated synchronous
+allocate-and-attach contract. A safe record allocator/free pair for an arbitrary
+display carrier was **not established**. The existing `DeleteBaggage` queue path
+addresses the manager’s records by index and is not a destructor for external
+records.
+
+**Persistence and delivery risks:** native insertion changes actual carried
+state and weight. Record reset `0x2ca4710` also constructs an actor ID from
+record `+0xd4` and calls actor-registry removal. Consequently, bypassing manager
+ownership can leave stale visual/actor references; using real manager records
+can affect inventory queries and saved cargo. Exact save exclusion and
+delivery/order side effects are **unknown**.
+
+The most promising visual-only follow-up is the
+`0x2cd4660` mesh-instance construction path with correctly retained resources and
+explicit transform/lifetime management. It remains an untested candidate,
+not a ready-to-call implementation.

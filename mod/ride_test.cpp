@@ -13,11 +13,11 @@ namespace {
 void check(bool ok,const char* text){if(!ok)throw std::runtime_error(std::string("ride oracle: ")+text);}
 #define CHECK(x) check(bool(x),#x)
 struct Game {
-    std::map<uint64_t,uint8_t> vehicles;uint64_t next=0x1000;unsigned spawns=0,removes=0,places=0;bool refuse=false,noMover=false;
+    std::map<uint64_t,uint8_t> vehicles;uint64_t next=0x1000;unsigned spawns=0,removes=0,places=0;bool refuse=false,noMover=false;Look lastLook{};
     std::vector<Transform> placed;
     Api api(){
         Api a;
-        a.spawn=[this](uint8_t kind,const Transform&)->uint64_t{++spawns;if(refuse)return 0;auto e=next+=0x1000;vehicles[e]=kind;return e;};
+        a.spawn=[this](uint8_t kind,const Transform&,Look look)->uint64_t{++spawns;lastLook=look;if(refuse)return 0;auto e=next+=0x1000;vehicles[e]=kind;return e;};
         a.remove=[this](uint64_t e){++removes;vehicles.erase(e);};
         a.place=[this](uint64_t e,const Transform& t){if(noMover||!vehicles.count(e))return false;++places;placed.push_back(t);return true;};
         a.alive=[this](uint64_t e,uint8_t kind){auto it=vehicles.find(e);return it!=vehicles.end()&&it->second==kind;};
@@ -58,6 +58,15 @@ int main(){
         }
         {   // no mover to drive: the vehicle is removed, not left standing
             Game g;g.noMover=true;PartnerVehicle v(g.api(),note);auto t=at(1);v.tick(0,true,2,&t);CHECK(g.removes==1&&!v.entity());
+        }
+        {   // the partner's paint: passed to the creator; a different paint makes the vehicle again; unusual looks are default
+            Game g;PartnerVehicle v(g.api(),note);auto t=at(1);
+            v.tick(0,true,2,&t,{0,uint16_t(5|(7<<6))});CHECK(g.spawns==1&&g.lastLook.variant==0&&g.lastLook.paint==(5|(7<<6)));
+            v.tick(50,true,2,&t,{0,uint16_t(5|(7<<6))});CHECK(g.spawns==1);
+            v.tick(100,true,2,&t,{0,9});CHECK(g.spawns==2&&g.removes==1&&g.lastLook.paint==9);
+            CHECK(paint(2,{6,9}).variant==0&&paint(2,{6,9}).paint==0);          // truck variant 6 (special): default
+            CHECK(paint(1,{1,12}).variant==1&&paint(1,{1,12}).paint==12);       // the bike's variant 1 is kept
+            CHECK(paint(2,{0,30}).paint==0&&paint(2,{0,uint16_t(31<<6)}).paint==0&&paint(2,{0,0x1000}).paint==0);   // gold/silver, upper bits
         }
         {   // presence to game transform: rider + offset in game axes, the vehicle's rotation
             auto t=vehicleTransform({10,5,20},{1,-2,3},{0.5,0,0});

@@ -10,8 +10,13 @@
 #include <string>
 namespace mod::ride {
 using puppet::Transform;
+// What the partner's vehicle looks like: the creator's variant and paint word, filtered by paint().
+struct Look { uint8_t variant=0; uint16_t paint=0; bool operator==(const Look& o) const {return variant==o.variant&&paint==o.paint;} };
+// Only what ordinary player vehicles were seen to use (variant 0 trucks, 1 the bike) and plain colour indices
+// (each six-bit channel below 30; 30/31 select gold/silver resources): anything else is drawn as the default.
+Look paint(uint8_t kind,Look wanted);
 struct Api {
-    std::function<uint64_t(uint8_t kind,const Transform&)> spawn;   // wire kind (ds::VehicleKind); entity or 0
+    std::function<uint64_t(uint8_t kind,const Transform&,Look)> spawn;   // wire kind (ds::VehicleKind); entity or 0
     std::function<void(uint64_t entity)> remove;
     std::function<bool(uint64_t entity,const Transform&)> place;     // playback target; false = no mover to drive
     std::function<bool(uint64_t entity,uint8_t kind)> alive;         // still the vehicle class this kind made
@@ -23,7 +28,7 @@ public:
     PartnerVehicle(Api api,std::function<void(const std::string&)> log):api_(std::move(api)),log_(std::move(log)){}
     // permitted=false (no partner, game event, world change): the vehicle goes. kind 0 = the partner is on foot: the
     // vehicle stays parked where it is. `at` is the partner's vehicle transform (game axes) when kind != 0.
-    void tick(uint64_t nowMs,bool permitted,uint8_t kind,const Transform* at);
+    void tick(uint64_t nowMs,bool permitted,uint8_t kind,const Transform* at,Look look={});
     // The world was replaced (load): the entity went with it; forget it without calling the game.
     void forget(const char* why);
     uint64_t entity() const {return entity_;}
@@ -34,7 +39,7 @@ public:
 private:
     void drop(const char* why);
     Api api_;std::function<void(const std::string&)> log_;
-    uint64_t entity_=0,nextTry_=0;uint8_t kind_=0;unsigned failures_=0;bool moved_=false;
+    uint64_t entity_=0,nextTry_=0;uint8_t kind_=0;unsigned failures_=0;bool moved_=false;Look look_{};
 };
 // Signature-checked native calls (Windows, pinned build); throws elsewhere or when the image differs.
 Api nativeApi(discovery::Sampler&);

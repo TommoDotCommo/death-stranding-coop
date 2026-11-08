@@ -28,10 +28,12 @@ struct State {
     uint8_t vehicle=0;
     std::array<double,3> vehicleOffset{}, vehicleAngles{};
     double steer=0; // the rider's Turn_Heading animation control (degrees, |x| <= SteerMax); 0 on foot
+    uint8_t vehicleVariant=0; uint16_t vehicleLook=0; // its variant (< 64) and paint word (vehicle +0x4c8, +0x664); 0 on foot
 };
 enum VehicleKind : uint8_t { OnFoot=0, Motorbike=1, Truck=2, Car=3, VehicleKindMax=3 };
 constexpr double VehicleOffsetMax=20; // metres between the rider and the vehicle origin
 constexpr double SteerMax=180;
+constexpr uint8_t VehicleVariantMax=63;
 bool vehicleValid(const State&);
 // Local inputs: reject nonfinite transforms; clamp finite values to the wire envelope.
 bool sanitise(State&);

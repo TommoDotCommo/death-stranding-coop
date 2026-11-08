@@ -15,6 +15,18 @@
 #endif
 namespace mod::ride {
 bool supported(uint8_t kind){return kind==1||kind==2;}
+Look paint(uint8_t kind,Look w){
+    Look out;
+#ifndef MUTANT_RIDE_PAINT
+    bool ordinary=(kind==2&&w.variant==0)||(kind==1&&(w.variant==0||w.variant==1));
+    if(!ordinary)return out;
+    out.variant=w.variant;
+    if((w.paint&0x3f)<30&&((w.paint>>6)&0x3f)<30&&!(w.paint>>12))out.paint=w.paint;
+#else
+    out=w;
+#endif
+    return out;
+}
 Transform vehicleTransform(const std::array<double,3>& p,const std::array<double,3>& offset,const std::array<double,3>& angles){
     Transform t;
     // Adapter axes (x, up, y) to game axes (x, y, z up).
@@ -37,18 +49,20 @@ void PartnerVehicle::drop(const char* why){
     log_("RIDE partner vehicle removed ("+std::string(why)+") "+hex(entity_)+"\n");
     entity_=0;kind_=0;moved_=false;
 }
-void PartnerVehicle::tick(uint64_t now,bool permitted,uint8_t kind,const Transform* at){
+void PartnerVehicle::tick(uint64_t now,bool permitted,uint8_t kind,const Transform* at,Look look){
     if(!permitted){drop("partner gone");return;}
 #ifndef MUTANT_RIDE_IDENTITY
     if(entity_&&!api_.alive(entity_,kind_)){forget("no longer the vehicle made");}
 #endif
     if(!kind||!at)return;   // on foot: the vehicle stays where the partner left it
     if(entity_&&kind_!=kind)drop("partner rides another kind");
+    look=paint(kind,look);
+    if(entity_&&!(look_==look))drop("partner's vehicle looks different");
     if(!entity_){
         if(!supported(kind)||failures_>=MaxFailures||now<nextTry_)return;
-        entity_=api_.spawn(kind,*at);
+        entity_=api_.spawn(kind,*at,look);
         if(!entity_){++failures_;nextTry_=now+RetryMs;log_("RIDE partner vehicle not made (kind "+std::to_string(kind)+", failure "+std::to_string(failures_)+")\n");return;}
-        kind_=kind;failures_=0;moved_=false;
+        kind_=kind;look_=look;failures_=0;moved_=false;
         std::ostringstream o;o<<std::setprecision(10)<<"RIDE partner vehicle made kind="<<int(kind)<<" entity="<<hex(entity_)
             <<" at="<<at->position[0]<<","<<at->position[1]<<","<<at->position[2]<<"\n";log_(o.str());
     }
@@ -130,7 +144,7 @@ Api nativeApi(discovery::Sampler& s){
                 *reinterpret_cast<uint64_t*>(c+gear::ComponentCarrier)=carriers->back()->address();++given;}}
         return int(given);};
     Api api;
-    api.spawn=[create,pool,table,sp,giveCarriers](uint8_t kind,const Transform& t)->uint64_t{
+    api.spawn=[create,pool,table,sp,giveCarriers](uint8_t kind,const Transform& t,Look look)->uint64_t{
         if(!table(kind))return 0;
         unsigned used=0;for(unsigned i=0;i<4;++i)if(*reinterpret_cast<uint64_t*>(pool+8*i))++used;
         if(used==4)return 0;   // the creator does not check capacity itself
@@ -139,7 +153,9 @@ Api nativeApi(discovery::Sampler& s){
         uint64_t manager=0,unit=0,unitVtable=0,unitResource=0;
         if(!q(*sp,sp->base+0x7bfecc0,manager)||!manager||!q(*sp,manager+0x28+8ull*(kind==1?3:2),unit)||!unit
            ||!q(*sp,unit,unitVtable)||unitVtable!=sp->base+(kind==1?0x3e261c0:0x3e26b98)||!q(*sp,unit+0x80,unitResource)||!unitResource)return 0;
-        alignas(8) uint16_t descriptor[2]={uint16_t(kind==1?3:2),0};   // unit type: truck 2, motorbike 3; variant 0
+        // Unit type (truck 2, motorbike 3) | variant << 6, then the paint word (static: 0x2f532d2..0x2f5333c; the game's own
+        // copy wrapper 0x2f533a0 passes a vehicle's actor variant and paint the same way).
+        alignas(8) uint16_t descriptor[2]={uint16_t((kind==1?3:2)|(uint16_t(look.variant&0x3f)<<6)),look.paint};
         auto e=create(pool,descriptor,&t,0.f);
         uint64_t v=0;if(!e||!q(*sp,e,v)||v!=table(kind))return 0;
         if(giveCarriers(e)<0)return 0;

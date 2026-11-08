@@ -44,7 +44,11 @@ void vehicleTests(const Bytes& onFoot) {
     auto b=encode(p);
     check(parse(b)==Error::None&&q.state.vehicle==Truck&&(q.state.flags&Vehicle)&&std::abs(q.state.vehicleOffset[0]+19.99)<.006&&std::abs(q.state.vehicleOffset[2]-3.21)<.006,"vehicle_roundtrip");
     check(std::abs(q.state.vehicleAngles[0]+3.14159)<.0002&&std::abs(q.state.vehicleAngles[1]-.25)<.0002&&std::abs(q.state.vehicleAngles[2]+1.5)<.0002,"vehicle_roundtrip");
-    { auto bad=b; patch(bad,97,1,1); check(parse(bad)==Error::Reserved,"reserved"); }
+    for(size_t at:{size_t(114),size_t(119)}) { auto bad=b; patch(bad,at,1,1); check(parse(bad)==Error::Reserved,"reserved"); }
+    { Packet pv=p; pv.state.vehicleVariant=5; pv.state.vehicleLook=0x0a47; auto vb=encode(pv);
+      check(parse(vb)==Error::None&&q.state.vehicleVariant==5&&q.state.vehicleLook==0x0a47,"vehicle_paint_roundtrip");
+      auto bad=vb; patch(bad,97,64,1); check(parse(bad)==Error::Range,"vehicle");                       // variant beyond 63
+      bad=onFoot; patch(bad,112,7,2); check(parse(bad)==Error::Range,"vehicle"); }                      // paint on foot
     { Packet st=p; st.state.steer=-37.25; auto sb=encode(st); check(parse(sb)==Error::None&&std::abs(q.state.steer+37.25)<0.006,"vehicle_steer_roundtrip");
       auto bad=sb; patch(bad,110,uint64_t(uint16_t(int16_t(18001))),2); check(parse(bad)==Error::Range,"vehicle");       // beyond 180 degrees
       bad=onFoot; patch(bad,110,100,2); check(parse(bad)==Error::Range,"vehicle"); }                                       // steering on foot
@@ -78,8 +82,8 @@ void parserTests() {
     for(size_t at:{size_t(12),size_t(16)}) { bad=b; patch(bad,at,0,4); check(parse(bad)==Error::Build,"build"); }
     bad=b; patch(bad,32,0,8); check(parse(bad)==Error::Nonce,"zero_session");
     bad=b; patch(bad,40,0,8); check(parse(bad)==Error::Nonce,"zero_nonce");
-    for(size_t at:{size_t(64),size_t(112)}) { bad=b; patch(bad,at,UINT64_MAX,8); check(parse(bad)==Error::Time,"clock_range"); }
-    { Packet ping; ping.kind=Kind::Ping; auto pb=encode(ping); for(size_t at:{size_t(96),size_t(104)}) { bad=pb; patch(bad,at,UINT64_MAX,8); check(parse(bad)==Error::Time,"clock_range"); } }
+    for(size_t at:{size_t(64)}) { bad=b; patch(bad,at,UINT64_MAX,8); check(parse(bad)==Error::Time,"clock_range"); }
+    { Packet ping; ping.kind=Kind::Ping; auto pb=encode(ping); for(size_t at:{size_t(96),size_t(104),size_t(112)}) { bad=pb; patch(bad,at,UINT64_MAX,8); check(parse(bad)==Error::Time,"clock_range"); } }
     vehicleTests(b);
     for(size_t at:{size_t(72),size_t(76),size_t(80)}) { bad=b; patch(bad,at,10000001,4); check(parse(bad)==Error::Range,"range"); }
     for(size_t at:{size_t(84),size_t(86),size_t(88)}) { bad=b; patch(bad,at,32767,2); check(parse(bad)==Error::Range,"range"); }
