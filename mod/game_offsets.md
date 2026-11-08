@@ -1329,7 +1329,53 @@ lowered by them (lock xadd -1). So the main thread waits for the frame's draw jo
 Which job, and why, is unknown; a draw job touching the parts of the removed `ArtPartsData` fits the 22b4310 reading
 above.
 
-## Vehicles (static, 2026-11-07; read-only provider, no vehicle created or live vehicle checked)
+## Vehicles
+
+### Riding, live (2026-11-08, Episode 3 save, a truck in the Lake Knot garage)
+
+The static ride-component path below is **refuted** for driving a truck: the seated porter has no
+`DSRideVehicleMovementComponent` at all. What changes instead (read from the process, on foot vs seated):
+
+| Field | On foot | Seated in the truck |
+|---|---|---|
+| porter `+0x70` (parent entity) | null | the `DSVehicleTruck` |
+| vehicle `+0x78` (first child; siblings at `+0x80`) | not the porter | the porter |
+| `DSPlayerMover` (porter `+0xb0`) `+0x880` / `+0x898` | not the truck | truck `+0x20` |
+| `DSPlayerPadOperatorComponent` `+0x58` / `+0x60` | not the truck | the truck |
+| `DSPlayerParamComponent` `+0xad8` | not the truck | truck `+0x20` |
+
+Vehicle `+0x4c4` read 2 on all three trucks and 3 on the motorbike, as the constructors write. The seated porter's
+world position follows the truck (it is a child); porter minus truck was (-0.80, -0.44, +1.95), z up. `vehicle.cpp`
+now reads riding as: the porter's parent is a type-checked bike, truck or speed car, its kind field agrees, and its
+child list contains the porter. Presence carries the vehicle block (kind, offset from the rider, yaw/pitch/roll);
+two copies live: the receiver logged kind 2, a 2.1 m offset and the truck's 15 degree pitch on the exit ramp.
+
+### The partner's vehicle, live (2026-11-08)
+
+`ride.cpp` makes a display vehicle with the pooled creator wrapper `0x2f532c0(pool, &word, &WorldTransform, float)`
+(word: unit type 2 truck / 3 motorbike in the low four bits, variant 0; float 0), from a mod-owned pool laid out like
+the game's (`0x2f5af30`: entities `+0`, sources `+0x20`, four `0x50` records at `+0x40` built with `0x2f51e90`), and
+removes it with `0x2b7b9e0(pool, entity)`. The resource comes from the vehicle unit table (below), so no vehicle needs
+to be nearby. Each tick it calls `0x2f801b0(VehicleMover, &WorldTransform)` (mode 1) on the vehicle's own
+`VehicleMover` (found among its components). Live, one copy: a truck and the reverse trike were drawn and followed
+an 8 m lead target; changing kind removed one and made the other; removal left nothing; no fault recorded. With the
+stand-in partner riding a bike, the bike appeared under it, stayed parked when it got off, and Sam standing beside it
+was offered no prompt (no "Use Vehicle"); the vehicle was removed when the partner left. The created entity's
+`+0x560` read `0x08114002` (the creator's `0x08004000` bits set).
+
+Resolved live (read-only): `*(0x7bfecc0)` -> `+0x38` `DSVehicleTruckGameActorUnit`, `+0x40`
+`DSVehicleMotorbikeGameActorUnit`; unit `+0x80` -> `...GameActorUnitResource`; its `+0x38` reference -> `*ref` ->
+`+0x20` = `GameActorSpecificData`; its `+0x38` = `DSVehicleTruckResource` / `DSVehicleMotorbikeResource`. The
+reference's loaded flag is bit 59 of the referenced object's `+8` (resolver `0x1dde990`).
+
+The partner's body on the vehicle: setting `Is_Vehicle`, `Vehicle_Type`, `Is_Actions` and `Is_Landed` on the body's
+manager left it standing (live, twice). Two changes from "Vehicle animation entry" below made it sit (live, the stand-in
+on a bike: legs bent, hands on the handlebars; standing again after getting off): the handles are resolved while the
+manager resource's `+0xd8` points at the definition of the instance the body runs (`*(manager+0xa0)+0x38`, restored at
+once), and on getting on `Action_Rewind`, `Action_Rewind_NoInter` and `Is_Force_Upper_Reset` are pulsed once for 0.1 s
+with `AnimationManager_ExportedTriggerBoolAnimationVariable` (`0x2397310`), with `Vehicle_Seat` 0.
+
+### Static ride-component path (2026-11-07; refuted live for the truck, kept for reference)
 
 Scope: the pinned build/hash at the top of this file, opened read-only. The old
 37-match vehicle type-check window remains rejected: it is common Decima ancestry
@@ -1659,3 +1705,638 @@ then an authorized one-copy time setter run with a stand-in, independent process
 state observations and 90 s responsiveness. For weather, observe region/map and
 forecast state through a rain transition, then trace its producer/reset/seed and
 regional override lifetime before considering any weather-setting implementation.
+
+## Vehicles: creation, resources and transform playback (2026-11-08, static only)
+
+Inspected build 13300582, SHA-256
+`9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b`.
+All addresses below are RVAs relative to `0x140000000`. No game ran or native function was called. Names assigned to unnamed arguments are **inferences**.
+
+### Type identification
+
+Vtable slot 0 points to `lea rax,[rip+descriptor]; ret`; descriptor `+0x40` points to the class name.
+
+| Class | Descriptor | Vtable | Slot-0 getter |
+|---|---:|---:|---:|
+| DSVehicleMotorbikeResource | `0x4ca6420` | `0x3e246b8` | `0x2f5dba0` |
+| DSVehicleTruckResource | `0x4ca6be0` | `0x3e266b8` | `0x2f6bd30` |
+| DSVehicleMotorbike | `0x4ca65a0` | `0x3e25db8` | `0x2f6bb60` |
+| DSVehicleTruck | `0x4ca6d60` | `0x3e26790` | `0x2f6bcb0` |
+| DSVehicleMotorbikeGameActorUnit | `0x4ca6790` | `0x3e261c0` | `0x2f6bbb0` |
+| DSVehicleTruckGameActorUnit | `0x4ca6f70` | `0x3e26b98` | `0x2f6bd00` |
+| VehicleMover | `0x4ca7ed0` | `0x3e28010` | `0x2f6be60` |
+| DSNetVehicleInfo | `0x4dfbf70` | `0x3ee0010` | `0x34b55c0` |
+
+For example, `0x2f5dba0` returns descriptor `0x4ca6420`, and `0x2f6bd30` returns `0x4ca6be0`.
+
+### Resource acquisition without finding a nearby vehicle
+
+There is a global table of vehicle GameActorUnits:
+
+```text
+manager = *[base + 0x7bfecc0]
+unit    = *[manager + 0x28 + 8*vehicleType]
+```
+
+`0x2f6c840(manager, vehicleType)` reads that table under its lock:
+`0x2f6c86f: mov rdi,[rdi+rsi*8+0x28]`.
+
+The confirmed types are:
+
+- **Truck = 2.** Constructor `0x2f626f0` installs vtable `0x3e26b98`; `0x2f62749` stores the unit into `manager+0x38`.
+- **Motorbike = 3.** Constructor `0x2f61e00` installs vtable `0x3e261c0`; `0x2f61e59` stores the unit into `manager+0x40`.
+
+Both constructors fill an empty slot; they do not replace an existing unit.
+
+The caller at `0x2f532c0` demonstrates the resource chain:
+
+```text
+unitResource = *[unit + 0x80]
+specificData = ResolveReference(unitResource + 0x38)
+entityResource = *[specificData + 0x38]
+```
+
+Evidence:
+
+| RVA | Instruction/action |
+|---|---|
+| `0x2f532e9` | Calls `0x2f6c840` using the input word’s low four bits as vehicle type. |
+| `0x2f532f3` | `mov rdi,[rax+0x80]` |
+| `0x2f53319–0x2f5332a` | Checks reference readiness with `0x1de12e0`, then resolves `rdi+0x38` through `0x1dde990`. |
+| `0x2f5332f` | `mov rdx,[rax+0x38]` |
+| `0x2f53356` | Passes that resource to `0x2f534e0`. |
+
+Reflection corroborates the chain: `GameActorUnitResource`, descriptor `0x4af0e20`, names `+0x38` **DefaultSpecificData**; `GameActorSpecificData`, descriptor `0x4af0ee0`, names `+0x38` **EntityResource**.
+
+There is a separate branch when `(inputWord & 0xfc0) == 0x1c0`: it uses `*[unitResource+0x58]`, then that object’s `+0x38` (`0x2f5330a–0x2f53317`). The branch’s complete semantic meaning is **unknown**.
+
+**Inference:** registered units provide a resource source independent of nearby entity searches. This is not proof that both units and their dependencies are always resident. If the unit is null or DefaultSpecificData is unresolved, a reliable force-load contract is **unknown**. This path does not demonstrate a direct GGUUID-to-vehicle-resource lookup.
+
+### The supplied creator: a separate four-slot entity path
+
+`0x2f534e0` has this observed Win64 argument layout:
+
+| Argument | Location | Observed use |
+|---|---|---|
+| Pool pointer | RCX | Four entity pointers at `+0`; four source pointers at `+0x20`; four `0x50`-byte records at `+0x40`. |
+| EntityResource pointer | RDX | Calls resource virtual `+0x88`. |
+| Integer | R8D | Written to vehicle `+0x4c8`; wrappers extract six bits. **Inference:** variant/customization selector. |
+| Data pointer | R9 | Passed to vehicle virtual `+0x228`. Reviewed implementations consume a word. **Inference:** appearance/customization data. |
+| WorldTransform pointer | Entry RSP `+0x28` | Passed to `0x22dff80`; 60-byte position/rotation layout. |
+| Float | Entry RSP `+0x30` | Passed to `0x2f7f190(vehicle+0x670, value, vehicle)`. Meaning **unknown**. |
+
+Return value: signed pool index. Wrappers `0x2f532c0` and `0x2f533a0` return the entity from that slot.
+
+The creation sequence is:
+
+| RVA | Evidence |
+|---|---|
+| `0x2f53522` | Calls resource virtual `+0x88`, returning an entity. |
+| `0x2f53531` | Calls `0x22dff80(entity, transform)`. |
+| `0x2f53550` | Calls `0x235d1d0` with an activation-policy pointer obtained through `0x2617d60`. |
+| `0x2f5355d` | Stores entity in the pool. |
+| `0x2f53561` | `or dword [entity+0x560],0x08004000` |
+| `0x2f5356b` | Calls activation helper `0x234f3e0(entity,0)`. |
+| `0x2f53570–0x2f53598` | Finds VehicleMover by descriptor `0x4ca7ed0`; writes mover `+0x128 = 2`. |
+| `0x2f535ac` | Calls world-manager virtual `+0x18` with `(entity,0,1,0)`. |
+| `0x2f535c1` | Stores argument 3 at entity `+0x4c8`. |
+| `0x2f535c7` | Stores `pool+0x40+index*0x50` at entity `+0x898`. |
+| `0x2f535d4` | Calls vehicle virtual `+0x228` with argument 4. |
+
+`Entity` reflection names `+0x260` **ActivationPolicy**. Helper `0x235d1d0` refcounts and replaces that field (`0x235d1fc–0x235d217`); it is not evidence of assigning player ownership.
+
+Both concrete vehicle resource vtables use:
+
+- virtual `+0x80` → `0x2366570`;
+- virtual `+0x88` → `0x22b74b0`.
+
+`0x22b74b0` builds a default transform and invokes resource virtual `+0x80` at `0x22b74f5`. The pooled path therefore creates synchronously through the resource factory; it does not call asynchronous request creator `0x2380920`.
+
+**Capacity hazard:** `0x2f53517` sets the index to `-1` when all four slots are occupied, but execution continues into creation and indexed stores. A caller must establish capacity before calling. Neither null-resource nor null-result handling is demonstrated here.
+
+The game initializes its pool at global `0x7bfe668` in `0x2f5af30`: allocates `0x180` bytes, constructs four records with `0x2f51e90`, and clears both pointer arrays. **Inference:** a mod-owned pool could avoid competing with the game’s four slots; its allocation and lifetime contract still requires validation.
+
+### Matching pooled removal and registration
+
+`0x2b7b9e0(pool, entity)` is the matching removal routine. Caller `0x268d4a4–0x268d4ab` supplies the game’s pool at `0x7bfe668`.
+
+It finds the entity among four entries, then:
+
+```text
+0x2b7ba29  call [worldManagerVtable+0x20]  ; entity, 0, 0
+0x2b7ba2c  mov [pool+index*8],0
+0x2b7ba34  mov [pool+index*8+0x20],0
+```
+
+World registration is real even for pooled entities. Initialization at `0x262d7f4–0x262d81e` installs world-manager vtable `0x3d5d140`; its add/remove slots resolve to `0x357dfb0` / `0x3587110`.
+
+The add path calls `0x2370840`, which hashes the 16-byte key at entity `+8`, accesses the manager’s `+0x2c0` table, sets entity registered bit `0x20000000` at `0x2370a2f`, and inserts into another collection at manager `+0x130` through `0x2370bb8–0x2370bc2`. **Inference:** the key is the entity UUID. These operations do not establish save exclusion.
+
+### Actual parking take-out and online shared vehicles
+
+The named parking export is a different path:
+
+```text
+SpawnVehicleSelectedInParking
+  registration 0x2d2088e–0x2d208b6
+  thunk 0x2d6dc60 → 0x2d6ece0
+  → 0x2d5cb20
+  → call 0x2f830a0 at 0x2d5cddb
+  → call 0x2f654e0 at 0x2f831f9
+```
+
+At the parking call, RCX is the vehicle manager; RDX is selected-row `+8`; R8 points to the calculated transform; R9B is 1; stack argument 5 points to parking-controller `+8`; stack argument 6 is 0 (`0x2d5cdaf–0x2d5cddb`).
+
+`0x2f830a0` selects `manager+0x28+8*(recordWord&0xf)`, builds a `0x68`-byte request, and calls `0x2f654e0`. The latter queues up to four requests at unit `+0x240`, with count at `+0x3f8` (`0x2f656ad–0x2f656e1`). Unit update `0x2f98520` invokes queue processing `0x2f98f40`, then base processing `0x22f9300`.
+
+The request flag derived from R9B becomes bit `0x4` (`0x2f831c5–0x2f831cc`). Queue processing tests that bit at `0x2f99609`; when set, it calls `0x2f5ab00` with the manager’s `+0x58` collection and sets actor `+0x19d` bit `0x40`. **Inference:** this is the parking/player vehicle-list registration control. It is not a proven no-save switch.
+
+The online path also reaches this queue:
+
+- `0x34b4ebd–0x34b4ec0` initializes a `DSNetVehicleInfo`.
+- `0x34b4e79` gets the vehicle unit using `0x2f6c840`.
+- `0x34b4fbd` ORs request flags with `0xc0a`.
+- `0x34b4fcd` calls the same `0x2f654e0`.
+- Another online caller occurs at `0x34b4557`.
+
+**Inference:** online shared vehicles use a separate preparation path feeding ordinary vehicle GameActor creation, rather than the four-slot pooled creator. The flags’ complete ownership semantics, player-name assignment, and exact fabrication/terminal “Use vehicle” branches remain **unknown**.
+
+Ordinary entity construction also links the GameActor: `0x2f6905a` writes it to entity `+0x8a8`. The reviewed pooled creator does not perform that assignment. Its resource factory and activation still have additional behavior; this is not an exhaustive proof of isolation from persistence.
+
+### Flags relevant to an inert partner vehicle
+
+The pooled creator’s `0x08004000` mask has concrete effects:
+
+| Flag | Observed effect |
+|---|---|
+| `0x08000000` | `0x2f731c1–0x2f731ce` skips vehicle setup ending at `0x2f7359d`. That setup includes body/model access and vehicle construction calls. **Inference:** suppresses vehicle physics setup. |
+| `0x08000000` | `0x2fa4b90–0x2fa4bab` skips code that automatically selects mover modes 0/1 and overwrites the target transform. |
+| `0x4000` | `0x2f750dd–0x2f750e7` skips automatic construction/attachment of `QueryTriggersComponent`, descriptor `0x4af99d0`, at `0x2f75121–0x2f7512c`. |
+| `0x4000` | `0x2f68a9a–0x2f68aa7` skips another creation path using resource `+0x1e0`, reflected as WheelHologram. |
+
+**Inference:** preserving these flags, avoiding ordinary GameActor/list registration, and using paired pooled removal is the strongest identified candidate for a display-only partner vehicle.
+
+Whether this fully prevents local entry, theft, collisions or save persistence is **unknown**. In particular, skipping automatic QueryTriggersComponent construction does not prove that the selected resource cannot supply interaction components itself. No verified “locked and never saved” flag was established.
+
+### VehicleMover mode 1 and transform playback
+
+`0x2f801b0(mover, WorldTransform*)` writes mode 1 and copies the complete transform into mover `+0x130`:
+
+```text
+0x2f801b0  mov dword [rcx+0x128],1
+0x2f801bA  vmovups xmm0,[rdx]
+0x2f801be  vmovups [rcx+0x130],xmm0
+```
+
+The remainder copies the third position double and nine rotation floats through `0x2f801ee`.
+
+VehicleMover vtable `+0x130` resolves to `0x2f899d0`:
+
+```text
+mode 0 → 0x23b7060
+mode 1 → 0x22e97f0(mover, mover+0x130)
+other  → return
+```
+
+At `0x22e97fa`, the helper gets the entity from mover `+0x48`. When the transform differs, `0x22e988b–0x22e98bf` copies it into entity `+0xc8/+0xe0` under the entity lock, then sets transform-dirty bit 1 at `0x22e98c2`.
+
+A second callback, `0x2f75df0`, returns immediately for nonzero modes (`0x2f75dfa`). **Inference:** mode 1 bypasses both reviewed normal mover branches and is suitable for testing transform playback, especially with the pooled creation flags. Freedom from all physics correction remains **unknown**.
+
+The generic exported alternative is `Entity_ExportedSetWorldTransform`, `0x2361ea0`: calls `0x22dff80`, then `0x235bf60(entity,0)` at `0x2361ead–0x2361eb7`. No separate vehicle-specific exported transform setter was established.
+
+Validation: standard-library PE parsing and **32 descriptor/instruction assertions passed**; focused MinGW objdump disassembly corroborated the sites above. The executable hash was unchanged afterward.
+
+## Vehicle attachment and riding animation — static follow-up (2026-11-08)
+
+Inspected build 13300582 read-only. SHA-256 matched `9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b`; image base is `0x140000000`. All addresses below are RVAs. No game ran and no live observation was reproduced.
+
+### Animation controls
+
+The player’s animation-variable registration tables identify these names:
+
+| Name | Player’s internal enum | Static evidence |
+|---|---:|---|
+| `Is_Vehicle` | bool `0x19` | Registration at `0x1883f62`; enabled at `0x2772ee9` and `0x27749be`; cleared at `0x27e96fb`. |
+| `Vehicle_Type` | float `0x1b` | Registration at `0x1884d49`; riding setup writes it at `0x2774469`, `0x277448c` or `0x27744b5`. |
+| `Vehicle_Seat` | float `0x1c` | Registration at `0x1884d66`; setup writes it at `0x2774681`; bike update changes it at `0x277645a`. |
+| `Turn_Heading` | float `0x04` | Riding setup clears it at `0x2774693`; updates write it at `0x277666a` and `0x27766c0`. |
+| `Temporary_Float8` | float `0x18` | Registration table `0x1884a40–0x18859ec`; mount setup writes it at `0x2773333`. Its complete riding-state value map is **unknown**. |
+
+These enums are **not AnimationManager slot indices**. The player-side float setter `0x2741df0` addresses `entity + 0x470c + 12*enum`; bool setter `0x273f7f0` changes the corresponding packed record at `entity + 0x4dc8 + 12*enum`.
+
+`Vehicle_Type` is distinct from the vehicle entity’s kind:
+
+| Vehicle | Entity kind, `u32(vehicle+0x4c4)` | Animation `Vehicle_Type` |
+|---|---:|---:|
+| `DSVehicleMotorbike` | `3` | `0.0` |
+| `DSVehicleTruck`, either door index nonnegative | `2` | `1.0` |
+| `DSVehicleTruck`, both door indices negative | `2` | `2.0` |
+| `DSVehicleSpeedCar` | `1` | `3.0` |
+
+Evidence:
+
+- Constructors write the entity kinds at `0x2f61cfc` (motorbike), `0x2f62571` (truck) and `0x2f62201` (speed car).
+- Riding setup reads kind into its state byte at `0x277437f–0x2774391`.
+- Kind `3` takes the zero-valued animation-type branch at `0x2774418–0x2774469`.
+- Otherwise `0x2774474` calls vehicle vtable `+0x120`. True selects `1.0`; false selects `3.0` for kind `1`, otherwise `2.0`, at `0x2774483–0x27744b5`.
+- Truck’s `+0x120` implementation, `0x2f6cc70`, tests resource `+0x300/+0x304`. The `DSVehicleTruckResource` descriptor `0x4ca6be0` names these `DoorLeftIndex` and `DoorRightIndex`. Motorbike and speed-car implementations return false (`0x1920dc0`).
+
+`Vehicle_Seat` must not be interpreted as driver versus passenger. During bike mounting, `0x27744ba–0x2774681` derives its initial value from relative position/orientation. Bike update `0x27763df–0x277645a` changes it using direction tests and state `+0x3f0`. **Inference:** it selects mounting/foot-down side or a related pose variant. Its complete meaning is **unknown**.
+
+For truck/speed-car steering, `0x2776680–0x27766c0` reads current vehicle `+0x58c`, multiplies by `180.0`, smooths toward that value, and writes `Turn_Heading`. Bike handling uses a longer calculation ending at `0x277666a`. **Inference:** replaying the named variable preserves the game’s steering/lean input more faithfully than deriving it from world yaw. Exact clip response and limits are **unknown**.
+
+The animation manager also resolves these names through `0x238ffe0` during `0x2759e40`:
+
+| Name | Resolution call | Stored result |
+|---|---:|---:|
+| `Vehicle_ToOnLoad` | `0x275b548` | output `+0x244` |
+| `Vehicle_ToOffLoad` | `0x275b573` | output `+0x248` |
+| `Vehicle_Driving` | `0x275b59e` | output `+0x24c` |
+| `Vehicle_FootDown` | `0x275b5c9` | output `+0x250` |
+| `Vehicle_ToFootDown` | `0x275b5f4` | output `+0x254` |
+| `Vehicle_FootDownMove` | `0x275b61f` | output `+0x258` |
+
+These are resolved animation names; this does **not** establish that they are writable bool variables. Fixed network node IDs and name hashes are **unknown**.
+
+### Applying the variables to another Sam
+
+The exported path targets the supplied manager:
+
+- `InitBoolAnimationVariable`: `0x2397050`; `InitFloatAnimationVariable`: `0x23970b0`.
+- `SetBoolAnimationVariable`: `0x23971e0`; `SetFloatAnimationVariable`: `0x2397220`.
+- Setters calculate a 48-byte slot from `manager+0x58`, update slot `+0x20`, read its network control ID at `+8`, and dispatch only when that ID is not `-1`.
+- Morpheme bool dispatch `0x239a1d0` loads **that manager’s** network instance from `+0xa0` and jumps to `0x1a52b30`.
+- Float dispatch `0x239a1f0` similarly uses `manager+0xa0` and jumps to `0x1a52af0`.
+
+There is no local-player lookup in these setter paths. **Inference:** another Sam with its own instance of the porter’s network definition can receive these controls through the existing exports. Whether this produces a complete seated pose without additional controls/IK remains **unknown**.
+
+The committed `mod/double.cpp` creates a separate network instance from the porter’s definition; it does not share the porter’s running instance pointer. Resolve handles on the partner’s manager, and verify each slot’s control ID is not `-1`. A nonnegative `Init` result alone does not prove the network contains that control.
+
+**Candidate experiment, untested:** set `Is_Vehicle`, the appropriate `Vehicle_Type`, and replay `Vehicle_Seat`, `Turn_Heading` and relevant temporary controls from a seated porter. A sufficient minimal set for bike foot-down/driving transitions is **unknown**.
+
+### Mounting and helper placement
+
+Player riding function `0x2772c10` contains a concrete parent assignment:
+
+```text
+0x2773040  rcx = [state+0x30]       ; porter
+0x2773044  r8d = 0
+0x2773047  rdx = r14               ; resolved VehicleEntity
+0x2773051  call 0x235e990
+```
+
+It then records the vehicle through `0x2741370`, called at `0x277305d`. That routine stores a tracked reference to `vehicle+0x20` at player-param component `+0xad8` (`0x2741386–0x27413ba`), matching the supplied live observation.
+
+The parent implementation is concrete:
+
+- `0x235e990` calls `0x235ebc0`.
+- `0x235ec51–0x235ec88` unlinks the child from the former parent’s `+0x78/+0x80` list.
+- `0x235ed05–0x235ed09` clears child parent/sibling pointers.
+- `0x235ed6c–0x235ed7b` stores the new parent at child `+0x70` and inserts the child at parent `+0x78`.
+
+The helper and transform are selected later in the same riding function:
+
+- Kind `2` (truck) selects `HLP_Driver` at `0x27733f1`.
+- Kind `1` (speed car) selects `HLP_Driver` at `0x277345c`.
+- Kind `3` (motorbike) selects `HLP_C_Driver` at `0x27734a0`.
+- `0x277356c–0x2773595` constructs the transform from quaternion `(0,0,0,1)` and zero translation.
+- `0x277359a–0x27735fe` passes the helper, tracked vehicle reference, transform and zero blend value through vtable `+0x338` of `state+0x58`.
+
+Thus the supplied helper-local offset is **identity**, rather than a hard-coded truck-seat displacement. The concrete implementation behind that last virtual call was **not established**.
+
+The supplied live world-position difference `(-0.80,-0.44,+1.95)` is not proof of a fixed local offset: helper placement, vehicle rotation and animation can contribute.
+
+### Dismount
+
+The riding state’s cleanup method is vtable entry `+0x30` (`0x27e9680`) in the table installed by constructor `0x2784c40`:
+
+- `0x27e96e0` calls `state+0x58` vtable `+0x10` with `EDX=1`.
+- `0x27e96ea` calls its vtable `+0x238`.
+- `0x27e96fb` clears `Is_Vehicle`.
+- `0x27e989a` calls vehicle vtable `+0x110` with the porter actor id and `R8B=0`, reversing the reservation made during mounting.
+- `0x27e9b86` calls `state+0x58` vtable `+0x380` with zero.
+- `0x27e9b92` calls `0x2741370(param,null)`, clearing the tracked vehicle reference.
+
+The exact player-dismount instruction that ultimately clears `porter+0x70`, and the final exit transform calculation, remain **unknown**. The cleanup calls above must not be presented as a fully resolved unlink implementation.
+
+### Read-only vehicle and driver detection
+
+Vehicle class identity can be recovered through slot-zero compound descriptors:
+
+| Entity vtable | Type getter | Descriptor | Class |
+|---|---:|---:|---|
+| `0x3e25db8` | `0x2f6bb60` | `0x4ca65a0` | `DSVehicleMotorbike` |
+| `0x3e26790` | `0x2f6bcb0` | `0x4ca6d60` | `DSVehicleTruck` |
+| `0x3e274d8` | `0x2f6bc10` | `0x4ca7660` | `DSVehicleSpeedCar` |
+
+Each getter is `lea rax,[rip+descriptor]; ret`; descriptor `+0x40` points to the listed name.
+
+A stronger driver test than parenthood alone is available:
+
+1. Read and type-check `vehicle = *(porter+0x70)`.
+2. Read porter actor id at `porter+0x314`.
+3. Compare it with `u32(vehicle+0x8b0)`, also checking occupancy `u32(vehicle+0x63c)`.
+
+Evidence: mount reads porter `+0x314` at `0x2772f7b` and supplies it to vehicle vtable `+0x110` at `0x2772fcb`. Truck implementation `0x2f7c310` delegates to common routine `0x2f7c4c0`, which sets occupancy to `1` and stores that id at vehicle `+0x8b0` (`0x2f7c537–0x2f7c547`). Release compares the supplied id at `0x2f7c7df–0x2f7c7e8`, then clears occupancy and sets the id to `0x1fffff` at `0x2f7c84d/0x2f7c85f`.
+
+**Inference:** matching parent, occupancy and actor id identifies the porter as the registered driver. A parented entity whose id does not match is **not thereby proven to be a passenger**. Use guarded reads and recheck the chain during transitions.
+
+Player-usable truck passenger seats are **unknown**. The executable contains passenger mechanisms, including five helper selections in `0x2dc8520` and `Passenger_Mounting`/`Passenger_Mounting_Direction` registration at `0x2b8746f–0x2b874df`. Their existence does not establish a player passenger action. The mapped player mount path selects driver helpers. This pass neither confirms passenger support nor proves its universal absence.
+
+### Attaching the owned non-player Sam
+
+The generic native exports are resolved:
+
+| Export | RVA | Behavior |
+|---|---:|---|
+| `Entity_ExportedSetParent` | `0x2361dd0` | Calls `0x235e990(child,parent,0)`; optional flag sets entity flag `0x200`. |
+| `Entity_ExportedClearParent` | `0x2361900` | Clears flag `0x200`, then calls `0x235e990(child,null,0)`. |
+| `Entity_ExportedSetParentAndAttachToHelper` | `0x2361dc0` | Jumps to `0x234ceb0(child,parent,helperCString,flag)`. |
+
+`0x234ceb0` parents the entity, then calls `0x23aa8d0` for a nonempty helper and nonnull parent. That routine obtains/configures an `AttachToHelperMover` and installs it through entity vtable `+0x40` at `0x23aa97d`.
+
+For `DSPlayerAKukanEntity`, that slot is `0x235e3f0`: it replaces entity `+0xb0` at `0x235e53d`, registers the new mover, and removes the old one through engine paths.
+
+**Inference:** this is an engine-supported candidate for attaching the owned plain-Entity Sam to a vehicle helper. It replaces the own body’s `FixedPositionMover`; parenthood alone does not establish helper-following movement. Retaining/restoring the original mover and stopping the existing mover-target writes would therefore be required. Exact mover lifetime ownership and successful attachment/restoration remain **unknown**.
+
+The node-graph wrapper explicitly rejects Humanoids (`0x178602–0x178618`, diagnostic at `0x3f5c78d`). The owned AKukan body is a plain Entity subclass, as documented above, so **inference:** that particular restriction does not exclude it. This is not evidence that the player’s Humanoid mounting machinery can safely be reused on it.
+
+Visual attachment would not itself register a second driver or establish a player passenger seat.
+
+## Vehicle animation entry: native pulses, tags and Morpheme APIs
+
+Static analysis of build 13300582; executable SHA-256
+`9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b`.
+All addresses below are RVAs; image base `0x140000000`.
+
+### Native riding entry includes animation-variable pulses
+
+The riding code does more than latch `Is_Vehicle` and `Vehicle_Type`.
+
+At `0x2772edd..0x2772f05`:
+
+```text
+2772edd  mov rcx,[rsi+30]
+2772ee1  mov r8b,1
+2772ee4  mov edx,19
+2772ee9  call 273f7f0       ; Is_Vehicle = true
+
+2772eee  mov rcx,[rsi+30]
+2772ef2  mov edx,44
+2772ef7  call 2741c80       ; pulse Action_Rewind_NoInter
+
+2772efc  mov rcx,[rsi+30]
+2772f00  mov edx,7d
+2772f05  call 2741c80       ; pulse Is_Force_Upper_Reset
+```
+
+A second riding-entry branch repeats `Is_Vehicle=true` at `0x27749be`
+and pulses enum `0x44` at `0x27749cc`.
+
+Names are established by the bool-name initialization routine
+`0x1883ae0..0x1884a35`:
+
+| Player bool enum | Name |
+|---:|---|
+| `0x19` | `Is_Vehicle` |
+| `0x29` | `Action_Rewind` |
+| `0x32` | `Is_BasicAction` |
+| `0x44` | `Action_Rewind_NoInter` |
+| `0x46` | `Is_Actions` |
+| `0x7d` | `Is_Force_Upper_Reset` |
+
+`0x2741c80` is a pulse setter, not a Morpheme message broadcaster:
+
+```text
+2741c80  mov eax,edx
+2741c82  lea rdx,[rax+rax*2]
+2741c86  movzx eax,byte ptr [rcx+rdx*4+4dc8]
+2741c8e  and al,fb
+2741c90  or al,2
+2741c92  mov [rcx+rdx*4+4dc8],al
+```
+
+The flush at `0x278b4d1..0x278b520` recognizes bit 1, writes true to the
+manager's variable record and invokes manager virtual `+0x148`. It then
+marks the player-side state and requests false through `0x273f7f0`.
+This supplies a true pulse followed by reset through normal updates.
+
+### Is_Actions is an aggregate, not an established action-ID channel
+
+The inspected selector at `0x2803e1a..0x2803fb2` reads player bools with
+`0x2717c40`, including `Is_Vehicle` at `0x2803f03..0x2803f0b`, and builds
+an action bitset.
+
+When the new bitset is nonzero and differs from `DSPlayerState+0x474`,
+it pulses enum `0x29`:
+
+```text
+2803f91  cmp [rsi+474],ebx
+2803f97  je 2803fa6
+2803f99  mov rcx,[r14]
+2803f9c  mov edx,29
+2803fa1  call 2741c80       ; Action_Rewind
+
+2803fa6  mov rcx,[r14]
+2803fa9  movzx r8d,dil
+2803fad  mov edx,46
+2803fb2  call 273f7f0       ; Is_Actions
+```
+
+The bitset is subsequently stored at state `+0x474`. This inspected path
+does not export it as a numeric animation “action ID”.
+
+`Is_BasicAction` is computed separately at `0x27fff90..0x280001a` from
+controller flags. It is not established here as the native logical
+inverse of `Is_Actions`.
+
+**Inference:** replaying only the steady bool/float values can miss the
+transition/reset pulse used to enter the riding branch. A snapshot of
+nonzero variables can also miss a pulse that has already expired.
+
+### Existing export for pulses
+
+`AnimationManager_ExportedTriggerBoolAnimationVariable` is `0x2397310`:
+
+```cpp
+void TriggerBool(AnimationManager* manager, int handle, float duration);
+```
+
+Evidence:
+
+```text
+2397319  vmaxss xmm3,xmm2,[7bc6810]
+2397321  lea r8,[rsp+20]
+2397326  mov byte ptr [rsp+20],1
+239732b  call 238a2f0
+```
+
+The helper writes the bool through virtual `+0x148`, stores a positive
+expiry in variable-record `+0x10`, and registers the handle in manager
+`+0x60/+0x68`. The update at `0x2393510..0x239353d` decrements the expiry;
+`0x2393631..0x2393653` resets an expired bool to false.
+
+The runtime value of duration floor `0x7bc6810` is unknown from this
+static pass. Zero-duration behavior should not be assumed.
+
+### Smallest justified next experiment
+
+This is a candidate, not a demonstrated sufficient or minimal sequence:
+
+1. Validate the controls against the partner's active porter definition.
+2. Set the desired steady controls on the partner's own manager:
+   `Vehicle_Type=1`, `Vehicle_Seat=0`, `Is_Vehicle=true`,
+   `Is_Actions=true`, plus the existing stationary/landed controls.
+3. Once on entry, pulse `Action_Rewind` and
+   `Action_Rewind_NoInter` using `0x2397310`.
+4. To reproduce the observed riding branch completely, also pulse
+   `Is_Force_Upper_Reset`. Its necessity for the seated lower-body pose
+   is unknown.
+5. Keep the steady controls applied while allowing the pulses to expire.
+   Ensure another mod update does not overwrite them before evaluation.
+
+A short positive trigger duration, such as 0.1 seconds, is an experimental
+choice, not a recovered native duration. Do not retrigger every tick.
+
+Candidate return to locomotion: clear `Is_Vehicle`, clear `Is_Actions`
+when no other action remains, and resume the ordinary locomotion controls.
+The inspected aggregate selector does not pulse `Action_Rewind` when its
+new bitset is zero. A sufficient exit sequence on the partner remains
+unknown.
+
+### Important binding caveat after borrowing the porter definition
+
+A valid handle/node number does not establish the intended control name.
+
+`0x2390d80` searches manager `+0x58` records by name. New records are
+resolved in `0x2390e70`; at `0x2390f61..0x2390f7a`, bool/float lookup
+dispatches through manager `+0x30` — the manager resource.
+
+`MorphemeAnimationManagerResource` lookup `0x2399070` loads resource
+`+0xd8` and calls `0x1a4aff0`. Existing matching records with a non-`-1`
+binding can return without re-resolution (`0x2390f0a..0x2390f13`).
+
+The current borrowing implementation restores the double resource's
+`+0xd8` after rebuilding its instance. Consequently, controls initialized
+later can resolve against that restored definition. Whether this explains
+the supplied failed experiment is unknown.
+
+Compare each handle's binding at:
+
+```text
+manager->records + 0x30 * handle + 0x08
+```
+
+with a lookup against:
+
+```text
+activeDefinition = *(manager->instance + 0x38)
+```
+
+Useful native lookup: `0x1a4bcf0(definition, const char* fullNodeName)`,
+used by `0x1a4aff0` after constructing `ControlParameters|<name>`.
+Failure is `0xffff`. Do not confuse the player enums above with
+definition-specific control node IDs.
+
+The setter disassembly establishes a **48-byte (`0x30`) record stride**.
+The supplied IDs 72/73 being valid does not independently prove their
+name/type correspondence in the active porter definition.
+
+### The six Vehicle_* names are animation tags
+
+`0x238ffe0` dispatches through resource virtual `+0xd8`:
+
+```text
+238ffe0  mov rcx,[rcx+30]
+238ffe4  mov rax,[rcx]
+238ffe7  jmp [rax+d8]
+```
+
+For resource vtable `0x3d0a7e8`, this is `0x2399210`, which loads resource
+`+0xd8` and jumps to `0x1a4acc0`.
+
+This is also the path used by
+`AnimationManager_ExportedGetAnimationTagID` at `0x2397430`.
+Resource metadata identifies the map at definition `+0x80` as
+`AnimationTags`; `Messages` is a separate field at `+0x60`.
+
+| Name | Output offset | Player tag enum |
+|---|---:|---:|
+| `Vehicle_ToOnLoad` | `+0x244` | `0x91` |
+| `Vehicle_ToOffLoad` | `+0x248` | `0x92` |
+| `Vehicle_Driving` | `+0x24c` | `0x93` |
+| `Vehicle_FootDown` | `+0x250` | `0x94` |
+| `Vehicle_ToFootDown` | `+0x254` | `0x95` |
+| `Vehicle_FootDownMove` | `+0x258` | `0x96` |
+
+The initializer stores these at `0x275b551..0x275b628`.
+Its caller, `0x27498b4`, supplies entity `+0x6a8` as the output table.
+
+Entity virtual `+0x140`, implemented by `0x270e330`, retrieves
+`[entity + 0x6a8 + 4*enum]`. Query helper `0x2717100` passes the resulting
+tag ID to the animation manager.
+
+Confirmed consumers include:
+
+- `0x278d484`: query enum `0x91`.
+- `0x278d49b`: query enum `0x92`.
+- `0x278d4c5`: query enum `0x94`.
+- `0x278d50e`: query enum `0x95`.
+
+These are observations of animation activity, not evidence that sending
+those names starts the corresponding animation. Their tag IDs must not
+be passed as message IDs or forced-state node IDs.
+
+### Native message and force-state interfaces
+
+The following methods exist independently of the bool-variable pulses:
+
+| Purpose | RVA | Established behavior |
+|---|---:|---|
+| Resolve message name | `0x1a4bab0` | Definition plus engine String reference; calls `0x2202a50`; failure `0xffffffff`. |
+| Broadcast request | `0x2399cb0` | Manager virtual `+0xd0`; `RCX=manager`, `EDX=message ID`, `R8B=queue`. |
+| Select message preset | `0x2399cf0` | Manager virtual `+0xd8`; takes message ID, preset index and queue flag. |
+| Force state path | `0x2399c10` | Manager virtual `+0xc8`; `EDX=node ID`, `R8=optional data`, `R9B=flag`. |
+
+For broadcast, queue=false reaches `0x1a488d0`. It loads instance
+`+0x40`, constructs a message with ID at `+0xc`, type `0xa` and status
+true, then calls `0x21fd490`. That routine iterates the definition's
+registered recipients. Queue=true appends `{message ID, 0xffff}` through
+`0x1a50220`.
+
+`0x2399cf0` reaches `0x1a48950` for immediate processing. It selects a
+preset message from the distributor's `+0x20` array through
+`0x21fcb50`, then uses the same broadcaster. Its preset argument is not
+established as a target state/node.
+
+For forcing, `0x2399c10` operates on `*(manager+0xa0)` and calls
+`0x1a4a7c0`. That routine searches enclosing state-machine structure
+through `0x1a4bf70`, recursively handles ancestors, and calls
+`0x22009c0` to select the matching child state.
+
+An existing native caller is `0x239f7b0`; at `0x239f8aa..0x239f8c2` it
+passes a 16-bit node ID and calls manager virtual `+0xc8` with `R9D=0`.
+The precise meaning of the optional data/flag is not fully established.
+
+Vehicle-specific message names, message IDs and forceable node IDs:
+**unknown**. No riding-to-broadcast or riding-to-force-state call chain
+was established. The recovered riding entry uses bool pulses.
+
+### Export-name search
+
+The inspected `AnimationManager_Exported*` names include variable
+initializers/setters/getters, the bool trigger, and tag/event queries.
+No matching named Request, Message or State setter export was found.
+
+Relevant query exports:
+
+| Export | RVA |
+|---|---:|
+| `GetAnimationEventID` | `0x23973d0` |
+| `GetAnimationTagID` | `0x2397430` |
+| `IsEventActive` | `0x2397490` |
+| `IsTagActive` | `0x23974b0` |
+
+Static evidence establishes the entry pulses and native APIs. Whether
+those pulses seat the partner, which subset is sufficient, and reliable
+entry/exit behavior remain untested.

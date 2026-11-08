@@ -20,17 +20,19 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 | What the partner carries (opt-in) | `carry_visual` reads the porter's carried cargo read-only and sends a summary; the partner logs it (live: "1 entry ... x2", cleared on disconnect). Nothing is drawn yet. |
 | The partner on the map, and pings (opt-in) | Live: a map pin follows the partner, a ping is sent and placed in both worlds, the pin is removed when the partner leaves. |
 | Crash and hang recorder (opt-in) | `COOP_CRASH_RECORD=1`: module map at start, a record with module+offset stack for fatal-class exceptions, a minidump on an unhandled one. A research build's forced divide fault on a worker thread was recorded, dumped and recovered live. It found tonight's first bug: the game's crash dialog of 2026-11-07 was the proxy itself (two threads patching import tables at once), fixed with one lock (`redirect/iat_patch.h`). |
+| Riding read from the game (2026-11-08) | Episode 3 save, a truck: a seated porter is a child entity of the vehicle; the reader checks the parent's class (bike, truck, speed car), its kind field and that the vehicle lists the porter. Presence carries what the porter rides (kind, offset, yaw/pitch/roll); two copies live: the other copy received the truck with its 15 degree pitch on a ramp. |
+| The partner's vehicle (opt-in `partner_vehicle`, 2026-11-08) | While the partner rides, a vehicle of the same kind is drawn under him with the game's pooled vehicle creator (no nearby vehicle needed) and moved every tick by its own mover's transform playback; it stays parked where he gets off, is replaced when he rides another kind and removed when he leaves. Live, one copy: truck and bike drawn and following, removal clean; with the stand-in partner riding a bike, the bike appeared under it and stayed parked after it got off; no prompt to use it was offered; no fault. The partner's body sits on it in the game's riding pose: the body's animation controls are now bound against the network it actually runs, and the game's entry pulses (`Action_Rewind`, `Action_Rewind_NoInter`, `Is_Force_Upper_Reset`) are sent once on getting on; live with the stand-in on a bike it sat with hands on the handlebars and stood up again when it got off. |
 | Release proxy name `avrt.dll` | The proxy also builds as `avrt.dll`, a DLL the game imports but does not ship, so an install never replaces a game file. Live in a test copy (game's own `d3dcompiler_47.dll` untouched): loaded at startup, the mod started, the game reached gameplay. Without the launcher's ticket or an explicit test environment the release proxy does nothing, so a game started from Steam runs untouched. |
 
 ## Not done
 
-- Drawing the partner as anything other than a standing/walking/running Sam: no vehicles yet (a read-only bike/truck
-  reader is built and treats "no ride component" as on foot, but the test save has no vehicle), no carried cargo drawn on
-  the partner (the backpack and cuff are, and they follow what the partner shows), no cutscene sharing.
+- Passengers; steering lean and wheel animation on the partner's vehicle; real driving at speed between two copies
+  (only a short drive up a ramp ran live, before the vehicle was drawn); no carried cargo drawn on the partner (the backpack and cuff are,
+  and they follow what the partner shows), no cutscene sharing.
 - BTs, MULEs, death and voidouts, shared orders and deliveries, saves of a shared world, shared weather (time of day
   sync is built, off by default, untested live; the time setter can advance the day counter), the partner's own
   controller input.
-- Structures built from the game's own menus (the test save is in Episode 1, before the chiral network).
+- Structures built from the game's own menus: an Episode 3 test save now exists, the test has not run yet.
 - A real two-PC session. The mod accepts any unicast IPv4 peer (LAN or VPN) and binds only the address that routes
   to it (README, "Two PCs"); it has only run over loopback so far. The launcher (`launcher/`, invite codes, LAN and
   Tailscale discovery, `deathstranding-coop://` links) is built and tested game-free only.

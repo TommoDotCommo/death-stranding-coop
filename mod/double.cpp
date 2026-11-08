@@ -690,7 +690,7 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
     (void)s;throw std::runtime_error("native double API requires Windows");
 #else
     struct Entry{uint64_t rva;std::vector<uint8_t> bytes;};
-    const std::array<Entry,8> entries={{
+    const std::array<Entry,9> entries={{
         {0x2361e20,{0x48,0x85,0xc9,0x74,0x2f,0x48,0x8b,0x81,0x88,0,0,0,0x48,0xc1,0xe8,0x08,0x84,0xd2,0x74,0x12,0xa8,0x01,0x75,0x1c,0x48,0x8b,0x01,0x41,0x0f,0xb6,0xd0,0x48,0xff,0xa0,0xa0,0,0,0}},
         {0x2361e90,{0x48,0x85,0xc9,0x0f,0x85,0xa7,0xd7,0xff,0xff,0xc3}},
         {0x2361ea0,{0x48,0x85,0xc9,0x74,0x1c,0x53,0x48,0x83,0xec,0x20,0x48,0x8b,0xd9,0xe8,0xce,0xe0,0xf7,0xff,0x33,0xd2,0x48,0x8b,0xcb,0xe8,0xa4,0xa0,0xff,0xff}},
@@ -700,8 +700,10 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
         {0x2397220,{0x48,0x85,0xc9,0x74,0x33,0x48,0x63,0xc2,0x48,0x8d,0x14,0x40,0x48,0xc1,0xe2,0x04}},
         {0x23971e0,{0x48,0x85,0xc9,0x74,0x2b,0x48,0x63,0xc2,0x48,0x8d,0x14,0x40,0x48,0xc1,0xe2,0x04}},
         // MorphemeAnimationManager: (re)create its network instance from resource+d8 into manager+a0
-        {0x23a2fc0,{0x48,0x89,0x5c,0x24,0x18,0x55,0x48,0x8d,0x6c,0x24,0xc0,0x48,0x81,0xec,0x40,0x01,0,0,0xc5,0xf8,0x29,0xb4,0x24,0x30}}}};
-    std::array<unsigned,8> counts{};
+        {0x23a2fc0,{0x48,0x89,0x5c,0x24,0x18,0x55,0x48,0x8d,0x6c,0x24,0xc0,0x48,0x81,0xec,0x40,0x01,0,0,0xc5,0xf8,0x29,0xb4,0x24,0x30}},
+        // AnimationManager_ExportedTriggerBoolAnimationVariable (manager, handle, seconds): true now, false when it expires.
+        {0x2397310,{0x48,0x83,0xec,0x38,0x48,0x85,0xc9,0x74,0x17,0xc5,0xea,0x5f,0x1d,0xef,0xf4,0x82,0x05,0x4c,0x8d,0x44}}}};
+    std::array<unsigned,9> counts{};
     for(auto section:s.sections)if(section.executable){
         require(section.size<=128*1024*1024,"double code size cap");std::vector<uint8_t> code(section.size);
         require(s.read(section.address,code.data(),code.size()),"double code unreadable");
@@ -720,7 +722,9 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
     auto setFloat=reinterpret_cast<SetFloatFn>(s.base+entries[5].rva);auto setBool=reinterpret_cast<SetBoolFn>(s.base+entries[6].rva);
     const uint64_t animator=s.base+0x3d09910;   // MorphemeAnimationManager
     // Handles are per manager; the double's network (sam/references/akukan) has these locomotion controls.
-    struct Handles{uint64_t manager=0;int speed=-1,move=-1,moveFloat=-1,moveInterp=-1,crouchRate=-1,basic=-1,isVehicle=-1,vehicleType=-1;int action[7]={-1,-1,-1,-1,-1,-1,-1};};auto handles=std::make_shared<Handles>();
+    struct Handles{uint64_t manager=0;int speed=-1,move=-1,moveFloat=-1,moveInterp=-1,crouchRate=-1,basic=-1,isVehicle=-1,vehicleType=-1,vehicleSeat=-1,
+        rewind=-1,rewindNoInter=-1,upperReset=-1;bool riding=false;int action[7]={-1,-1,-1,-1,-1,-1,-1};};auto handles=std::make_shared<Handles>();
+    using TriggerFn=void(*)(uint64_t,int,float);auto trigger=reinterpret_cast<TriggerFn>(s.base+entries[8].rva);
     // The borrowed instance is kept after release and swapped back in on the next borrow of the same manager,
     // so repeated borrows build one instance per double, not one per borrow.
     struct Borrowed{uint64_t manager=0,own=0,instance=0,def=0;};auto borrowed=std::make_shared<Borrowed>();
@@ -751,20 +755,34 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
                     &&at+60<=reinterpret_cast<uint64_t>(info.BaseAddress)+info.RegionSize,"double mover not plain writable memory");
             std::memcpy(reinterpret_cast<void*>(at),&t,60);   // position (3 x f64) + rotation (3x3 f32), the entity+c8 layout
         },
-        [check,managerOf,handles,initBool,initFloat,setFloat,setBool](uint64_t e,double speed,uint32_t flags){
+        [&s,check,managerOf,handles,initBool,initFloat,setFloat,setBool,trigger,writable](uint64_t e,double speed,uint32_t flags){
             check(e);auto manager=managerOf(e);
             if(!manager)return;   // no animation manager: position-only body
             if(handles->manager!=manager){*handles={};handles->manager=manager;
+                // Controls resolve by name against the manager resource's definition (+0xd8), which is the body's own while
+                // it runs the porter's network instance: bind against the instance's definition instead, or a control can
+                // land on another node (static, game_offsets.md "Vehicle animation entry").
+                uint64_t res=0,resDef=0,instance=0,activeDef=0;bool swapped=false;
+                if(q(s,manager+0x30,res)&&q(s,res+0xd8,resDef)&&q(s,manager+0xa0,instance)&&instance&&q(s,instance+0x38,activeDef)
+                   &&activeDef&&activeDef!=resDef&&writable(res+0xd8,8)){std::memcpy(reinterpret_cast<void*>(res+0xd8),&activeDef,8);swapped=true;}
                 handles->speed=initFloat(manager,"Speed");handles->move=initBool(manager,"DSMove");
                 handles->moveFloat=initFloat(manager,"Move_Float");handles->moveInterp=initFloat(manager,"Move_Float_Interp");
                 for(unsigned k=0;k<7;++k)handles->action[k]=initBool(manager,ActionNames[k]);
                 handles->crouchRate=initFloat(manager,"Crouch_Rate");handles->basic=initBool(manager,"Is_BasicAction");
-                handles->isVehicle=initBool(manager,"Is_Vehicle");handles->vehicleType=initFloat(manager,"Vehicle_Type");}
+                handles->isVehicle=initBool(manager,"Is_Vehicle");handles->vehicleType=initFloat(manager,"Vehicle_Type");
+                handles->vehicleSeat=initFloat(manager,"Vehicle_Seat");handles->rewind=initBool(manager,"Action_Rewind");
+                handles->rewindNoInter=initBool(manager,"Action_Rewind_NoInter");handles->upperReset=initBool(manager,"Is_Force_Upper_Reset");
+                if(swapped)std::memcpy(reinterpret_cast<void*>(res+0xd8),&resDef,8);}
             // Riding: the porter network's own vehicle controls (enum 0x19 / 0x1b, set by the game's mount at 0x2772ee9 and
             // 0x2774469); locomotion stays at rest underneath.
             auto type=vehicleAnimationType((flags&VehicleMask)>>VehicleShift);bool riding=type>=0;
             if(handles->isVehicle>=0)setBool(manager,handles->isVehicle,riding);
             if(riding&&handles->vehicleType>=0)setFloat(manager,handles->vehicleType,type);
+            if(riding&&handles->vehicleSeat>=0)setFloat(manager,handles->vehicleSeat,0.f);
+            // Entering: the game's mount pulses these right after Is_Vehicle (0x2772ef7, 0x2772f05; the action selector
+            // pulses Action_Rewind when its bitset changes, 0x2803fa1). Once per entry, not every tick.
+            if(riding&&!handles->riding){for(int h:{handles->rewind,handles->rewindNoInter,handles->upperReset})if(h>=0)trigger(manager,h,0.1f);}
+            handles->riding=riding;
             // A seated porter shows Is_Actions and Is_Landed (live 2026-11-08, driving a truck); locomotion at rest.
             if(riding){speed=0;flags=(flags&VehicleMask)|ActionsBit|LandedBit;}
             bool moving=speed>MovingSpeed;

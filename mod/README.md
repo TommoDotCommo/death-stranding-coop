@@ -709,6 +709,12 @@ Each command is a file in the mod folder. The mod consumes it and accepts it onl
   it (`gear.h`, the `partner_gear` section above).
 - `puppet.body`: `create <stamp>` asks the engine for a second Sam from the double's resource, 3 m to the porter's side,
   and logs what the request produces (`BODY ...` lines); `remove <stamp>` removes it (`body.h`, an experiment).
+- `puppet.ride` (lab tests of the partner's vehicle, `ride.h`): `on <stamp>` / `off <stamp>` (off removes it);
+  `lead K <stamp>` draws vehicle kind K (1 motorbike, 2 truck) 8 m ahead of this porter as if a partner rode it;
+  `park <stamp>` stops the lead vehicle where it is; `rider <stamp>` toggles hiding the partner's body while his vehicle is drawn;
+  `goto X Y Z <stamp>` moves this porter with the game's player teleport (game axes; it lands on the topmost surface,
+  so indoor targets end up on the roof). `partner_vehicle: true` (requires `puppet_probe`) turns the partner's vehicle
+  on from the start. `coop-partner --vehicle KIND ON OFF` makes the stand-in ride from ON to OFF seconds after connecting.
 - `puppet.vehicle`: `read <stamp>` logs one read-only vehicle observation; `watch <stamp>` logs at most four a second
   for 60 seconds (240 observations); `off <stamp>` stops it. Requires the ordinary `provider:"game"` and `logging:true`,
   with the pinned `discovery_sha256`. It works with either `self_tick` or the guarded `game_thread` callback and needs
@@ -716,7 +722,7 @@ Each command is a file in the mod folder. The mod consumes it and accepts it onl
   anything. `discovery:true` uses the separate discovery worker and does not process this command.
 
 Vehicle observations are `VEHICLE {json}` rows in the process's mod log. The riding/seat interpretation is provisional
-static evidence for build 13300582; it has not been checked against a live mount. Expected on foot: `available:true`,
+live for a truck (2026-11-08): the porter is a child entity of the vehicle; the static ride-component path was refuted. Expected on foot: `available:true`,
 `riding:false`, `kind:"none"`, `seat:"none"`, with null vehicle transform and speed. Seated on a bike: `riding:true`,
 `kind:"motorbike"`, `seat:"driver"`, `seat_index:0`, and the **bike's** position/rotation in game axes (z up). Trucks
 report `kind:"truck"`; raw seat indices 1..4 select passenger helpers, without an established left/right/front/back

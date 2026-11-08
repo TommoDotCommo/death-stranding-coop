@@ -261,7 +261,7 @@ struct Runtime final:ds::Transport {
     // --- The partner's vehicle (ride.h): opt-in (partner_vehicle, or `puppet.ride on`). `lead K` is a one-copy test: the
     // vehicle of kind K drives 8 m ahead of this porter as if a partner rode it.
     std::filesystem::path rideCommand;std::unique_ptr<mod::ride::PartnerVehicle> ride;bool rideOn=false,rideConfigDone=false;
-    uint8_t rideLead=0;uint64_t ridePorter=0;
+    uint8_t rideLead=0;uint64_t ridePorter=0;bool rideHideRider=false;   // test: `rider` hides the body while its vehicle is drawn
     std::function<void(uint64_t,const mod::puppet::Transform&)> rideTeleport;   // lab test: `goto X Y Z` (game axes)
     void makeRide() {
 #ifdef MOD_FAKE_NETWORK
@@ -283,6 +283,7 @@ struct Runtime final:ds::Transport {
             if(text=="on"+stamp){if(!ride)makeRide();rideOn=ride!=nullptr;rideLead=0;}
             else if(text=="off"+stamp){rideOn=false;rideLead=0;}
             else if(text=="park"+stamp){rideLead=0xff;}   // test: the lead vehicle stops where it is
+            else if(text=="rider"+stamp){rideHideRider=!rideHideRider;}
             else if(text.rfind("goto ",0)==0&&text.size()>stamp.size()&&text.compare(text.size()-stamp.size(),stamp.size(),stamp)==0){
                 // Lab test: move this porter with the game's own player teleport (join.h), once, in normal gameplay.
                 double x=0,y=0,z=0;auto porter=mod::join::readPorter(*sampler);
@@ -949,9 +950,8 @@ struct Runtime final:ds::Transport {
         // A partner who is only missing for now (late packets, private room) is hidden, not handed back; a game event
         // or the mode switched off hands the double back.
         const mod::puppet::Transform* goal=(target&&!event)?&*target:nullptr;bool hold=twinMode!=TwinMode::None&&!event;
-        // While the partner's vehicle is drawn the body is hidden (kept, not handed back): the game's seated pose is not
-        // reproduced yet, and a standing Sam on the seat reads worse than an empty one.
-        if(goal&&partnerMode()&&cache.remote.state.vehicle&&ride&&ride->entity()&&ride->kind()==cache.remote.state.vehicle)goal=nullptr;
+        // Test toggle: hide the body (kept, not handed back) while the partner's vehicle is drawn.
+        if(goal&&rideHideRider&&partnerMode()&&cache.remote.state.vehicle&&ride&&ride->entity()&&ride->kind()==cache.remote.state.vehicle)goal=nullptr;
         // Own body: made (once per world) and driven by its own backend; the resident double is released, never
         // dropped while borrowed. Until the body exists, or if the game refuses to make one, the resident double is used.
         bool useOwn=twinMode==TwinMode::Own&&own&&ownTwin&&!own->exhausted();
