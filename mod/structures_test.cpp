@@ -1,6 +1,8 @@
 #include "structures.h"
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <vector>
 using namespace mod::structures;
 unsigned failures=0;
 #define CHECK(x) do{if(!(x)){std::fprintf(stderr,"structures oracle: %s\n",#x);++failures;}}while(0)
@@ -8,6 +10,22 @@ constexpr double Pi=3.14159265358979323846;
 double wrap(double a){return std::remainder(a,2*Pi);}
 Record rec(uint32_t id,uint8_t type,uint8_t state,double x=0){Record r;r.id=id;r.type=type;r.state=state;r.at.position={x,2,3};r.at.rotation=rotation(.5,0,0);return r;}
 int main(){
+    {   // The construction table, read in one copy, and record by record when the one copy is not possible:
+        // the same structures either way. Records count back from TableEnd; a record is three image-pointer words.
+        const uint64_t base=0x140000000,image=0x8000000,manager=0x20000000;
+        for(bool short_:{false,true}){
+            uint64_t lo=manager+TableEnd-uint64_t(MaxRecords)*Stride;std::vector<unsigned char> mem(size_t(MaxRecords)*Stride);
+            auto rec=[&](unsigned i,uint32_t id,uint8_t type){uint64_t at=manager+TableEnd-i*Stride-lo;uint64_t q0=base+0x3000000,z=0,q2=q0+0x10;
+                std::memcpy(&mem[at],&q0,8);std::memcpy(&mem[at+8],&z,8);std::memcpy(&mem[at+16],&q2,8);std::memcpy(&mem[at+0x18],&id,4);mem[at+0x1c]=type;mem[at+0x1e]=2;
+                double p[3]={1,2,3};std::memcpy(&mem[at+0x28],p,24);};
+            rec(1,700,25);rec(5,701,26);
+            // short_: memory ends 100 records before the table start, so the one copy fails and the loop reads what it can.
+            uint64_t from=short_?lo+100ull*Stride:lo;
+            mod::discovery::Sampler sm{[&](uint64_t a,void* o,size_t n){if(a<from||a+n>lo+mem.size())return false;std::memcpy(o,&mem[a-lo],n);return true;},base};
+            auto t=readTable(sm,manager,base,image);
+            CHECK(t.size()==2&&t[0].id==700&&t[0].type==25&&t[1].id==701&&t[1].at.position[1]==2);
+        }
+    }
     // The porter's matrix (live: rows -0.819,0.574,0 / -0.574,-0.819,0 / 0,0,1) is yaw 145 degrees.
     { auto r=rotation(145*Pi/180,0,0);CHECK(std::fabs(r[0]+.81915)<1e-4&&std::fabs(r[1]-.57358)<1e-4&&std::fabs(r[3]+.57358)<1e-4&&std::fabs(r[4]+.81915)<1e-4&&std::fabs(r[8]-1)<1e-6);
       double y,p,q;angles(r,y,p,q);CHECK(std::fabs(wrap(y-145*Pi/180))<1e-5&&std::fabs(p)<1e-6&&std::fabs(q)<1e-6); }

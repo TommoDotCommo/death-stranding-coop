@@ -11,10 +11,16 @@ double dequantize(uint32_t q){return (double(q&0xfff)/4096-.5)*2*Pi;}
 }
 std::vector<Record> readTable(const discovery::Sampler& s,uint64_t manager,uint64_t base,uint64_t imageSize){
     std::vector<Record> out;if(!manager)return out;
+    // The whole table in one guarded copy (readOnce, as the cargo records): 640 double-checked record reads were
+    // two system calls each, every 500 ms on the game thread. Structures change rarely and the sync waits for them
+    // to stand, so a record caught mid-change is harmless. Falls back to record by record if the copy fails.
+    std::vector<uint8_t> table(size_t(MaxRecords)*Stride);
+    bool whole=s.readOnce(manager+TableEnd-uint64_t(MaxRecords)*Stride,table.data(),table.size());
     std::vector<uint8_t> block(0x68);
     for(unsigned i=1;i<=MaxRecords;++i){
         uint64_t at=manager+TableEnd-i*Stride;
-        if(!s.read(at,block.data(),block.size()))break;
+        if(whole)std::memcpy(block.data(),table.data()+size_t(MaxRecords-i)*Stride,block.size());
+        else if(!s.read(at,block.data(),block.size()))break;
         uint64_t q0,q1,q2;std::memcpy(&q0,block.data(),8);std::memcpy(&q1,block.data()+8,8);std::memcpy(&q2,block.data()+16,8);
         if(!(q0>=base&&q0<base+imageSize&&q1==0&&q2==q0+0x10))continue;
         Record r;std::memcpy(&r.id,block.data()+0x18,4);r.type=block[0x1c];r.category=block[0x1d];r.state=block[0x1e];

@@ -391,7 +391,7 @@ struct Runtime final:ds::Transport {
     }
     // --- end ds3 ---
     // Shared structures (structures.h): what this porter builds goes to the partner; theirs appear here as Net structures.
-    mod::structures::Sync structSync;uint64_t structReadAt=0,structSent=0,structMade=0,structIdBase=0,imageSize=0;
+    mod::structures::Sync structSync;uint64_t structReadAt=0,structSent=0,structMade=0,structIdBase=0,imageSize=0;bool structTimed=false;
     void tickStructures(uint64_t now) {
         if(!core||!sampler)return;   // like tickCargo: watched while the partner is away, sent when it connects
         bool coop=partnerMode()&&construct;
@@ -400,7 +400,8 @@ struct Runtime final:ds::Transport {
         auto table=[&]()->const std::vector<mod::structures::Record>&{
             if(records.empty()&&sampler->read(sampler->base+0x7bf4960,&manager,8)&&manager){
                 if(!imageSize)for(auto& sec:sampler->sections)imageSize=std::max(imageSize,sec.address+sec.size-sampler->base);
-                records=mod::structures::readTable(*sampler,manager,sampler->base,imageSize);}
+                auto t0=mod::nowUs();records=mod::structures::readTable(*sampler,manager,sampler->base,imageSize);
+                if(!structTimed){structTimed=true;std::ostringstream o;o<<"STRUCT table read: "<<records.size()<<" records, "<<(mod::nowUs()-t0)/1000.<<" ms\n";note(o.str().c_str());}}
             return records;};
         for(auto& e:structIn) {
             if(!coop){note("STRUCT partner structure ignored (not in peer mode)\n");continue;}
