@@ -54,6 +54,13 @@ bool Sampler::read(uint64_t a,void* out,size_t n) const {
     if(!read_(a,x.data(),n)||!read_(a,y.data(),n)||x!=y)return false;
     memcpy(out,x.data(),n);return true;
 }
+bool Sampler::readStrict(uint64_t a,void* out,size_t n) const {
+    ++reads;
+    if(!a||!n||n>128*1024*1024||n>UINT64_MAX-a)return false;
+    std::vector<unsigned char> first(n),second(n);
+    if(!read_(a,first.data(),n)||!read_(a,second.data(),n)||!(first==second))return false;
+    memcpy(out,first.data(),n);return true;
+}
 bool Sampler::readOnce(uint64_t a,void* out,size_t n) const {
     ++reads;
     if(!a||!n||n>128*1024*1024||n>UINT64_MAX-a)return false;

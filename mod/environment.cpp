@@ -19,7 +19,7 @@ bool code(const discovery::Sampler& s,Code site) {
     for(auto section:s.sections)if(section.executable&&at>=section.address&&at-section.address<section.size&&site.size<=section.size-(at-section.address))executable=true;
     if(!executable)return false;
     std::vector<unsigned char> bytes(site.size);
-    if(!s.read(at,bytes.data(),bytes.size()))return false;
+    if(!s.readStrict(at,bytes.data(),bytes.size()))return false;
     uint64_t h=14695981039346656037ULL;for(auto b:bytes)h=(h^b)*1099511628211ULL;
     return h==site.fingerprint;
 }
@@ -28,13 +28,13 @@ struct Copies {
     struct Copy {uint64_t at;std::vector<unsigned char> bytes;};
     std::vector<Copy> copies;
     void read(uint64_t at,void* out,size_t size) {
-        require(s.read(at,out,size),"memory unreadable or torn");
+        require(s.readStrict(at,out,size),"memory unreadable or torn");
         auto* b=static_cast<unsigned char*>(out);copies.push_back({at,{b,b+size}});
     }
     template<class T> T value(uint64_t at) {T v{};read(at,&v,sizeof v);return v;}
     uint64_t ptr(uint64_t at) {auto p=value<uint64_t>(at);require(pointer(p),"invalid pointer");return p;}
     bool unchanged() const {
-        for(const auto& c:copies){std::vector<unsigned char> bytes(c.bytes.size());if(!s.read(c.at,bytes.data(),bytes.size())||bytes!=c.bytes)return false;}
+        for(const auto& c:copies){std::vector<unsigned char> bytes(c.bytes.size());if(!s.readStrict(c.at,bytes.data(),bytes.size())||bytes!=c.bytes)return false;}
         return true;
     }
 };

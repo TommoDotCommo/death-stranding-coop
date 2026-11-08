@@ -28,6 +28,9 @@ public:
     // One guarded copy, without the second read that rejects tearing: for bulk tables whose readers tolerate a record
     // changing mid-copy (cargo records; each consumer checks over time). Fails like read on unreadable memory.
     bool readOnce(uint64_t,void*,size_t) const;
+    // Always two copies compared, whatever the size: for readers whose guarantees are that a value seen once
+    // changed between the two copies is refused (the environment and progress readers; at most once a second).
+    bool readStrict(uint64_t,void*,size_t) const;
     bool region(uint64_t,size_t,bool nonExecutable=false) const;
     uint64_t pointer(uint64_t) const;
     void scan(const std::string& actual,const std::string& expected);

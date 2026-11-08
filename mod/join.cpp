@@ -126,7 +126,7 @@ const unsigned char EntityTeleportCode[40]={0x48,0x8b,0xc4,0x48,0x89,0x58,0x18,0
     0xff,0xff,0x48,0x81,0xec,0xa0,0x01,0x00,0x00,0xc5,0xf8,0x29,0x70,0xd8,0xc5,0xf8,0x29,0x78,0xc8,0xc5};
 const unsigned char PlaceOnGroundCode[40]={0x40,0x53,0x56,0x57,0x41,0x56,0x41,0x57,0x48,0x81,0xec,0x10,0x02,0x00,0x00,0x48,0x8b,0x05,0xea,0x96,
     0x82,0x01,0x48,0x33,0xc4,0x48,0x89,0x84,0x24,0x00,0x02,0x00,0x00,0xc5,0xf8,0x10,0x15,0x07,0x0a,0x48};
-bool slot(const discovery::Sampler& s,uint64_t at,uint64_t& v){return s.read(at,&v,8);}
+bool slot(const discovery::Sampler& s,uint64_t at,uint64_t& v){return s.readStrict(at,&v,8);}
 }
 std::string verifyMoveCode(const discovery::Sampler& s,const MoveSites& m) {
     struct Want{uint64_t rva;const unsigned char* bytes;const char* name;};
@@ -134,7 +134,7 @@ std::string verifyMoveCode(const discovery::Sampler& s,const MoveSites& m) {
     unsigned counts[3]={};
     for(auto& section:s.sections)if(section.executable){
         if(section.size>128ull*1024*1024)return "code section too large";
-        std::vector<unsigned char> code(section.size);if(!s.read(section.address,code.data(),code.size()))return "code unreadable";
+        std::vector<unsigned char> code(section.size);if(!s.readStrict(section.address,code.data(),code.size()))return "code unreadable";
         for(unsigned k=0;k<3;++k)for(auto at=code.begin();(at=std::search(at,code.end(),wants[k].bytes,wants[k].bytes+40))!=code.end();++at){
             ++counts[k];
 #ifndef MUTANT_MOVE_SIGNATURE
@@ -145,7 +145,7 @@ std::string verifyMoveCode(const discovery::Sampler& s,const MoveSites& m) {
     for(unsigned k=0;k<3;++k)if(counts[k]!=1)return std::string(wants[k].name)+" signature missing or ambiguous";
     // The override calls the entity teleport directly (mode 2 path).
     unsigned char call[5]={};
-    if(!s.read(s.base+m.playerTeleport+m.callAt,call,5)||call[0]!=0xe8)return "PlayerGame teleport call site differs";
+    if(!s.readStrict(s.base+m.playerTeleport+m.callAt,call,5)||call[0]!=0xe8)return "PlayerGame teleport call site differs";
     int32_t rel=0;std::memcpy(&rel,call+1,4);
     if(s.base+m.playerTeleport+m.callAt+5+int64_t(rel)!=s.base+m.entityTeleport)return "PlayerGame teleport calls something else";
     uint64_t v=0;
@@ -162,7 +162,7 @@ Porter readPorter(const discovery::Sampler& s) {
         auto selected=s.selectPlayer(manager);if(!selected.player)return p;
         if(!slot(s,selected.player+0x70,entity)||!entity||entity>=0x0000800000000000ull)return p;
         Porter a,b;
-        for(Porter* r:{&a,&b})if(!s.read(entity+0xc8,r->position.data(),24)||!s.read(entity+0xe0,r->rotation.data(),36))return p;
+        for(Porter* r:{&a,&b})if(!s.readStrict(entity+0xc8,r->position.data(),24)||!s.readStrict(entity+0xe0,r->rotation.data(),36))return p;
         uint64_t manager2=0,player2=0,entity2=0;
         if(!slot(s,managerSlot,manager2)||manager2!=manager||!slot(s,selected.slot,player2)||player2!=selected.player
            ||!slot(s,selected.player+0x70,entity2)||entity2!=entity||a.position!=b.position||a.rotation!=b.rotation)return p;
@@ -208,7 +208,7 @@ public:
     explicit Observation(const discovery::Sampler& s):s_(s) {}
     std::vector<unsigned char> bytes(uint64_t at,size_t n) {
         std::vector<unsigned char> data(n);
-        if(!s_.read(at,data.data(),n))throw ReadFailure{};
+        if(!s_.readStrict(at,data.data(),n))throw ReadFailure{};
         reads_.push_back({at,data});return data;
     }
     template<class T> T get(uint64_t at) {auto b=bytes(at,sizeof(T));return load<T>(b.data());}
@@ -217,7 +217,7 @@ public:
     }
     bool coherent() const {
 #ifndef MUTANT_PROGRESS_COHERENT
-        for(const auto& r:reads_){std::vector<unsigned char> b(r.data.size());if(!s_.read(r.at,b.data(),b.size())||b!=r.data)return false;}
+        for(const auto& r:reads_){std::vector<unsigned char> b(r.data.size());if(!s_.readStrict(r.at,b.data(),b.size())||b!=r.data)return false;}
 #endif
         return true;
     }
@@ -254,7 +254,7 @@ ProgressObservation ProgressReader::read() const {
         if(s.signatures.size()!=6||!s.region(s.base+p.missionSlot,8,true)||!s.region(s.base+p.factsSlot,8,true)||!s.region(s.base+p.scope,16,true))throw ReadFailure{};
         unsigned char code[8];const unsigned char missionPrefix[]={0x40,0x53,0x48,0x83,0xec,0x20};
         const unsigned char integer[]={0x48,0x89,0x5c,0x24,0x20,0x55,0x56,0x57};
-        if(!s.read(s.base+p.missionCode,code,6)||std::memcmp(code,missionPrefix,6)||!s.read(s.base+p.integerCode,code,8)||std::memcmp(code,integer,8))throw ReadFailure{};
+        if(!s.readStrict(s.base+p.missionCode,code,6)||std::memcmp(code,missionPrefix,6)||!s.readStrict(s.base+p.integerCode,code,8)||std::memcmp(code,integer,8))throw ReadFailure{};
 #endif
         Observation o(s);
         auto mission=o.pointer(s.base+p.missionSlot),owner=o.pointer(mission+0x28),goals=o.pointer(owner+0x1f0);
