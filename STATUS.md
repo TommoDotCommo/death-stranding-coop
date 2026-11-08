@@ -168,13 +168,12 @@ restarts and sliding; none without restarts).
 
 Off by default (`mod/marker.h`, armed with the `puppet.marker` command). The partner is shown as one of the game's own
 map pins, moved at most once a second and removed when he disconnects or either porter is in an event or private room;
-a ping (V) puts a pin at the porter's position in both worlds through a reliable CARGO event of type 5, shown once per
+a ping (B; V is the game's Melee) puts a pin at the porter's position in both worlds through a reliable CARGO event of type 5, shown once per
 ping. The pins are the game's user markers, found statically (`mod/game_offsets.md`, "Map markers"); they are saved with
 the game, so the mod uses two groups of its own, never touches the player's pins and removes its own leftovers after a
 reload. Tested game-free with a fake marker table and four mutants, and live with one copy and the stand-in partner
 (pin follows the partner, a ping reaches both worlds, the pin goes when the partner leaves). Player-placed pins were
-not part of that run. Default key bindings are not in the executable, so
-whether V collides with a game key is unknown.
+not part of that run. The game deletes a user pin the player walks onto, so no partner pin is shown within 20 m of him.
 
 ## Testing aids (built 2026-11-03, first run live 2026-11-07)
 

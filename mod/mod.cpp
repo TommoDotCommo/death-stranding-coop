@@ -337,7 +337,7 @@ struct Runtime final:ds::Transport {
             if(text=="on "+stamp+"\n"||text=="off "+stamp+"\n") {
                 bool on=text[1]=='n';
                 if(on&&!markers)makeMarkers();
-                if(markers){markers->enable(on);pingKey=on?0x56:0;}   // V, the co-op standard's ping key (game_offsets.md, "Keys")
+                if(markers){markers->enable(on);pingKey=on?0x42:0;}   // B: V is the game's Melee (game_offsets.md, "Keys")
             }
             else if(text=="ping "+stamp+"\n")ping=true;
             else if(auto vk=mod::puppet::parseCargoCommand(text,stamp,"key");vk&&*vk<=0xfe){pingKey=*vk;note(("MARKER ping key "+std::to_string(*vk)+"\n").c_str());}

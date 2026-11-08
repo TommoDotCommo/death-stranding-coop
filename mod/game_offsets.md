@@ -1602,10 +1602,12 @@ executable shows: the game's actions are the `EDSFunction` enum (table 0x3df10f0
 `MarkerPrev`, `MarkerNext`, `Sensor` (the Odradek scan) and `Shout`; key assignments are `DSFunctionKeyBindDefinition`
 resources and the key-assign menu (`DSUIKeyAssignMenuKeyBindResource`). The **default keyboard and mouse bindings are not
 in `ds.exe`** (they are data resources in the packed archives), and the player's own bindings are in the profile's
-settings, which this pass did not read. So whether V, middle mouse, Tab or F1 is bound by default is **unknown** from
-static evidence. Middle mouse does have a menu meaning (`EMenuInputFunction_FUNCTION_MOUSE_MIDDLE`, map menu
-`OnMouseMiddle...` handlers). The mod's ping key is V by default and changeable at run time (`key <vk>` command), read
-only while the game window has the focus; a live check of the key-assign menu is the next step.
+settings. The profile's `bindings.cfg` (read 2026-11-09 in a test copy with default bindings: lines
+`bind "<Context>_kDSFunction<Action>" "<Key>" "<0|1>"`) binds **V to Melee** and Tab to the main menu; keys 1-5, A, C,
+D, E, F, F8, G, I, Q, R, S, T, W, Z, Space, Left Alt/Ctrl/Shift and the mouse buttons are taken. Free: B, H, J, K, L,
+M, N, O, P, U, X, Y. The mod's ping key is therefore **B** (changeable at run time with the `key <vk>` command), read
+only while the game window has the focus. Middle mouse has a menu meaning (`EMenuInputFunction_FUNCTION_MOUSE_MIDDLE`,
+map menu `OnMouseMiddle...` handlers).
 
 ## Time of day and weather (static only, build 13300582)
 
