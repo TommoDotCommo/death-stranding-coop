@@ -3,9 +3,10 @@
 Work in progress: real-time co-op for DEATH STRANDING DIRECTOR'S CUT on PC (Steam, build 13300582), built from zero.
 **Not playable yet; there is no release.** What works today, on one PC with two copies of the game: each copy is
 isolated and kept offline, each player sees the other as a second Sam walking, running, crouching and jumping
-beside them, cargo one player puts down or picks up is put down or taken away in the other's world, and a structure
-one player builds or dismantles (tested with ladders) is built or removed in the other's. The partner's gear, a
-two-PC session tried for real, and everything about a shared story are still to do. See [STATUS.md](STATUS.md).
+beside them, wearing the other's gear and outfit, seated on a bike or truck when the other rides one, and pinned
+on the map. Cargo one player puts down or picks up is put down or taken away in the other's world, and a structure
+one player builds or dismantles (tested with ladders) is built or removed in the other's. A two-PC session tried
+for real, shared weather, and everything about a shared story are still to do. See [STATUS.md](STATUS.md).
 
 This repository contains only original mod code. It contains no game files, assets, saves or anything copied from
 the game, and it never will. You need your own copy of the game.
@@ -15,7 +16,7 @@ the game, and it never will. You need your own copy of the game.
 | Folder | What it is |
 |---|---|
 | [`core/`](core/CORE.md) | Game-free presence core: versioned handshake, quantised player snapshots, clock and RTT estimates, interpolation, reconnect, and a reliable exactly-once channel for cargo events. Tested in a simulator with a fuzzer and mutants. |
-| [`mod/`](mod/README.md) | The in-process mod: Winsock transport, the game adapter (reads the local player's pose through the game's own player path), presence log, the partner's body (the game's resident Sam double), shared cargo, a stand-in partner (`coop-partner`) for testing with one copy, and analysis tools. [`mod/game_offsets.md`](mod/game_offsets.md) holds the reverse-engineering notes for the pinned build. |
+| [`mod/`](mod/README.md) | The in-process mod: Winsock transport, the game adapter (reads the local player's pose through the game's own player path), presence log, the partner's body (the mod's own Sam, or the game's resident Sam double) and vehicle, shared cargo, a stand-in partner (`coop-partner`) for testing with one copy, and analysis tools. [`mod/game_offsets.md`](mod/game_offsets.md) holds the reverse-engineering notes for the pinned build. |
 | [`launcher/`](launcher/README.md) | Native Windows Play / Saves / Settings / About launcher: LAN/Tailscale lobbies, standard invites, Steam launch with isolated co-op saves, and backups. A development foundation; see its remaining standard work. |
 | [`install/`](install/README.md) | Game-free package/install/uninstall core for the drop-in `avrt.dll` release layout. |
 | [`redirect/`](redirect/README.md) | The loader proxy that isolates each test copy: saves, loaded modules, the single-instance guard and network access. |
