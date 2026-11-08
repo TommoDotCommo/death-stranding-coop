@@ -10,6 +10,9 @@ struct Config {
     uint32_t peerAddress=0x7f000001, bindAddress=0;                       // host byte order; 0 = choose the route's local address
     uint64_t session=0;
     bool logging=true, required=false, impairment=false, discovery=false, selfTick=false, gameThread=false, puppetProbe=false, virtualPad=false, autoContinue=false, joinAtHost=false;
+    // How the partner is shown from the start, without a test command: "off" (default), "peer" (the game's resident
+    // double) or "own" (a Sam the mod makes; the double until it exists). Requires puppet_probe and an explicit role.
+    std::string partner="off";
     bool partnerGear=false;   // the porter's visible gear copied onto the partner's own body (gear.h)
     bool carryVisual=false;   // ds3: send what the porter carries, show what the partner carries (carry_visual.h)
     unsigned presenceLogMaxMiB=8;

@@ -11,7 +11,7 @@ int main(int argc,char** argv) {
     for(bool host:{false,true}) {s.host=host;launcher::writeConfig(root,s);
         std::ifstream f(root/"redirect-data/mod/mod.json");std::string bytes((std::istreambuf_iterator<char>(f)),{});auto c=mod::parseConfig(bytes);
         check(c.role==(host?"host":"client")&&c.slot==(host?3:4)&&c.peerSlot==(host?4:3),"role and exact ports");
-        check(c.peer==s.peer&&c.session==s.secret&&c.required&&c.selfTick&&!c.gameThread&&!c.puppetProbe,"session and read-only defaults");}
+        check(c.peer==s.peer&&c.session==s.secret&&c.required&&!c.selfTick&&c.gameThread&&c.puppetProbe&&c.partner=="own"&&c.partnerGear&&!c.autoContinue&&!c.virtualPad,"session and play defaults");}
     for(auto peer:{"0.0.0.0","example.com","255.255.255.255","192.168.01.2","224.0.0.1"}) {s.peer=peer;rejects([&]{launcher::config(s);});}s.peer="127.0.0.1";
     for(auto port:{0u,48999u,49015u,65535u}) {s.port=port;rejects([&]{launcher::config(s);});}s.port=49000;
     for(auto name:{"", "x\"", "x\\", "x\n", "012345678901234567890123456789012"}){s.name=name;rejects([&]{launcher::config(s);});}s.name="Porter";

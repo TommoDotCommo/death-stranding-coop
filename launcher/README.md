@@ -45,9 +45,12 @@ The mod's existing ports are `49000 + slot`. The launcher's host port is therefo
 49000–49014; client uses the next port, with opposite host/client slot assignments.
 Both configs use the same nonzero 32-bit invite secret as the mod's session id.
 The proxy's peer allowlist is the same selected numeric address. The generated
-config uses the pinned game hash, `required:true`, and read-only `self_tick:true`.
-Game-thread callbacks, actor/cargo/structure writes and automatic Continue remain
-off. Existing environment-driven test tools still work independently of this app.
+config uses the pinned game hash, `required:true`, and the play setup: the guarded
+game-thread callback (`game_thread`, `puppet_probe`), the partner drawn as the mod's
+own Sam (`partner:"own"`, the game's resident double until it exists) wearing the
+porter's visible gear (`partner_gear`), and with them shared cargo and structures.
+Automatic Continue and the virtual pad stay off. Existing environment-driven test
+tools still work independently of this app.
 
 ## Steam and data
 
@@ -148,10 +151,11 @@ Custom `--data-dir` is accepted only with `--dev-direct`.
 Look for proxy `READY` and `MOD_STARTED` (network only), then mod `POSE available`
 after continuing a co-op save, and `handshake:true` / `connected:true` in the
 partner/mod state. Inspect `<instance>/redirect-data/mod/mod.json`: role host,
-slots 0/1, peer 127.0.0.1, session 123, game provider, self_tick, required. Repeat
+slots 0/1, peer 127.0.0.1, session 123, game provider, game_thread, puppet_probe,
+partner own, partner_gear, required. Repeat
 with `--dev-client` and a host stand-in to check opposite slots. This launcher
-baseline performs no game-thread mutation; no `puppet.double`, `pad.script` or
-`puppet.body` command is armed. If a later test enables them independently, use
+setup shows the partner without any command; no `puppet.double`, `pad.script` or
+`puppet.body` command is armed. If a later test sends them independently, use
 only the PID/creation-time stamp from the current log as documented in
 [Live test commands](../mod/README.md#live-test-commands-per-process-stamp-guarded).
 Expect seconds for launcher/proxy setup and about a minute for a cold game load;

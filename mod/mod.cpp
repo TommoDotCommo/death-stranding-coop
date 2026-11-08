@@ -652,6 +652,10 @@ struct Runtime final:ds::Transport {
                     gear=std::make_unique<mod::gear::Mirror>(mod::gear::nativeApi(*sampler),[this](const std::string& row){note(row.c_str());});
                 }
 #endif
+                // The partner shown from the start (config partner), as the puppet.double command would; the Double
+                // backends wait for a porter and a partner before they borrow or drive anything.
+                if(config.partner=="own"&&own&&ownTwin){twinMode=TwinMode::Own;ownTwin->enable();twin->enable();note("DOUBLE start mode own (config)\n");}
+                else if(config.partner!="off"){twinMode=TwinMode::Peer;twin->enable();note("DOUBLE start mode peer (config)\n");}
             }
             presence=std::make_unique<mod::PresenceLog>([this](const std::string& line){return writePresence(line);},uint64_t(config.presenceLogMaxMiB)*1024*1024,[this](const char* s){note(s);});
             auto* raw=sampler.get();

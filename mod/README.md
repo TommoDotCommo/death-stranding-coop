@@ -643,6 +643,15 @@ game's porter carries is printed as `CARRY the porter carries ...`. Tests: `carr
 copies through the real core with loss and an outage, seven mutants in `test_game_thread_mutants.py`) and
 `test_partner_carry.py` (two stand-ins on loopback, one restarted).
 
+## The partner from the start (`partner`)
+
+`"partner": "own"` (or `"peer"`) in `mod.json` shows the partner from the start, as the `puppet.double` command `own` /
+`peer` would, with no command: `own` draws a Sam the mod makes (the resident double until it exists), `peer` borrows the
+game's resident double. It requires `puppet_probe` and an explicit role; the default is `"off"`. The log says
+`DOUBLE start mode own (config)`. The launcher writes `partner:"own"` and `partner_gear:true` with the game-thread hook
+for every co-op session (`launcher/README.md`). Live (2026-11-08): two copies started that way, with no command, each
+made its body, drew the other porter at the other's place and copied the gear; no fault in the crash recorder.
+
 ## The partner's gear (`partner_gear`, off by default)
 
 With `"partner_gear": true` in `mod.json` (requires the game provider), or the command `puppet.gear` `on <stamp>`, the

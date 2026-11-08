@@ -68,6 +68,15 @@ int main() {
     assert(!mod::parseConfig(good).carryVisual&&!mod::parseConfig(threaded).carryVisual);   // ds3: off by default
     assert(mod::parseConfig(withKeys(threaded,"\"carry_visual\":true")).carryVisual);
     assert(refused(withKeys(good,"\"carry_visual\":true")));                                // needs the game provider
+    // Partner presence from the start: off by default; peer/own need puppet_probe and an explicit role.
+    auto probe=withKeys(threaded,"\"puppet_probe\":true,\"required\":true");
+    assert(mod::parseConfig(probe).partner=="off");
+    assert(mod::parseConfig(withKeys(probe,"\"partner\":\"own\"")).partner=="own");
+    assert(mod::parseConfig(withKeys(probe,"\"partner\":\"peer\"")).partner=="peer");
+    assert(refused(withKeys(probe,"\"partner\":\"mirror\"")));
+    assert(refused(withKeys(threaded,"\"partner\":\"own\"")));                             // no puppet_probe
+    {auto none=probe;none.erase(none.find("\"role\":\"host\","),14);assert(refused(withKeys(none,"\"partner\":\"own\"")));}
+    assert(mod::parseConfig(withKeys(threaded,"\"partner\":\"off\"")).partner=="off");
     assert(mod::parseConfig(withKeys(threaded,"\"virtual_pad\":true,\"required\":true")).virtualPad);
     assert(mod::parseConfig(withKeys(good,"\"virtual_pad\":true,\"required\":true,\"self_tick\":true")).virtualPad);
     assert(refused(withKeys(threaded,"\"virtual_pad\":true")));

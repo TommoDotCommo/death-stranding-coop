@@ -19,6 +19,37 @@ class Pad(c.Structure):
               ('lx',c.c_int16),('ly',c.c_int16),('rx',c.c_int16),('ry',c.c_int16)]
 
 class ApiTests(unittest.TestCase):
+    def test_partner_from_config(self):
+        # partner "own" in mod.json: own mode from the start, no puppet.double command; the body is made and parked.
+        for partner,mode in (('own','own'),('peer','peer'),('off','none')):
+            with tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);shutil.copyfile(ROOT/'build/fake.so',root/'mod.so')
+                lib=c.CDLL(str(root/'mod.so'));lib.mod_init.argtypes=[c.c_char_p]
+                lib.mod_game_thread_tick.argtypes=[c.POINTER(Context)];lib.mod_status.argtypes=[c.c_void_p,c.c_uint]
+                lib.mod_last_error.restype=c.c_char_p;lib.mod_test_thread_id.restype=c.c_uint32;lib.mod_test_frame_caller.restype=c.c_uint64
+                lib.mod_test_set_pose.argtypes=[c.POINTER(c.c_double),c.POINTER(c.c_float),c.c_int]
+                config=root/'mod.json';config.write_text(json.dumps(dict(role='host',peer='127.0.0.1',slot=0,peer_slot=1,
+                    nickname='probe',provider='game',session=45,required=True,game_thread=True,puppet_probe=True,partner=partner,
+                    discovery_sha256=PIN)))
+                self.assertEqual(lib.mod_init(str(config).encode()),1,lib.mod_last_error())
+                def status():
+                    cap=lib.mod_status(None,0)
+                    for _ in range(8):
+                        out=c.create_string_buffer(cap);required=lib.mod_status(out,cap)
+                        if required<=cap:return json.loads(out.value)
+                        cap=required*2
+                    self.fail('status kept growing')
+                ctx=Context(c.sizeof(Context),1,lib.mod_test_thread_id(),1,lib.mod_test_frame_caller(),1,0)
+                try:
+                    lib.mod_test_set_pose((c.c_double*3)(10,20,30),(c.c_float*9)(1,0,0,0,1,0,0,0,1),0)
+                    for _ in range(3):self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1)
+                    self.assertFalse((root/'puppet.double').exists())
+                    self.assertEqual(status()['double']['mode'],mode,partner)
+                    log=next(root.glob('mod-*.log')).read_text()
+                    self.assertEqual(log.count('made and parked'),1 if partner=='own' else 0,partner)
+                    self.assertEqual('DOUBLE start mode' in log,partner!='off',partner)
+                    if partner!='off':self.assertEqual(status()['double']['stage'],'parked')   # no partner yet: nothing borrowed
+                finally:lib.mod_shutdown()
     def test_guarded_tick_and_one_shot_command(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);shutil.copyfile(ROOT/'build/fake.so',root/'mod.so')

@@ -11,7 +11,7 @@ def run(args, **kwargs):
 
 with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
     work = Path(directory)
-    for name in ['CONFIG_ROLE', 'LOBBY_SECRET', 'BACKUP_LINKS', 'OUTPUT_LINKS',
+    for name in ['CONFIG_ROLE', 'CONFIG_PLAY', 'LOBBY_SECRET', 'BACKUP_LINKS', 'OUTPUT_LINKS',
                  'MISSING_CONFIG_CLOSES', 'TICKET_TARGET', 'TICKET_EXPIRY', 'TICKET_NETWORK',
                  'BACKUP_RUNNING', 'NESTED_LAB', 'NESTED_RELEASE']:
         exe = work/name

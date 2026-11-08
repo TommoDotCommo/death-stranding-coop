@@ -33,7 +33,14 @@ std::string config(const Session& s) {
 #else
     bool host=s.host;
 #endif
-    std::string json="{\"role\":\""+std::string(host?"host":"client")+"\",\"peer\":\""+s.peer+"\",\"slot\":"+std::to_string(slot+(s.host?0:1))+",\"peer_slot\":"+std::to_string(slot+(s.host?1:0))+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)+",\"required\":true,\"logging\":true,\"self_tick\":true,\"discovery_sha256\":\""+mod::discovery::PinnedHash+"\"}\n";
+    // Play setup: the game-thread hook, the partner drawn as the mod's own Sam wearing the porter's gear, and shared
+    // cargo and structures (mod/README.md). The network-only self_tick setup draws nothing.
+#ifndef MUTANT_CONFIG_PLAY
+    const std::string play="\"game_thread\":true,\"puppet_probe\":true,\"partner\":\"own\",\"partner_gear\":true";
+#else
+    const std::string play="\"self_tick\":true";
+#endif
+    std::string json="{\"role\":\""+std::string(host?"host":"client")+"\",\"peer\":\""+s.peer+"\",\"slot\":"+std::to_string(slot+(s.host?0:1))+",\"peer_slot\":"+std::to_string(slot+(s.host?1:0))+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)+",\"required\":true,\"logging\":true,"+play+",\"discovery_sha256\":\""+mod::discovery::PinnedHash+"\"}\n";
     mod::parseConfig(json); // Use the production schema before writing anything.
     return json;
 }
