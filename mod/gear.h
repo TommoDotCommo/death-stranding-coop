@@ -17,6 +17,8 @@
 // the partner's own gear over the wire is not done.
 #include "discovery.h"
 #include "puppet.h"
+#include "../core/core.h"
+#include <optional>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -102,6 +104,43 @@ struct EmptyCarrier {
 };
 // The carrier component among the entity's components (+90 count, +98 array, bounded), 0 when absent.
 uint64_t carrierComponent(const discovery::Sampler&,uint64_t entity);
+// --- The partner's own gear over the wire (CARGO events of type 7) ---
+// Every porter has the same direct children (the gear he does not show is there, hidden), so a worn piece is named by
+// its helper (hashed) and its position among the porter's direct children with that helper. Each side sends what its
+// porter shows; the receiver copies the matching pieces of its own porter, visible or not. Without a set from the
+// partner (an older mod, or none received yet) the local porter's visible gear is used.
+constexpr uint8_t GearWireType=7;
+struct Worn {
+    uint32_t helper=0;   // helperHash of the helper name
+    uint8_t ordinal=0;   // among the porter's direct children with this helper, in list order
+    bool operator==(const Worn& o) const {return helper==o.helper&&ordinal==o.ordinal;}
+    bool operator!=(const Worn& o) const {return !(*this==o);}
+};
+using WornSet=std::vector<Worn>;
+uint32_t helperHash(const std::string&);   // FNV-1a, 32 bits
+WornSet worn(const std::vector<Node>&,uint64_t image);   // what plan() would copy, as identities
+std::vector<Piece> planFor(const std::vector<Node>&,uint64_t image,const WornSet&);
+std::string describe(const WornSet&,const std::vector<Node>&);
+// One event per piece (an empty set is one event with total 0). item = helper hash; ref packs index (5 bits), total
+// (5), ordinal (4) and the set's generation (16).
+std::vector<ds::CargoEvent> encode(const WornSet&,uint16_t generation);
+class WornReceiver {
+public:
+    std::optional<WornSet> feed(const ds::CargoEvent&);
+    void reset(){pending_.clear();active_=false;}
+private:
+    WornSet pending_;bool active_=false;uint16_t generation_=0;uint8_t total_=0;
+};
+// Sends the set once it has held for Stable ms, at most once per MinGap ms, and again on every new connection.
+class WornSender {
+public:
+    // Right after a load the porter shows gear he then hides for a few seconds (live: 7 pieces sent, then 2).
+    static constexpr uint64_t Stable=5000,MinGap=1000;
+    std::vector<ds::CargoEvent> observe(const std::optional<WornSet>& read,bool connected,uint64_t now);
+private:
+    WornSet candidate_,sent_;uint64_t since_=0,lastSend_=0;bool haveCandidate_=false,haveSent_=false,wasConnected_=false,resend_=false;
+    uint16_t generation_=0;
+};
 // Signature-checked native calls (Windows); throws elsewhere or when the pinned image differs.
 Api nativeApi(discovery::Sampler&);
 }

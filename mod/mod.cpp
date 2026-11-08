@@ -177,6 +177,8 @@ struct Runtime final:ds::Transport {
     std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
     // The porter's visible gear on the partner's own body (gear.h); config partner_gear or puppet.gear "on <stamp>".
     std::filesystem::path gearCommand;std::unique_ptr<mod::gear::Mirror> gear;bool gearOn=false;
+    // The partner's own gear (gear.h, CARGO type 7): what they show, and what this porter shows sent to them.
+    std::optional<mod::gear::WornSet> partnerWorn;mod::gear::WornReceiver wornRx;mod::gear::WornSender wornTx;uint64_t wornReadAt=0;
     // Read-only vehicle diagnostics. No changes to presence or actor control (vehicle.h).
     std::filesystem::path vehicleCommand;std::unique_ptr<mod::vehicle::Monitor> vehicleMonitor;
     // Optional environment sampling and host time setter. Only the verified callback can call the export.
@@ -201,6 +203,11 @@ struct Runtime final:ds::Transport {
             if(e.type==mod::carry::WireType){if(config.carryVisual)carry.incoming(e,carrySink);continue;}   // ds3: tickCarry
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
+            if(e.type==mod::gear::GearWireType){             // the gear the partner shows (tickGear, gear.h)
+                if(auto s=wornRx.feed(e)){bool changed=!partnerWorn||*partnerWorn!=*s;partnerWorn=*s;
+                    if(changed)note(("GEAR the partner shows "+std::to_string(s->size())+" pieces\n").c_str());}
+                continue;
+            }
             if(!coop){note("CARGO partner event ignored (not in peer mode)\n");continue;}
             if(e.type==4) {   // the partner dismantled a structure: by ref, or by type and place when the ref is unknown here
                 if(netCopies.known(e.ref))netCopies.dismantled(e.ref,now);
@@ -785,7 +792,7 @@ struct Runtime final:ds::Transport {
     }
     // The porter's visible gear on the own body only (never on the game's resident double). "on <stamp>" / "off
     // <stamp>" in puppet.gear; off removes the copies. The copies are hidden whenever the body is.
-    void tickGear(uint64_t bodyEntity,const mod::puppet::Anchor& anchor) {
+    void tickGear(uint64_t bodyEntity,const mod::puppet::Anchor& anchor,uint64_t now) {
         if(!gear)return;
         if(std::filesystem::exists(gearCommand)) {
             auto command=readConfig(gearCommand);auto stamp=" "+mod::runStamp()+"\n";
@@ -795,12 +802,19 @@ struct Runtime final:ds::Transport {
             else note("GEAR ignored command for another process\n");
         }
         if(!gearOn||!anchor.entity)return;
+        // What this porter shows goes to the partner (read once a second; sent when it holds still, and on every connection).
+        if(core&&now-wornReadAt>=1000){wornReadAt=now;
+            auto mine=mod::gear::worn(mod::gear::snapshot(*sampler,anchor.entity),sampler->base);
+            for(auto& e:wornTx.observe(mine,core->connected(),now))core->queueCargo(e);}
         uint64_t flags=0;bool shown=bodyEntity&&sampler->read(bodyEntity+mod::gear::Flags,&flags,8)&&(flags&mod::gear::FlagVisible);
         auto pose=bodyEntity?mod::puppet::readEntityPose(*sampler,bodyEntity):anchor.pose;
         if(bodyEntity&&!(pose.available&&pose.coherent))return;   // never make pieces at an unreadable place
         auto at=bodyEntity?mod::puppet::transform(pose):mod::puppet::Transform{};
         auto* sp=&*sampler;uint64_t porter=anchor.entity;
-        gear->tick(bodyEntity,porter,[sp,porter]{return mod::gear::plan(mod::gear::snapshot(*sp,porter),sp->base);},at,shown);
+        // The partner's own gear when they have sent it; else what this porter shows.
+        auto theirs=partnerWorn;
+        gear->tick(bodyEntity,porter,[sp,porter,theirs]{auto nodes=mod::gear::snapshot(*sp,porter);
+            return theirs?mod::gear::planFor(nodes,sp->base,*theirs):mod::gear::plan(nodes,sp->base);},at,shown);
     }
     void tickTwin(uint64_t now) {
         if(std::filesystem::exists(twinCommand)) {
@@ -855,7 +869,7 @@ struct Runtime final:ds::Transport {
             twin->tick(true,nullptr);ownTwin->tick(true,goal,speed,actions,hold);
         }
         else{twin->tick(true,goal,speed,actions,hold);if(ownTwin)ownTwin->tick(true,nullptr);}
-        tickGear(useOwn?ownEntity:0,anchor);
+        tickGear(useOwn?ownEntity:0,anchor,now);
     }
     bool tickOnce(std::string& err,bool gameContext=false) {
         std::lock_guard<std::timed_mutex> guard(mutex);

@@ -671,8 +671,10 @@ The porter's visible gear is read every second while the body shows; the copies 
 seen three times in a row, and a different set seen three times in a row replaces them (right after a load the game
 briefly shows gear it then hides: 15 pieces, then 2). The copies are hidden whenever the body is,
 removed with `off <stamp>`, when `own` mode ends or when the body changes,
-and forgotten (never touched) when a new world loads. The source is the local porter, so the partner shows this
-porter's gear, not their own, and carried cargo is not drawn. The resident double (`peer` mode) is never given gear.
+and forgotten (never touched) when a new world loads. Each side also sends what its porter shows (CARGO events of type
+7: each piece as its helper's hash and its place among the porter's pieces with that helper), and the partner's body
+wears that set, copied from the matching pieces of the local porter, shown or hidden; until a set arrives, the local
+porter's visible gear is used. Live, two copies: `GEAR the partner shows 2 pieces` on both. Carried cargo is not drawn. The resident double (`peer` mode) is never given gear.
 Log lines start with `GEAR`. Tests: `gear_test.cpp` (the porter's tree in fake memory, the plan, the mirror in a fake
 world, the empty carrier and its slot lookup; six mutants in `test_game_thread_mutants.py`) and `make
 gear-windows-test` (the carrier's critical sections on Windows, with an uninitialised mutant).

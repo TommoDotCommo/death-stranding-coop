@@ -237,7 +237,7 @@ Error Core::receive(const uint8_t* b,size_t n,uint64_t now) {
         lastReceive_=now; return fail(Error::None);
     }
     if(q.kind==Kind::Cargo) {
-        if(q.state.action<1||q.state.action>6||q.t0>0xffffffffull||!q.t1) return fail(Error::Range);
+        if(q.state.action<1||q.state.action>7||q.t0>0xffffffffull||!q.t1) return fail(Error::Range);
         bool next=q.sequence==cargoSeen_+1;
         if(next||!protections_.cargoOrder) {
             CargoEvent e; e.sequence=q.sequence; e.type=q.state.action; e.item=uint32_t(q.t0); e.position=q.state.position; e.yaw=q.state.yaw; e.id=q.t1; e.ref=q.t2;

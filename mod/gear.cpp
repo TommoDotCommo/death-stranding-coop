@@ -92,6 +92,78 @@ uint64_t carrierComponent(const discovery::Sampler& s,uint64_t entity){
         if(q(s,array+8*i,c)&&c&&q(s,c,v)&&v==s.base+CarrierComponentVtable)return c;}
     return 0;
 }
+uint32_t helperHash(const std::string& s){uint32_t h=2166136261u;for(unsigned char c:s){h^=c;h*=16777619u;}return h;}
+namespace {
+bool copyable(const Node& n,uint64_t image){
+    bool kind=n.vtable==image+EntityVtable||n.vtable==image+BackpackVtable;
+    bool mover=n.moverVtable==image+HelperMoverVtable||n.moverVtable==image+BackpackMoverVtable;
+    return kind&&mover&&!n.helper.empty()&&n.parent<0;
+}
+uint8_t ordinalOf(const std::vector<Node>& nodes,size_t i){
+    unsigned k=0;for(size_t j=0;j<i;++j)k+=nodes[j].parent<0&&nodes[j].helper==nodes[i].helper;return uint8_t(std::min(k,15u));
+}
+uint64_t bits(uint64_t v,unsigned at,unsigned n){return v>>at&((1ull<<n)-1);}
+}
+WornSet worn(const std::vector<Node>& nodes,uint64_t image){
+    WornSet out;
+    for(auto& p:plan(nodes,image))for(size_t i=0;i<nodes.size();++i)if(nodes[i].entity==p.source){out.push_back({helperHash(p.helper),ordinalOf(nodes,i)});break;}
+    return out;
+}
+std::vector<Piece> planFor(const std::vector<Node>& nodes,uint64_t image,const WornSet& set){
+    std::vector<Piece> out;
+    for(size_t i=0;i<nodes.size()&&out.size()<MaxPieces;++i){
+        auto& n=nodes[i];if(!copyable(n,image))continue;
+#ifndef MUTANT_GEAR_ORDINAL
+        Worn id{helperHash(n.helper),ordinalOf(nodes,i)};
+#else
+        Worn id{helperHash(n.helper),0};
+#endif
+        if(std::find(set.begin(),set.end(),id)!=set.end())out.push_back({n.entity,-1,n.helper});
+    }
+    return out;
+}
+std::string describe(const WornSet& set,const std::vector<Node>& nodes){
+    std::string o=std::to_string(set.size())+(set.size()==1?" piece":" pieces");
+    for(auto& w:set){std::string name="?";for(auto& n:nodes)if(n.parent<0&&helperHash(n.helper)==w.helper){name=n.helper;break;}
+        o+=(&w==&set.front()?" (":",")+name+"#"+std::to_string(w.ordinal);}
+    if(!set.empty())o+=")";
+    return o;
+}
+std::vector<ds::CargoEvent> encode(const WornSet& set,uint16_t generation){
+    std::vector<ds::CargoEvent> out;size_t total=std::min<size_t>(set.size(),MaxPieces);
+    auto base=[&](size_t index){return uint64_t(index)|uint64_t(total)<<5|uint64_t(generation)<<16;};
+    if(!total){ds::CargoEvent e;e.type=GearWireType;e.ref=base(0);out.push_back(e);return out;}
+    for(size_t i=0;i<total;++i){ds::CargoEvent e;e.type=GearWireType;e.item=set[i].helper;e.ref=base(i)|uint64_t(set[i].ordinal&15)<<10;out.push_back(e);}
+    return out;
+}
+std::optional<WornSet> WornReceiver::feed(const ds::CargoEvent& e){
+    if(e.type!=GearWireType||e.ref>>32){reset();return std::nullopt;}
+    auto index=uint8_t(bits(e.ref,0,5)),total=uint8_t(bits(e.ref,5,5));auto generation=uint16_t(bits(e.ref,16,16));
+    if(total>MaxPieces||(total&&index>=total)){reset();return std::nullopt;}
+    if(!total){reset();return WornSet{};}
+    if(index==0){pending_.clear();active_=true;generation_=generation;total_=total;}
+#ifndef MUTANT_GEAR_MIXED
+    else if(!active_||generation!=generation_||total!=total_||index!=pending_.size()){reset();return std::nullopt;}
+#endif
+    pending_.push_back({e.item,uint8_t(bits(e.ref,10,4))});
+    if(pending_.size()<total_)return std::nullopt;
+    WornSet done;done.swap(pending_);active_=false;return done;
+}
+std::vector<ds::CargoEvent> WornSender::observe(const std::optional<WornSet>& read,bool connected,uint64_t now){
+    if(read&&(!haveCandidate_||*read!=candidate_)){candidate_=*read;since_=now;haveCandidate_=true;}
+    if(!connected){wasConnected_=false;return {};}
+    if(!wasConnected_)resend_=true;
+    wasConnected_=true;
+    if(!haveCandidate_||now-since_<Stable)return {};
+    bool changed=!haveSent_||candidate_!=sent_;
+#ifndef MUTANT_GEAR_RESEND
+    if(!resend_&&(!changed||(haveSent_&&now-lastSend_<MinGap)))return {};
+#else
+    if(!changed||(haveSent_&&now-lastSend_<MinGap))return {};
+#endif
+    resend_=false;sent_=candidate_;haveSent_=true;lastSend_=now;
+    return encode(sent_,++generation_);
+}
 size_t Mirror::made() const {size_t n=0;for(auto& m:made_)n+=m.entity!=0;return n;}
 void Mirror::removeCopies(){
     unsigned removed=0;
@@ -119,7 +191,7 @@ void Mirror::tick(uint64_t body,uint64_t world,const std::function<std::vector<P
         std::string names;for(size_t i=0;i<pieces_.size()&&i<8;++i)names+=(i?",":" (")+pieces_[i].helper;
         if(pieces_.size()>8)names+=",...";
         if(!names.empty())names+=")";
-        log_("GEAR plan: "+std::to_string(pieces_.size())+" visible pieces of the porter's gear"+names+"\n");
+        log_("GEAR plan: "+std::to_string(pieces_.size())+" pieces"+names+"\n");
     };
     // A new body: nothing is made until the porter's visible gear has held still for StableChecks reads.
     if(!body_){body_=body;pieces_.clear();made_.clear();next_=0;candidate_.clear();stable_=0;ticks_=CheckEvery-1;}

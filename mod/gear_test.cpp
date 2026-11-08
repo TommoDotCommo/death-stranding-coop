@@ -28,10 +28,11 @@ struct Mem {
         for(size_t i=0;i<kids.size();++i)put<uint64_t>(kids[i]+NextSibling,i+1<kids.size()?kids[i+1]:0);}
 };
 struct Porter {
-    Mem m;uint64_t porter,armour,cuff,backpack,pouch,corpse,item,odradek,odradekChild,bare,hiddenPack,hiddenPackChild;
+    Mem m;uint64_t porter,armour,armour2,cuff,backpack,pouch,corpse,item,odradek,odradekChild,bare,hiddenPack,hiddenPackChild;
     Porter(){
         porter=m.entity(0x3d7d0d8,true);
         armour=m.entity(EntityVtable,false);m.helper(armour,HelperMoverVtable,"HLP_Waist_l_armor");
+        armour2=m.entity(EntityVtable,false);m.helper(armour2,HelperMoverVtable,"HLP_Waist_l_armor");
         cuff=m.entity(EntityVtable,true);m.helper(cuff,HelperMoverVtable,"HLP_Hcuf");
         backpack=m.entity(BackpackVtable,true);m.helper(backpack,BackpackMoverVtable,"HLP_Backpack");
         corpse=m.entity(CargoVtable,true);m.helper(corpse,OtherMover,"HLP_DeadBody_3rd");
@@ -42,7 +43,7 @@ struct Porter {
         odradekChild=m.entity(EntityVtable,true);m.helper(odradekChild,HelperMoverVtable,"HLP_Oderadek");
         hiddenPack=m.entity(EntityVtable,false);m.helper(hiddenPack,HelperMoverVtable,"HLP_Bbp");
         hiddenPackChild=m.entity(EntityVtable,true);m.helper(hiddenPackChild,HelperMoverVtable,"HLP_DogTag");
-        m.children(porter,{armour,cuff,backpack,odradek,bare,hiddenPack});
+        m.children(porter,{armour,cuff,backpack,odradek,bare,hiddenPack,armour2});
         m.children(backpack,{corpse,pouch,item});m.children(odradek,{odradekChild});m.children(hiddenPack,{hiddenPackChild});
     }
 };
@@ -69,7 +70,7 @@ int main(){
     Porter p;
     auto nodes=snapshot(p.m.sampler,p.porter);
     // Snapshot: depth first, parents before children, helper names read, the porter itself excluded.
-    CHECK(nodes.size()==11);
+    CHECK(nodes.size()==12);
     CHECK(!nodes.empty()&&nodes[0].entity==p.armour&&nodes[0].helper=="HLP_Waist_l_armor"&&nodes[0].parent==-1);
     std::map<uint64_t,int> at;for(int i=0;i<int(nodes.size());++i)at[nodes[i].entity]=i;
     CHECK(at.count(p.pouch)&&nodes[at[p.pouch]].parent==at[p.backpack]&&at[p.backpack]<at[p.pouch]);
@@ -165,6 +166,32 @@ int main(){
         CHECK(r.removes==2&&r.creates==5&&r.live()==3&&r.parentOf("HLP_Boot")==body);
         run(Mirror::CheckEvery*(Mirror::StableChecks+2));
         CHECK(r.creates==5);                                  // stable again: nothing more
+    }
+    // The partner's own gear: identities (helper hash, ordinal among same-helper direct children), the plan from the
+    // partner's set (pieces this porter hides are copied too; cargo and nested pieces never), and the wire.
+    {
+        auto w=worn(nodes,Image);
+        CHECK((w==WornSet{{helperHash("HLP_Hcuf"),0},{helperHash("HLP_Backpack"),0}}));
+        WornSet theirs{{helperHash("HLP_Backpack"),0},{helperHash("HLP_Waist_l_armor"),1},{helperHash("HLP_DeadBody_3rd"),0},{helperHash("HLP_PodPouch_2nd"),0}};
+        auto pf=planFor(nodes,Image,theirs);
+        CHECK(pf.size()==2&&pf[0].source==p.backpack&&pf[1].source==p.armour2&&pf[1].helper=="HLP_Waist_l_armor");
+        CHECK(planFor(nodes,Image,{}).empty());
+        CHECK(describe(theirs,nodes).find("HLP_Waist_l_armor#1")!=std::string::npos);
+        // Wire round trip, an empty set, and a broken run (another generation in the middle) dropped.
+        WornReceiver rx;std::optional<WornSet> got;
+        for(auto& e:encode(theirs,5)){CHECK(e.type==GearWireType);auto r=rx.feed(e);if(r)got=r;}
+        CHECK(got&&*got==theirs);
+        auto one=encode(theirs,6),two=encode(w,7);std::optional<WornSet> mixed;
+        for(auto* e:{&one[0],&one[1],&two[1],&one[2],&one[3]})if(auto r=rx.feed(*e))mixed=r;
+        CHECK(!mixed);
+        got.reset();for(auto& e:encode({},8))if(auto r=rx.feed(e))got=r;CHECK(got&&got->empty());
+        ds::CargoEvent junk;junk.type=GearWireType;junk.ref=1ull<<40;CHECK(!rx.feed(junk));
+        junk.ref=uint64_t(MaxPieces+1)<<5;CHECK(!rx.feed(junk));
+        // Sender: after Stable ms, once; again after a reconnect even when unchanged; a change after MinGap.
+        WornSender tx;CHECK(tx.observe(w,true,1000).empty());CHECK(tx.observe(w,true,1000+WornSender::Stable).size()==2);
+        CHECK(tx.observe(w,true,5000).empty());
+        CHECK(tx.observe(w,false,6000).empty());CHECK(tx.observe(w,true,6100).size()==2);
+        CHECK(tx.observe(theirs,true,7000).empty());CHECK(tx.observe(theirs,true,7000+WornSender::Stable).size()==4);
     }
     // The empty carrier a backpack copy gets: the game's slot lookup (2c52010, emulated) finds a slot for every type,
     // and no slot holds a stack or an item; the component search finds the carrier component among others.
