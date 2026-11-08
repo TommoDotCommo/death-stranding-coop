@@ -636,8 +636,14 @@ it sends that summary to the partner as CARGO events of type 6 (at most 16 entri
 once it has been the same for 0.5 s, at most once a second, and again after every reconnection. The partner's mod
 keeps the latest complete summary and logs `CARRY partner shows ...` (or `shows nothing` after a put-down or a
 disconnection). It never creates, moves or deletes cargo: a cargo record held by the partner body would be the game's
-real cargo, counted as this porter's. Drawing the items on the partner body needs a purely visual entity that is not
-found yet. `coop-partner --carry SPEC` plays the partner's side: SPEC is `hash[:slot[:count]],...` (slots 1 BackPack,
+real cargo, counted as this porter's. Instead the partner body shows what the partner carries on the backpack as plain
+cases (`cargo_stack.h`): one of the game's cargo case meshes per item (at most 12), made from the cargo config's case
+model with no record, carrier or collision, two side by side in rows on the copy of the backpack the body wears (or on
+the body without one), moved every tick, removed when the summary shrinks, the body hides or a game event starts, and
+forgotten without a call when the world is replaced (`STACK N cases on the partner`, `STACK N cases removed`). Lab
+commands in `puppet.ride`: `stack N` draws N cases whatever the partner carries, `stack auto` returns to the summary,
+`stack off` draws none, `stack at OX OY OZ SX SY SZ` and `stack across AX AY AZ COLUMNS` move them (anchor axes right,
+forward, up, in metres). Tests: `cargo_stack_test.cpp` (fake engine; mutants EXTRA and LEAK). `coop-partner --carry SPEC` plays the partner's side: SPEC is `hash[:slot[:count]],...` (slots 1 BackPack,
 6 LeftHand, 7 RightHand; `none` for nothing); `--carry-drop-after S` puts it all down S seconds after connecting; what the
 game's porter carries is printed as `CARRY the porter carries ...`. Tests: `carry_visual_test.cpp` (fake memory, two
 copies through the real core with loss and an outage, seven mutants in `test_game_thread_mutants.py`) and

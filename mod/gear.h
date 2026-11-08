@@ -77,6 +77,10 @@ public:
     void start(){stopped_=false;}
     size_t made() const;
     bool done() const {return body_&&next_>=pieces_.size();}
+    // The copy made for the piece on the body at `helper` (a direct child of the body), or 0.
+    uint64_t copyAt(const std::string& helper) const {
+        for(size_t i=0;i<pieces_.size()&&i<made_.size();++i)if(pieces_[i].parent<0&&pieces_[i].helper==helper)return made_[i].entity;
+        return 0;}
 private:
     struct Made {uint64_t entity=0;bool shown=false;};
     Api api_;std::function<void(const std::string&)> log_;

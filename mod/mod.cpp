@@ -31,6 +31,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "body.h"
 #include "vehicle.h"
 #include "ride.h"
+#include "cargo_stack.h"
 #include "weather.h"
 #include "environment.h"
 #include "auto_continue.h"
@@ -310,6 +311,18 @@ struct Runtime final:ds::Transport {
             else if(text=="off"+stamp){rideOn=false;rideLead=0;}
             else if(text=="park"+stamp){rideLead=0xff;}   // test: the lead vehicle stops where it is
             else if(text=="rider"+stamp){rideHideRider=!rideHideRider;}
+            else if(text=="stack off"+stamp){stackTest=-2;}            // test: no cases drawn
+            else if(text=="stack auto"+stamp){stackTest=-1;}           // the partner's summary (the default)
+            else if(text.rfind("stack ",0)==0&&text.size()>stamp.size()&&text.compare(text.size()-stamp.size(),stamp.size(),stamp)==0){
+                // Lab test: `stack N` draws N cases on the body whatever the partner carries; `stack at ox oy oz sx sy sz`
+                // moves them (anchor axes right, forward, up; metres).
+                mod::stack::Layout l;int n=0;
+                if(std::sscanf(text.c_str()+6,"at %lf %lf %lf %lf %lf %lf",&l.offset[0],&l.offset[1],&l.offset[2],&l.step[0],&l.step[1],&l.step[2])==6){
+                    auto now=stackLayout.value_or(mod::stack::Layout{});now.offset=l.offset;now.step=l.step;stackLayout=now;if(cargoStack)cargoStack->layout=now;}
+                else if(unsigned cols=0;std::sscanf(text.c_str()+6,"across %lf %lf %lf %u",&l.across[0],&l.across[1],&l.across[2],&cols)==4&&cols>=1&&cols<=4){
+                    auto now=stackLayout.value_or(mod::stack::Layout{});now.across=l.across;now.columns=cols;stackLayout=now;if(cargoStack)cargoStack->layout=now;}
+                else if(std::sscanf(text.c_str()+6,"%d",&n)==1&&n>=0&&n<=int(mod::stack::Stack::MaxCases))stackTest=n;
+                else {note("RIDE stack refused\n");return;}}
             else if(text.rfind("goto ",0)==0&&text.size()>stamp.size()&&text.compare(text.size()-stamp.size(),stamp.size(),stamp)==0){
                 // Lab test: move this porter with the game's own player teleport (join.h), once, in normal gameplay.
                 double x=0,y=0,z=0;auto porter=mod::join::readPorter(*sampler);
@@ -340,6 +353,33 @@ struct Runtime final:ds::Transport {
         if(!r.visible||!r.state.vehicle){ride->tick(now,true,0,nullptr);return;}
         auto t=mod::ride::vehicleTransform(r.state.position,r.state.vehicleOffset,r.state.vehicleAngles);
         ride->tick(now,true,r.state.vehicle,&t,{r.state.vehicleVariant,r.state.vehicleLook});
+    }
+    // --- The partner's carried cargo drawn on the partner body (cargo_stack.h): with carry_visual, from the partner's
+    // carry summary (backpack slot); `puppet.ride` "stack N" / "stack auto" / "stack off" / "stack at ..." test it.
+    std::unique_ptr<mod::stack::Stack> cargoStack;bool stackTried=false;int stackTest=-1;uint64_t stackPorter=0;
+    std::optional<mod::stack::Layout> stackLayout;
+    static unsigned backpackCases(const std::optional<mod::carry::Summary>& s){
+        unsigned n=0;if(s)for(auto& e:*s)if(e.slot==1)n+=e.count;   // EDSBaggage2SlotType 1: BackPack
+        return n;}
+    void tickStack(uint64_t body,const mod::puppet::Anchor& anchor) {
+        bool on=(config.carryVisual&&stackTest!=-2)||stackTest>=0;
+        if(!on){if(cargoStack)cargoStack->tick(false,0,nullptr);return;}
+#ifndef MOD_FAKE_NETWORK
+        if(!cargoStack&&!stackTried){stackTried=true;
+            try{cargoStack=std::make_unique<mod::stack::Stack>(mod::stack::nativeApi(*sampler),[this](const std::string& row){note(row.c_str());});
+                if(stackLayout)cargoStack->layout=*stackLayout;}
+            catch(const std::exception& e){note((std::string("STACK unavailable: ")+e.what()+"\n").c_str());}}
+#endif
+        if(!cargoStack)return;
+        if(anchor.entity!=stackPorter){if(stackPorter)cargoStack->forget("world changed");stackPorter=anchor.entity;}
+        unsigned wanted=stackTest>=0?unsigned(stackTest):backpackCases(carrySink.shown);
+        uint64_t flags=0;bool shown=body&&sampler->read(body+mod::gear::Flags,&flags,8)&&(flags&mod::gear::FlagVisible);
+        bool permitted=shown&&!inEvent&&(stackTest>=0||(partnerMode()&&core&&core->connected()));
+        // On the copy of the backpack the body wears when there is one (it moves with the body's back), else the body.
+        uint64_t on_=gear?gear->copyAt("HLP_Backpack"):0;
+        auto pose=mod::puppet::readEntityPose(*sampler,on_?on_:body);
+        if(!permitted||!(pose.available&&pose.coherent)){cargoStack->tick(false,0,nullptr);return;}
+        auto t=mod::puppet::transform(pose);cargoStack->tick(true,wanted,&t);
     }
     std::filesystem::path markerCommand;std::unique_ptr<mod::marker::Markers> markers;std::vector<ds::CargoEvent> pingIn;
     mod::marker::KeyEdge pingEdge;unsigned pingKey=0;bool markerConfigDone=false;
@@ -392,8 +432,9 @@ struct Runtime final:ds::Transport {
     // --- ds3: what the partner carries (carry_visual.h); opt-in with carry_visual, read-only, the sink only logs ---
     struct CarryLog final:mod::carry::Sink {
         std::function<void(const std::string&)> log;explicit CarryLog(std::function<void(const std::string&)> f):log(std::move(f)){}
-        void attach(const mod::carry::Summary& s) override {log("CARRY partner shows "+mod::carry::describe(s)+"\n");}
-        void detach() override {log("CARRY partner shows nothing\n");}
+        std::optional<mod::carry::Summary> shown;   // drawn by tickStack
+        void attach(const mod::carry::Summary& s) override {shown=s;log("CARRY partner shows "+mod::carry::describe(s)+"\n");}
+        void detach() override {shown.reset();log("CARRY partner shows nothing\n");}
         void hold(uint32_t,uint8_t) override {log("CARRY refused: a cargo record on the partner body would be this porter's cargo\n");}
     } carrySink{[this](const std::string& s){note(s.c_str());}};
     mod::carry::Exchange carry;uint64_t carryReadAt=0,carrySent=0;std::string carryLast;
@@ -1012,6 +1053,8 @@ struct Runtime final:ds::Transport {
         else{twin->tick(true,goal,speed,actions,hold);if(ownTwin)ownTwin->tick(true,nullptr);}
         stages.enter("gear",mod::nowUs());
         tickGear(useOwn?ownEntity:0,anchor,now);
+        stages.enter("stack",mod::nowUs());
+        tickStack(useOwn?ownEntity:0,anchor);
         stages.enter("ride",mod::nowUs());
         tickRide(anchor,now);
     }

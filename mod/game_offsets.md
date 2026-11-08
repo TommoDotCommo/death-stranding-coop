@@ -2994,3 +2994,534 @@ The most promising visual-only follow-up is the
 `0x2cd4660` mesh-instance construction path with correctly retained resources and
 explicit transform/lifetime management. It remains an untested candidate,
 not a ready-to-call implementation.
+
+## Visual-only cargo stack on the partner body — static recipe
+
+Pinned executable SHA-256: `9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b`. All addresses below are **RVAs**, image base `0x140000000`.
+
+**Established** means supported by the cited disassembly or executable data. **Inferred** identifies the proposed record-free use. Nothing described here was called in the game.
+
+### Creation and draw registration
+
+**Established:** `0x2cd4660` allocates and fills the mesh instance; it does **not** complete scene registration. The native caller subsequently sends `MsgInit`:
+
+```asm
+2c48cb5  mov rcx,r14
+2c48cb8  call 2cd4660
+...
+2c48cc8  lea rax,[3ba7b28]       ; MsgInit vtable
+...
+2c48cf8  call 19f4ae0           ; reflected message dispatch
+```
+
+The instance descriptor’s message table at `0x4c36f30` maps `MsgInit`, descriptor `0x486b1c0`, to thunk `0x2cdedf0`, which jumps to **`0x2c6f3b0(instance, message)`**.
+
+**Established:** this initializer creates a `DSMovableSkinnedMeshInstance`, stores it at instance `+0x48`, initializes its transform, and registers its scene interface:
+
+```asm
+2c6f439  lea rcx,[4bab4f0]      ; DSMovableSkinnedMeshInstance
+2c6f440  call 19f12f0
+...
+2c6f476  mov [rsi+48],rbx
+...
+2c6f65d  lea rdx,[rsi+b0]       ; initial transform
+2c6f675  call 1e0b020
+...
+2c6f90f  mov rcx,[578c130]      ; scene interface
+2c6f91b  mov rax,[rsi+48]
+2c6f925  lea rdx,[rax+60]
+2c6f92d  call [r8+28]           ; scene add
+```
+
+**Established:** `MsgInit` is `0x10` bytes, alignment 8. Native construction sets its vtable to `base+0x3ba7b28` and byte `+8` to zero; the remaining bytes can be zero-initialized.
+
+**Inferred minimal creation sequence:**
+
+1. Select and validate a loaded ordinary case model as described below.
+2. Fill the visual parameter block below, using a valid initial world transform.
+3. Call `0x2cd4660(&parameters)`.
+4. Send `MsgInit`, either through the native reflected dispatch or its established handler `0x2c6f3b0(instance,&message)`.
+5. Apply the initial transform through virtual `+0x78`.
+6. Match the carried mesh’s finishing calls: virtual `+0x88(instance,4)`, `+0xa0(instance,9)`, then `+0x90(instance,true)`.
+
+The finishing calls are established at `0x2c4978a–0x2c497c8`; their complete rendering semantics remain unknown.
+
+### Visual parameter block
+
+**Established:** the ordinary local block is **`0xa8` bytes**, initially zeroed at `0x2c489a5–0x2c489b8`. Its base is `rsp+0x2c0`. The following table covers its initialization and changes before the factory call. Unnamed fields retain offset names deliberately.
+
+| Offset | Representation | Native initialization/source |
+|---:|---|---|
+| `+00` | pointer | Selected `ModelResource`’s loaded object at resource `+30`; `0x2c489e5`, `0x2c48a6e`. |
+| `+08` | pointer | Initially null. Usually result of `0x2c541d0(manager,item,variant)`; case type `0xb` on carrier type `0xc` instead uses the pointer reached through config `+2b8`, then `+0`. `0x2c48b30–0x2c48b7a`. |
+| `+10` | pointer | Null; optional override for instance `+30`, consumed only when nonnull. |
+| `+18` | pointer | Null; optional override for instance `+40`, consumed only when nonnull. |
+| `+20` | three doubles | Initial position, zero locally. |
+| `+38` | nine floats | Initial basis, identity copied from `0x4591d70/0x4591d90`. |
+| `+5c` | four bytes | Zero padding after the basis. |
+| `+60` | 16-byte array header | Initially empty; count/capacity and pointer to 32-bit values. Conditional additions described below. |
+| `+70` | 16-byte array header | Empty locally. |
+| `+80` | `u32` | Initially `7`; becomes `2` for carrier type 1. |
+| `+84` | `u32` | `0xffffffff`, loaded from `0x4563070`. |
+| `+88` | byte | Initially 0; becomes 1 for carrier type 1. |
+| `+89` | byte | Initially 0. Set to 1 unless the checks at `0x2c48c50–0x2c48c81` preserve zero; a further global predicate can set it at `0x2c48ca0`. |
+| `+8a..+8c` | bytes | Zero locally. |
+| `+8d` | byte | Set to 1 at `0x2c48a71`. |
+| `+8e..+90` | bytes | Zero locally. |
+| `+91..+97` | padding | Zero locally. |
+| `+98` | pointer | Normally null. Special case type `0xa`, player hand slots, can select config `+230 -> +28 -> +18/+20`; `0x2c48ad1–0x2c48b22`. |
+| `+a0` | byte | 1. |
+| `+a1..+a7` | padding | Zero locally. |
+
+**Established:** when record `+34 <= 0`, native code appends to `+60`:
+
+- One of `0x4f2c5f8b`, `0x72d62591`, or `0x05064ba2`, selected by damage/case/volume fields.
+- `0x2b3df951` for damage type 3, otherwise the value at `0x4c35d5c`.
+- If predicate `0x2c63710(record)` succeeds, also `0x039e5aaa` and `0x616756be`.
+
+Evidence: `0x2c48b7e–0x2c48c4c`; append helper `0x26867c0` copies one 32-bit value. The meanings of these identifiers are unknown.
+
+**Established:** a caller-supplied parameter pointer replaces `r14` at `0x2c489e9`. Consequently, the local initialization does not establish defaults for that external block.
+
+**Established factory mapping:** `0x2cd4660` copies position/basis to instance `+b0/+c8`, the arrays to `+90/+a0`, and:
+
+```text
+parameter +80 → instance +158
+          +84 →          +13c
+          +88 →          +15c
+          +89 →          +15f
+          +8a →          +161
+          +8b →          +162
+          +8c →          +163
+          +8e →          +160
+          +8f →          +166
+          +90 →          +167
+          +98 →          +188
+          +a0 →          +1da
+```
+
+Evidence: `0x2cd46e4–0x2cd47d7`.
+
+### Keeping the instance independent of cargo and physics
+
+**Established:** none of this block’s ordinary fields receives a record, carrier or slot pointer. The factory consumes model/resource data and visual parameters.
+
+**Established:** the cargo wrapper introduces a record association **after** initialization:
+
+```asm
+2c48d0a  mov rcx,[rbx+50]
+...
+2c48d16  lea rax,[rdi+8]        ; record interface
+2c48d1e  mov [rcx+60],rax
+```
+
+Instance `+50` is a **`PhysicsCollisionInstance`**, established by descriptor `0x48c7d50` used in `0x2c47560`.
+
+**Established:** parameter `+89=1` sets instance `+15f`, suppressing that collision-instance creation:
+
+```asm
+2cd46ed  mov byte [rbx+15f],1
+...
+2c6ed06  cmp qword [rcx+40],0
+2c6ed0e  je ...
+2c6ed10  cmp byte [rcx+15f],0
+2c6ed17  jne ...
+2c6ed19  call 2c47560
+```
+
+**Inferred minimal settings:** zero the block, set the model, transform, `+80=2`, `+84=-1`, `+88=1`, **`+89=1`**, `+8d=1`, and `+a0=1`. Leave `+08`, overrides, arrays, `+98` and animation-related bytes zero.
+
+**Inferred restriction:** initially accept only models whose loaded object has an empty child-model list at `+d0`. `MsgInit` traverses this list through `0x2c70900`; child creation does not visibly copy the parent’s collision-suppression byte in the inspected assignment sequence. Root suppression alone therefore does not establish that an arbitrary compound resource is entirely collision-free.
+
+**Established, bounded conclusion:** the inspected factory, transform setter and mesh update handler do not require a cargo record/carrier argument. The native collision owner rewrite above supplies the demonstrated record reference. Exhaustive behavior of arbitrary resource children and deeper renderer callbacks remains unknown.
+
+### Per-frame transform and update
+
+**Established:** the transform passed to the instance is:
+
+```cpp
+struct Transform60 {
+    double position[3];     // +00
+    float basis[9];         // +18, tightly packed
+};                          // 0x3c bytes
+```
+
+Virtual **`+0x70`**, implementation **`0x2cb2a70(instance,&world)`**, writes the current transform:
+
+```asm
+2cb2aab  vmovups xmm0,[rdx]
+2cb2aaf  vmovups [rcx+f0],xmm0
+2cb2ab7  vmovsd xmm1,[rdx+10]
+2cb2abc  vmovsd [rcx+100],xmm1
+...
+2cb2ade  vmovups ymm0,[rdx+18]
+2cb2ae2  vmovups [rcx+108],ymm0
+2cb2ae6  mov eax,[rdx+38]
+2cb2ae9  mov [rcx+128],eax
+...
+2cb2af8  call 1e0b020          ; update underlying render instance
+...
+2cb2bd0  call 1c82920          ; bounds/spatial update
+```
+
+**Established:** on its first placement, `+0x70` dispatches to virtual **`+0x78`**, implementation `0x2cb32a0`. That implementation performs unconditional placement and marks instance `+15e=1`. Child meshes receive composed transforms through `0x2c56ba0`.
+
+**Established native carried path:** slot update **`0x2ccb240`**, called by carrier update `0x2ccdbd0`, walks each stack and record. It collects record `+148`, constructs the case world transform, calls virtual `+70`, and stores the same transform back into record `+38`:
+
+```asm
+2ccc526  mov rdx,[r14+148]      ; mesh
+...
+2ccd262  lea r8,[rsp+920]       ; case-local placement
+2ccd272  lea rcx,[rsp+970]      ; stack/model transform
+2ccd27d  call 1ae4bd0           ; compose → rsp+c90
+...
+2ccd2c0  mov rcx,[rbx]
+2ccd2c3  lea rdx,[rsp+c90]
+2ccd2ce  call [rax+70]
+...
+2ccd2fb  vmovups [r14+38],xmm0
+2ccd301  vmovsd [r14+48],xmm1
+```
+
+**Established inputs to native placement:**
+
+- Stack `+3c`: helper identifier.
+- Stack `+40`: local stack transform.
+- Stack `+80`: cached/current placement transform.
+- Stack `+c8`: optional preceding/supporting stack.
+- Stack flags `+f0/+f1`: choose direct placement, helper variants and other paths.
+- Holder’s `SkinnedModel` component: lookup with descriptor `0x4b132c0`, then component `+40`.
+- Helper query **`0x23a80f0(model,&helperId,&matrix64,0)`**.
+- Matrix conversion **`0x19c7000(&transform60,&matrix64)`**.
+- Transform composition **`0x1ae4bd0(&parent,&output,&local)`**.
+
+Evidence: `0x2ccb543–0x2ccb7dd`, `0x2cccd42–0x2ccd14c`. The helper query returns a boolean; failed lookup must be handled.
+
+**Established:** the default player BackPack helper identifier is **`0x024334b7`**, stored at RVA `0x4c3a0bc`. The player-slot constructor selects it for slot type 1 at `0x2c4c8a1–0x2c4c95b`, `0x2c4d26b–0x2c4d27d`. Its string name was not established.
+
+**Established:** native carried visuals also receive an update through **`0x2c75980(instance,&MsgUpdate)`**, called at `0x2ccdb10`. This updates the render instance, recursively updates children and optionally performs animation work.
+
+`MsgUpdate` is `0x28` bytes, alignment 8. Native construction at `0x2ccd5ff–0x2ccd64a` supplies:
+
+```text
++00 vtable = base+0x3badf50
++08 byte = 0
++10 u32 = 0
++18 u64 = 0xffefffffffffffff
++20 u32 = 0
++24 float = frame delta
+```
+
+**Inferred frame sequence:** resolve the partner’s current helper matrix after its pose is available; compose partner world transform, helper transform, mod-owned stack placement and case placement; call mesh virtual `+70`; then call `0x2c75980` with the update message. All placement state can live in mod-owned memory.
+
+### Stack spacing
+
+**Established:** native placement uses **accumulated volume below the case**, not its ordinal index. The slot updater starts the accumulator at zero, passes it to `0x2c5b010`, and adds each case’s volume afterward:
+
+```asm
+2ccc4b4  xor ebx,ebx
+...
+2ccd0e9  movzx r9d,byte [rsp+44] ; accumulated volume
+2ccd0f7  movzx r8d,byte [rsp+28] ; this case's volume
+2ccd0fd  mov rcx,[r12]           ; placement shape
+2ccd104  call 2c5b010
+...
+2ccdb7e  add ebx,[rsp+28]
+```
+
+**Established:** `0x2c5b010(shape,out,caseVolume,volumeBelow)` scans four entries at shape `+28`, stride `0x30`. Each entry contains:
+
+| Offset | Meaning |
+|---:|---|
+| `+00` | Case-volume key, byte |
+| `+01` | Volume-below key, byte |
+| `+10/+14/+18` | Three float translation components |
+| `+20/+24/+28` | Three float rotation inputs |
+
+It converts these into `Transform60`; no matching entry returns identity. Evidence: `0x2c5b02b–0x2c5b1ae`. These are packed arrangements, so total stack `+34` volume is **not a height in metres**.
+
+**Established:** ordinary case dimension constants, initialized by `0x1891fb0`, `0x1892170`, `0x1892190`, `0x18921b0`, are:
+
+| Volume units | Model-space dimensions |
+|---:|---|
+| 1 | `(0.382, 0.132, 0.274)` |
+| 2 | `(0.382, 0.132, 0.548)` |
+| 4 | `(0.382, 0.264, 0.548)` |
+| 6 | `(0.382, 0.396, 0.548)` |
+
+**Established:** native backpack placement separates neighboring stacks using half of each stack’s dimension in the **second local axis**, then adds the resulting negative-axis translation. Evidence: `0x2c4cf22–0x2c4cff8`, `0x2c4d154–0x2c4d258`. Native packing also rotates cases and changes depth offsets.
+
+**Inferred simplest N-case display:** use one case per layer, retain one chosen case orientation, and separate layer centers by half the preceding height plus half the next height:
+
+```text
+center[0] = chosen anchor
+center[k+1] = center[k] - localAxisY * (height[k] + height[k+1]) / 2
+```
+
+For identical ordinary medium cases, the separation is `0.132` model-space units. Compose this local axis through the helper/body transform; do not apply it directly to world Y.
+
+This supplies a simple visual stack without reproducing native packed layouts. Exact model pivot alignment and the desired anchor offset remain visually unverified. Special cases, body bags and volume-8 objects need separate treatment.
+
+### Model selection and retention
+
+**Established callable contract, Microsoft x64 ABI:**
+
+```cpp
+ModelResource* selectCaseModel(
+    Manager* manager, ItemDefinition* item, bool variant);
+// RVA 0x2c5acc0; RCX, RDX, R8B; result RAX.
+```
+
+It searches additional assets by item `+34`, returns a matching nonnull asset `+38`, or calls `0x2c5ad70(manager->config,item,variant)`. The inspected selector only reads these objects; it performs no allocation, loading, cargo insertion or reference acquisition. Evidence: `0x2c5accf–0x2c5ad5a`.
+
+**Established:** the return is the **resource wrapper**, not its loaded object. Creation uses wrapper `+30`. The fallback reads item `+34`, `+3b`, `+3c`, `+3e` and the variant flag. Its complete implementation is `0x2c5ad70–0x2c5afbb`; ordinary generic choices are config model-array indices 1/2/3, or 4/5/6 for the variant, with volume 3 choosing index 13. Special case types and definition hashes override these choices.
+
+**Established:** the 31 default model resources are **not permanently retained merely because config was once loaded**:
+
+- Registration skips null wrapper `+30` and calls `0x2dcd770(streamingManager,loadedObject,5)`: `0x2c6b8d0–0x2c6b905`.
+- A matching removal path walks the same 31 entries, calls `0x2dcdae0(...,5)`, and clears manager config `+8`: **`0x2c6d9b0–0x2c6da35`**.
+- Registration maintains entries keyed by object identifiers `+8/+10`, increments entry `+18`, and issues requests through `0x22b6e50`: `0x2dcd904–0x2dcd9b5`.
+- Removal decrements `+18` and releases request data when it reaches zero: `0x2dcdb54–0x2dcdc20`.
+
+**Established:** the mesh’s own retention settings are balanced. With parameter `+88=1` and `+80=2`, initialization registers its model with request category 2 and sets instance `+15d`; the destructor unregisters it. Evidence: `0x2c6ef4b–0x2c6ef7c`, `0x2c2501f–0x2c25060`.
+
+**Inferred requirement:** validate the selected wrapper, loaded object and factory-required nested model data before creation; keep ownership valid throughout the instance lifetime. A nonnull config array entry is insufficient. These routines do not establish synchronous GPU readiness or a complete lifetime guarantee for a cached raw loaded-object pointer.
+
+### Removal
+
+**Established:** release the owned mesh once through **virtual `+0x80`**. It reaches `0x2c4dee0`, the deleting-destructor path through the RTTI interface at `+168`, and destructor `0x2c253e0`.
+
+The destructor removes the render instance from the scene:
+
+```asm
+2c25412  mov rdx,[rcx+48]
+...
+2c25425  mov rcx,[578c130]
+...
+2c25434  add rdx,60
+2c25438  call [rax+30]          ; scene remove
+```
+
+It then releases renderer/animation allocations. The base destructor balances residency, unregisters collision if present and releases child meshes (`0x2c25010–0x2c2518e`).
+
+**Established:** `0x2c4e6b0` additionally disposes record-owned visual-object arrays at record `+158/+160` and `+168/+170`. Those arrays are separate from a standalone mesh. **Inferred:** a mod owning only the mesh uses its virtual release and clears its own pointer; it must not call the record cleanup routine.
+
+### Threading, remaining unknowns and fault risks
+
+**Established:** native placement runs through carrier/slot update code, reads animation helper buffers, and mutates renderer and spatial state. The inspected functions contain no general-purpose dispatch to a safe engine phase.
+
+**Inferred requirement:** create, initialize, place, update and release on the existing game-thread mutation boundary, with the partner’s pose available and before dependent scene teardown. This is a conservative boundary; the exact required phase is **unknown**.
+
+| Step | Remaining unknown / risk |
+|---|---|
+| Model acquisition | **High:** loading completion and raw-pointer lifetime across resource-set unload are not established; stale nested pointers can fault. |
+| Factory | **High:** allocation failure is not safely handled internally: after a null-allocation branch it still writes through `rbx` at `0x2cd468a`. |
+| `MsgInit` | **High:** requires valid renderer/resource infrastructure and phase. Compound models may create children with their own behavior. |
+| Collision suppression | **Established for the root; unknown for arbitrary children.** Restrict the first implementation to an inspected child-free case resource. |
+| Helper lookup | **Medium:** helper presence and bone-buffer readiness on the partner body remain unverified. Refuse placement when lookup fails. |
+| Placement | **Low visual risk:** anchor, pivot and axis errors can cause clipping or misplaced cases; malformed pointers or transforms can still fault renderer code. |
+| Update | **Medium:** the exact supported update phase and behavior of unusual model resources remain unknown. |
+| Release | **High during teardown:** release once while scene/streaming infrastructure remains valid; double release or delayed release can fault. |
+
+**Inferred conclusion:** the smallest justified implementation owns mesh pointers and transforms only, uses the factory plus `MsgInit`, suppresses root collision, updates through virtual `+70` and `MsgUpdate`, and releases through virtual `+80`. It needs no cargo-record allocation or mutation, carrier/slot insertion, or cargo-manager table writes. It remains an untested native-call recipe.
+
+## Display vehicle wheels: spin and steering — static recipe
+
+**Established — scope:** Static inspection of build 13300582, executable SHA-256 `9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b`. Addresses below are RVAs from image base `0x140000000`. No game ran and no native game function was called.
+
+**Established — result:** The inspected wheel paths produce joint transforms directly. They expose substantially more than the previously identified physics dependency, but do **not** establish a safe scalar spin/steering setter for a pooled display vehicle.
+
+### Wheel state and its writers
+
+**Established — shared physics layout:** For both concrete vehicles, let:
+
+```text
+V = vehicle entity
+P = *(V + 0x330)             // game vehicle-physics wrapper
+H = *(P + 0x28)             // hknpVehicleInstance
+W = *(H + 0x88)             // WheelInfo array
+wheel[i] = W + 0xc0*i
+```
+
+**Established — identification evidence:** Wrapper initialization `0x1c20970` calls `0x215a120`, storing its result at wrapper `+0x28` at `0x1c20a01`; bike initialization `0x1c20a60` does likewise at `0x1c20aee`. The Havok instance vtable is `0x3cc75b8`. Reflection identifies `hknpVehicleInstance` at descriptor `0x4ad1ba0`, and `hknpVehicleInstance::WheelInfo` at `0x4ad1a10`, with size `0xc0`.
+
+**Established — fields:** The member tables at `0x3cb7e80` and `0x3cb9010` explicitly name these fields:
+
+| Object | Offset | Reflected name | Representation |
+|---|---:|---|---|
+| `H` | `+0x108` | `mainSteeringAngle` | float |
+| `H` | `+0x110` | `wheelsSteeringAngle` | float-array data pointer; count `+0x118` |
+| `wheel[i]` | `+0x50` | `currentSuspensionLength` | float |
+| `wheel[i]` | `+0x70` | `spinAxisChassisSpace` | float4 |
+| `wheel[i]` | `+0x90` | `steeringOrientationChassisSpace` | quaternion float4 |
+| `wheel[i]` | `+0xa0` | `spinVelocity` | float |
+| `wheel[i]` | `+0xa4` | `noSlipIdealSpinVelocity` | float |
+| `wheel[i]` | `+0xa8` | `spinAngle` | float |
+
+**Established — frame writers:**
+
+| Function RVA | Observed writes |
+|---|---|
+| `0x215ad70` | Computes wheel angular velocity, advances `spinAngle`, and stores `spinVelocity`. |
+| `0x215db00` | Dispatches steering-component virtual `+0x18`, then stores main and per-wheel steering angles. |
+| `0x215dd70` | Copies wheel-collision results, including suspension length, and constructs steering quaternions and spin axes. |
+
+**Established — spin integration evidence:**
+
+```asm
+215b046  vdivss xmm3,xmm1,DWORD PTR [rcx+rbp]
+215b04b  vmulss xmm0,xmm3,xmm9
+215b050  vminss xmm1,xmm0,xmm14
+215b055  vaddss xmm2,xmm1,DWORD PTR [rbx+rdi+0xa8]
+215b05e  vmovss DWORD PTR [rbx+rdi+0xa8],xmm2
+...
+215b07d  vmovss DWORD PTR [rbx+rdi+0xa0],xmm3
+215b090  add    rbx,0xc0
+```
+
+**Established — suspension and steering evidence:**
+
+```asm
+215de17  mov    eax,DWORD PTR [r15+0x1c]
+215de1b  mov    DWORD PTR [rbx+rbp+0x50],eax
+
+215de7a  mov    rax,QWORD PTR [rdi+0x110]
+215de81  vmulss xmm1,xmm8,DWORD PTR [rax+r13]
+...
+215dee8  vmovups XMMWORD PTR [rdx],xmm4  ; wheel +0x90
+215def5  vmovups xmm0,XMMWORD PTR [rax+0x60]
+215defa  vmovups XMMWORD PTR [r8],xmm0   ; wheel +0x70
+```
+
+**Inferred — units:** `spinAngle` is radians and `spinVelocity` is radians/second: the angle feeds a half-angle sine/cosine quaternion constructor, while the integrator multiplies angular velocity by its timestep. Per-wheel steering angles use radians; their conversion constructs a normalized quaternion from half-angle times suspension direction and `w=1`. Suspension length uses physics/world distance units, rather than degrees or a normalized animation control.
+
+### From physics state to mesh joints
+
+**Established — common wheel-pose reader:** `0x2f6c980` calls `0x1c1f730`, which dispatches `H` virtual `+0x50`, resolving to `0x215b870`.
+
+**Established — its inputs and calculation:**
+
+```asm
+215b8c0  shl    rbx,0x6
+215b8c4  add    rbx,QWORD PTR [rcx+0x88] ; WheelInfo, stride 0xc0
+215b8d8  vmovss xmm0,DWORD PTR [rbx+0xa8]
+215b8e0  vxorps xmm2,xmm0,[signMask]
+215b8e8  lea    rdx,[rbx+0x70]
+215b8ec  call   0x1e77c60               ; quaternion(axis, -spinAngle)
+215b8f1  vmovups xmm8,XMMWORD PTR [rbx+0x90]
+...
+215b965  vmovups XMMWORD PTR [rsi],xmm2
+215b96d  vmaxss xmm2,xmm4,DWORD PTR [rbx+0x50]
+215b977  vmulps xmm0,xmm1,XMMWORD PTR [rdi+0x10]
+215b97c  vaddps xmm2,xmm0,XMMWORD PTR [rdi]
+```
+
+**Established:** This combines steering and spin quaternions, and obtains the wheel center from the suspension hardpoint plus direction times nonnegative suspension length. It subsequently transforms those results through the supplied chassis transform.
+
+**Established — entity-side arrays:** Vehicle `+0x4c0` is the wheel count; `+0x4d8` points to joint indices. `+0x4e0/+0x4e8` point to current/previous wheel-center float4 arrays, **not scalar spin-angle arrays**. The copy loop at `0x2fa5e60` moves current centers to previous centers, then copies newly calculated centers into current centers.
+
+| Vehicle | Count | Joint-index storage | Center storage |
+|---|---:|---|---|
+| Truck | 4 | entity `+0xc60..+0xc6c` | current `+0xbe0`, previous `+0xc20` |
+| Motorbike | 3 | entity `+0xcb0..+0xcb8` | current `+0xbe0`, previous `+0xc10` |
+
+**Established — array evidence:** Constructors `0x2f62450` and `0x2f61b80` establish these pointers and counts at `0x2f62563..0x2f625b0` and `0x2f61ce0..0x2f61d33`. Truck initialization `0x2f74e90` copies resource indices `+0x2e8/+0x2ec/+0x2f0/+0x2f4`; bike initialization `0x2f74820` copies `+0x2e8/+0x2ec/+0x2f0`.
+
+**Established — truck pose writer:** Truck vtable `0x3e26790`, slot `+0x168`, selects `0x2f9e750`. It obtains physics wheel poses through `0x2f6c980` at `0x2f9f133`, obtains contact data at `0x2f9f170`, and invokes joint/suspension geometry helper `0x2f85410` for each wheel at `0x2f9f310`.
+
+**Established — useful lower-level truck boundary:** The complete `0x2f85410..0x2f864f7` helper takes:
+
+```cpp
+// Inferred names; argument positions and buffer accesses established.
+void TruckWheelGeometry(
+    Vehicle* vehicle,             // RCX
+    int wheelIndex,               // EDX
+    Quaternion* jointRotations,   // R8
+    Float4* jointPositions,       // R9
+    const Quaternion* wheelRotations, // stack argument 5
+    const Float4* wheelCenter);      // stack argument 6
+```
+
+**Established:** Its inspected body operates on supplied arrays, skeleton ancestry and bind transforms. It does not directly read vehicle `+0x330`. It follows several wheel ancestors without validating their indices, so this is not a generally safe arbitrary-joint API.
+
+**Established — bike pose writer:** Bike vtable `0x3e25db8`, slot `+0x168`, selects `0x2f9d170`; its ordinary branch calls `0x2fa3370` at `0x2f9d1fd`. The bike builds wheel/fork/handle geometry through `0x2fa1fb0` and related helpers after obtaining complete wheel poses, spin-only quaternions and contacts.
+
+**Established — bike helper hazard:** Calling `0x2fa1fb0` separately does not remove the physics dependency. It calls `0x2f6a800` at `0x2fa2135`; that helper immediately reads `vehicle+0x330`, then dereferences wrapper `+0xf0` at `0x2f6a82b`.
+
+**Established — final pose destination:** Both full writers store local joint rotations and translations into:
+
+```text
+M = *(V + 0xb8)
+k = int32(M + 0x250)
+S = *(M + 0x190 + 0x70*k)       // skeleton
+N = int32(S + 0x20)             // joint count
+B = *(M + 0x1a0 + 0x70*k)       // writable pose records
+
+joint[j].rotation    = B + 0x30*j
+joint[j].translation = B + 0x30*j + 0x10
+```
+
+**Established — write evidence:**
+
+```asm
+; Truck
+2f9f780  movsxd rax,DWORD PTR [rdx+0x250]
+2f9f787  imul   rcx,rax,0x70
+2f9f78b  mov    rax,QWORD PTR [rcx+rdx+0x1a0]
+...
+2f9f7ae  vmovdqu XMMWORD PTR [rax-0x30],xmm0 ; rotation
+2f9f7b8  vmovdqu XMMWORD PTR [rax-0x20],xmm1 ; translation
+
+; Bike performs the equivalent stores at 0x2fa427e and 0x2fa4288.
+```
+
+**Established — animation API distinction:** These inspected wheel writers use direct pose-array arithmetic and stores. Neither full writer directly calls the porter’s `TriggerBool` or float-variable setters. No named wheel-speed/steer variable binding was established here; the vehicle may still use animation components for other purposes.
+
+### Playback gating and the smallest candidate
+
+**Established — separate gates:** The normal vehicle update first bypasses its physics-dependent body when `vehicle+0x330` is null:
+
+```asm
+2f78def  cmp    QWORD PTR [rdi+0x330],0
+2f78df7  je     0x2f79905
+```
+
+**Established:** When that body is reached, the pooled flag independently skips the wheel-pose dispatch:
+
+```asm
+2f79004  test   DWORD PTR [rdi+0x560],0x08000000
+2f79012  jne    0x2f79069
+...
+2f79063  call   QWORD PTR [rax+0x168]
+```
+
+**Established:** `VehicleMover` mode dispatch at `0x2f899d0` does not perform wheel-pose updates: mode 1 tail-calls the transform application helper. Therefore changing mover mode or its target alone cannot supply spin, steering or suspension state.
+
+**Established — unresolved requirement:** No single native call or scalar field write was established that accepts angular speed and steering angle and safely animates both pooled vehicle types without physics. Writing Havok fields requires objects the pooled path can omit; calling the complete vehicle pose writers can fault.
+
+**Inferred — minimal physics-free candidate, not validated:**
+
+1. Retain the pooled suppression flags and mode-1 transform playback.
+2. Maintain mod-owned wheel phases: `phase[i] += angularSpeed[i] * dt`, using radians and seconds. Reset or freeze integration across teleports, stale samples and identity changes.
+3. Build wheel rotations from a retained rest pose, using steering followed by spin about each wheel’s correct axle. Convert the resulting transforms into the skeleton’s parent-local space before writing them.
+4. Write only the affected joint records at `B+0x30*j`, using the native rotation/translation layout above. The truck geometry helper is a candidate for reproducing its suspension linkage using supplied poses; the bike requires a separately derived physics-free joint calculation.
+5. Apply these overrides after the mover has applied the desired chassis transform and after competing pose writers, before skinning consumes the pose.
+
+**Inferred — speed estimate:** Signed longitudinal displacement divided by timestep and wheel radius can supply approximate angular velocity. Bike resource `FrontWheelRadius` is reflected at `+0x2e0`; a radius must be validated for each wheel/variant before use.
+
+**Inferred — steering limitation:** The received porter `Turn_Heading` is not sufficient evidence of the actual road-wheel angle. Truck code separately scales control input by π/2 for its steering-wheel joint at `0x2f9f662`; this pass did not establish the inverse mapping from the porter variable to Havok’s per-wheel steering angles.
+
+**Inferred — suspension limitation:** Chassis transforms and speed cannot uniquely recover individual suspension compression. A display implementation must retain rest suspension, synthesize it, or receive additional suspension data.
+
+### Fault boundaries and unknowns
+
+**Established — fault boundaries:**
+
+- Null wrapper or Havok instance: the full wheel readers and writers contain unchecked dereferences.
+- Invalid model, selected skeleton, joint index or ancestor: the pose and geometry paths use unchecked indexing.
+- Bike helper reuse: `0x2f6a800` retains an unconditional physics dependency.
+- Wheel-center caches are also consumed elsewhere; treating them as spin/steering scalars would corrupt positional state.
+
+**Inferred — remaining risks:** Direct pose writes can be overwritten or race animation/skinning jobs. The exact frame phase, pose-buffer lifetime, required invalidation, rest-pose ownership, wheel-axis signs, bike steering/fork hierarchy and pooled-instance behavior remain **unknown**. Ordering merely after `0x2f801b0` is insufficient: that function sets a target rather than applying it immediately.
+
+**Established — validation:** The executable hash matched; focused MinGW objdump windows corroborated the cited instructions; **29 read-only PE, metadata and disassembly assertions passed**. Runtime safety and visual results were not tested.
