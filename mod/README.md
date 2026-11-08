@@ -869,7 +869,14 @@ known mismatch instead. `--episode N|unknown` and `--progress-id N|unknown` are
 explicit stand-in fixtures, not statements about a loaded save. No two-copy run
 is needed for these experiments. No live result is claimed here.
 
-## Shared time and environment research (opt-in, not live verified)
+## Shared time, rain and environment (opt-in; rain live verified 2026-11-09)
+
+With `share_environment:"host"` the host's time sample also carries its rain condition (`ds::Environment::rain`), and
+a guest places the game's own local rain or clear influence around the host when its world disagrees there
+(`weather.h`; `WEATHER ...` log lines). `coop-partner --environment-time H --weather V` plays such a host (V: the map
+condition, lower is wetter; -1.8 heavy rain, 1.5 clear).
+
+### Time and environment research
 
 `share_environment` accepts `"off"` (default) or `"host"`. Host mode requires
 `provider:"game"`, `game_thread:true`, `self_tick:false`, `required:true`,

@@ -31,6 +31,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "body.h"
 #include "vehicle.h"
 #include "ride.h"
+#include "weather.h"
 #include "environment.h"
 #include "auto_continue.h"
 #include "pad.h"
@@ -188,6 +189,7 @@ struct Runtime final:ds::Transport {
     // Optional environment sampling and host time setter. Only the verified callback can call the export.
     std::filesystem::path environmentCommand;std::unique_ptr<mod::environment::Reader> environmentReader;
     std::unique_ptr<mod::environment::Sync> environmentSync;uint64_t environmentReadAt=0,environmentApplyAt=0;
+    std::unique_ptr<mod::weather::Share> weatherShare;std::optional<float> hostRain;uint64_t hostRainAt=0;   // guest: shared rain
     std::function<void(uint32_t)> cargoGive,cargoDelete;std::function<void(uint8_t,const mod::puppet::Transform&,bool)> construct;std::function<bool(uint64_t,unsigned,bool)> partToggle;
     std::function<void(const std::array<float,4>&,const std::array<float,4>&,const mod::puppet::Transform&,bool,bool,bool)> unconstruct;
     std::function<void()> continueLastSave;mod::AutoContinue autoContinue;bool autoNoted=false;
@@ -608,7 +610,16 @@ struct Runtime final:ds::Transport {
                 setter=[address](float hour,float seconds){reinterpret_cast<void(*)(float,float)>(address)(hour,seconds);};
 #endif
                 environmentSync=std::make_unique<mod::environment::Sync>(*sampler,std::move(setter));
-                note("ENVIRONMENT host sync enabled: time only; weather setter unavailable\n");
+                note("ENVIRONMENT host sync enabled: time, and the host's rain (weather.h)\n");
+#if defined(_WIN32) && !defined(MOD_FAKE_NETWORK)
+                if(config.role=="guest"||config.role=="client") {
+                    try{auto api=mod::weather::nativeApi(*sampler);auto* reader=environmentReader.get();
+                        api.conditionAt=[reader](const std::array<double,3>& at)->std::optional<float>{
+                            auto o=reader->read(at);if(!o.weatherAvailable||!std::isfinite(o.rainFromMap))return std::nullopt;return o.rainFromMap;};
+                        weatherShare=std::make_unique<mod::weather::Share>(std::move(api),[this](const std::string& row){note(row.c_str());});}
+                    catch(const std::exception& e){note((std::string("WEATHER unavailable: ")+e.what()+"\n").c_str());}
+                }
+#endif
             }
             if(config.gameThread) {
 #ifdef MOD_FAKE_NETWORK
@@ -1062,8 +1073,10 @@ struct Runtime final:ds::Transport {
                 if(requested||(environmentSync&&gameplay&&now>=environmentReadAt)) {
                     auto observation=environmentReader->read(position);note(mod::environment::row(observation).c_str());
                     environmentReadAt=now+1000;
-                    if(environmentSync&&gameplay&&observation.available&&config.role=="host")
-                        core->sendEnvironment({uint32_t(std::min<double>(ds::EnvironmentDayMs-1,std::llround(double(observation.hour)*3600000)))},now);
+                    if(environmentSync&&gameplay&&observation.available&&config.role=="host"){
+                        ds::Environment sample{uint32_t(std::min<double>(ds::EnvironmentDayMs-1,std::llround(double(observation.hour)*3600000)))};
+                        if(observation.weatherAvailable&&std::isfinite(observation.rainFromMap)){sample.haveRain=true;sample.rain=std::clamp(observation.rainFromMap,-ds::EnvironmentRainMax,ds::EnvironmentRainMax);}
+                        core->sendEnvironment(sample,now);}
                 }
                 if(environmentSync&&gameContext&&now>=environmentApplyAt) {
                     environmentApplyAt=now+1000;
@@ -1071,6 +1084,15 @@ struct Runtime final:ds::Transport {
                     input.gameThread=gameContext;input.networkEnforced=gameContext; // dispatch Gate requires network_enforced==1
                     input.gameplay=gameplay;input.connected=core->connected();input.nowMs=now;input.host=core->latestEnvironment(now);input.gamePosition=position;
                     auto line=environmentSync->tick(input);if(!line.empty())note(line.c_str());
+                }
+                // Shared rain (guest): the host's last rain sample (sent every 30 s) is used for 40 s, placed at the
+                // partner's position in this world.
+                if(weatherShare&&gameContext) {
+                    if(auto e=core->latestEnvironment(now);e&&e->haveRain){hostRain=e->rain;hostRainAt=now;}
+                    if(hostRain&&now-hostRainAt>40000)hostRain.reset();
+                    std::optional<std::array<double,3>> partnerAt;
+                    if(cache.remote.visible){auto& r=cache.remote.state.position;partnerAt=std::array<double,3>{r[0],r[2],r[1]};}
+                    weatherShare->tick(now,gameplay&&core->connected(),hostRain,partnerAt);
                 }
             }
             // End environment dispatch.

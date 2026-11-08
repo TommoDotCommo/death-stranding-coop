@@ -58,7 +58,10 @@ struct CargoEvent { uint32_t sequence=0; uint8_t type=1; uint32_t item=0; std::a
 // Optional host-only sample, independent of presence/cargo and the handshake.
 // Milliseconds since midnight, not an elapsed world/forecast clock. Weather is unknown.
 constexpr uint32_t EnvironmentDayMs=86400000;
-struct Environment { uint32_t timeOfDayMs=0; };
+// rain (optional): the host's native weather-map condition where it stands (4*z-2 of the game's rain map: lower is
+// wetter; about < -0.5 rain, < -1.5 heavy rain, > 0.5 clear), carried in t1 as bit 32 plus int16 thousandths.
+constexpr float EnvironmentRainMax=2.5f;
+struct Environment { uint32_t timeOfDayMs=0; bool haveRain=false; float rain=0; };
 // Mutants exist only in test builds (-DDS_TESTING).
 struct Protection {
     bool version=true, range=true, teleport=true, duplicate=true, delay=true, session=true, build=true;

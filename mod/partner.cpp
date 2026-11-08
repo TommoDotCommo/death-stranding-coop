@@ -5,7 +5,8 @@
 //                [--carry SPEC] [--carry-drop-after SECONDS] [--seconds N] [--stop FILE]
 // --offset X Y Z shifts the follow target (adapter metres, Y up); --episode N|unknown and --progress-id N|unknown
 // set explicit handshake fixtures, --progress-mismatch warn|refuse chooses policy.
-// --environment-time HOURS requires --role host and sends a fixed [0,24) time sample every 30 s (no weather).
+// --environment-time HOURS requires --role host and sends a fixed [0,24) time sample every 30 s; --weather VALUE adds a
+// rain condition to it (the game's map condition, lower is wetter: -1.8 heavy rain, 1.5 clear).
 // --where-recorded plays the walk where it was recorded (same save, same place) instead of beside the porter.
 // Prints one status line a second and every cargo event the game sends. --drop places one cargo item (the game's
 // item hash) where the partner stands, SECONDS after connecting. --take-after picks up (sends "taken" for) every item the
@@ -99,7 +100,7 @@ struct CarryPrint final:mod::carry::Sink {
 int main(int argc,char** argv){
     unsigned slot=1,peerSlot=0;ds::Role role=ds::Role::Client;uint64_t session=0;double seconds=3600,dropAfter=-1,takeAfter=-1,takeOwnAfter=-1,buildAfter=-1,unbuildAfter=-1;uint32_t dropItem=0,buildType=0;
     std::string replayFile,stopFile;Shell shell;ds::ProgressPolicy progressPolicy=ds::ProgressPolicy::Warn;std::optional<mod::carry::Summary> carrySpec;double carryDropAfter=-1;
-    std::optional<ds::Environment> fixedEnvironment;double rideOn=-1,rideOff=-1;
+    std::optional<ds::Environment> fixedEnvironment;double rideOn=-1,rideOff=-1;std::optional<float> fixedRain;
     for(int i=1;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc)usage(("missing value after "+a).c_str());return std::string(argv[++i]);};
         if(a=="--slot")slot=unsigned(std::stoul(next()));else if(a=="--peer-slot")peerSlot=unsigned(std::stoul(next()));
@@ -120,6 +121,7 @@ int main(int argc,char** argv){
         else if(a=="--unbuild-after")unbuildAfter=std::stod(next());
         else if(a=="--carry"){carrySpec=mod::carry::parseSpec(next());if(!carrySpec)usage("--carry takes hash[:slot[:count]],... (cargo slots 1..9) or none");}
         else if(a=="--carry-drop-after")carryDropAfter=std::stod(next());
+        else if(a=="--weather"){auto v=std::stod(next());if(!std::isfinite(v)||std::abs(v)>ds::EnvironmentRainMax)usage("--weather is the map condition -2.5..2.5 (lower is wetter)");fixedRain=float(v);}
         else if(a=="--seat"){for(auto& x:shell.seat)x=std::stod(next());}
         else if(a=="--vehicle"){auto k=std::stoul(next());if(k<1||k>ds::VehicleKindMax)usage("vehicle kind is 1..3");shell.rideKind=uint8_t(k);rideOn=std::stod(next());rideOff=std::stod(next());}
         else if(a=="--take-after")takeAfter=std::stod(next());else if(a=="--take-own-after")takeOwnAfter=std::stod(next());
@@ -127,6 +129,8 @@ int main(int argc,char** argv){
     }
     if(!session)usage("--session is required (the game copy's mod.json session)");
     if(fixedEnvironment&&role!=ds::Role::Host)usage("--environment-time requires --role host");
+    if(fixedRain&&!fixedEnvironment)usage("--weather requires --environment-time");
+    if(fixedRain){fixedEnvironment->haveRain=true;fixedEnvironment->rain=*fixedRain;}
     if(!replayFile.empty()){
         std::ifstream f(replayFile,std::ios::binary);if(!f)usage("cannot read the replay file");
         std::stringstream ss;ss<<f.rdbuf();Replay r(parseRecording(ss.str()));
@@ -166,7 +170,9 @@ int main(int argc,char** argv){
         }
         core.frame(now);shell.step(now);core.tick(now);
         if(fixedEnvironment&&core.sendEnvironment(*fixedEnvironment,now)) {
-            std::printf("ENVIRONMENT sent fixed hour=%.6f weather=unknown\n",fixedEnvironment->timeOfDayMs/3600000.);std::fflush(stdout);
+            if(fixedEnvironment->haveRain)std::printf("ENVIRONMENT sent fixed hour=%.6f rain=%.3f\n",fixedEnvironment->timeOfDayMs/3600000.,fixedEnvironment->rain);
+            else std::printf("ENVIRONMENT sent fixed hour=%.6f weather=unknown\n",fixedEnvironment->timeOfDayMs/3600000.);
+            std::fflush(stdout);
         }
         if(auto value=core.latestEnvironment(now)) {
             if(!observedEnvironment||*observedEnvironment!=value->timeOfDayMs) {

@@ -31,6 +31,16 @@ void parser() {
     auto bytes=encode(p);check(decode(bytes.data(),bytes.size(),q)==Error::None&&q.t0==EnvironmentDayMs-1&&q.kind==Kind::Environment,"environment_roundtrip");
     p.t0=EnvironmentDayMs;bytes=encode(p);check(decodeForTest(bytes.data(),bytes.size(),q,protection)==Error::Range,"environmentRange");
     p.t0=0;
+    {   // rain rides in t1: bit 32 + int16 thousandths; other t1 bits are reserved; |rain| <= 2.5
+        Packet r=p;r.t1=(uint64_t(1)<<32)|uint16_t(int16_t(-1750));auto b=encode(r);
+        check(decodeForTest(b.data(),b.size(),q,protection)==Error::None,"environment_rain_roundtrip");
+        r.t1=(uint64_t(1)<<32)|uint16_t(int16_t(-2600));b=encode(r);check(decodeForTest(b.data(),b.size(),q,protection)==Error::Range,"environmentRange");
+        r.t1=(uint64_t(1)<<33)|5;b=encode(r);check(decodeForTest(b.data(),b.size(),q,protection)==Error::Reserved,"reserved");
+        Pair pair;Environment w{43200000,true,-1.75f};check(pair.host.sendEnvironment(w,20),"environment_rain_send");pair.drain(20);
+        auto got=pair.guest.latestEnvironment(20);check(got&&got->haveRain&&std::abs(got->rain+1.75f)<0.001f,"environment_rain_delivered");
+        Pair dry;check(dry.host.sendEnvironment({43200000},20),"environment_no_rain_send");dry.drain(20);
+        got=dry.guest.latestEnvironment(20);check(got&&!got->haveRain,"environment_no_rain");
+        Pair bad;check(!bad.host.sendEnvironment({43200000,true,9.f},20),"environment_rain_refused");}
     for(unsigned field=0;field<9;++field){Packet bad=p;if(field==0)bad.t1=1;if(field==1)bad.t2=1;if(field==2)bad.state.position[0]=1;if(field==3)bad.state.flags=1;
         if(field==4)bad.state.action=1;
         if(field==5)bad.state.velocity[2]=1;

@@ -61,7 +61,11 @@ Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
     if(p.vehicle && q.kind==Kind::Presence && !vehicleValid(q.state)) return Error::Range;
     if(q.kind==Kind::Environment) {
         if(p.environmentRange && q.t0>=EnvironmentDayMs)return Error::Range;
-        if(p.reserved && (q.t1||q.t2||q.state.flags||q.state.action||b[63]||q.byeReason||
+        // t1: bit 32 = a rain sample follows in bits 0..15 (int16 thousandths); nothing else may be set.
+        if(p.reserved && (q.t1&~((uint64_t(1)<<32)|0xffffu)))return Error::Reserved;
+        if(p.reserved && q.t1 && !(q.t1>>32))return Error::Reserved;
+        if(p.environmentRange && (q.t1>>32) && std::abs(int16_t(uint16_t(q.t1&0xffffu))/1000.f)>EnvironmentRainMax)return Error::Range;
+        if(p.reserved && (q.t2||q.state.flags||q.state.action||b[63]||q.byeReason||
             q.state.position!=State{}.position||q.state.velocity!=State{}.velocity||q.state.yaw||
             q.state.health!=255||q.state.stamina!=255))return Error::Reserved;
     }
@@ -246,7 +250,7 @@ Error Core::receive(const uint8_t* b,size_t n,uint64_t now) {
         if(protections_.environmentOrder && (!q.sequence||(haveEnvironment_&&(advance==0||advance>=0x80000000u||q.stamp<=environmentStamp_))))return fail(Error::Duplicate);
         double mapped=double(q.stamp)-offset_;
         if(protections_.environmentFresh && (!clockValid_||mapped<0||std::abs(mapped-double(now))>2000))return fail(Error::Time);
-        environment_={uint32_t(q.t0)};haveEnvironment_=true;environmentIn_=q.sequence;environmentStamp_=q.stamp;environmentReceived_=now;
+        environment_={uint32_t(q.t0),(q.t1>>32)!=0,(q.t1>>32)?int16_t(uint16_t(q.t1&0xffffu))/1000.f:0.f};haveEnvironment_=true;environmentIn_=q.sequence;environmentStamp_=q.stamp;environmentReceived_=now;
         // Optional traffic cannot keep a dead presence connection alive.
         return fail(Error::None);
     }
@@ -328,9 +332,11 @@ void Core::frame(uint64_t now) { Render r=render(now); if(protections_.gate && p
 void Core::disconnect(uint64_t now) { if(connected_) send(Kind::Bye,now); reset(true); }
 bool Core::sendEnvironment(Environment value,uint64_t now) {
     if(!connected_||config_.role!=Role::Host||value.timeOfDayMs>=EnvironmentDayMs)return false;
+    if(value.haveRain&&!(std::isfinite(value.rain)&&std::abs(value.rain)<=EnvironmentRainMax))return false;
     if(protections_.environmentRate && sentEnvironment_&&(now<environmentSent_||now-environmentSent_<30000))return false;
     Packet q;q.kind=Kind::Environment;q.role=config_.role;q.session=config_.session;q.nonce=config_.nonce;q.echo=peer_;
     q.stamp=now;q.sequence=++environmentOut_;q.t0=value.timeOfDayMs;
+    if(value.haveRain)q.t1=(uint64_t(1)<<32)|uint16_t(int16_t(std::lround(value.rain*1000)));
     transport_.send(encode(q));sentEnvironment_=true;environmentSent_=now;return true;
 }
 std::optional<Environment> Core::latestEnvironment(uint64_t now) const {
