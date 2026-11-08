@@ -17,7 +17,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('structure',['PACK','NET','REMOVED','EARLY'],['structures_test.cpp','structures.cpp','discovery.cpp']),
           ('body',['ANY_CLASS'],['body_test.cpp','body.cpp','discovery.cpp']),
           ('auto',['ONCE_IN_GAME'],['auto_continue_test.cpp']),
-          ('marker',['LEFT','TWICE','RATE','FOREIGN'],['marker_test.cpp','marker.cpp','discovery.cpp']),
+          ('marker',['LEFT','TWICE','RATE','FOREIGN','NEAR'],['marker_test.cpp','marker.cpp','discovery.cpp']),
           ('gear',['CARGO','HIDDEN','NESTED','STALE_WORLD','VISIBILITY','SLOTS','FLICKER','ORDINAL','MIXED','RESEND'],['gear_test.cpp','gear.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
           ('outfit',['COUNT','SKIP','RESEND'],['outfit_test.cpp','outfit.cpp','discovery.cpp']),
           ('ride',['LEAK','IDENTITY'],['ride_test.cpp','ride.cpp','providers.cpp','pose.cpp','discovery.cpp','../core/core.cpp'])]

@@ -359,7 +359,8 @@ struct Runtime final:ds::Transport {
                 else note(("MARKER ping "+std::to_string(p->ref)+" shown here only (no partner)\n").c_str());
             }
         }
-        markers->tick(now,partner,hidden);
+        std::optional<std::array<double,3>> local;if(anchor.entity&&anchor.pose.available)local=anchor.pose.position;
+        markers->tick(now,partner,hidden,local);
     }
     // --- end map markers
     // --- ds3: what the partner carries (carry_visual.h); opt-in with carry_visual, read-only, the sink only logs ---

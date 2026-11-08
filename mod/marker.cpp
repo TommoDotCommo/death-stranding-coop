@@ -99,7 +99,7 @@ void Markers::drop(Slot& s,const std::vector<Record>& records){
     for(auto& r:records)if(ours(s.placed,s.pending,s.id,s.at,s.group,r)){api_.remove(r.index);++removals_;break;}
     s.placed=s.pending=false;s.id=0;
 }
-void Markers::tick(uint64_t now,const std::optional<std::array<double,3>>& partner,bool hidden){
+void Markers::tick(uint64_t now,const std::optional<std::array<double,3>>& partner,bool hidden,const std::optional<std::array<double,3>>& local){
     if(!enabled_)return;
     auto records=api_.read();if(records.empty())return;   // no manager (title screen, loading): nothing to do
     sync(partner_,records);sync(ping_,records);
@@ -113,11 +113,15 @@ void Markers::tick(uint64_t now,const std::optional<std::array<double,3>>& partn
             log_("MARKER removed a leftover mod marker in group "+std::to_string(r.group)+" at "+where(r.position)+"\n");}
     if(removed)return;   // read again next tick (a removal can close up a route)
     // The partner: shown while he is in this world and this porter is not hidden; moved at most once a second.
-    bool want=partner&&!hidden;
+    bool near=false;
+#ifndef MUTANT_MARKER_NEAR
+    if(partner&&local)near=std::hypot((*partner)[0]-(*local)[0],(*partner)[1]-(*local)[1],(*partner)[2]-(*local)[2])<Near;
+#endif
+    bool want=partner&&!hidden&&!near;
 #ifdef MUTANT_MARKER_LEFT
     want=true;if(!partner)return;   // never takes the marker away
 #endif
-    if(!want){if(partner_.placed||partner_.pending){drop(partner_,records);log_(hidden?"MARKER partner marker removed (event or private room here)\n":"MARKER partner marker removed (partner gone)\n");}}
+    if(!want){if(partner_.placed||partner_.pending){drop(partner_,records);log_(hidden?"MARKER partner marker removed (event or private room here)\n":near?"MARKER partner marker removed (partner near)\n":"MARKER partner marker removed (partner gone)\n");}}
     else if(foreign(partner_,records)){
         if(!takenNoted_)log_("MARKER group "+std::to_string(partner_.group)+" holds the player's markers: partner marker not shown\n");
         takenNoted_=true;}

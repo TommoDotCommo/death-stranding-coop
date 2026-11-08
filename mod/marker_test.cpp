@@ -41,6 +41,15 @@ int main(){
       unsigned hits=0;for(int i=0;i<200000;++i){float x=float(-5000+i*0.04999123),y=float(3000-i*0.03311);hits+=stamped({x,y,float(i%97)});}
       CHECK(hits<=5); }   // expected 200000 / 2^18, below one
     // Off by default: nothing is read or written.
+    {   // near the partner: no pin (the game deletes a pin the player reaches, so it would be re-placed and reached every
+        // second); it comes back once he is farther than Near, and a pin deleted by the game is not re-placed while near.
+        World w;Markers m(w.api(),logger);m.enable(true);
+        m.tick(0,P{100,0,0},false,P{0,0,0});CHECK(w.sets==1);
+        for(auto& r:w.r)if(r.used)w.remove(r.index);                         // reached: the game deletes it
+        for(uint64_t t=10;t<=5000;t+=10)m.tick(t,P{5,0,0},false,P{0,0,0});    // standing beside him
+        CHECK(w.sets==1);
+        for(uint64_t t=5010;t<=8000;t+=10)m.tick(t,P{50,0,0},false,P{0,0,0}); // he walks off
+        CHECK(w.sets==2); }
     { World w;Markers m(w.api(),logger);m.tick(0,P{1,2,3},false);m.partnerPing({7,{1,1,1}},0);CHECK(!m.localPing({1,1,1},0));
       m.tick(10,P{1,2,3},false);CHECK(w.sets==0&&w.removes==0); }
     // The partner marker: placed at once in group 4, point 0; follows the partner at most once a second.

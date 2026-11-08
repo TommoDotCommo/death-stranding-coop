@@ -55,7 +55,11 @@ public:
     bool enabled() const {return enabled_;}
     // Once per game tick. partner: where the partner is in this world (game axes) while he is shown here; nothing when
     // disconnected, in his private room or an event. hidden: this porter is in an event or his private room.
-    void tick(uint64_t now,const std::optional<std::array<double,3>>& partner,bool hidden);
+    // local: this porter (game axes). Within Near metres of the partner no pin is shown: he can be seen, and the game
+    // deletes a user pin the player reaches ("You have reached Marker E"), so a pin kept there would be re-placed and
+    // reached again every second (live 2026-11-08).
+    void tick(uint64_t now,const std::optional<std::array<double,3>>& partner,bool hidden,const std::optional<std::array<double,3>>& local={});
+    static constexpr double Near=20.0;
     // The partner pinged: shown once per ref, however often the event arrives.
     void partnerPing(const Ping&,uint64_t now);
     // This porter pings: shown here and returned for the partner (nothing while the feature is off).
