@@ -1,5 +1,7 @@
 #include "ride.h"
 #include "providers.h"
+#include "gear.h"
+#include <memory>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -58,6 +60,24 @@ void PartnerVehicle::tick(uint64_t now,bool permitted,uint8_t kind,const Transfo
 namespace {
 void require(bool ok,const char* m){if(!ok)throw std::runtime_error(m);}
 bool q(const discovery::Sampler& s,uint64_t a,uint64_t& v){return s.read(a,&v,8);}
+// An empty cargo carrier with a slot for every slot type (0..255): the gear copies' layout (gear.h, EmptyCarrier), wide
+// enough for a vehicle. The porter's cargo logic near a truck asks for slot type 0x45 and writes the slot it gets
+// (0x279e228..0x279e232, live 2026-11-09: a 32-type carrier returned none and the game faulted).
+struct VehicleCarrier {
+    static constexpr unsigned Types=256;
+    alignas(16) unsigned char carrier[0x100]{};
+    uint64_t slots[Types]{};
+    alignas(16) unsigned char slot[Types][0x100]{};
+    VehicleCarrier(){
+        int32_t count=int32_t(Types);uint64_t array=reinterpret_cast<uint64_t>(slots);
+        std::memcpy(carrier+0x10,&count,4);std::memcpy(carrier+0x18,&array,8);
+        for(unsigned i=0;i<Types;++i){slot[i][1]=uint8_t(i);slots[i]=reinterpret_cast<uint64_t>(slot[i]);}
+        static_assert(sizeof(CRITICAL_SECTION)==gear::LockSize,"CRITICAL_SECTION size");
+        InitializeCriticalSection(reinterpret_cast<CRITICAL_SECTION*>(carrier+gear::CarrierLock));
+        for(auto& one:slot)InitializeCriticalSection(reinterpret_cast<CRITICAL_SECTION*>(one+gear::SlotLock));
+    }
+    uint64_t address() const {return reinterpret_cast<uint64_t>(carrier);}
+};
 }
 #endif
 Api nativeApi(discovery::Sampler& s){
@@ -96,14 +116,32 @@ Api nativeApi(discovery::Sampler& s){
     for(unsigned i=0;i<4;++i)record(pool+0x40+0x50*i);
     auto table=[bike,truck](uint8_t kind){return kind==1?bike:kind==2?truck:0;};
     auto* sp=&s;
+    // The display vehicle skips the game's vehicle setup and has no cargo carrier (its DSBaggage2CarrierComponent +0x50
+    // is null); the porter's cargo logic near a vehicle reads it (0x2796646 -> 0x2f66d80 -> 0x2c52010) and faulted live
+    // (2026-11-09). Each carrier component gets an empty carrier the mod owns, as the gear copies do (gear.h), with every
+    // slot type.
+    auto carriers=std::make_shared<std::vector<std::unique_ptr<VehicleCarrier>>>();   // kept for the process
+    auto giveCarriers=[sp,carriers](uint64_t e){
+        uint32_t count=0;uint64_t list=0;unsigned given=0;
+        if(!sp->read(e+gear::ComponentCount,&count,4)||count>gear::MaxComponents||!q(*sp,e+gear::ComponentArray,list))return -1;
+        for(uint32_t i=0;i<count;++i){uint64_t c=0,v=0,current=1;
+            if(q(*sp,list+8*i,c)&&c&&q(*sp,c,v)&&v==sp->base+gear::CarrierComponentVtable&&q(*sp,c+gear::ComponentCarrier,current)&&!current){
+                carriers->push_back(std::make_unique<VehicleCarrier>());
+                *reinterpret_cast<uint64_t*>(c+gear::ComponentCarrier)=carriers->back()->address();++given;}}
+        return int(given);};
     Api api;
-    api.spawn=[create,pool,table,sp](uint8_t kind,const Transform& t)->uint64_t{
+    api.spawn=[create,pool,table,sp,giveCarriers](uint8_t kind,const Transform& t)->uint64_t{
         if(!table(kind))return 0;
         unsigned used=0;for(unsigned i=0;i<4;++i)if(*reinterpret_cast<uint64_t*>(pool+8*i))++used;
         if(used==4)return 0;   // the creator does not check capacity itself
         alignas(8) uint16_t descriptor[2]={uint16_t(kind==1?3:2),0};   // unit type: truck 2, motorbike 3; variant 0
         auto e=create(pool,descriptor,&t,0.f);
         uint64_t v=0;if(!e||!q(*sp,e,v)||v!=table(kind))return 0;
+        if(giveCarriers(e)<0)return 0;
+        // Occupied (+0x63c, written only by the driver registration 0x2f7c4c0/release): the vehicle update then keeps its
+        // "free" bit (+0x560 bit 1) clear (0x2f7920b..0x2f79222), so the porter's use/load checks skip it; a free display
+        // vehicle reached its missing GameActor (+0x8a8) through 0x2f6f700 and faulted live (2026-11-09).
+        *reinterpret_cast<uint32_t*>(e+0x63c)=1;*reinterpret_cast<uint32_t*>(e+0x560)&=~2u;
         return e;};
     api.remove=[remove,pool](uint64_t e){remove(pool,e);};
     api.alive=[table,sp,pool](uint64_t e,uint8_t kind){
