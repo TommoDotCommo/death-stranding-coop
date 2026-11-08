@@ -13,7 +13,9 @@
 // --build builds one structure (a Player type of EDSConstructionPointType, e.g. 25 ladder) where the partner stands;
 // --unbuild-after dismantles it SECONDS later.
 // --vehicle KIND ON OFF: from ON to OFF seconds after connecting the partner rides vehicle KIND (1 motorbike, 2 truck): its
-// presence carries the vehicle block (origin at the stand-in's feet, level, facing its way).
+// presence carries the vehicle block (origin at the stand-in's feet, level, facing its way). --seat F R U (metres,
+// vehicle frame: forward, right, up) reports the stand-in at that seat above the vehicle origin, as a real rider is
+// (a truck driver measured live: 0.8 0.44 left, 1.95 up -> --seat 0.8 -0.44 1.95).
 // --carry tells the game what the partner carries (carry_visual.h; the game needs carry_visual true): SPEC is
 // "hash[:slot[:count]],..." (slot 1 BackPack, 6 LeftHand, 7 RightHand; default 1 and 1), sent once connected and again
 // after every reconnect; --carry-drop-after puts it all down SECONDS after connecting. What the game's porter carries
@@ -23,6 +25,7 @@
 #include "carry_visual.h"
 #include "environment.h"
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -53,11 +56,15 @@ struct Shell final:ds::StateProvider,ds::Transport {
     ds::Progress readProgress() const override {return progress;}
     Follower follower;std::optional<Replay> replay;std::optional<ds::State> porter,mine;
     uint64_t started=0,last=0;double replayLoop=0;bool stickyTeleport=false;std::array<double,3> replayOrigin{};bool replayPlaced=false,whereRecorded=false;
-    uint8_t rideKind=0;bool riding=false;
+    uint8_t rideKind=0;bool riding=false;std::array<double,3> seat{};
     bool readLocal(ds::State& s) override {
         if(!mine)return false;
         s=*mine;if(stickyTeleport)s.flags|=ds::Teleport;
-        if(riding&&rideKind){s.vehicle=rideKind;s.flags|=ds::Vehicle;s.vehicleOffset={0,0,0};s.vehicleAngles={s.yaw,0,0};}
+        if(riding&&rideKind){
+            // Game forward (sin yaw, cos yaw), right (cos yaw, -sin yaw), z up; adapter axes are (x, up, game y).
+            double sy=std::sin(s.yaw),cy=std::cos(s.yaw),gx=seat[0]*sy+seat[1]*cy,gy=seat[0]*cy-seat[1]*sy;
+            s.position[0]+=gx;s.position[1]+=seat[2];s.position[2]+=gy;
+            s.vehicle=rideKind;s.flags|=ds::Vehicle;s.vehicleOffset={-gx,-seat[2],-gy};s.vehicleAngles={s.yaw,0,0};}
         return true;
     }
     bool isInCutsceneOrLoading() const override {return false;}
@@ -113,6 +120,7 @@ int main(int argc,char** argv){
         else if(a=="--unbuild-after")unbuildAfter=std::stod(next());
         else if(a=="--carry"){carrySpec=mod::carry::parseSpec(next());if(!carrySpec)usage("--carry takes hash[:slot[:count]],... (cargo slots 1..9) or none");}
         else if(a=="--carry-drop-after")carryDropAfter=std::stod(next());
+        else if(a=="--seat"){for(auto& x:shell.seat)x=std::stod(next());}
         else if(a=="--vehicle"){auto k=std::stoul(next());if(k<1||k>ds::VehicleKindMax)usage("vehicle kind is 1..3");shell.rideKind=uint8_t(k);rideOn=std::stod(next());rideOff=std::stod(next());}
         else if(a=="--take-after")takeAfter=std::stod(next());else if(a=="--take-own-after")takeOwnAfter=std::stod(next());
         else usage(("unknown option "+a).c_str());
