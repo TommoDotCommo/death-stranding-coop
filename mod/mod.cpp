@@ -61,7 +61,17 @@ constexpr int INVALID_SOCKET=-1;
 #include <chrono>
 #include <mutex>
 #include <sstream>
+#include <future>
 #include <thread>
+// A one-off job on its own thread: the signature checks behind each native API read the whole code section (about
+// 200 ms each, live 2026-11-09), which stalled the game thread when a feature first ran. They only read memory, so they
+// run beside the game; the feature starts on the tick after its check is done.
+template<class T> struct Background {
+    std::future<T> job;bool started=false;
+    bool ready(std::function<T()> make){
+        if(!started){started=true;job=std::async(std::launch::async,std::move(make));}
+        return job.valid()&&job.wait_for(std::chrono::seconds(0))==std::future_status::ready;}
+};
 #include <vector>
 
 namespace {
@@ -358,7 +368,7 @@ struct Runtime final:ds::Transport {
     }
     // --- The partner's carried cargo drawn on the partner body (cargo_stack.h): with carry_visual, from the partner's
     // carry summary (backpack slot); `puppet.ride` "stack N" / "stack auto" / "stack off" / "stack at ..." test it.
-    std::unique_ptr<mod::stack::Stack> cargoStack;bool stackTried=false;int stackTest=-1;uint64_t stackPorter=0;
+    std::unique_ptr<mod::stack::Stack> cargoStack;bool stackTried=false;Background<mod::stack::Api> stackJob;int stackTest=-1;uint64_t stackPorter=0;
     std::optional<mod::stack::Layout> stackLayout;
     static std::vector<mod::stack::Item> backpackItems(const std::optional<mod::carry::Summary>& s){
         std::vector<mod::stack::Item> out;if(s)for(auto& e:*s)if(e.slot==1)for(unsigned i=0;i<e.count;++i)out.push_back({e.hash,e.variant});   // 1: BackPack
@@ -367,8 +377,15 @@ struct Runtime final:ds::Transport {
         bool on=(config.carryVisual&&stackTest!=-2)||stackTest>=0;
         if(!on){if(cargoStack)cargoStack->tick(false,{},nullptr);return;}
 #ifndef MOD_FAKE_NETWORK
-        if(!cargoStack&&!stackTried){stackTried=true;
-            try{cargoStack=std::make_unique<mod::stack::Stack>(mod::stack::nativeApi(*sampler),[this](const std::string& row){note(row.c_str());});
+        if(!cargoStack&&!stackTried){
+            auto* sp=&*sampler;if(!stackJob.ready([sp]{return mod::stack::nativeApi(*sp);}))return;   // checked beside the game
+            stackTried=true;
+            try{auto api=stackJob.job.get();
+                // Slow native calls are logged (a case's first mesh can stall a tick while the game sets it up).
+                auto slow=[this](const char* what,uint64_t us){if(us>=10000)note((std::string("STACK slow ")+what+" "+std::to_string(us/1000)+" ms\n").c_str());};
+                api.caseFor=[f=api.caseFor,slow](uint32_t item,bool variant){auto t=mod::nowUs();auto r=f(item,variant);slow("case lookup",mod::nowUs()-t);return r;};
+                api.create=[f=api.create,slow](const mod::stack::Case& c,const mod::puppet::Transform& at){auto t=mod::nowUs();auto r=f(c,at);slow("mesh create",mod::nowUs()-t);return r;};
+                cargoStack=std::make_unique<mod::stack::Stack>(std::move(api),[this](const std::string& row){note(row.c_str());});
                 if(stackLayout)cargoStack->layout=*stackLayout;}
             catch(const std::exception& e){note((std::string("STACK unavailable: ")+e.what()+"\n").c_str());}}
 #endif
@@ -386,12 +403,14 @@ struct Runtime final:ds::Transport {
     // --- Likes for the partner (likes.h): opt-in partner_likes. L sends one like (at most one per 1.5 s); a like that
     // arrives is given to this porter the game's way (at most one a second, ten a minute).
     std::vector<ds::CargoEvent> likeIn;mod::likes::Sender likeTx;mod::likes::Receiver likeRx;mod::marker::KeyEdge likeEdge;
-    std::optional<mod::likes::Api> likesApi;bool likesTried=false;uint64_t likesSent=0,likesGiven=0;
+    std::optional<mod::likes::Api> likesApi;bool likesTried=false;Background<mod::likes::Api> likesJob;uint64_t likesSent=0,likesGiven=0;
     void tickLikes(uint64_t now) {
         if(!config.partnerLikes||!core){likeIn.clear();return;}
 #ifndef MOD_FAKE_NETWORK
-        if(!likesTried){likesTried=true;
-            try{likesApi=mod::likes::nativeApi(*sampler);note("LIKE on (config), key L\n");}
+        if(!likesTried){
+            auto* sp=&*sampler;if(!likesJob.ready([sp]{return mod::likes::nativeApi(*sp);})){likeIn.clear();return;}
+            likesTried=true;
+            try{likesApi=likesJob.job.get();note("LIKE on (config), key L\n");}
             catch(const std::exception& e){note((std::string("LIKE unavailable: ")+e.what()+"\n").c_str());}}
 #endif
         bool coop=partnerMode()&&core->connected()&&!inEvent;
@@ -407,7 +426,7 @@ struct Runtime final:ds::Transport {
         likeIn.clear();
     }
     std::filesystem::path markerCommand;std::unique_ptr<mod::marker::Markers> markers;std::vector<ds::CargoEvent> pingIn;
-    mod::marker::KeyEdge pingEdge;unsigned pingKey=0;bool markerConfigDone=false;
+    mod::marker::KeyEdge pingEdge;unsigned pingKey=0;bool markerConfigDone=false;Background<mod::marker::Api> markerJob;
     void makeMarkers() {
 #ifdef MOD_FAKE_NETWORK
         note("MARKER unavailable: the fake world has no map markers\n");
@@ -420,8 +439,19 @@ struct Runtime final:ds::Transport {
     void tickMarkers(uint64_t now) {
         auto stamp=mod::runStamp();bool ping=false;
         // partner_marker: the pin and the partner's pings from the start; no ping key (whether V is free is unverified).
-        if(config.partnerMarker&&!markerConfigDone){markerConfigDone=true;if(!markers)makeMarkers();
-            if(markers){markers->enable(true);pingKey=0;note("MARKER on (config), no ping key\n");}}
+        if(config.partnerMarker&&!markerConfigDone&&!markers){
+#ifndef MOD_FAKE_NETWORK
+            auto* sp=&*sampler;
+            if(markerJob.ready([sp]{return mod::marker::nativeApi(*sp);})){markerConfigDone=true;   // checked beside the game
+                try{markers=std::make_unique<mod::marker::Markers>(markerJob.job.get(),[this](const std::string& row){note(row.c_str());});
+                    markers->setRefBase((nonce()>>32)<<20);}
+                catch(const std::exception& e){note((std::string("MARKER unavailable: ")+e.what()+"\n").c_str());}
+                if(markers){markers->enable(true);pingKey=0;note("MARKER on (config), no ping key\n");}}
+#else
+            markerConfigDone=true;makeMarkers();
+#endif
+        }
+        else if(config.partnerMarker&&!markerConfigDone){markerConfigDone=true;markers->enable(true);pingKey=0;note("MARKER on (config), no ping key\n");}
         if(!markerCommand.empty()&&std::filesystem::exists(markerCommand)) {
             auto text=readConfig(markerCommand);
             if(!std::filesystem::remove(markerCommand))throw std::runtime_error("cannot consume marker command");
