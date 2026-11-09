@@ -14,6 +14,7 @@ struct Config {
     // double) or "own" (a Sam the mod makes; the double until it exists). Requires puppet_probe and an explicit role.
     std::string partner="off";
     bool partnerVehicle=false; // the partner's vehicle drawn under him while he rides (ride.h)
+    bool partnerTag=false;     // the partner's name (their nickname) over the partner body (nametag.h)
     bool partnerLikes=false;   // L gives the partner a like; the partner's likes arrive as the game's likes (likes.h)
     bool partnerMarker=false; // the partner's map pin and the partner's pings from the start (marker.h); no ping key
     bool partnerGear=false;   // the porter's visible gear copied onto the partner's own body (gear.h)

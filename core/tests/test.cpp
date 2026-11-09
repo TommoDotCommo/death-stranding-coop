@@ -123,7 +123,8 @@ void cargoTests() {
       auto gear=cargo(4,34); gear.state.action=7; check(f.receive(gear,170)==Error::None,"cargo_gear_type");       // the gear the porter wears (optional)
       auto outfit=cargo(5,35); outfit.state.action=8; check(f.receive(outfit,175)==Error::None,"cargo_outfit_type"); // the porter's art parts (optional)
       auto like=cargo(6,36); like.state.action=9; check(f.receive(like,178)==Error::None,"cargo_like_type");          // a like for the porter (optional)
-      auto carried=f.core.takeCargo(); check(carried.size()==4&&carried[0].type==6&&carried[1].type==7&&carried[1].item==34&&carried[2].type==8&&carried[3].type==9,"cargo_carry_type"); }
+      auto name=cargo(7,37); name.state.action=10; check(f.receive(name,179)==Error::None,"cargo_name_type");        // a chunk of the partner's name (optional)
+      auto carried=f.core.takeCargo(); check(carried.size()==5&&carried[0].type==6&&carried[1].type==7&&carried[1].item==34&&carried[2].type==8&&carried[3].type==9&&carried[4].type==10,"cargo_carry_type"); }
     // A ping (type 5) travels like any cargo event: delivered once, with its place and ref.
     { Fixture f; Packet p=f.presence(1,0); p.kind=Kind::Cargo; p.state.action=5; p.t0=0; p.t1=91; p.t2=4242; p.state.position={1,2,3};
       check(f.receive(p,100)==Error::None,"cargo_ping"); f.receive(p,110);

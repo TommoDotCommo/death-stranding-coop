@@ -33,6 +33,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "ride.h"
 #include "cargo_stack.h"
 #include "likes.h"
+#include "nametag.h"
 #include "weather.h"
 #include "environment.h"
 #include "auto_continue.h"
@@ -241,6 +242,7 @@ struct Runtime final:ds::Transport {
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
             if(e.type==mod::likes::WireType){likeIn.push_back(e);continue;}   // a like (tickLikes, likes.h)
+            if(e.type==mod::nametag::WireType){if(auto n=nameRx.feed(e)){partnerName=*n;note(("TAG partner name "+std::to_string(n->size())+" bytes\n").c_str());}continue;}   // nametag.h
             if(e.type==mod::outfit::WireType){               // the partner's art parts (tickGear, outfit.h)
                 if(auto p=mod::outfit::decode(e)){if(!partnerParts||*partnerParts!=*p)note(("OUTFIT the partner wears "+std::to_string(__builtin_popcountll(p->enabled))+" of "+std::to_string(p->count)+" parts\n").c_str());partnerParts=*p;}
                 continue;
@@ -323,6 +325,8 @@ struct Runtime final:ds::Transport {
             else if(text=="off"+stamp){rideOn=false;rideLead=0;}
             else if(text=="park"+stamp){rideLead=0xff;}   // test: the lead vehicle stops where it is
             else if(text=="rider"+stamp){rideHideRider=!rideHideRider;}
+            else if(text=="tag on"+stamp){tagTest=true;}              // test: a name over the partner body
+            else if(text=="tag off"+stamp){tagTest=false;}
             else if(text=="stack off"+stamp){stackTest=-2;}            // test: no cases drawn
             else if(text=="stack auto"+stamp){stackTest=-1;}           // the partner's summary (the default)
             else if(text.rfind("stack ",0)==0&&text.size()>stamp.size()&&text.compare(text.size()-stamp.size(),stamp.size(),stamp)==0){
@@ -424,6 +428,29 @@ struct Runtime final:ds::Transport {
             else note("LIKE dropped: no likes state\n");
         }
         likeIn.clear();
+    }
+    // --- A name over the partner (nametag.h): one of the game's hologram-name records above the partner body.
+    // On with config partner_tag; `puppet.ride` "tag on" / "tag off" test it. The name is the partner's nickname.
+    std::unique_ptr<mod::nametag::Tag> nameTag;bool tagTried=false,tagTest=false;Background<mod::nametag::Api> tagJob;uint64_t tagPorter=0;
+    mod::nametag::Sender nameTx;mod::nametag::Receiver nameRx;std::string partnerName;
+    void tickTag(uint64_t body,const mod::puppet::Anchor& anchor) {
+        // This player's name goes to the partner on every connection (both ends send; each shows the other's).
+        if(core)for(auto& e:nameTx.tick(config.nickname,core->connected()&&partnerMode()))core->queueCargo(e);
+        if(!tagTest&&!config.partnerTag){if(nameTag)nameTag->tick(false,u"",nullptr);return;}
+#ifndef MOD_FAKE_NETWORK
+        if(!nameTag&&!tagTried){auto* sp=&*sampler;if(!tagJob.ready([sp]{return mod::nametag::nativeApi(*sp);}))return;
+            tagTried=true;
+            try{nameTag=std::make_unique<mod::nametag::Tag>(tagJob.job.get(),[this](const std::string& row){note(row.c_str());});}
+            catch(const std::exception& e){note((std::string("TAG unavailable: ")+e.what()+"\n").c_str());}}
+#endif
+        if(!nameTag)return;
+        if(anchor.entity!=tagPorter){if(tagPorter)nameTag->forget("world changed");tagPorter=anchor.entity;}
+        uint64_t flags=0;bool shown=body&&sampler->read(body+mod::gear::Flags,&flags,8)&&(flags&mod::gear::FlagVisible);
+        auto pose=body?mod::puppet::readEntityPose(*sampler,body):mod::Pose{};
+        if(!shown||inEvent||!(pose.available&&pose.coherent)){nameTag->tick(false,u"",nullptr);return;}
+        std::array<double,3> at=pose.position;at[2]+=2.1;   // game axes, z up: above the head
+        auto name=mod::nametag::fromUtf8(partnerName);if(name.empty())name=u"Partner";
+        nameTag->tick(true,name,&at);
     }
     std::filesystem::path markerCommand;std::unique_ptr<mod::marker::Markers> markers;std::vector<ds::CargoEvent> pingIn;
     mod::marker::KeyEdge pingEdge;unsigned pingKey=0;bool markerConfigDone=false;Background<mod::marker::Api> markerJob;
@@ -1110,6 +1137,8 @@ struct Runtime final:ds::Transport {
         tickGear(useOwn?ownEntity:0,anchor,now);
         stages.enter("stack",mod::nowUs());
         tickStack(useOwn?ownEntity:0,anchor);
+        stages.enter("tag",mod::nowUs());
+        tickTag(useOwn?ownEntity:0,anchor);
         stages.enter("ride",mod::nowUs());
         tickRide(anchor,now);
     }

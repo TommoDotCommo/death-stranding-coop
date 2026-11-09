@@ -3988,3 +3988,262 @@ Project(screen_out, menu_context, world_float4); // RVA 0x329dd60
 **Inferred — risks:** Menu lifetime, clone visibility defaults, inherited anchors, glyph availability and mutation timing relative to UI jobs need validation. Resource-based cloning also participates in menu resource lookup, so interference with stock lookups must be checked. Clear stale handles across menu destruction/reload; never free native UI objects with the mod’s allocator. No single native “attach custom nameplate to arbitrary entity” API was established—the proposed recipe supplies world anchoring explicitly.
 
 **Live (2026-11-09):** `0x2e4eeb0(1, nullptr, 17)` on the game thread raised `+18`/`+28` by one and the reason-17 counters by one, with the stock like counter popup ("+1").
+
+## Finding the marker HUD and a custom label — static follow-up
+
+**Established — scope:** Static inspection of build 13300582, executable SHA-256 `9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b`. Addresses below are RVAs; add the loaded image base. Disassembly used `x86_64-w64-mingw32-objdump -d -M intel`. Runtime population, display and mutation safety were not tested.
+
+**Established — descriptor correction:** The marker logic’s type descriptor begins at **`0x4cf0800`**. `0x4cf0810` is inside its construction metadata. Its runtime vtable remains `0x3e53b50`.
+
+```asm
+307a180: lea rax,[image+4cf0800]
+307a187: ret
+
+; Construction metadata:
+[image+4cf0820] = image+307c700
+
+307c700: test rdx,rdx
+307c703: je   307c70d
+307c705: mov  rcx,rdx
+307c708: jmp  307f430
+
+307f455: lea rax,[image+3e53b50]
+307f462: mov [rdi],rax
+```
+
+**Established — construction and ownership:** The menu’s logic factory at `0x36ffb50` obtains each logic type from its resource, constructs it through reflection, initializes it with the resource and menu, and appends it to the menu’s logic array.
+
+```asm
+36ffb90: mov  rsi,[r15]             ; logic resource
+36ffb96: mov  rax,[rsi]
+36ffb99: call qword ptr [rax+68]    ; runtime logic descriptor
+36ffb9c: mov  rcx,rax
+36ffb9f: call 19f4830              ; reflected allocation/construction
+36ffba4: mov  rbx,rax              ; new logic
+36ffba7: mov  r8,rdi               ; menu
+36ffbaa: mov  rdx,rsi              ; resource
+36ffbad: mov  rcx,rbx
+36ffbb3: call qword ptr [rax+10]    ; base initialization
+
+36ffbbc: mov  rcx,[rdi+1b0]        ; logic pointer array
+...
+36ffc20: movsxd rdx,dword ptr [rdi+1a8]
+36ffc27: lea  r8,[rcx+rdx*8]
+36ffc30: mov  [r8],rbx             ; retain constructed logic
+36ffc3c: lea  eax,[rdx+1]
+36ffc3f: mov  [rdi+1a8],eax
+```
+
+**Established:** For the marker resource, vtable `0x3e4eb20`, slot `+0x68` selects `0x307a180`, completing the route to the constructor above. Reflection allocator `0x19f4830` allocates at `0x19f48f4`, invokes the construction function at `0x19f494c`, and returns the allocated instance at `0x19f4962`.
+
+**Established:** Base initialization `0x36ff800` writes the resource and menu. These fields are already present when marker-specific initialization `0x308b1f0` runs.
+
+```asm
+36ff819: mov [rcx+08],rdx           ; logic resource
+36ff81d: mov [rcx+18],r8            ; owning menu
+```
+
+**Established — global-to-HUD chain:** The player-manager global is `0x7bc7568`. Native UI code obtains player number zero, then follows player `+0xd0` to its view and view `+0x610` to its HUD menu:
+
+```asm
+30064c5: mov  rcx,[image+7bc7568]
+30064cc: xor  edx,edx
+30064d8: call 23c60b0               ; player number zero
+30064e4: mov  rdx,[rax+d0]          ; player view
+30064eb: mov  rax,[rdx+610]         ; HUD menu
+30064f2: mov  rbx,[rax+190]         ; menu resource
+```
+
+**Established:** `0x23c60b0` implements the player-number lookup by walking the manager’s pointer array:
+
+```asm
+23c60b0: mov    rax,[rcx+40]        ; player array
+23c60b4: movsxd rcx,dword ptr [rcx+38]
+23c60b8: lea    r8,[rax+rcx*8]
+...
+23c60c1: mov    rcx,[rax]
+23c60c4: cmp    [rcx+88],edx        ; requested player number
+23c60ca: je     23c60d8
+...
+23c60d8: mov    rax,rcx
+23c60db: ret
+```
+
+**Established — this is the HUD menu:** View initialization `0x3618c10` destroys the previous menu at view `+0x610`, constructs its replacement using menu constructor `0x36fa020`, and stores it back there:
+
+```asm
+3618c52: lea  rbx,[rsi+610]
+3618c59: mov  rdi,[rbx]
+...
+3618c64: call 36fb0c0               ; destroy old menu
+3618c71: call 1951c70               ; release its allocation
+3618c76: mov  [rbx],r12             ; clear slot
+3618c79: mov  rax,[image+7bc7df8]
+3618c80: mov  rcx,[rax+110]         ; GameViewResource
+3618c87: mov  rbp,[rcx+70]          ; HUD resource
+...
+3618cc3: call 36fa020
+3618cc8: mov  rdi,rax
+...
+3618cfa: mov  [rbx],rdi
+```
+
+**Established:** `GameViewResource` descriptor `0x4e634c0` identifies its member table at `0x4e62080`; member record `0x4e62400` names offset `+0x70` **`HUD`**.
+
+**Inferred — concrete acquisition procedure:** Read the following chain with bounded counts, readable-pointer checks and a final chain recheck:
+
+```text
+M = *(base + 0x7bc7568)
+P = player in *(M+0x40)[0 .. i32(M+0x38))
+    whose u32(P+0x88) == 0
+
+V = *(P + 0xd0)
+H = *(V + 0x610)
+
+L = unique pointer in *(H+0x1b0)[0 .. i32(H+0x1a8))
+    whose first pointer == base + 0x3e53b50
+    and whose *(L+0x18) == H
+```
+
+**Inferred:** Select the marker logic belonging to this player-zero HUD menu. A process-wide vtable scan could find another view’s instance or an object undergoing destruction. If the selected HUD contains zero or multiple matching initialized logics, refuse acquisition rather than selecting the first match. Actual instance counts remain unknown.
+
+**Established — initialization validation:** Marker initialization supplies useful consistency checks:
+
+```asm
+308b234: mov rdx,[rdi+08]
+308b238: mov rcx,[rdi+18]
+308b23c: mov [rdi+1a350],rdx
+
+308b243: mov rax,[rdx+78]
+308b247: mov [rdi+1a358],rax
+308b24e: mov rax,[rdx+80]
+308b255: mov [rdi+1a360],rax
+308b25c: mov rax,[rdx+88]
+308b263: mov [rdi+1a368],rax         ; detail resource
+
+308b2f6: mov rdx,[rdx+e0]
+308b2fd: call 36fedc0               ; menu element lookup
+308b302: mov [rdi+1a348],rax         ; marker parent element
+```
+
+**Inferred:** Accept only an initialized L with a nonnull parent and detail resource, `*(L+0x1a350)==*(L+8)`, and `*(L+0x1a368)==*(*(L+8)+0x88)`. Validate expected resource/element identities as well as readability. Reacquire across view/menu replacement; cached addresses alone do not establish object lifetime.
+
+**Established — update dispatch uses jobs:** The view’s HUD update calls `0x3702e40`:
+
+```asm
+361b19a: mov  rax,[rbx+610]
+361b1a5: mov  [rax+1e50],cl
+361b1ab: mov  rcx,[rbx+610]
+361b1b2: call 3702e40
+```
+
+**Established:** That routine constructs `MsgHUDUpdate`, descriptor `0x4ea8d80`, vtable `0x3f31788`, and dispatches it through `0x37016a0`:
+
+```asm
+3702fa0: lea  rax,[image+3f31788]
+3702fac: lea  rdx,[rsp+28]
+3702fb1: mov  [rsp+28],rax
+3702fb6: mov  rcx,rdi               ; menu
+3702fb9: vmovss [rsp+38],xmm7       ; delta time
+3702fbf: call 37016a0
+```
+
+**Established:** For this message, `0x37016a0` builds two task payloads using menu collections at `+0x1e88/+0x1ec8`, installs task callback `0x37042e0`, submits both, then waits for their completion.
+
+```asm
+3701752: lea  r15,[r13+1ec8]
+3701759: lea  r12,[r13+1e88]
+3701763: lea  rbx,[image+37042e0]
+...
+3701783: mov  [rsi-08],r12
+3701787: mov  [rsi],r15
+370178a: mov  [rsi+08],r14           ; message
+370179d: mov  [rax+08],rbx          ; task callback
+37017a1: mov  [rax+10],rbp          ; payload
+37017bd: call 1a06140               ; submit
+...
+3701836: lea  r8d,[r9+1]            ; one task handle
+370183a: call 1a08770               ; wait
+3701869: jne  3701800               ; both handles
+```
+
+**Established:** Wait routine `0x1a08770` removes completed task handles at `0x1a08938–0x1a08964` and loops while handles remain at `0x1a0897d–0x1a08988`. Task callback `0x37042e0` dispatches through `0x237c430`.
+
+**Established:** The inherited HUD handler connects that dispatch to the marker update. Descriptor `0x4cd1240` (`DSUIHUDLogicBase`) maps `MsgHUDUpdate` to thunk `0x3055690`, which jumps to `0x303dad0`. The handler calls virtual `+0x50` for active HUD entries at `0x303db75`. Marker vtable `+0x50` selects:
+
+```asm
+2362e00: mov rax,[rcx]
+2362e03: jmp qword ptr [rax+58]
+```
+
+**Established:** Marker vtable `+0x58` is `0x3096960`.
+
+**Inferred — thread conclusion:** The marker update is scheduled as a HUD task. It is **not established as confined to the mod’s game thread**; a task might execute on a worker or through scheduler assistance. An observed game-thread callback does not by itself permit concurrent mutation of the menu graph.
+
+**Inferred — mutation point:** Queue label intentions from the existing game-thread callback. The strongest local rendezvous identified here is **`0x3702fc4`**, immediately after the joined HUD dispatch returns, conditional on the current menu being H. Another candidate is `0x361b1b7`, after the whole HUD-menu update returns. Drain creation, text, position, visibility and removal operations together at the chosen UI phase. These are candidate integration points, not proven global renderer barriers; render overlap and surrounding scheduling still need validation.
+
+**Established — simpler alternative: hologram-name records:** The hologram-name HUD has three presentation slots, initialized at `0x307c853–0x307c886` and processed by update `0x307cab0`. It consumes records from:
+
+```text
+Q = *(*(base + 0x7c00128) + 0xf0)
+record count = i32(Q+0x30)
+record array = *(Q+0x38)
+```
+
+**Established:** Hologram initialization stores Q at logic `+0x88` (`0x307c825–0x307c83c`). Its update copies each selected record’s world vector into a presentation slot (`0x307cc25–0x307cc3b`), then projects and positions it:
+
+```asm
+307cd31: mov  rdx,[rbp+18]          ; menu
+307cd35: lea  r8,[rbx+18]           ; saved world position
+307cd39: lea  rcx,[rsp+30]
+307cd3e: call 329dd60
+307cd43: mov  rcx,[rbx-58]          ; label root
+307cd47: lea  rdx,[rsp+30]
+307cd4c: call 3701e40
+```
+
+**Established — record creation/removal:** Constructor **`0x307e170(record)`** registers a `0x30`-byte record with Q. It initializes the native string at `+0x10`, assigns a provider-generated ID at `+0x1c`, and appends the record pointer under Q’s lock (`0x307e1bc–0x307e1ef`). Destructor **`0x3081db0(record)`** removes entries matching that ID under the same lock (`0x3081de4–0x3081e67`) and releases the string through `0x191cad0` (`0x3081e72–0x3081e7c`).
+
+**Established:** A native caller demonstrates the complete data contract:
+
+```asm
+2d87973: lea  ecx,[rbx+30]
+2d87976: call 1a0d9d0               ; allocate 0x30 bytes
+...
+2d8799c: call 307e170               ; construct/register
+...
+2d879c8: add  rcx,10
+2d879cc: call 191caf0               ; assign native string
+...
+2d879e6: mov  [rbp+18],al           ; presentation mode
+...
+2d87a24: vaddps xmm0,xmm3,[rsi+30] ; world position + offset
+2d87a29: vmovups [rbx],xmm0
+...
+2d87a3e: call 3081db0               ; unregister/destruct
+2d87a43: mov  edx,30
+2d87a4b: call 1951c70               ; release native allocation
+```
+
+**Established:** Presentation entry `0x3085d00` applies record `+0x10` to its text elements through `0x3646c40` at `0x3085e31–0x3085e47`.
+
+**Inferred:** This is a simpler candidate than cloning the marker detail: construct/register one record, assign a bounded native string, and update its world float vector. The stock HUD supplies projection, positioning and presentation. It is not a discovered single-call `(world_position,string)` API.
+
+**Established — alternative limits:** The provider sorts records using squared distance (`0x3093340–0x309335a`), while the presentation loop examines three entries (`0x307cc51–0x307cc5f`). Text assignment occurs on presentation entry.
+
+**Inferred:** A custom record competes with stock hologram names; display is not guaranteed when more than three records exist. Changing the record string might require presentation re-entry. No independent record visibility flag was established: `+0x18` selects presentation mode. Unregister/reconstruct is the justified candidate for hide/show. The provider’s container lock does not establish safety for changing or freeing a record after a consumer has obtained its pointer.
+
+**Inferred — other alternatives:** No simpler arbitrary-text creation/removal contract was established for porter tags or the user-marker path in this pass. The hologram record path is the strongest alternative found, but its shared pool makes an independent subtree more controllable.
+
+**Inferred — minimal independent-label recipe:** Perform the following at the proposed serialized UI phase, using intentions queued by the mod’s game-thread callback:
+
+1. **Acquire:** Resolve H and its unique initialized L through the global chain above. Read `parent=*(L+0x1a348)` and `R=*(L+0x1a368)`. Associate cached handles with this exact menu generation.
+2. **Create once:** Call `0x36fb8b0(parent, *(R+0x58))` for a separate name subtree. Its established wrapper forwards the parent’s menu and parent to factory `0x364f400`. Resolve the clone’s name root, ordinary text and online text through `0x36fec70`, using `R+0x138/+0x140/+0x148`. Stock lookup evidence is `0x308bb35–0x308bb89`.
+3. **Set text once or when changed:** Decode bounded UTF-8 into terminated UTF-16. Construct a temporary native string with `0x191ca20`, call `0x3646c40(text,&handle)`, then release the temporary with `0x191cad0`. Show the name ancestors and chosen text; hide the alternative text through `0x37028c0(element,visible,0.0f)`.
+4. **Each eligible tick:** Convert to game coordinates and add the head-height offset to **game Z**. Pass an initialized float4 to `0x329dd60(&screen,H,&world)`, then call `0x3701e40(root,&screen)`. The established projector returns its output pointer, not a visibility boolean.
+5. **Hide:** Call `0x37028c0(root,false,0.0f)` for stale partner data, gameplay suppression or rejected camera/distance tests. Define those tests separately; projection alone does not establish front-facing visibility.
+6. **Remove:** While the parent/menu generation is still valid, locate the root by pointer identity in parent `+0x48`, bounded by count `+0x40`, then call `0x3700750(parent,index)`. Native removal detaches/unregisters the child and releases its temporary reference (`0x370075f–0x370080c`). Balance any extra retained references. After menu replacement, discard stale handles without calling through them.
+
+**Inferred — risks:** This remains an untested candidate. Principal risks are UI/render scheduling outside the reviewed join, menu destruction, inherited subtree anchors/visibility, duplicate resource identities affecting lookups, unsupported glyphs/markup, and reference ownership. Do not alter the stock 16 detail records or invent an online identity. The global chain establishes where to look; it does not make a cached instance permanently live or certify UI mutation from the existing callback.
+
+**Live (2026-11-09):** the hologram-record route works: a 0x30-byte, 16-aligned record the mod allocates, zeroed, then `0x307e170(record)`, its string set from UTF-16 with `0x191ca20`/`0x191caf0`/`0x191cad0` at `+0x10`, mode byte `+0x18` left 0, and its float4 point (game axes) at `+0x00` 2.1 m above the body: the game drew the name with its hologram-name label over the partner body. `0x3081db0(record)` removed it.
