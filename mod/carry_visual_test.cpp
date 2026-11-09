@@ -153,6 +153,15 @@ int main(){
         CHECK(seenB.playerCarried.size()==1);
         CHECK(xb.view().shown()==after);
     }
+    // The record's variant bit (+204 bit 5) is read, splits a run of the same item, and survives the wire.
+    {
+        Game g;g.carry({{1,{{{5,0xAA},{6,0xAA},{7,0xAA}}}}});
+        g.put<uint32_t>(g.manager+RecordBase+RecordStride*6+RecordFlags,0x321);
+        auto v=g.read();
+        CHECK(v&&v->size()==3&&!(*v)[0].variant&&(*v)[1].variant&&!(*v)[2].variant&&(*v)[1].level==1);
+        if(v){Receiver rx;std::optional<Summary> got;for(auto& e:encode(*v,9))got=rx.feed(e);
+            CHECK(got&&*got==*v);}
+    }
     if(!failures)std::puts("carry visual checks passed");
     return failures?1:0;
 }

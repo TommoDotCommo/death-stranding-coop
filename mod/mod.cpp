@@ -314,11 +314,11 @@ struct Runtime final:ds::Transport {
             else if(text=="stack off"+stamp){stackTest=-2;}            // test: no cases drawn
             else if(text=="stack auto"+stamp){stackTest=-1;}           // the partner's summary (the default)
             else if(text.rfind("stack ",0)==0&&text.size()>stamp.size()&&text.compare(text.size()-stamp.size(),stamp.size(),stamp)==0){
-                // Lab test: `stack N` draws N cases on the body whatever the partner carries; `stack at ox oy oz sx sy sz`
-                // moves them (anchor axes right, forward, up; metres).
+                // Lab test: `stack N` draws N plain cases on the body whatever the partner carries; `stack at ox oy oz ux uy uz`
+                // moves them and sets the stacking direction (anchor axes right, forward, up; metres).
                 mod::stack::Layout l;int n=0;
-                if(std::sscanf(text.c_str()+6,"at %lf %lf %lf %lf %lf %lf",&l.offset[0],&l.offset[1],&l.offset[2],&l.step[0],&l.step[1],&l.step[2])==6){
-                    auto now=stackLayout.value_or(mod::stack::Layout{});now.offset=l.offset;now.step=l.step;stackLayout=now;if(cargoStack)cargoStack->layout=now;}
+                if(std::sscanf(text.c_str()+6,"at %lf %lf %lf %lf %lf %lf",&l.offset[0],&l.offset[1],&l.offset[2],&l.up[0],&l.up[1],&l.up[2])==6){
+                    auto now=stackLayout.value_or(mod::stack::Layout{});now.offset=l.offset;now.up=l.up;stackLayout=now;if(cargoStack)cargoStack->layout=now;}
                 else if(unsigned cols=0;std::sscanf(text.c_str()+6,"across %lf %lf %lf %u",&l.across[0],&l.across[1],&l.across[2],&cols)==4&&cols>=1&&cols<=4){
                     auto now=stackLayout.value_or(mod::stack::Layout{});now.across=l.across;now.columns=cols;stackLayout=now;if(cargoStack)cargoStack->layout=now;}
                 else if(std::sscanf(text.c_str()+6,"%d",&n)==1&&n>=0&&n<=int(mod::stack::Stack::MaxCases))stackTest=n;
@@ -358,12 +358,12 @@ struct Runtime final:ds::Transport {
     // carry summary (backpack slot); `puppet.ride` "stack N" / "stack auto" / "stack off" / "stack at ..." test it.
     std::unique_ptr<mod::stack::Stack> cargoStack;bool stackTried=false;int stackTest=-1;uint64_t stackPorter=0;
     std::optional<mod::stack::Layout> stackLayout;
-    static unsigned backpackCases(const std::optional<mod::carry::Summary>& s){
-        unsigned n=0;if(s)for(auto& e:*s)if(e.slot==1)n+=e.count;   // EDSBaggage2SlotType 1: BackPack
-        return n;}
+    static std::vector<mod::stack::Item> backpackItems(const std::optional<mod::carry::Summary>& s){
+        std::vector<mod::stack::Item> out;if(s)for(auto& e:*s)if(e.slot==1)for(unsigned i=0;i<e.count;++i)out.push_back({e.hash,e.variant});   // 1: BackPack
+        return out;}
     void tickStack(uint64_t body,const mod::puppet::Anchor& anchor) {
         bool on=(config.carryVisual&&stackTest!=-2)||stackTest>=0;
-        if(!on){if(cargoStack)cargoStack->tick(false,0,nullptr);return;}
+        if(!on){if(cargoStack)cargoStack->tick(false,{},nullptr);return;}
 #ifndef MOD_FAKE_NETWORK
         if(!cargoStack&&!stackTried){stackTried=true;
             try{cargoStack=std::make_unique<mod::stack::Stack>(mod::stack::nativeApi(*sampler),[this](const std::string& row){note(row.c_str());});
@@ -372,13 +372,13 @@ struct Runtime final:ds::Transport {
 #endif
         if(!cargoStack)return;
         if(anchor.entity!=stackPorter){if(stackPorter)cargoStack->forget("world changed");stackPorter=anchor.entity;}
-        unsigned wanted=stackTest>=0?unsigned(stackTest):backpackCases(carrySink.shown);
+        auto wanted=stackTest>=0?std::vector<mod::stack::Item>(size_t(stackTest)):backpackItems(carrySink.shown);
         uint64_t flags=0;bool shown=body&&sampler->read(body+mod::gear::Flags,&flags,8)&&(flags&mod::gear::FlagVisible);
         bool permitted=shown&&!inEvent&&(stackTest>=0||(partnerMode()&&core&&core->connected()));
         // On the copy of the backpack the body wears when there is one (it moves with the body's back), else the body.
         uint64_t on_=gear?gear->copyAt("HLP_Backpack"):0;
         auto pose=mod::puppet::readEntityPose(*sampler,on_?on_:body);
-        if(!permitted||!(pose.available&&pose.coherent)){cargoStack->tick(false,0,nullptr);return;}
+        if(!permitted||!(pose.available&&pose.coherent)){cargoStack->tick(false,{},nullptr);return;}
         auto t=mod::puppet::transform(pose);cargoStack->tick(true,wanted,&t);
     }
     std::filesystem::path markerCommand;std::unique_ptr<mod::marker::Markers> markers;std::vector<ds::CargoEvent> pingIn;

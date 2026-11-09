@@ -32,6 +32,9 @@ constexpr uint64_t ComponentVtable=0x3dd9750;   // image offset of DSBaggage2Car
 constexpr unsigned RecordCount=0x1e98;
 // A record's holder (+0x90) is its SLOT, whose +0x28 is the carrier (native append 0x2c2b530; live 2026-11-09).
 constexpr uint64_t SlotCarrier=0x28;
+// Record +204 bit 5: the case's variant (its darker model and look; 0x2c488c0 passes it to the model selectors). Live
+// 2026-11-09 every carried record of the Episode 3 save had it.
+constexpr uint64_t RecordFlags=0x204;constexpr uint32_t RecordVariant=0x20;
 constexpr size_t MaxSlots=48, MaxStacks=16, MaxLevels=32, MaxItems=64, MaxEntries=16;
 constexpr uint8_t WireType=6;
 // Slots that hold cargo on the body (EDSBaggage2SlotType 1..9); gear slots (weapons, shoes, suit, gloves, mask) and
@@ -44,10 +47,10 @@ inline bool cargoSlot(uint8_t s){
 #endif
 }
 const char* slotName(uint8_t);
-struct Item { uint32_t hash=0,index=0; uint8_t slot=0,column=0,level=0,kind=0; };
+struct Item { uint32_t hash=0,index=0; uint8_t slot=0,column=0,level=0,kind=0; bool variant=false; };
 // One run of identical items in one stack: where it starts and how many.
-struct Entry { uint32_t hash=0; uint8_t slot=0,column=0,level=0,count=1;
-               bool operator==(const Entry& o) const {return hash==o.hash&&slot==o.slot&&column==o.column&&level==o.level&&count==o.count;}
+struct Entry { uint32_t hash=0; uint8_t slot=0,column=0,level=0,count=1; bool variant=false;
+               bool operator==(const Entry& o) const {return hash==o.hash&&slot==o.slot&&column==o.column&&level==o.level&&count==o.count&&variant==o.variant;}
                bool operator!=(const Entry& o) const {return !(*this==o);} };
 using Summary=std::vector<Entry>;
 // Every carried item, in slot, stack and level order. nullopt when the chain is not readable or not what it should
@@ -56,7 +59,8 @@ std::optional<std::vector<Item>> readCarried(const discovery::Sampler&,uint64_t 
 Summary summarise(const std::vector<Item>&);   // cargo slots only; runs grouped; at most MaxEntries entries
 std::string describe(const Summary&);
 // Wire: one type-6 CARGO event per entry (an empty summary is one event with total 0). item = hash; ref packs
-// index (4 bits), total (5), slot (7), column (4), level (6), count (8) and the summary's generation (16): 50 bits.
+// index (4 bits), total (5), slot (7), column (4), level (6), count (8), the summary's generation (16) and the
+// variant (1): 51 bits.
 std::vector<ds::CargoEvent> encode(const Summary&,uint16_t generation);
 // Receiver: entries of one summary arrive in order (the core delivers in order, exactly once); the latest complete
 // summary replaces the previous one. A broken run (a lost reconnect, a restarted sender) is dropped.

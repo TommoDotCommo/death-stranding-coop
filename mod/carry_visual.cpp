@@ -11,7 +11,7 @@ bool pointers(const discovery::Sampler& s,uint64_t array,int32_t count,size_t ca
     return array&&s.read(array,out.data(),out.size()*8);
 }
 // Ref layout of a type-6 event (below 2^53).
-constexpr unsigned IndexAt=0,TotalAt=4,SlotAt=9,ColumnAt=16,LevelAt=20,CountAt=26,GenerationAt=34;
+constexpr unsigned IndexAt=0,TotalAt=4,SlotAt=9,ColumnAt=16,LevelAt=20,CountAt=26,GenerationAt=34,VariantAt=50;
 uint64_t field(uint64_t ref,unsigned at,unsigned bits){return (ref>>at)&((uint64_t(1)<<bits)-1);}
 }
 const char* slotName(uint8_t s){
@@ -39,7 +39,11 @@ std::optional<std::vector<Item>> readCarried(const discovery::Sampler& s,uint64_
                 // Only the manager's own records (inline array), and only those that name this carrier as their holder.
                 if(r<manager+RecordBase||(r-manager-RecordBase)%RecordStride||(r-manager-RecordBase)/RecordStride>=RecordCount)continue;
                 uint64_t holder=0;Item it;uint32_t kind=0;
-                if(!load(s,r+RecordHolder,holder)||!load(s,r+RecordHash,it.hash)||!load(s,r+RecordKind,kind))return std::nullopt;
+                uint32_t flags=0;
+                if(!load(s,r+RecordHolder,holder)||!load(s,r+RecordHash,it.hash)||!load(s,r+RecordKind,kind)||!load(s,r+RecordFlags,flags))return std::nullopt;
+#ifndef MUTANT_CARRY_VARIANT
+                it.variant=(flags&RecordVariant)!=0;
+#endif
 #ifndef MUTANT_CARRY_HOLDER
                 // Held by this slot of this carrier (or, older layout, by the carrier itself); anything else is a stale
                 // pointer or an item already handed to another carrier.
@@ -60,11 +64,11 @@ Summary summarise(const std::vector<Item>& items){
     for(auto& it:items){
         if(!cargoSlot(it.slot))continue;
         if(!out.empty()){auto& e=out.back();
-            if(e.hash==it.hash&&e.slot==it.slot&&e.column==it.column&&unsigned(e.level)+e.count==it.level&&e.count<255){++e.count;continue;}}
+            if(e.hash==it.hash&&e.variant==it.variant&&e.slot==it.slot&&e.column==it.column&&unsigned(e.level)+e.count==it.level&&e.count<255){++e.count;continue;}}
 #ifndef MUTANT_CARRY_CAP
         if(out.size()>=MaxEntries)break;
 #endif
-        out.push_back({it.hash,it.slot,uint8_t(std::min<unsigned>(it.column,15)),uint8_t(std::min<unsigned>(it.level,63)),1});
+        out.push_back({it.hash,it.slot,uint8_t(std::min<unsigned>(it.column,15)),uint8_t(std::min<unsigned>(it.level,63)),1,it.variant});
     }
     return out;
 }
@@ -78,12 +82,12 @@ std::vector<ds::CargoEvent> encode(const Summary& s,uint16_t generation){
     auto base=[&](size_t index){return uint64_t(index)<<IndexAt|uint64_t(total)<<TotalAt|uint64_t(generation)<<GenerationAt;};
     if(!total){ds::CargoEvent e;e.type=WireType;e.ref=base(0);out.push_back(e);return out;}
     for(size_t i=0;i<total;++i){auto& x=s[i];ds::CargoEvent e;e.type=WireType;e.item=x.hash;
-        e.ref=base(i)|uint64_t(x.slot&0x7f)<<SlotAt|uint64_t(x.column&0xf)<<ColumnAt|uint64_t(x.level&0x3f)<<LevelAt|uint64_t(x.count)<<CountAt;
+        e.ref=base(i)|uint64_t(x.slot&0x7f)<<SlotAt|uint64_t(x.column&0xf)<<ColumnAt|uint64_t(x.level&0x3f)<<LevelAt|uint64_t(x.count)<<CountAt|uint64_t(x.variant)<<VariantAt;
         out.push_back(e);}
     return out;
 }
 std::optional<Summary> Receiver::feed(const ds::CargoEvent& e){
-    if(e.type!=WireType||e.ref>>50){reset();return std::nullopt;}
+    if(e.type!=WireType||e.ref>>51){reset();return std::nullopt;}
     auto index=uint8_t(field(e.ref,IndexAt,4)),total=uint8_t(field(e.ref,TotalAt,5));auto generation=uint16_t(field(e.ref,GenerationAt,16));
     if(total>MaxEntries||(total&&index>=total)){reset();return std::nullopt;}
     if(!total){
@@ -95,7 +99,7 @@ std::optional<Summary> Receiver::feed(const ds::CargoEvent& e){
 #endif
     }
     Entry x;x.hash=e.item;x.slot=uint8_t(field(e.ref,SlotAt,7));x.column=uint8_t(field(e.ref,ColumnAt,4));x.level=uint8_t(field(e.ref,LevelAt,6));
-    x.count=uint8_t(field(e.ref,CountAt,8));
+    x.count=uint8_t(field(e.ref,CountAt,8));x.variant=field(e.ref,VariantAt,1)!=0;
     if(!x.count||!cargoSlot(x.slot)){reset();return std::nullopt;}
     if(index==0){pending_.clear();active_=true;generation_=generation;total_=total;}
     else if(!active_||generation!=generation_||total!=total_||index!=pending_.size()){reset();return std::nullopt;}

@@ -3525,3 +3525,301 @@ joint[j].translation = B + 0x30*j + 0x10
 **Inferred — remaining risks:** Direct pose writes can be overwritten or race animation/skinning jobs. The exact frame phase, pose-buffer lifetime, required invalidation, rest-pose ownership, wheel-axis signs, bike steering/fork hierarchy and pooled-instance behavior remain **unknown**. Ordering merely after `0x2f801b0` is insufficient: that function sets a target rather than applying it immediately.
 
 **Established — validation:** The executable hash matched; focused MinGW objdump windows corroborated the cited instructions; **29 read-only PE, metadata and disassembly assertions passed**. Runtime safety and visual results were not tested.
+
+## Per-item case models for the partner's cargo — static recipe
+
+**Established — scope:** pinned executable SHA-256 `9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b`, image base `0x140000000`. All addresses below are **RVAs**. Assembly was inspected with `x86_64-w64-mingw32-objdump -d -M intel`; nothing was called in the game.
+
+### Resolve the transmitted identifier without creating cargo
+
+**Established:** the definition lookup used by queued cargo creation is **`0x3439df0`**, on the separate global **`0x7c0dd98`**, rather than the cargo manager at `0x7bf4968`.
+
+```cpp
+// Inferred descriptive name; established Microsoft x64 argument/result layout.
+DSGameBaggageListItem* findBaggageDefinition(
+    DefinitionManager* definitions, uint32_t identifier);
+// RCX = *[base+0x7c0dd98], EDX = identifier; RAX = item or null.
+```
+
+**Established — creation-path evidence:** request processing loads request `+0x48` into `EDX` at `0x2c844ef`. The intervening category/capacity checks preserve that argument, then:
+
+```asm
+2c845c7  mov rcx,[7c0dd98]
+2c845ce  call 3439df0
+2c845da  mov rdx,rax
+2c845e0  mov rdi,rax
+...
+2c846ed  mov [rbx+28],rdi       ; cargo record's item definition
+2c846fb  test rdi,rdi
+2c846fe  je 2c8599a            ; missing definition leaves this path
+...
+2c84709  mov eax,[r14+48]
+2c8470d  mov [rbx+c8],eax       ; request identifier used when +64 was -1
+```
+
+**Established — lookup structure:**
+
+| Location | Meaning |
+|---|---|
+| definition manager `+0x158` | Entry-array pointer |
+| definition manager `+0x164` | Capacity used by lookup |
+| entry stride | `0x18` bytes |
+| entry `+0x00` | Stored hash; zero means empty |
+| entry `+0x08` | Original 32-bit lookup key |
+| entry `+0x10` | Definition pointer |
+
+```asm
+3439df2  mov r8,[rcx+158]
+3439e11  mov r10d,[rcx+164]
+3439e18  xor edi,edi
+3439e1a  crc32 edi,edx
+3439e1f  dec r10d
+3439e22  or edi,80000000h
+3439e28  mov r9d,r10d
+3439e2b  and r9d,edi            ; initial bucket
+...
+3439e34  lea rcx,[rdx+rdx*2]
+3439e38  cmp dword [r8+rcx*8],0 ; 24-byte entries
+...
+3439e92  cmp edx,edi            ; stored hash
+3439e96  cmp [r11+8],esi        ; original key
+...
+3439ee0  mov rax,[r8+rdx*8+10]
+3439ee6  ret
+...
+3439ef4  xor eax,eax
+3439ef6  pop rbx
+3439ef7  ret
+```
+
+**Established:** hashing is the x86 `CRC32` instruction over the 32-bit argument, seeded with zero, followed by OR `0x80000000`. Lookup masks and wraps with `capacity-1`, and uses stored-bucket ordering for early termination (`0x3439e40–0x3439eba`). Missing entries and a null entry-array pointer return null.
+
+**Established:** the complete lookup contains no calls, allocation, loading, locking, reference acquisition, or writes through game-object pointers. It writes only its stack/register state. It does not validate a null manager pointer or protect against concurrent table replacement.
+
+**Established — signature:** the following 25-byte prefix occurs once in the pinned executable:
+
+```text
+40 53 4C 8B 81 58 01 00 00 48 8B D9
+48 89 74 24 10 8B F2 48 89 7C 24 18
+```
+
+**Established — identifier correction:** item metadata distinguishes **`+0x30 = ID`** from **`+0x34 = NameCode`**, inherited from descriptor `0x4df2bc0`; the item descriptor is `0x4df3100`. Native code also calls this lookup with item `+0x34`, for example `0x2c563aa–0x2c563b4`. Therefore, do not assume those fields are interchangeable or validate a lookup result solely by comparing item `+0x30` with the transmitted value.
+
+**Inferred — concrete read-only alternative:** a bounded linear scan of occupied entries avoids reproducing the native probe ordering:
+
+```cpp
+definitions = read_ptr(base + 0x7c0dd98);
+entries     = read_ptr(definitions + 0x158);
+capacity    = read_u32(definitions + 0x164);
+
+// Apply mod-owned bounds, overflow checks and guarded reads first.
+for (uint32_t i = 0; i < capacity; ++i) {
+    entry = guarded_copy(entries + uint64_t(i) * 0x18, 0x18);
+    if (entry.hash != 0 && entry.key == transmittedIdentifier)
+        return validate_definition(entry.item);
+}
+return nullptr;
+```
+
+**Inferred — synchronization:** perform lookup and selection within the existing game-thread callback while the relevant resource set is alive. Recheck the global/table header after guarded copying and abandon an inconsistent result. This reduces races but does not establish an atomic snapshot or arbitrary-thread safety; the engine’s precise permitted phase remains **unknown**.
+
+### Select the carried model and its variant
+
+**Established:** carried realization `0x2c488c0` obtains its variant from **record `+0x204`, bit 5**, calls **`0x2c5acc0(manager,item,variant)`**, then passes the returned wrapper’s **`+0x30` loaded object** to the mesh factory:
+
+```asm
+2c48969  mov r8d,[rdi+204]
+2c48978  mov rdx,[rdi+28]
+2c4897c  mov rcx,rbx
+2c4897f  shr r8d,5
+2c4898b  and r8b,1
+2c489a0  call 2c5acc0
+...
+2c489e5  mov rax,[rsi+30]
+2c48a6e  mov [r14],rax          ; visual parameter +00
+```
+
+**Established:** creation sets that bit for item **`+0x3a == 1`**:
+
+```asm
+2c84757  mov rax,[rbx+28]
+2c8475b  movzx edi,byte [rax+3a]
+2c8475f  cmp dil,1
+2c84763  jne 2c8476c
+2c84765  or dword [rbx+204],20h
+```
+
+**Established:** metadata names item `+0x3a` `AttributeOfBaggage`; enum descriptor `0x4de8a20` names value 1 **Personal**.
+
+**Inferred — default without a record:** use `item->AttributeOfBaggage == Personal` to approximate initial native selection. Explicit `false` selects the base branch and is a conservative fallback when reproducing the record’s variant is impossible. Neither choice establishes the current remote record’s appearance: exact matching requires transmitting bit 5 or an equivalent appearance flag.
+
+**Established:** selector `0x2c5acc0` first searches additional assets:
+
+```text
+manager +46dfb0 : signed count
+manager +46dfb8 : pointer array
+asset   +28    : count of NameCode hashes
+asset   +30    : u32 hash array
+asset   +38    : model-resource wrapper
+asset   +40    : ArtPartsVariationResource pointer
+```
+
+**Established:** it compares asset hashes against item `+0x34`, returns a matching nonnull model wrapper, or falls back to **`0x2c5ad70(manager->config,item,variant)`** (`0x2c5accf–0x2c5ad46`). Metadata descriptor `0x4c37010` confirms `ListItemNameHashes`, `SkinnedModel`, and `ArtPartsVariation`.
+
+**Established:** fallback resources come from the pointer array at **config `+0x1a0`**, whose array header begins at `+0x198`. Selection has the following precedence (`0x2c5ad70–0x2c5afbb`; switch table `0x2c5afbc`):
+
+| Condition, after preceding rules fail | Returned model |
+|---|---|
+| NameCode in special group A below | Model index 18 |
+| NameCode in special group B below | Model index 29 |
+| Case type `0x12` | Model index 30 |
+| Volume type 3, case type 9 | Model index 21 |
+| Volume type 3, contents-damage type 3 | Model index 22 |
+| Other volume type 3 | Model index 13 |
+| Case type 1 | Model index 13 |
+| Case type 2 | Volume 0 → index 15; volume 1 → 16; otherwise → 17 |
+| Case type 6 | First `DeadBodyBagModelResources` entry |
+| Case type 9 | Volume 0 → index 18; 1 → 19; 2 → 20; otherwise generic |
+| Case type `0xa` | Model index 11 |
+| Case type `0xb` | Model index 7 |
+| Case type `0xc` | Model index 14 |
+| Case type `0x11`, volume 0 | Model index 27 |
+| Generic volume 0/1/2 | Base indices 1/2/3; variant indices 4/5/6 |
+
+**Established:** group A is `{093f5c71, 7b54df72, 68042c86, 1a6faf85, 4ea5cb6e, 3cce486d}`; group B is `{03e867fc, 7183e4ff, 62d3170b, 10b89408, 4472f0e3, 361973e0}`. Comparisons occur at `0x2c5ad82–0x2c5ae18`. The generic branch forcibly clears the variant for NameCodes `{1a8b69f4, 4e410d1f, 3c2a8e1c}` (`0x2c5af23–0x2c5af3e`).
+
+**Established:** unrecognized volume values reaching the generic branch fall through to its small-model choice; this is not evidence that malformed values describe valid small cases.
+
+### Parameter `+08` supplies appearance overrides
+
+**Established:** native carried realization also calls **`0x2c541d0(manager,item,variant)`** and stores its result directly at parameter **`+08`**:
+
+```asm
+2c48b60  mov r8d,[rdi+204]
+2c48b67  mov rcx,rbx
+2c48b6a  shr r8d,5
+2c48b6e  and r8b,1
+2c48b75  call 2c541d0
+2c48b7a  mov [r14+8],rax
+```
+
+**Established:** this selector searches the same additional-asset list and returns matching asset `+0x40`; otherwise it tail-calls **`0x2c54270(config,item,variant)`** (`0x2c541db–0x2c5425a`). Unlike model selection, a matched asset’s null appearance pointer is returned directly.
+
+**Established:** its type is **`ArtPartsVariationResource`**, descriptor **`0x4ae3a30`**. Config metadata calls the array at `+0x2b0/+0x2b8` **ArtPartsVariations**. The resource describes:
+
+| Resource offset | Metadata field |
+|---|---|
+| `+0x20` | `ReplaceTextureSet` |
+| `+0x30` | `ReplaceShaderVariable` |
+| `+0x40` | `OnMesh` |
+| `+0x50` | `OffMesh` |
+
+**Established:** the factory copies this pointer unchanged into mesh `+0x18`; it is **not** another wrapper requiring a `+0x30` dereference:
+
+```asm
+2cd468e  mov rcx,[rdi+8]
+2cd4692  mov [rbx+18],rcx
+```
+
+**Established:** `MsgInit` finishes by calling `0x2c6ed00` at `0x2c6fc21`. That routine checks mesh `+0x18`, traverses the appearance resource and applies its entries through `0x2cb0f60`, including to applicable child meshes (`0x2c6ed46–0x2c6ef11`).
+
+**Established:** null is supported: `0x2c6ed4a–0x2c6ed4d` skips appearance processing. The selector itself can return null (`0x2c547cd`), including its early contents-damage-type-3 path.
+
+**Inferred:** this is the mechanism needed to reproduce item-dependent texture/shader/mesh appearance when native selection returns an override. Changing only the model cannot reproduce those overrides. Which replacements correspond specifically to colour or printed labels remains **unknown** without inspecting the loaded resources or testing visually.
+
+**Established:** selection also depends on item `+0x64` (`MissionId`) through global `0x7c0aff8` and lookup `0x333b470`, plus contents parameters and specific NameCodes (`0x2c54386–0x2c547cd`). Therefore, a hand-maintained “material by size” table is insufficient.
+
+**Established:** the ground-only case-type-`0xb` override at `0x2c48b39–0x2c48b56` applies when carrier type is `0xc`. It does not replace the ordinary selector for carried cargo.
+
+### Skip or substitute nonstandard objects
+
+**Established:** item metadata provides case type at `+0x3b` and volume type at `+0x3e`. Case enum descriptor `0x4de8a60` supplies these relevant names:
+
+| Item condition | Native distinction |
+|---|---|
+| Case type 2, `Weapon` | Dedicated model indices 15–17 in the non-LL branch |
+| Case type 6, `BodyBag` | Uses `DeadBodyBagModelResources`; volume helper returns 8 |
+| Case type `0xa`, `Cart` | Model index 11; carried hand slots can also supply animation data at parameter `+0x98` |
+| Case type `0xb`, `ConstractionMachine` | Model index 7; ground appearance override |
+| Case type `0xc`, `Ladder` | Model index 14 |
+| Case type `0x11`, `SmallDelicate` | Special small model index 27 |
+| Case type `0x12`, `ToxicGas` | Model index 30 |
+| Volume type 4, `Human` | Volume helper returns 8; no ordinary-case dimension mapping established |
+
+**Established:** enum values 0–3 for volume are `S`, `M`, `L`, `LL`; value 4 is `Human` (descriptor `0x4de8c50`).
+
+**Established — body-bag model evidence:**
+
+```asm
+2c5ae80  mov rax,[r9+258]       ; config +250 array's pointer
+2c5ae87  mov rax,[rax]          ; first body-bag wrapper
+2c5ae8a  ret
+```
+
+**Inferred — conservative display filter:** initially skip/substitute case types 2, 6, `0xa`, `0xb`, and any volume type outside 0–3. Treat the other dedicated models and additional-asset models as requiring separate bounds/child-resource inspection. For a strict ordinary-case implementation, accept only reviewed selected wrappers from generic indices 1–6 and LL indices 13/21/22.
+
+**Inferred:** case-type detection deliberately excludes weapons even when the selector could supply a packaged weapon model. Item hash alone does not establish whether the desired remote display is an ordinary case, an exposed weapon, or a slot-specific attachment.
+
+### Dimensions and mixed-size spacing
+
+**Established:** `0x2c563a0(record)` returns ordinary volume units **1/2/4/6/8** for item volume types **0/1/2/3/4**. Its case-type-6 exception returns 8:
+
+```asm
+2c563b1  mov edx,[rbx+34]
+2c563b4  call 3439df0
+2c563b9  cmp byte [rax+3b],6
+2c563bd  je 2c563e2            ; return 8
+2c563bf  movzx ecx,byte [rbx+3e]
+...
+2c563e2  mov eax,8
+2c563ed  mov eax,6
+2c563f8  mov eax,4
+2c56403  mov eax,2
+```
+
+**Established:** the ordinary dimension constants are:
+
+| Item `+0x3e` | Units | Model-space dimensions | Constant RVA → initialized global RVA |
+|---:|---:|---|---|
+| 0 | 1 | `(0.382, 0.132, 0.274)` | `0x3ddab00 → 0x7bf4a50` |
+| 1 | 2 | `(0.382, 0.132, 0.548)` | `0x3ddab10 → 0x7bf4a30` |
+| 2 | 4 | `(0.382, 0.264, 0.548)` | `0x3ddab20 → 0x7bf49d0` |
+| 3 | 6 | `(0.382, 0.396, 0.548)` | `0x3ddab30 → 0x7bf49f0` |
+| 4 / body bag | 8 | **Unknown for ordinary-case layout** | Separate treatment required |
+
+**Established:** initializers are `0x18921b0`, `0x1892190`, `0x1892170`, and `0x1891fb0`, respectively. Carried placement selects these constants directly from item `+0x3e` at **`0x2ccd41a–0x2ccd466`**. Native neighboring-stack spacing uses their second local component (`0x2c4cf22–0x2c4cff8`).
+
+**Inferred:** for fixed-orientation ordinary cases, space adjacent centres by half the previous dimension plus half the next dimension along the chosen stacking axis. Rotate that axis with the backpack/helper transform. Volume units are packing keys, not metres; custom models, pivots and native packing rotations need separate treatment.
+
+### Minimal record-free acquisition
+
+**Inferred — proposed sequence, not executed:**
+
+```cpp
+item = readOnlyLookup(transmittedIdentifier); // table scan above
+if (!item || !acceptedCase(item))
+    return substitute_or_skip;
+
+// Initial-native approximation when the remote record flag is unavailable.
+bool variant = read_u8(item + 0x3a) == 1;
+
+manager = read_ptr(base + 0x7bf4968);
+wrapper = selectCaseModel(manager, item, variant); // RVA 0x2c5acc0
+loaded  = guarded_read_ptr(wrapper + 0x30);
+appearance = selectCaseAppearance(manager, item, variant); // RVA 0x2c541d0
+
+// After validating resource readiness and lifetime:
+parameters.model      = loaded;     // +00
+parameters.appearance = appearance; // +08; direct pointer, null permitted
+// Keep the established visual-only transform, retention and collision settings.
+mesh = meshFactory(&parameters);    // RVA 0x2cd4660
+// Follow the existing MsgInit, placement/update and release sequence.
+```
+
+**Established:** `selectCaseModel` reads resources and returns a wrapper; it does not load or retain it (`0x2c5acc0–0x2c5afbb`). Appearance selection returns a resource pointer, not proof of readiness.
+
+**Inferred — remaining limits:** use both selectors with identical item/variant inputs on the established game-thread boundary. Preserve the existing residency, initialization, collision and release contracts. Resource lifetime across unload, exact remote variant, per-record damage/effect changes, custom-model dimensions, and the final colours/labels remain **unknown**. The proposed acquisition creates no cargo record and requires no slot insertion.
+
+**Established — validation:** executable hash matched; focused disassembly corroborated the cited instructions; **38 read-only file assertions passed** for instruction bytes, lookup-signature uniqueness, metadata offsets/types, special-case jump targets and dimension constants. No runtime or visual validation ran.
+
+**Live (2026-11-09):** on the Episode 3 save the carried records' `+0x204` read `0x321` (bit 5 set) on every item; with the variant the selector returned the same model objects as without it (config entries 1/4 and 2/5 point to the same loaded objects). One item had an appearance override. The porter's own cases looked darker than the drawn ones; the cause (per-record shader data such as the `+60` identifiers or wear) is not established.
