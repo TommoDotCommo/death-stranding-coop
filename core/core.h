@@ -58,6 +58,9 @@ struct Packet {
 // (a map marker for the partner; ref = the ping's id) (mod-defined); 6 = one entry of what the porter carries (mod-defined). ref (t2, below 2^53) names the shared cargo across both worlds.
 // id is a stable nonzero identity chosen by the sender; the receiver delivers each id once for the lifetime of the
 // Core, so an event resent after a reconnection (its acknowledgement lost) is not delivered twice.
+// CARGO event types 1..CargoTypeMax (2 pick-up, 3 structure, 4 dismantle, 5 ping, 6 carry summary, 7 gear, 8 outfit,
+// 9 like); a receiver refuses any other type as out of range.
+constexpr uint8_t CargoTypeMax=9;
 struct CargoEvent { uint32_t sequence=0; uint8_t type=1; uint32_t item=0; std::array<double,3> position{}; double yaw=0; uint64_t id=0, ref=0; };
 // Optional host-only sample, independent of presence/cargo and the handshake.
 // Milliseconds since midnight, not an elapsed world/forecast clock. Weather is unknown.

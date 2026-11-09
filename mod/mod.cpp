@@ -32,6 +32,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "vehicle.h"
 #include "ride.h"
 #include "cargo_stack.h"
+#include "likes.h"
 #include "weather.h"
 #include "environment.h"
 #include "auto_continue.h"
@@ -229,6 +230,7 @@ struct Runtime final:ds::Transport {
             if(e.type==mod::carry::WireType){if(config.carryVisual)carry.incoming(e,carrySink);continue;}   // ds3: tickCarry
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
+            if(e.type==mod::likes::WireType){likeIn.push_back(e);continue;}   // a like (tickLikes, likes.h)
             if(e.type==mod::outfit::WireType){               // the partner's art parts (tickGear, outfit.h)
                 if(auto p=mod::outfit::decode(e)){if(!partnerParts||*partnerParts!=*p)note(("OUTFIT the partner wears "+std::to_string(__builtin_popcountll(p->enabled))+" of "+std::to_string(p->count)+" parts\n").c_str());partnerParts=*p;}
                 continue;
@@ -380,6 +382,29 @@ struct Runtime final:ds::Transport {
         auto pose=mod::puppet::readEntityPose(*sampler,on_?on_:body);
         if(!permitted||!(pose.available&&pose.coherent)){cargoStack->tick(false,{},nullptr);return;}
         auto t=mod::puppet::transform(pose);cargoStack->tick(true,wanted,&t);
+    }
+    // --- Likes for the partner (likes.h): opt-in partner_likes. L sends one like (at most one per 1.5 s); a like that
+    // arrives is given to this porter the game's way (at most one a second, ten a minute).
+    std::vector<ds::CargoEvent> likeIn;mod::likes::Sender likeTx;mod::likes::Receiver likeRx;mod::marker::KeyEdge likeEdge;
+    std::optional<mod::likes::Api> likesApi;bool likesTried=false;uint64_t likesSent=0,likesGiven=0;
+    void tickLikes(uint64_t now) {
+        if(!config.partnerLikes||!core){likeIn.clear();return;}
+#ifndef MOD_FAKE_NETWORK
+        if(!likesTried){likesTried=true;
+            try{likesApi=mod::likes::nativeApi(*sampler);note("LIKE on (config), key L\n");}
+            catch(const std::exception& e){note((std::string("LIKE unavailable: ")+e.what()+"\n").c_str());}}
+#endif
+        bool coop=partnerMode()&&core->connected()&&!inEvent;
+        if(likeEdge.pressed(coop&&mod::marker::keyDown(0x4c),now))
+            if(auto e=likeTx.press(now,coop)){core->queueCargo(*e);++likesSent;note("LIKE sent to the partner\n");}
+        for(auto& e:likeIn){
+            auto n=mod::likes::decode(e);if(!n){note("LIKE refused: malformed\n");continue;}
+            if(!coop||!likesApi){note("LIKE dropped: not in play\n");continue;}
+            if(!likeRx.accept(now)){note("LIKE dropped: too many\n");continue;}
+            if(likesApi->give(*n)){++likesGiven;note("LIKE received from the partner\n");}
+            else note("LIKE dropped: no likes state\n");
+        }
+        likeIn.clear();
     }
     std::filesystem::path markerCommand;std::unique_ptr<mod::marker::Markers> markers;std::vector<ds::CargoEvent> pingIn;
     mod::marker::KeyEdge pingEdge;unsigned pingKey=0;bool markerConfigDone=false;
@@ -1191,6 +1216,8 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickStructures(now);
             stage="markers";stages.enter("markers",mod::nowUs());
             if(twin&&gameContext)tickMarkers(now);
+            stage="likes";stages.enter("likes",mod::nowUs());
+            if(twin&&gameContext)tickLikes(now);
             stage="cargo command";stages.enter("cargo command",mod::nowUs());
             if(cargoCreate&&gameContext&&std::filesystem::exists(cargoCommand)) {
                 auto text=readConfig(cargoCommand);

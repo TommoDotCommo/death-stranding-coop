@@ -3,8 +3,8 @@ CXX ?= g++
 MINGW ?= x86_64-w64-mingw32-g++-posix
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -101,6 +101,8 @@ gear-windows-test: gear_test.cpp gear.cpp gear.h puppet.cpp pose.cpp discovery.c
 	 ./build/gear-test.exe || exit 1; \
 	 ./build/mutant-gear-locks.exe >/dev/null 2>build/gear-locks.err; code=$$?; if test $$code -ne 1 || ! grep -q oracle build/gear-locks.err; then echo "SURVIVED GEAR_LOCKS (exit $$code)"; exit 1; fi; echo KILLED MUTANT_GEAR_LOCKS
 .PHONY: gear-windows-test
+build/likes-test: likes_test.cpp likes.cpp likes.h discovery.cpp ../core/core.cpp | build
+	$(CXX) $(FLAGS) likes_test.cpp likes.cpp discovery.cpp ../core/core.cpp -o $@
 build/stack-test: cargo_stack_test.cpp cargo_stack.cpp cargo_stack.h puppet.cpp pose.cpp discovery.cpp | build
 	$(CXX) $(FLAGS) cargo_stack_test.cpp cargo_stack.cpp puppet.cpp pose.cpp discovery.cpp -o $@
 build/weather-test: weather_test.cpp weather.cpp weather.h discovery.cpp | build
@@ -125,7 +127,7 @@ build/coop-partner: environment.cpp environment.h partner.cpp partner_logic.cpp 
 	$(CXX) $(FLAGS) partner.cpp partner_logic.cpp environment.cpp structures.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@
 build/coop-partner.exe: environment.cpp environment.h partner.cpp partner_logic.cpp partner.h identity.h structures.cpp structures.h carry_visual.cpp carry_visual.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(MINGW) $(WINFLAGS) partner.cpp partner_logic.cpp environment.cpp structures.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@ -lws2_32 -lbcrypt
-game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test
+game-thread-test: build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/likes-test
 	./build/game-thread-test
 	./build/puppet-test
 	./build/double-test
@@ -146,6 +148,7 @@ game-thread-test: build/game-thread-test build/puppet-test build/double-test bui
 	./build/ride-test
 	./build/weather-test
 	./build/stack-test
+	./build/likes-test
 	$(MAKE) gear-windows-test
 	python3 -B test_game_thread_mutants.py
 .PHONY: game-thread-test

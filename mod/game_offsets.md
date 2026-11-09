@@ -3823,3 +3823,168 @@ mesh = meshFactory(&parameters);    // RVA 0x2cd4660
 **Established — validation:** executable hash matched; focused disassembly corroborated the cited instructions; **38 read-only file assertions passed** for instruction bytes, lookup-signature uniqueness, metadata offsets/types, special-case jump targets and dimension constants. No runtime or visual validation ran.
 
 **Live (2026-11-09):** on the Episode 3 save the carried records' `+0x204` read `0x321` (bit 5 set) on every item; with the variant the selector returned the same model objects as without it (config entries 1/4 and 2/5 point to the same loaded objects). One item had an appearance override. The porter's own cases looked darker than the drawn ones; the cause (per-record shader data such as the `+60` identifiers or wear) is not established.
+
+## Likes for the partner — static recipe
+
+**Established:** All addresses below are RVAs for the pinned executable, image base `0x140000000`.
+
+**Established — script entry points:** Registration at `0x2e23801–0x2e23883` associates these names and function pointers:
+
+| Binding | Entry RVA | Implementation RVA |
+|---|---:|---:|
+| `DSLikeCommand_sReceiveLike` | `0x2e4d770` | `0x2e4eeb0` |
+| `DSLikeCommand_sReceiveLikeFromMajorMember` | `0x2e4d750` | `0x2e4ef60` |
+| `DSLikeCommand_sReceiveLikeWithOption` | `0x2e4d760` | `0x2e4f060` |
+
+**Established — simplest offline-capable award:** `0x2e4eeb0` accepts an integer amount in ECX, an optional person/resource argument in RDX, and a 16-bit reason in R8W. Its null-RDX branch loads the local likes state from global `0x7bf83b0` and calls `0x2e138e0`:
+
+```asm
+RVA 2e4eec0: test rdx,rdx
+RVA 2e4eec3: je   2e4ef17
+RVA 2e4ef17: mov  rcx,[global 7bf83b0]
+RVA 2e4ef25: mov  dword ptr [rsp+68],ffffffff
+RVA 2e4ef31: mov  r9b,7
+RVA 2e4ef39: movzx r8d,di          ; supplied reason
+RVA 2e4ef41: mov  edx,ebx          ; supplied amount
+RVA 2e4ef43: call 2e138e0
+```
+
+**Established:** The reason enum table at `0x3e05ba0`, stride `0x28`, assigns `Other=17`, `FromBB=6`, `FromPorter=7`, `FromBridges=9`, `FromPreppers=10`, `BuildingUsed=14`, `ContributeToConstruction=15`, and `FromOnlineUser=16`. These are enum values, not their order in the string inventory.
+
+**Established:** For `Other=17`, the classifier at `0x2e1f150` returns false, and `0x2e13990` takes the branch without a resident/person connection object. At `0x2e13acc–0x2e13ad1`, it calls `0x2e07580` with the signed amount and classification false.
+
+**Inferred — minimal game-thread experiment:**
+
+```cpp
+// Microsoft x64 ABI. Resolve and validate the pinned code before calling.
+using ReceiveLike = void (*)(int32_t amount, void* person, uint16_t reason);
+
+ReceiveLike receive_like = /* image_base + 0x2e4d770 */;
+receive_like(N, nullptr, 17); // Other
+```
+
+**Inferred:** Require ordinary loaded gameplay, initialized likes/settings/HUD objects, a bounded positive N, and exactly-once handling of the partner’s award event. This is a candidate native invocation, not a proven runtime contract.
+
+**Established — counter fields:** In the object referenced by global `0x7bf83b0`, `0x2e07580` updates clamped signed 64-bit counters:
+
+| Offset | Established operation / inferred meaning |
+|---|---|
+| `+0x18` | Updated for classification false; inferred local/NPC bucket. |
+| `+0x20` | Updated for classification true; inferred online bucket. |
+| `+0x28` | Increased for positive classification-false awards; inferred cumulative positive local likes. |
+| `+0x60` | Increased for positive classification-true awards; inferred cumulative positive online likes. |
+| `+0x10d0 + 8*reason` | Per-reason counter, updated by the receiving path. |
+| `+0x1160 + 8*reason` | Second per-reason counter, also updated and serialized. |
+
+**Established:** The stores include `mov [rdi+18],rcx` at `0x2e07667`, `mov [rdi+20],rdx` at `0x2e075e7`, `mov [rdi+28],rax` at `0x2e076ab`, and `mov [rdi+60],rax` at `0x2e07624`. Limits come from the settings object at likes-state `+0x1480`, bounds `+0x28/+0x30`.
+
+**Established — the on-screen counter notification:** Internal flag bit 1 enables the HUD notification:
+
+```asm
+RVA 2e07709: test byte ptr [rsp+a0],2
+RVA 2e07711: je   2e077b3
+...
+RVA 2e077a1: call 3088d60
+RVA 2e077ae: call 3092810
+```
+
+**Established:** `0x3092810` copies a `0x20`-byte notification record into a queue with capacity 32, count at queue `+0x420`. `DSUILikeCounterHUDLogic`’s update at `0x3093b50` consumes that queue; its initialization at `0x308aa70` binds the counter elements. The script wrapper supplies flags `7`, so the minimal call requests this normal animated counter notification.
+
+**Established:** The positive, no-person `Other` path does not itself supply a sender name or enqueue the named InfoLog message used by the online-user path. The counter animation and the named “received likes” message are separate operations.
+
+**Established — named attribution:** Internal receiver `0x2e12d40`, continuing into `0x2e12de0`, takes a native user identity. It:
+
+- Records an amount against that identity through `0x2e2cfb0` at `0x2e12eb5`.
+- Calls the total-counter updater at `0x2e12ee9`.
+- Resolves the sender name through `0x34ad870` at `0x2e12fe1`.
+- Converts that name to UI text and calls InfoLog insertion `0x30929f0` at `0x2e13184`, using a caller-supplied message-format hash.
+
+**Established:** Its text-message branch additionally requires internal flag bit 0 and a format hash other than `0xffffffff` (`0x2e12fac–0x2e12fc6`). Thus an award can update totals/show the counter without producing the named message.
+
+**Inferred:** A partner nickname is not interchangeable with the native user-identity argument. Arbitrary offline attribution should use separately formatted UI text; a single native call accepting `(N, custom_name)` was not established. Fresh online-name resolution while offline is also unproven.
+
+**Established — progression and persistence side effects:**
+
+- **Saving:** Writer `0x2e1e5b0` serializes `+0x18/+0x20/+0x28/+0x60`, both reason arrays, and identity-associated records. Corresponding reads appear at `0x2e11e7b–0x2e11ef2`. These awards change saveable state. An immediate autosave trigger was not established.
+- **Porter evaluation:** `0x2f237c0` obtains reason totals via `0x2e0b6d0`, maps reasons through `0x2e1f020`, multiplies them by settings coefficients (`0x2f23841–0x2f238a0`), and accumulates evaluation values. `Other=17` maps to bucket 2. Its coefficient is reflected as `TakeLikeReason_Other`, settings `+0xcc`; the loaded value is unknown.
+- **Connection level:** Person/resident routes reach `0x2f40a80`/`0x2f40e80`, which update connection-associated data at returned record `+8`. For example, `0x2f40b62–0x2f40b7f` adds the amount and clamps using the person’s thresholds. The null-person `Other` branch avoids this identified connection update.
+- **Achievements:** `0x2e093a0` compares the combined total against settings thresholds `+0xa8/+0xac` and invokes `0x3632a50` with trophy resources. Achievement consequences cannot be treated as absent merely because the game service is blocked.
+- **Online bookkeeping:** Identity-associated receiving updates a per-user map. It can also reach `0x2e07eb0`; that helper’s full effects were not traced. The simple `Other` route avoids those identified calls, but absence of every downstream online queue effect has not been proven.
+
+**Inferred — risks:** Use small awards initially. Totals, reason statistics, evaluation and achievements can persist; counter saturation can make the actual increment smaller than N; a full HUD queue can discard the notification after state changes. The minimal recipe gives the stock counter popup, but does not establish a custom named partner popup.
+
+## A name label over the partner — static recipe
+
+**Established — relevant HUD:** The stock owner-name presentation is implemented in `DSUIMarkerHUDLogic`, reflection descriptor `0x4cf0810`, runtime vtable `0x3e53b50`. Its constructor at `0x307f430` creates 256 marker slots and 16 detail slots:
+
+```asm
+RVA 307f465: lea  rbx,[rdi+80]
+RVA 307f473: call 3081470
+RVA 307f478: add  rbx,130
+...
+RVA 307f48a: lea  rsi,[rdi+13080]
+RVA 307f497: call 3081000
+RVA 307f49c: add  rsi,490
+```
+
+**Established:** Let `L` be an initialized instance of that HUD logic. Initialization `0x308b1f0` stores:
+
+| Field | Established use |
+|---|---|
+| `L+0x18` | Menu context passed to projection and element lookup. |
+| `L+0x1a348` | Parent HUD element used when creating marker/detail subtrees. |
+| `L+0x1a368` | `DSUIMarkerHUDLogicMarkerDetailResource` pointer. |
+| `L+0x13080 + 0x490*i` | Detail record, `i=0..15`. |
+
+**Established — name elements:** For detail record D and resource R, initialization at `0x308bb35–0x308bb89` resolves:
+
+| Resource field | Detail field | Reflected name |
+|---|---|---|
+| `R+0x138` | `D+0x118` | `NameRootElement` |
+| `R+0x140` | `D+0x120` | `NameTextElement` |
+| `R+0x148` | `D+0x128` | `OnlineNameTextElement` |
+
+**Established:** These lookups occur under the Bridges ID subtree at `D+0x38`. Resource `R+0x58` identifies that subtree’s root. Its adjacent fields include the rank/badge presentation.
+
+**Established — owner identity rather than an embedded name:** The HUD copies a native user handle into `D+0x390` via `0x34ac430` (`0x309813d–0x3098144`). Name update `0x308fc40` passes that handle to resolver `0x328f000`:
+
+```asm
+RVA 308fddf: lea rcx,[r15+1a500]   ; resolver owned by HUD logic
+RVA 308fde6: lea r9,[rsi+178]      ; resolution state
+RVA 308fded: lea r8,[rsi+390]      ; native owner identity
+RVA 308fdf9: call 328f000
+```
+
+**Established:** `0x328f000` calls `0x34ad870` for the display name and supplies resolving/error substitutes for certain states. The HUD selects ordinary versus online text at `0x308fe88–0x308fecb` and applies the resolved string with `0x3646c40` at `0x308fed7`.
+
+**Inferred:** The online owner label is backed by native identity/name-resolution state, rather than a freely replaceable UTF-8 owner-name field on every entity. An arbitrary partner body should not be inserted into this path by inventing an online identity.
+
+**Established — world anchoring:** The marker HUD processes `0x40`-byte input records through `L+0x1a3d0`. At `0x3096dc0–0x3096e14`, it passes the beginning of each record, containing a float-vector world position, to:
+
+```cpp
+// Inferred source-level signature; register assignments are established.
+Project(screen_out, menu_context, world_float4); // RVA 0x329dd60
+```
+
+**Established:** The projector reads x/y/z floats, transforms them through the active view, performs perspective division and returns a screen-space float vector (`0x329de0f–0x329dfeb`). The HUD copies the projected position to `D+0x450` at `0x3098114`; this is screen space, not the original world position.
+
+**Established:** The same projection-to-element pattern is directly visible in the hologram-name HUD at `0x307cd31–0x307cd4c`: call `0x329dd60`, then call element-position setter `0x3701e40`. That setter writes element `+0xf0` and invokes its layout-update virtual method.
+
+**Inferred — minimal independent label recipe:** Create a separate UI subtree and update its position from the partner pose. This avoids native online-name resolution and the HUD’s 16 managed detail slots.
+
+1. **Inferred:** Acquire and validate the active L, its menu, parent and resource pointers. The vtable/resource layout is established; a reliable runtime instance-acquisition method was not established here.
+2. **Established primitive; inferred use:** Create a new Bridges ID/name subtree using `0x36fb8b0(parent, *(R+0x58))`. This wrapper invokes factory `0x364f400`; that factory creates the runtime element, attaches it to the parent (`0x364f584–0x364f587`) and recursively creates resource children (`0x364f5c0–0x364f5ce`). Native detail construction uses the same factory at `0x308b942`.
+3. **Established primitive; inferred use:** Find the new subtree’s name children with `0x36fec70(new_root, child_resource)`, using `R+0x138/+0x140/+0x148`. This lookup compares resource identity at element `+0x28` and recursively searches children.
+4. **Established primitive; inferred use:** Build a native UTF-16 UI string with `0x191ca20(&string_handle, name_utf16)`, then call `0x3646c40(text_element, &string_handle)`. Release the temporary string with `0x191cad0`. Show the chosen name element and root; hide the alternative online text. Visibility routine `0x37028c0(element, visible, duration)` is used by the stock HUD.
+5. **Inferred:** Each eligible game-thread tick, project the partner’s world position plus a head-height offset with `0x329dd60`, then position the new root with `0x3701e40`. The UI needs no entity argument: the mod supplies the position. Apply distance, camera/front-facing and gameplay visibility gates.
+6. **Established primitive; inferred use:** Remove the subtree through `0x3700750(parent, child_index)`, after locating its current index by pointer identity in parent `+0x48`, count `+0x40`. This routine unregisters descendants, clears the child’s parent, removes the array entry and releases its temporary reference (`0x370075f–0x370080c`). Match any additional references held by the mod.
+
+**Established — encoding trap:** Do not pass UTF-8 directly to narrow UI-string constructor `0x191c9e0`. Its helper `0x191d260` widens individual bytes and recognizes a special `0x01` escape (`0x191d2e7–0x191d310`); it is not a normal UTF-8 decoder. The UTF-16 constructor copies 16-bit code units through `0x191d390`.
+
+**Inferred:** Decode validated UTF-8 to UTF-16 in the mod first. Bound the displayed name and handle UI markup/control characters deliberately.
+
+**Inferred — icon and removal limits:** The cloned Bridges ID subtree provides the stock name/badge presentation. Selecting the exact bike/truck glyph, and presenting a meaningful partner rank, remain unverified. Hiding the subtree is sufficient for temporary suppression; permanent removal should use the native removal routine.
+
+**Inferred — risks:** Menu lifetime, clone visibility defaults, inherited anchors, glyph availability and mutation timing relative to UI jobs need validation. Resource-based cloning also participates in menu resource lookup, so interference with stock lookups must be checked. Clear stale handles across menu destruction/reload; never free native UI objects with the mod’s allocator. No single native “attach custom nameplate to arbitrary entity” API was established—the proposed recipe supplies world anchoring explicitly.
+
+**Live (2026-11-09):** `0x2e4eeb0(1, nullptr, 17)` on the game thread raised `+18`/`+28` by one and the reason-17 counters by one, with the stock like counter popup ("+1").

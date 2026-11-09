@@ -651,6 +651,17 @@ game's porter carries is printed as `CARRY the porter carries ...`. Tests: `carr
 copies through the real core with loss and an outage, seven mutants in `test_game_thread_mutants.py`) and
 `test_partner_carry.py` (two stand-ins on loopback, one restarted).
 
+## Likes for the partner (`partner_likes`, off by default)
+
+With `"partner_likes": true` (requires `puppet_probe`) pressing **L** (free in the game's default keys) while the partner
+is connected and no game event runs sends the partner one like, at most one per 1.5 s (`likes.h`, a CARGO event of
+type 9). The partner's mod gives its porter that like the game's own way, `DSLikeCommand_sReceiveLike` with reason
+Other and no sender, which shows the game's like counter popup; it gives at most one a second and ten a minute whatever
+arrives. These are the game's real likes: they are saved and count toward the porter's evaluation and the like trophies,
+which is why the feature is off unless asked for. Log lines start with `LIKE` (`sent to the partner`, `received from the
+partner`, `dropped: ...`). Tests: `likes_test.cpp` (mutants GAP and CAP); live, two copies: one L press raised the
+other porter's likes by one with the counter popup.
+
 ## The partner from the start (`partner`)
 
 `"partner": "own"` (or `"peer"`) in `mod.json` shows the partner from the start, as the `puppet.double` command `own` /
