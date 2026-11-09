@@ -659,8 +659,8 @@ the launcher writes from the name each player types) above its head, in the game
 9-byte chunks, at most 36 bytes); until a name arrives the label reads "Partner". The label is one of the game's
 hologram-name records, which the mod allocates, registers with the game's record list (0x307e170) and moves every tick;
 the game's HUD projects and draws the nearest few. It goes when the body hides, a game event starts or the partner
-leaves (the record is unregistered with 0x3081db0 and freed), and is forgotten without a call when the world is
-replaced. Log lines start with `TAG`. `puppet.ride` "tag on" / "tag off" shows it without the config. Tests:
+leaves (the record is unregistered with 0x3081db0 and freed); when the world is replaced it is unregistered only if the
+game's record list is still the one it joined (otherwise left alone, never freed). Log lines start with `TAG`. `puppet.ride` "tag on" / "tag off" shows it without the config. Tests:
 `nametag_test.cpp` (mutants MARKUP, STILL and ORDER); live, two copies: each showed the other's nickname over the
 partner body, and the label went when the other copy closed. The launcher's play setup turns it on.
 

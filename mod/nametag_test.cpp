@@ -31,7 +31,7 @@ int main(){
     t.tick(true,u"Fragile",&q);CHECK(h.live.size()==1&&h.live.begin()->second.first==u"Fragile"&&h.removes==1);
     t.tick(true,u"Fragile",nullptr);CHECK(h.live.empty());
     t.tick(true,u"",&p);CHECK(h.live.empty());
-    t.tick(true,u"Sam",&p);auto before=h.removes;t.forget("load");CHECK(h.removes==before&&!t.record());
+    t.tick(true,u"Sam",&p);auto before=h.removes;t.forget("load");CHECK(h.removes==before+1&&!t.record()&&h.live.empty());
     t.tick(true,u"Sam",&p);CHECK(h.creates==4);
     std::array<double,3> bad{0,0,1.0/0.0};auto r=t.record();t.tick(true,u"Sam",&bad);CHECK(h.live.at(r).second==p);
     Hud n;n.refuse=99;Tag g(n.api(),[](const std::string&){});

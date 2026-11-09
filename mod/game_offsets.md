@@ -4247,3 +4247,205 @@ record array = *(Q+0x38)
 **Inferred — risks:** This remains an untested candidate. Principal risks are UI/render scheduling outside the reviewed join, menu destruction, inherited subtree anchors/visibility, duplicate resource identities affecting lookups, unsupported glyphs/markup, and reference ownership. Do not alter the stock 16 detail records or invent an online identity. The global chain establishes where to look; it does not make a cached instance permanently live or certify UI mutation from the existing callback.
 
 **Live (2026-11-09):** the hologram-record route works: a 0x30-byte, 16-aligned record the mod allocates, zeroed, then `0x307e170(record)`, its string set from UTF-16 with `0x191ca20`/`0x191caf0`/`0x191cad0` at `+0x10`, mode byte `+0x18` left 0, and its float4 point (game axes) at `+0x00` 2.1 m above the body: the game drew the name with its hologram-name label over the partner body. `0x3081db0(record)` removed it.
+
+## Death, BTs and voidouts for the partner — static recipe
+
+**Established — scope:** Inspected the pinned executable read-only with narrow `x86_64-w64-mingw32-objdump -d -M intel` windows. SHA-256 matched `9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b` before and after inspection. All addresses below are RVAs relative to `0x140000000`. “Established” means static machine-code or metadata evidence; none of these new state interpretations was tested live.
+
+### Read-only local detection
+
+**Established — native animation predicates:** `0x2717c40(entity, enum)` reads byte:
+
+```text
+b = *(uint8_t *)(entity + 0x4dc8 + 12*enum)
+
+if (b & 2) return true;
+if (b & 4) return (b & 0x10) != 0;
+return (b & 8) != 0;
+```
+
+Evidence: `0x2717c40–0x2717c65`. Reading only bit 4 would miss the other native true cases.
+
+**Established — relevant registered controls:**
+
+| Name | Native bool enum | Registration evidence |
+|---|---:|---|
+| `Is_Dead` | `0x0c` | `0x1883c36–0x1883c4e` |
+| `Is_Drag` | `0x12` | `0x1883cc7–0x1883cdf` |
+| `Drag_Is_Catch_Ground` | `0x13` | `0x1883ce4–0x1883cfc` |
+| `Is_Crouch` | `0x15` | `0x1883d3b–0x1883d53` |
+| `Int_Is_GazerCatch` | `0x25` | `0x1883d92–0x1883daa` |
+| `Int_Is_GazerCut` | `0x26` | `0x1883daf–0x1883dc7` |
+
+**Inferred — grabbed/dragged presentation:** These provide useful candidate observations for the porter's animation state. `Is_Drag` together with the two named Gazer controls is stronger evidence than movement speed alone, but the exact relationship to physical capture, escape and dragging was not established. Do not classify every `Is_Drag` interval as a proven BT capture.
+
+**Established — generic entity death:** `Entity_ExportedIsDead`, `0x2362c80`, returns bit 7 of entity `+0x88`:
+
+```asm
+2362c85  mov rax,[rcx+88]
+2362c8c  shr al,7
+2362c8f  and al,1
+```
+
+**Established — invalid-object caveat:** That export returns **true for null**, at `0x2362c92`. A reader must report an unavailable porter as **unknown**, rather than dead.
+
+**Inferred — porter death:** Combine the generic death flag with native `Is_Dead` and the global phase observations below. Neither flag alone establishes “currently in the Seam” or “repatriating.”
+
+**Established — global phase storage:** `DSGameState_sExportedGetGameState2` is registered to `0x2dd36c0` at `0x2dba487–0x2dba4af`. It returns:
+
+```text
+G = *(base + 0x7bf6e88)
+currentState = *(uint64_t *)(G + 8)
+```
+
+Its constructor installs vtable `base+0x3dfedb0` and publishes that global at `0x2dbd79a–0x2dbd7ce`. State requests also occupy `G+0x10`; these are distinct from the getter's current-state word.
+
+**Established — named sound-state evidence:**
+
+- `0x376a24–0x376a81` extracts **bit 9** from a game-state callback result and publishes `DSSdKnotSpaceState`.
+- `0x376a9d–0x376ad8` extracts **bit 17** and publishes `DSSdAnnihilationStateGameState`.
+- `0x376af4–0x376b2f` extracts **bit 13** and publishes `DSSdGameOverState`.
+
+**Inferred — phase meanings:** Bit 9 is the Seam/KnotSpace candidate, bit 17 the annihilation candidate, and bit 13 the game-over candidate. The sound callback's runtime import binding was not independently resolved to `0x2dd36c0`, so this semantic correspondence still needs validation.
+
+**Established — repatriation-related fields are insufficient:** `OverrideReturnFromKnotSpaceSequence`, `0x26e6e20`, stores its arguments at `*(base+0x7be7980)+0x20518/+0x2051c`. These are sequence overrides, not an established current repatriation phase. `DebugPlaySequenceOfReturningFromKnotSpace` is registered to the empty stub `0x18e9b10` at `0x266bca5–0x266bccd`.
+
+**Inferred/unknown — repatriation detection:** No independently identified “repatriating now” predicate was established. A falling Seam bit followed by restored porter animation is a possible transition heuristic, not a proven phase detector.
+
+**Established — Odradek pointer chains:** The native arm/body exports give:
+
+```text
+P    = *(porter + 0x54c8)
+arm  = tracked_pointer_at(P + 0x4c88) - 0x20
+body = tracked_pointer_at(P + 0x4ca0) - 0x20
+```
+
+Null tracked pointers remain null. Evidence: arm getter `0x26e6ac0–0x26e6ae8`; body getter `0x26e6af0–0x26e6b18`.
+
+**Established — raw Odradek state lead:** The common Odradek update selects a byte at Odradek entity `+0x34a`; examples include stores at `0x295e148`, `0x295e15f`, `0x295e66e`, `0x295e6ae`, `0x295e6bf` and `0x295e711`. Its distance selector, `0x29601a0–0x2960225`, follows Odradek `+0x3f0` and selects parameter fields `+0x4508`, or the minimum of `+0x450c/+0x4500`, under several flags.
+
+**Inferred/unknown — BT alert level:** Neither `+0x34a` nor those distance fields has an established mapping to the requested Odradek alert levels. They must not be exposed as such yet. The sound name `ASdGSOdradekTentionLevel` exists at `0x3f5b12c`, but its native producer/storage was not resolved.
+
+**Inferred — minimal conservative per-tick recipe:**
+
+1. Reuse the existing validated local-porter selection.
+2. Read entity `+0x88` and apply the native bool predicate above for enums `0x0c`, `0x12`, `0x13`, `0x25`, `0x26`.
+3. Read the validated game-state global and current word; retain the three candidate phase bits separately.
+4. Optionally record raw Odradek state through the arm/body chain; leave the interpreted alert level unknown.
+5. Re-read roots after sampling. Reject changed identities, unreadable spans or unloaded objects. Do not carry cached entity/component pointers across reloads.
+
+### Showing the state on the owned partner body
+
+**Established — setters:** The existing APIs support these named bool controls through per-manager handles:
+
+- Init bool: `0x2397050`.
+- Set bool: `0x23971e0`.
+- Init float: `0x23970b0`.
+- Set float: `0x2397220`.
+- Trigger bool: `0x2397310`.
+
+At `0x23971e5–0x2397209` and `0x2397225–0x2397251`, the setters address `manager+0x58 + 0x30*handle`, store the value at record `+0x20`, then dispatch the bound control ID from record `+8`.
+
+**Established — crouch control:** `Crouch_Rate` is registered as float enum `0x77` at `0x18857b5–0x18857cd`.
+
+**Inferred — candidate presentation recipe:**
+
+| Presentation | Candidate controls |
+|---|---|
+| Dragged/struggling | Mirror `Is_Drag`, `Drag_Is_Catch_Ground`, `Int_Is_GazerCatch`, `Int_Is_GazerCut` |
+| Crouched sneaking | `Is_Crouch`; mirror `Crouch_Rate` |
+| Dead/collapsed | Mirror `Is_Dead`; suppress normal locomotion inputs while held |
+
+**Inferred/unknown — pose limits:** Registration proves the controls exist. It does not prove that `Is_Dead` alone produces a collapsed pose, that the Gazer controls reproduce the complete struggle, or that any requires an entry pulse. Ragdoll setup, root motion and required companion controls remain unresolved.
+
+**Established — pulse limit:** `0x2397319–0x239732b` clamps duration against `base+0x7bc6810`, then submits bool true through `0x238a2f0`. A finite pulse is therefore not a substitute for holding a persistent state.
+
+**Inferred — binding requirement:** Resolve and validate each name against the body's active player graph. Native enum numbers above are **not** AnimationManager handles. Reuse the existing active-definition binding checks before testing these controls.
+
+### Detecting and reproducing a voidout
+
+**Established — catcher crater storage:** Let:
+
+```text
+C = *(base + 0x7bee060)
+
+active count     = int32(C + 0x280)
+active records   = pointer(C + 0x288)
+pending count    = int32(C + 0x290)
+pending records  = pointer(C + 0x298)
+record stride    = 0x60
+```
+
+The global is constructed through `0x29f12c0` and published at `0x2e0dacf`. Its constructor installs vtable `base+0x3daf258`.
+
+**Established — record fields:**
+
+| Offset | Static interpretation |
+|---|---|
+| `+0x18/+0x20/+0x28` | Three float64 world-position coordinates |
+| `+0x30` | Float32 radius |
+| `+0x3c` | Activation byte |
+| `+0x44` | Countdown before activation |
+| `+0x48` | Incrementing record identifier |
+| `+0x4c` | Progress counter |
+| `+0x50` | Area discriminator |
+| `+0x58` | Flags |
+
+Evidence: record construction/copy at `0x2a004bc–0x2a0051f` and `0x2a008d9–0x2a00960`; active-table update at `0x2a74fed–0x2a75211`.
+
+**Established — independent position/radius corroboration:** `catcher::sIsInAnnihilationArea` is registered to `0x2a92560`. It reads the active table, filters area and activation, and compares the supplied position with record position/radius at `0x2a92598–0x2a9261f`. The distance test uses the horizontal components.
+
+**Inferred — event detection:** Observe newly queued identifiers and their stored positions, then distinguish “queued” from activation-byte transitions. An existing active record is not evidence of a new voidout. Cache invalidation is necessary when the manager/world changes.
+
+**Established — native enqueue function:** `0x2a003d0(C, catcherIdentifier)` searches `C+0x88/+0x90`, using `0x110`-byte catcher records and identifier `+0x20` (`0x2a00422–0x2a00473`). It prepares a crater record and appends it to the pending table (`0x2a00870–0x2a00960`).
+
+**Established — no arbitrary-position contract here:** The enqueue function derives position from catcher data and resource-dependent calculations. Its second argument is an identifier, not a position pointer.
+
+**Established — crater materialization:** `0x2a014e0(C, record)`:
+
+- Requires the cached `CraterEntityResource` at `C+0x2a0`; resource `+0x80` is cached there at `0x2a1cdd1–0x2a1cdff`.
+- Checks world availability through `0x1ddd0f0`.
+- Calls resource virtual `+0x88` at `0x2a0154d`.
+- Applies the record transform through `0x22dff80` at `0x2a015f7`.
+- Sets entity radius-related fields `+0x35c/+0x360`.
+- Registers the entity at `0x2a01658–0x2a01674`.
+- Registers a world influence through `0x2e59bc0` at `0x2a0168d–0x2a016a5`.
+
+**Established — progress export is not a creator:** `catcher::sAnnihilationProgress`, `0x2a91050`, conditionally adds its integer argument to `C+0x2b0`. The update consumes it into record progress at `0x2a75131–0x2a7515a`.
+
+**Established — persistence:** The environment serialization path calls `0x2a90d80(C, writer)` at `0x2e1e2db–0x2e1e2ea`. That writer serializes active record positions, radius and additional fields at `0x2a90e1a–0x2a90ef4`.
+
+**Inferred — save risk:** Crater records can persist. This does not establish that enqueueing immediately writes a save to disk.
+
+**Established — area side effects:** First activation calls `0x2a1c710(C, position, radius)` at `0x2a75091–0x2a750a1`. That routine performs an area query, processes its results through `0x2d80630`, and calls two additional radius-based handlers, `0x2bdd2b0` and `0x2afff60`.
+
+**Established — local-player/game-flow coupling:** The enclosing catcher annihilation path enqueues the crater at `0x2a57c3f`, selects damage type `0x12e` at `0x2a57c74–0x2a57c7d`, and submits it against the local porter at `0x2a57d44–0x2a57d65`. Metadata names `0x12e` `CatcherAnnihilationAttack`. An alternate branch submits a game-flow request through `0x341f840` at `0x2a57d78–0x2a57dab`.
+
+**Inferred/unknown — remaining side effects:** Exact cargo destruction, structure removal, Chiral-network changes, terrain deformation/collision and the alternate branch's precise game-over behavior were not fully traced. None is established absent. Calling the enclosing annihilation path on receipt of a partner packet risks affecting the local porter and persistent world.
+
+### Separate visual effects and remaining risks
+
+**Established — separate crater-effect component:** `DSCraterEffectComponent` descriptor `0x4c0ba70` names a `0x128`-byte component. Its message table connects initialization to `0x2aba0f0` and updating to `0x2ac59a0`.
+
+**Established — particle creation primitive:** Initialization creates particle instances through `0x1bc7fe0`, using the owning entity's position and particle resources:
+
+```text
+0x2aba1d8–0x2aba227   resource +0x20
+0x2aba2be–0x2aba313   resource +0x28
+0x2aba448–0x2aba496   resource +0x30
+0x2aba5c8–0x2aba616   resource +0x38
+```
+
+The update positions/restarts an instance through `0x1e0b020` and `0x1bc1e30` at `0x2ac5aff–0x2ac5b5a`.
+
+**Established — annihilation particle resource leads:** Reflected fields named `AnnihilationEffectParticleSystem` occur at member records `0x4bf4828` and `0x4c077a8`.
+
+**Inferred/unknown — visual-only voidout:** Separate particle machinery exists, but this pass did **not** establish a standalone, safe, complete visual voidout explosion. The crater-effect component may supply continuing crater ambience rather than the initial explosion. Resource acquisition, lifetime, complete initialization side effects and teardown remain unresolved.
+
+**Inferred — integration boundary:** The conservative next implementation is read-only telemetry with explicit unknown states, followed by isolated animation experiments. A gameplay voidout or crater call should not yet be wired to received partner events.
+
+---
+
+Changed files: none. Ten pinned instruction assertions passed; executable hash remained unchanged; Git remained clean at the supplied start commit. No orchestrator refinements appeared in the inbox. No live checks, builds or test suite ran.
+
+**Status (2026-11-09):** nothing of this is wired. Crouching already reaches the partner body (`Crouch_Rate` from the presence crouch flag); the struggle and death poses, alert levels and voidouts stay parked (a gameplay crater must not be driven by partner events).

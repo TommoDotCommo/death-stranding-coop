@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <new>
 #include <stdexcept>
@@ -72,8 +73,10 @@ void Tag::tick(bool permitted,const std::u16string& name,const std::array<double
 #endif
 }
 void Tag::forget(const char* why){
-    if(record_)log_(std::string("TAG forgotten (")+why+")\n");
-    record_=0;failures_=0;   // the old record's memory is kept: the game may still list it until its world is gone
+    // The world was replaced: the record is handed back to the native side, which unregisters it only from a list that
+    // is still current (else it is left alone), so no stale label can stay when the game keeps its list across a load.
+    if(record_){api_.remove(record_);log_(std::string("TAG dropped (")+why+")\n");}
+    record_=0;failures_=0;
 }
 Api nativeApi(discovery::Sampler& s){
 #ifndef _WIN32
@@ -104,14 +107,22 @@ Api nativeApi(discovery::Sampler& s){
     const uint64_t listSlot=s.base+0x7c00128;auto* sp=&s;
     auto place=[](unsigned char* r,const std::array<double,3>& at){float v[4]={float(at[0]),float(at[1]),float(at[2]),0.f};std::memcpy(r,v,16);};
     Api a;
-    a.create=[construct,make,assign,release,listSlot,sp,place](const std::u16string& name,const std::array<double,3>& at)->uint64_t{
-        uint64_t owner=0,list=0;if(!sp->read(listSlot,&owner,8)||!owner||!sp->read(owner+0xf0,&list,8)||!list)return 0;   // no record list
+    // The list each record joined: a record is only unregistered from the list that is current now; one whose list
+    // was replaced (a new world) is left as it is, never freed, since the old list may still point at it.
+    auto lists=std::make_shared<std::map<uint64_t,uint64_t>>();
+    auto currentList=[sp,listSlot]()->uint64_t{uint64_t owner=0,list=0;if(!sp->read(listSlot,&owner,8)||!owner||!sp->read(owner+0xf0,&list,8))return 0;return list;};
+    a.create=[construct,make,assign,release,currentList,lists,place](const std::u16string& name,const std::array<double,3>& at)->uint64_t{
+        uint64_t list=currentList();if(!list)return 0;   // no record list
         auto* r=static_cast<unsigned char*>(::operator new(0x30,std::align_val_t(16)));std::memset(r,0,0x30);
-        construct(r);
+        construct(r);(*lists)[reinterpret_cast<uint64_t>(r)]=list;
         alignas(16) unsigned char text[16]{};make(text,name.c_str());assign(r+0x10,text);release(text);
         place(r,at);return reinterpret_cast<uint64_t>(r);};
     a.move=[place](uint64_t r,const std::array<double,3>& at){place(reinterpret_cast<unsigned char*>(r),at);};
-    a.remove=[destruct](uint64_t r){destruct(reinterpret_cast<void*>(r));::operator delete(reinterpret_cast<void*>(r),std::align_val_t(16));};
+    a.remove=[destruct,currentList,lists](uint64_t r){
+        auto it=lists->find(r);if(it==lists->end())return;
+        bool same=it->second==currentList();lists->erase(it);
+        if(!same)return;   // its list is gone or replaced: leak the 0x30 bytes rather than free what it may point at
+        destruct(reinterpret_cast<void*>(r));::operator delete(reinterpret_cast<void*>(r),std::align_val_t(16));};
     return a;
 #endif
 }

@@ -15,7 +15,7 @@ namespace mod::nametag {
 struct Api {
     std::function<uint64_t(const std::u16string& name,const std::array<double,3>& at)> create;   // a registered record, or 0
     std::function<void(uint64_t record,const std::array<double,3>& at)> move;
-    std::function<void(uint64_t record)> remove;    // unregistered and freed
+    std::function<void(uint64_t record)> remove;    // unregistered and freed (only from a list still current)
 };
 class Tag {
 public:
@@ -23,7 +23,7 @@ public:
     Tag(Api api,std::function<void(const std::string&)> log):api_(std::move(api)),log_(std::move(log)){}
     // permitted=false or no point: the label goes. A new name replaces it.
     void tick(bool permitted,const std::u16string& name,const std::array<double,3>* at);
-    void forget(const char* why);   // the world was replaced: never call the game for the old record
+    void forget(const char* why);   // the world was replaced: the record goes back to remove(), which checks its list
     uint64_t record() const {return record_;}
 private:
     Api api_;std::function<void(const std::string&)> log_;uint64_t record_=0;std::u16string name_;unsigned failures_=0;
