@@ -234,7 +234,7 @@ struct Runtime final:ds::Transport {
     std::unique_ptr<mod::weather::Share> weatherShare;std::optional<float> hostRain;uint64_t hostRainAt=0;   // guest: shared rain
     std::function<void(uint32_t)> cargoGive,cargoDelete;std::function<void(uint8_t,const mod::puppet::Transform&,bool)> construct;std::function<bool(uint64_t,unsigned,bool)> partToggle;
     std::function<void(const std::array<float,4>&,const std::array<float,4>&,const mod::puppet::Transform&,bool,bool,bool)> unconstruct;
-    std::function<void()> continueLastSave;mod::AutoContinue autoContinue;bool autoNoted=false;
+    std::function<void()> continueLastSave;mod::AutoContinue autoContinue;bool autoNoted=false,continueAgain=false;
     std::function<bool()> gameEvent;bool inEvent=false;uint64_t eventOverAt=0;std::atomic<bool> fakeEvent{false};
     // Shared cargo (cargo.h): placements read from the game's cargo map go to the partner; theirs are created here.
     mod::cargo::Sync cargoSync;uint64_t cargoReadAt=0,cargoManagerSlot=0,cargoManagerVtable=0,cargoSent=0,cargoMade=0,cargoTaken=0,cargoRemoved=0;
@@ -337,6 +337,7 @@ struct Runtime final:ds::Transport {
             else if(text=="park"+stamp){rideLead=0xff;}   // test: the lead vehicle stops where it is
             else if(text=="rider"+stamp){rideHideRider=!rideHideRider;}
             else if(text=="notice"+stamp){noticeTest=true;}           // test: one line in the game's info log
+            else if(text=="continue"+stamp){continueAgain=true;}      // test: load the last save again (from the title screen)
             else if(text=="tag on"+stamp){tagTest=true;}              // test: a name over the partner body
             else if(text=="tag off"+stamp){tagTest=false;}
             else if(text=="stack off"+stamp){stackTest=-2;}            // test: no cases drawn
@@ -436,7 +437,7 @@ struct Runtime final:ds::Transport {
             auto n=mod::likes::decode(e);if(!n){note("LIKE refused: malformed\n");continue;}
             if(!coop||!likesApi){note("LIKE dropped: not in play\n");continue;}
             if(!likeRx.accept(now)){note("LIKE dropped: too many\n");continue;}
-            if(likesApi->give(*n)){++likesGiven;note("LIKE received from the partner\n");}
+            if(likesApi->give(*n)){++likesGiven;note("LIKE received from the partner\n");if(notices)notices->event(mod::notice::Kind::Liked,partnerName,now);}
             else note("LIKE dropped: no likes state\n");
         }
         likeIn.clear();
@@ -454,7 +455,7 @@ struct Runtime final:ds::Transport {
             catch(const std::exception& e){note((std::string("NOTICE unavailable: ")+e.what()+"\n").c_str());}}
 #endif
         if(!noticeApi)return;
-        if(noticeTest){noticeTest=false;note(noticeApi->show(u"Co-op mod: test notice.")?"NOTICE test shown\n":"NOTICE test refused: no info log now\n");}
+        if(noticeTest){noticeTest=false;note(noticeApi->show(u"Co-op mod: test notice.",mod::notice::PlainIcon)?"NOTICE test shown\n":"NOTICE test refused: no info log now\n");}
         if(!config.notices)return;
         if(!notices)notices=std::make_unique<mod::notice::Notifier>(*noticeApi,[this](const std::string& row){note(row.c_str());});
         bool connected=core&&core->connected();
@@ -1370,6 +1371,7 @@ struct Runtime final:ds::Transport {
             }
             stage="continue";stages.enter("continue",mod::nowUs());
             if(continueLastSave&&gameContext) {
+                if(continueAgain){continueAgain=false;autoContinue.again(now-startedAt);autoNoted=false;note("AUTO continue asked again (test command)\n");}
                 if(autoContinue.tick(now-startedAt,cache.available)){continueLastSave();if(autoContinue.calls()==1)note("AUTO continue: asking the game to load the last save\n");}
                 if(autoContinue.done()&&!autoNoted){autoNoted=true;note(("AUTO in game after "+std::to_string((now-startedAt)/1000)+" s, "+std::to_string(autoContinue.calls())+" requests\n").c_str());}
             }

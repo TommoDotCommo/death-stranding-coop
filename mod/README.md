@@ -656,10 +656,12 @@ copies through the real core with loss and an outage, seven mutants in `test_gam
 
 With `"notices": true` (game provider and `game_thread`) the game's own info log, the message feed at the side of the
 screen, tells the player what happens to the session (`notice.h`): "<name> joined your session." when the partner
-connects (it waits up to 3 s for his name, else "Your partner"), "<name> left the session." when the link ends, and
-once, after 25 s in the world with nobody there since the mod started, "No partner yet. If this lasts, check the
+connects and is in the world (a partner whose game is still loading is announced when it has loaded; it waits up
+to 3 s for his name, else "Your partner"), "<name> left the session." when the link ends, and
+once, after a minute in the world with nobody there since the mod started, "No partner yet. If this lasts, check the
 firewall on both PCs." When the partner has been in a cutscene or private room for 2 s
-(where his body is hidden) it says "<name> is away (cutscene or private room)." and "<name> is back." when he returns. Nothing is shown outside the world (title, loading, game events);
+(where his body is hidden) it says "<name> is away (cutscene or private room)." and "<name> is back." when he returns.
+With `partner_likes`, a like he sends shows "<name> sent you a like." with the game's like icon. Nothing is shown outside the world (title, loading, game events);
 what happened meanwhile is told afterwards, in order, 2.5 s apart; at most four notices wait, and one the HUD does
 not take for 30 s is dropped. The name is cleaned like the name tag's.
 
@@ -667,7 +669,7 @@ The mod adds a finished text to the info-log queue with the game's own add funct
 the game takes, stamped with the UI clock, looking like the game's plain messages; it uses no table item and saves
 nothing. The HUD object is found through the UI owner global and checked by its vtable on every call
 (`game_offsets.md`, "Info log"). Log lines start with `NOTICE`. `puppet.ride` "notice" shows one test line without
-the config. Tests: `notice_test.cpp` (mutants BOUND, LEFT, ALONE_ONCE, NAME_WAIT, WORLD, GAP, AWAY_SETTLE, BACK_PAIRED). The launcher's play
+the config. Tests: `notice_test.cpp` (mutants BOUND, LEFT, ALONE_ONCE, NAME_WAIT, WORLD, GAP, AWAY_SETTLE, BACK_PAIRED, LIKE_ICON, JOIN_HOLD). The launcher's play
 setup turns it on.
 
 ## The partner's name over his body (`partner_tag`, off by default)

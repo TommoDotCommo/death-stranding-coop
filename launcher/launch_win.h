@@ -65,12 +65,12 @@ inline release_startup::Values launchValues(const LaunchOptions& o,const Session
     }
     return v;
 }
-inline void launchGame(const LaunchOptions& o,const Session& s,bool solo=false) {
+inline void launchGame(const LaunchOptions& o,Session s,bool solo=false) {
+    s.solo=solo;
     auto exe=o.game/L"ds.exe";
     if(gameRunning(o.game))throw std::runtime_error("This game copy is already running. Close it before starting a new session.");
     if(fileHash(exe)!=mod::discovery::PinnedHash)throw std::runtime_error("This game build is unsupported. Use Steam Director's Cut build 13300582.");
     if(!o.direct&&!equalPath(o.game,steamGame()))throw std::runtime_error("Steam is registered to another game folder, or its install path is unavailable. Select the registered Steam install in Settings. Test copies require --dev-direct.");
-    (void)solo;
     if(!fs::is_regular_file(o.data/"redirect-data/mod/mod.dll"))throw std::runtime_error("The co-op mod is missing. Install or repair the package first.");
     // Solo is isolated too: a host with no partner. Ordinary Steam starts remain pass-through.
     auto values=launchValues(o,s);auto bytes=ticket(values,asciiPath(exe),uint64_t(std::time(nullptr)));

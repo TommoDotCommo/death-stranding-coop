@@ -3,10 +3,12 @@
 Work in progress: real-time co-op for DEATH STRANDING DIRECTOR'S CUT on PC (Steam, build 13300582), built from zero.
 **Not playable yet; there is no release.** What works today, on one PC with two copies of the game: each copy is
 isolated and kept offline, each player sees the other as a second Sam walking, running, crouching and jumping
-beside them, wearing the other's gear and outfit, seated on a bike or truck when the other rides one, and pinned
-on the map. Cargo one player puts down or picks up is put down or taken away in the other's world, and a structure
-one player builds or dismantles (tested with ladders) is built or removed in the other's. Timefall falls where the host stands (opt-in). A two-PC session tried
-for real and everything about a shared story are still to do. See [STATUS.md](STATUS.md).
+beside them, wearing the other's gear and outfit, carrying the other's cargo as the game's own cases, with his name
+over his head, seated on his bike or truck (in his paint) when he rides one, and pinned on the map. Cargo one player
+puts down or picks up is put down or taken away in the other's world, and a structure one player builds or
+dismantles (tested with ladders) is built or removed in the other's. Timefall falls where the host stands, and the
+game's own message feed says when the partner joins, leaves or steps into a cutscene or private room. A two-PC
+session tried for real and everything about a shared story are still to do. See [STATUS.md](STATUS.md).
 
 This repository contains only original mod code. It contains no game files, assets, saves or anything copied from
 the game, and it never will. You need your own copy of the game.

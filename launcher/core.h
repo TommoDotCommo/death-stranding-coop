@@ -13,6 +13,7 @@ struct Session {
     std::string peer="127.0.0.1",name="Porter";
     unsigned port=49000;
     uint32_t secret=1;
+    bool solo=false;   // "Play solo": nobody is expected, so the session notices (and their "no partner yet" hint) stay off
 };
 std::string config(const Session&);
 void atomicWrite(const std::filesystem::path&,const std::string&);

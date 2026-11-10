@@ -16,13 +16,17 @@ public:
 #ifndef MUTANT_AUTO_ONCE_IN_GAME
         if(porterInWorld){done_=true;return false;}
 #endif
+        if(sinceStart<origin_)return false;
+        sinceStart-=origin_;
         if(sinceStart<FirstAfter||sinceStart>GiveUpAfter)return false;
         if(asked_&&sinceStart-last_<Every)return false;
         asked_=true;last_=sinceStart;++calls_;return true;
     }
+    // A test asks for one more load (after it sent the game back to the title screen): the same rules from now on.
+    void again(uint64_t sinceStart){if(!enabled_)return;done_=false;asked_=false;origin_=sinceStart>FirstAfter?sinceStart-FirstAfter:0;}
     bool done() const {return done_;}
     unsigned calls() const {return calls_;}
 private:
-    bool enabled_=false,done_=false,asked_=false;uint64_t last_=0;unsigned calls_=0;
+    bool enabled_=false,done_=false,asked_=false;uint64_t last_=0,origin_=0;unsigned calls_=0;
 };
 }

@@ -20,8 +20,15 @@ std::u16string text(Kind kind,const std::string& partnerName){
     case Kind::Alone:return u"No partner yet. If this lasts, check the firewall on both PCs.";
     case Kind::Away:return name+u" is away (cutscene or private room).";
     case Kind::Back:return name+u" is back.";
+    case Kind::Liked:return name+u" sent you a like.";
     }
     return {};
+}
+uint8_t icon(Kind kind){
+#ifndef MUTANT_NOTICE_LIKE_ICON
+    if(kind==Kind::Liked)return LikeIcon;
+#endif
+    (void)kind;return PlainIcon;
 }
 void Notifier::add(Kind kind,const std::string& name,uint64_t now){
 #ifndef MUTANT_NOTICE_BOUND
@@ -34,14 +41,20 @@ void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& 
     if(!started_){started_=true;connected_=false;}
     if(connected!=connected_){
         connected_=connected;
-        if(connected){everConnected_=true;add(Kind::Joined,partnerName,now);}
+        if(connected){everConnected_=true;joining_=true;add(Kind::Joined,partnerName,now);}
 #ifndef MUTANT_NOTICE_LEFT
         else add(Kind::Left,lastName_,now);
 #endif
     }
     // Away and back: only while connected, only after the state has lasted (a door transition is not worth a line),
     // and "back" only when "away" was told. A partner who leaves while away just leaves.
+    // Until the join has been told, the partner's absence is his game loading: not an "away".
+    if(!connected)joining_=false;
+#ifndef MUTANT_NOTICE_JOIN_HOLD
+    bool away=connected&&partnerAway&&!joining_;
+#else
     bool away=connected&&partnerAway;
+#endif
     if(away!=away_){away_=away;awaySince_=now;}
     if(!connected)awayTold_=false;
 #ifndef MUTANT_NOTICE_AWAY_SETTLE
@@ -63,6 +76,11 @@ void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& 
 #endif
     if(pending_.empty())return;
     auto& e=pending_.front();
+#ifndef MUTANT_NOTICE_JOIN_HOLD
+    // A partner whose game is still loading is announced when he is in the world (or after JoinHoldMs).
+    if(e.kind==Kind::Joined&&joining_&&connected&&partnerAway&&now-e.since<JoinHoldMs){e.held=true;return;}
+    if(e.held){e.held=false;e.since=now;e.nextTry=now;}   // the wait for the name and the retries count from here
+#endif
     // A join told before the name arrived would say "Your partner": wait a little for it.
     if(e.kind==Kind::Joined&&!e.named){
         if(!partnerName.empty()){e.name=partnerName;e.named=true;}
@@ -78,13 +96,13 @@ void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& 
 #ifndef MUTANT_NOTICE_GAP
     if(shown_&&now-lastShown_<GapMs)return;
 #endif
-    if(api_.show&&api_.show(text(e.kind,e.name))){
-        ++shown_;lastShown_=now;
-        static const char* const names[]={"joined","left","alone","away","back"};
+    if(api_.show&&api_.show(text(e.kind,e.name),icon(e.kind))){
+        ++shown_;lastShown_=now;if(e.kind==Kind::Joined)joining_=false;
+        static const char* const names[]={"joined","left","alone","away","back","liked"};
         log_(std::string("NOTICE shown: ")+names[unsigned(e.kind)]+"\n");
         pending_.pop_front();return;
     }
-    if(now-e.since>=GiveUpMs){log_("NOTICE dropped: the game's info log did not take it\n");pending_.pop_front();return;}
+    if(now-e.since>=GiveUpMs){if(e.kind==Kind::Joined)joining_=false;log_("NOTICE dropped: the game's info log did not take it\n");pending_.pop_front();return;}
     e.nextTry=now+RetryMs;
 }
 Api nativeApi(discovery::Sampler& s){
@@ -113,8 +131,8 @@ Api nativeApi(discovery::Sampler& s){
     auto release=reinterpret_cast<ReleaseFn>(s.base+entries[2].rva);
     auto* sp=&s;const uint64_t base=s.base;
     Api a;
-    a.show=[sp,base,add,make,release](const std::u16string& text)->bool{
-        if(text.empty()||text.size()>160)return false;
+    a.show=[sp,base,add,make,release](const std::u16string& text,uint8_t icon)->bool{
+        if(text.empty()||text.size()>160||(icon!=PlainIcon&&icon!=LikeIcon))return false;
         auto q=[sp](uint64_t at,uint64_t& v){v=0;return at&&at<0x800000000000ULL&&sp->read(at,&v,8);};
         // The UI owner (0x30125a0 returns this global), its info-log HUD logic (+0x48, as 0x307a4f0 reads it), checked
         // by its vtable and by a plausible item table; the UI clock gives the entry's time, as the game stamps its own.
@@ -127,7 +145,7 @@ Api nativeApi(discovery::Sampler& s){
         auto* lock=reinterpret_cast<SRWLOCK*>(hud+QueueLock);
         alignas(16) unsigned char string[16]{};make(string,text.c_str());
         AcquireSRWLockExclusive(lock);
-        add(reinterpret_cast<void*>(hud+Queue),string,NoticeId,Icon,Colour,Sound,float(now),0,&states);
+        add(reinterpret_cast<void*>(hud+Queue),string,NoticeId,icon,Colour,Sound,float(now),0,&states);
         ReleaseSRWLockExclusive(lock);
         release(string);return true;};
     return a;

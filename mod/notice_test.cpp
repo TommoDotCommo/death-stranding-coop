@@ -4,8 +4,8 @@
 using namespace mod::notice;
 unsigned failures=0;
 #define CHECK(x) do{if(!(x)){std::fprintf(stderr,"notice oracle: %s\n",#x);++failures;}}while(0)
-struct Hud {std::vector<std::u16string> shown;bool there=true;std::vector<std::string> log;
-    Api api(){Api a;a.show=[this](const std::u16string& t){if(!there)return false;shown.push_back(t);return true;};return a;}
+struct Hud {std::vector<std::u16string> shown;std::vector<uint8_t> icons;bool there=true;std::vector<std::string> log;
+    Api api(){Api a;a.show=[this](const std::u16string& t,uint8_t icon){if(!there)return false;shown.push_back(t);icons.push_back(icon);return true;};return a;}
     Notifier make(){return Notifier(api(),[this](const std::string& r){log.push_back(r);});}};
 int main(){
     CHECK(text(Kind::Joined,"Higgs")==u"Higgs joined your session.");CHECK(text(Kind::Left,"")==u"Your partner left the session.");
@@ -20,7 +20,7 @@ int main(){
         for(int i=0;i<200;++i)n.tick(t+=50,true,true,"Higgs");
         CHECK(h.shown.size()==1);
         n.tick(t+=50,true,false,"");CHECK(h.shown.size()==2&&h.shown[1]==u"Higgs left the session.");   // his last name is kept
-        for(int i=0;i<2000;++i)n.tick(t+=50,true,false,"");
+        for(uint64_t end=t+2*Notifier::AloneMs;t<end;)n.tick(t+=50,true,false,"");
         CHECK(h.shown.size()==2);                                                               // never "alone" after a partner
         CHECK(h.log.size()==2&&h.log[0]=="NOTICE shown: joined\n"&&h.log[1]=="NOTICE shown: left\n");
     }
@@ -31,14 +31,14 @@ int main(){
         n.tick(1000+Notifier::NameMs,true,true,"");CHECK(h.shown.size()==1&&h.shown[0]==u"Your partner joined your session.");
     }
     {   // Nobody arrives: one hint after a continuous stretch in the world; leaving the world starts the stretch again.
-        Hud h;auto n=h.make();uint64_t t=0;
-        for(;t<20000;t+=100)n.tick(t,true,false,"");
-        for(;t<22000;t+=100)n.tick(t,false,false,"");                                         // a cutscene
-        for(;t<22000+Notifier::AloneMs-100;t+=100)n.tick(t,true,false,"");
+        Hud h;auto n=h.make();uint64_t t=0;const uint64_t A=Notifier::AloneMs;
+        for(;t<A-5000;t+=100)n.tick(t,true,false,"");
+        for(;t<A-3000;t+=100)n.tick(t,false,false,"");                                        // a cutscene
+        uint64_t back=t;for(;t<back+A-100;t+=100)n.tick(t,true,false,"");
         CHECK(h.shown.empty());
-        for(;t<60000;t+=100)n.tick(t,true,false,"");
+        for(;t<back+A+5000;t+=100)n.tick(t,true,false,"");
         CHECK(h.shown.size()==1&&h.shown[0]==text(Kind::Alone,""));
-        for(;t<200000;t+=100)n.tick(t,true,false,"");
+        for(;t<back+5*A;t+=100)n.tick(t,true,false,"");
         CHECK(h.shown.size()==1);                                                               // once
     }
     {   // Outside the world nothing is shown; what happened is told afterwards, in order and spaced out.
@@ -75,6 +75,32 @@ int main(){
         CHECK(h.shown.size()==5&&h.shown[4]==u"Fragile left the session.");
         for(int i=0;i<60;++i)n.tick(t+=100,true,true,"Fragile",false);
         CHECK(h.shown.size()==6&&h.shown[5]==u"Fragile joined your session.");                  // no "back" for a new session
+    }
+    {   // The partner connects while his game is still loading: "joined" is told when he is in the world, and that first
+        // absence is never an "away"; a later one is. One who never arrives in the world is announced after the hold.
+        Hud h;auto n=h.make();uint64_t t=0;
+        for(int i=0;i<300;++i)n.tick(t+=100,true,true,"Fragile",true);                          // 30 s loading
+        CHECK(h.shown.empty());
+        n.tick(t+=100,true,true,"Fragile",false);CHECK(h.shown.size()==1&&h.shown[0]==u"Fragile joined your session.");
+        for(int i=0;i<100;++i)n.tick(t+=100,true,true,"Fragile",false);
+        CHECK(h.shown.size()==1);
+        for(int i=0;i<60;++i)n.tick(t+=100,true,true,"Fragile",true);
+        CHECK(h.shown.size()==2&&h.shown[1]==u"Fragile is away (cutscene or private room).");
+        Hud g;auto m=g.make();uint64_t u=0;
+        for(;u<Notifier::JoinHoldMs-200;u+=100)m.tick(u,true,true,"Higgs",true);
+        CHECK(g.shown.empty());
+        for(int i=0;i<10;++i)m.tick(u+=100,true,true,"Higgs",true);
+        CHECK(g.shown.size()==1&&g.shown[0]==u"Higgs joined your session.");
+        for(int i=0;i<60;++i)m.tick(u+=100,true,true,"Higgs",true);
+        CHECK(g.shown.size()==2&&g.shown[1]==u"Higgs is away (cutscene or private room).");     // still out after the hold
+    }
+    {   // A like from the partner: one line with the like icon, by name; session lines keep the plain icon.
+        Hud h;auto n=h.make();uint64_t t=0;
+        n.tick(t,true,true,"Higgs");n.tick(t+=100,true,true,"Higgs");CHECK(h.shown.size()==1&&h.icons[0]==PlainIcon);
+        for(int i=0;i<40;++i)n.tick(t+=100,true,true,"Higgs");
+        n.event(Kind::Liked,"",t);n.tick(t+=100,true,true,"Higgs");
+        CHECK(h.shown.size()==2&&h.shown[1]==u"Higgs sent you a like."&&h.icons[1]==LikeIcon);
+        CHECK(h.log.back()=="NOTICE shown: liked\n");
     }
     {   // The HUD is not there: tried again, then dropped; a flapping link never grows the queue.
         Hud h;h.there=false;auto n=h.make();uint64_t t=0;
