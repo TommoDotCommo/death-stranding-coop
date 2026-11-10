@@ -45,6 +45,12 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 
 ## QA level
 
+Live regressions (2026-11-10), all driven without the window focus: both porters walking at the same time in two
+copies (each copy's partner followed the other's own track with a median error of 5 mm and at most 9 cm over 15 to
+18 m, and stood within 6 mm of the other porter at rest); the partner quitting and starting again (the body and name
+went when he quit, both saw each other again 3 mm apart after the restart, no fault in any of the three processes).
+`make test` runs its mutants side by side and takes under six minutes for everything.
+
 Game-free: simulator, fuzzer and mutants for the core and every proxy protection (`make test`), plus seeded fuzzers
 for the shared world: one runs the cargo and structure logic through random worlds and checks its invariants, one
 runs two simulated worlds against each other and checks that they hold the same cargo after every quiet period.
@@ -127,10 +133,14 @@ its copy with the game's `DeleteBaggage` (which takes the record's index). Putti
 Live with `coop-partner`: the partner picking up the game's crate removed it from the game, and the partner's own
 crate, created in the game, was removed when the partner picked it up (`mod/game_offsets.md`, "Cargo").
 
-Unattended testing: live tests drive the focused copy with synthetic keyboard input and capture background
-copies with PrintWindow. The proxy's opt-in virtual gamepad (`COOP_VIRTUAL_PAD=1`, the mod's `virtual_pad`,
-a stamp-guarded `pad.script`) works on Windows without the game, but the game never polls it. A connected
-controller holds pad slot 0 through Windows.Gaming.Input, and the game only checks XInput for unassigned slots.
+Unattended testing: live tests drive a copy with scripted keyboard and mouse input that the proxy feeds to the
+game as raw input on its own game thread (`COOP_VIRTUAL_PAD=1`, the mod's `virtual_pad`, a stamp-guarded
+`pad.script`; `redirect/README.md`, "Scripted keyboard and mouse"), so the copy needs neither the window focus nor
+the desktop's keyboard and mouse, and background copies are captured with PrintWindow. Live (2026-11-10): with
+another window in the foreground the whole time, a scripted key walked the porter, a scripted mouse move turned the
+camera, and he stood still when the script ended. The script's gamepad steps work on Windows without the game, but
+the game never polls XInput: a connected controller holds pad slot 0 through Windows.Gaming.Input, and the game
+only checks XInput for unassigned slots.
 
 ## Shared structures (2026-11-07)
 

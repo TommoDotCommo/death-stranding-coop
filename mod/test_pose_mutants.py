@@ -1,6 +1,7 @@
 """Each broken pose-exchange protection must fail its own host oracle (exit 1, 'oracle' on stderr), never crash."""
 from pathlib import Path
 import subprocess
+import mutants as runner
 import tempfile
 ROOT = Path(__file__).resolve().parent
 SOURCES = ['pose.cpp', 'providers.cpp', 'discovery.cpp', '../core/core.cpp']
@@ -46,14 +47,11 @@ mutants = [
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     # Sources are copied so a mutated header is seen by every translation unit.
-    for name, test, edits in mutants:
-        work = tmp/'w'
-        if work.exists():
-            for f in work.rglob('*'):
-                if f.is_file():
-                    f.unlink()
-        (work/'core').mkdir(parents=True, exist_ok=True)
-        (work/'mod').mkdir(exist_ok=True)
+    def one(job):
+        index, (name, test, edits) = job
+        work = tmp/f'w{index}'
+        (work/'core').mkdir(parents=True)
+        (work/'mod').mkdir()
         for f in list(ROOT.glob('*.h'))+list(ROOT.glob('*.cpp')):
             (work/'mod'/f.name).write_text(f.read_text())
         for f in (ROOT.parent/'core').glob('*'):
@@ -64,11 +62,13 @@ with tempfile.TemporaryDirectory() as tmp:
             text = path.read_text()
             assert before in text, (name, file, before)
             path.write_text(text.replace(before, after, 1))
-        exe = tmp/'mutant'
+        exe = work/'mutant'
         subprocess.run(['g++', '-std=c++17', '-O1', '-pthread', '-DDS_TESTING', str(work/'mod'/'pose_test.cpp'), str(work/'mod'/'pose.cpp'),
                         str(work/'mod'/'providers.cpp'), str(work/'mod'/'discovery.cpp'), str(work/'core'/'core.cpp'), '-o', str(exe)],
                        check=True, capture_output=True)
-        result = subprocess.run([str(exe), test], text=True, capture_output=True, timeout=20)
+        result = subprocess.run([str(exe), test], text=True, capture_output=True, timeout=120)
         assert result.returncode == 1 and 'oracle' in result.stderr, (name, test, result.returncode, result.stderr)
-        print('KILLED pose mutant', name, '->', result.stderr.strip())
+        return name, result.stderr.strip()
+    for name, oracle in runner.parallel(one, list(enumerate(mutants))):
+        print('KILLED pose mutant', name, '->', oracle)
     print('all', len(mutants), 'pose mutants killed')

@@ -130,6 +130,16 @@ uint32_t currentThread() {
 // Process-lifetime pad state shared with the proxy's input-thread wrapper; never destroyed with a Runtime.
 struct PadShared {std::mutex lock;mod::pad::Player player;std::atomic<bool> enabled{false};std::atomic<uint64_t> calls{0},active{0};};
 PadShared padShared;
+// One of the mod's own keys (like, ping): held by the player (focused window only), or by a running pad script, so an
+// unattended test presses it like any other scripted key.
+bool modKey(unsigned vk) {
+    if(mod::marker::keyDown(vk))return true;
+    if(!vk||!padShared.enabled.load(std::memory_order_acquire))return false;
+    std::lock_guard<std::mutex> l(padShared.lock);mod::pad::Gamepad g;mod::pad::Keys k;
+    if(!padShared.player.sample(mod::nowMs(),g,&k))return false;
+    for(size_t i=0;i<k.count;++i)if(k.vk[i]==vk)return true;
+    return false;
+}
 struct Cache final:ds::StateProvider {
     // Game-thread progress discovery precedes the first game-provider handshake.
     ds::Progress story{};bool progressReady=true;
@@ -418,7 +428,7 @@ struct Runtime final:ds::Transport {
             catch(const std::exception& e){note((std::string("LIKE unavailable: ")+e.what()+"\n").c_str());}}
 #endif
         bool coop=partnerMode()&&core->connected()&&!inEvent;
-        if(likeEdge.pressed(coop&&mod::marker::keyDown(0x4c),now))
+        if(likeEdge.pressed(coop&&modKey(0x4c),now))
             if(auto e=likeTx.press(now,coop)){core->queueCargo(*e);++likesSent;note("LIKE sent to the partner\n");}
         for(auto& e:likeIn){
             auto n=mod::likes::decode(e);if(!n){note("LIKE refused: malformed\n");continue;}
@@ -498,7 +508,7 @@ struct Runtime final:ds::Transport {
         std::optional<std::array<double,3>> partner;
         if(partnerMode()&&cache.remote.visible&&core&&core->connected()){auto& p=cache.remote.state.position;partner=std::array<double,3>{p[0],p[2],p[1]};}   // adapter -> game axes
         for(auto& e:incoming)markers->partnerPing({e.ref,{e.position[0],e.position[2],e.position[1]}},now);
-        if(pingEdge.pressed(pingKey&&mod::marker::keyDown(pingKey),now))ping=true;
+        if(pingEdge.pressed(pingKey&&modKey(pingKey),now))ping=true;
         if(ping) {
             if(!anchor.entity||!anchor.pose.available)note("MARKER ping refused: no porter\n");
             else if(auto p=markers->localPing(anchor.pose.position,now)) {
@@ -1423,8 +1433,10 @@ int mod_pad(mod_pad_state* s) {
     ++padShared.calls;
     // The game's input thread must never wait: skip this poll when a script is being swapped in.
     std::unique_lock<std::mutex> l(padShared.lock,std::try_to_lock);if(!l)return 0;
-    mod::pad::Gamepad g;if(!padShared.player.sample(mod::nowMs(),g))return 0;
+    mod::pad::Gamepad g;mod::pad::Keys k;if(!padShared.player.sample(mod::nowMs(),g,&k))return 0;
     s->buttons=g.buttons;s->left_trigger=g.leftTrigger;s->right_trigger=g.rightTrigger;s->lx=g.lx;s->ly=g.ly;s->rx=g.rx;s->ry=g.ry;
+    static_assert(sizeof s->keys==mod::pad::MaxKeys,"key slots");
+    memcpy(s->keys,k.vk,sizeof s->keys);s->key_count=k.count;s->mouse_buttons=k.mouseButtons;s->mouse_x=k.mouseX;s->mouse_y=k.mouseY;
     ++padShared.active;return 1;
 }
 int mod_init(const char* path) {

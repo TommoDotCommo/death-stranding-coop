@@ -17,3 +17,8 @@ Rules:
    Changes to any source in `mod/build_id.py`'s list change the wire identity: run `python3 mod/build_id.py --write`
    deliberately and deploy the same build to both copies.
 6. Verify, then claim: write `unknown` rather than guess, and report only checks that actually ran.
+7. Live tests drive a copy through the mod's `pad.script` (keys, mouse, buttons; `mod/pad.h`) and its test command
+   files, and read state from the process or the mod log. Never send input through the desktop (`SendInput`, focus
+   changes): it fails when someone uses the PC and cannot drive two copies at once.
+8. `make test` runs the mutants side by side (`mod/mutants.py`); a new mutant family goes into an existing runner
+   or uses that helper, not a serial loop.

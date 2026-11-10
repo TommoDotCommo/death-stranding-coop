@@ -25,6 +25,7 @@
 #include "network_policy.h"
 #include "thread_trace.h"
 #include "virtual_pad.h"
+#include "virtual_kbm.h"
 #include "frame_cap.h"
 #include "crash_record.h"
 #include <set>
@@ -299,6 +300,88 @@ void cap_game_frame(const redirect::trace::Call& call,BOOL result) {
     if(wait>=1000)Sleep(DWORD(wait/1000));
 }
 
+// Scripted keyboard and mouse (virtual_kbm.h), part of the opt-in virtual pad. Game thread only, except kbm_holding.
+extern bool pad_enabled;
+int kbm_sample(redirect::kbm::Input& in);
+using GetRawInputDataFn=UINT(WINAPI*)(HRAWINPUT,UINT,LPVOID,PUINT,UINT);
+using GetForegroundWindowFn=HWND(WINAPI*)();
+GetRawInputDataFn real_rawinput=nullptr;
+GetForegroundWindowFn real_foreground=nullptr;
+redirect::kbm::Feed kbm_feed;
+redirect::kbm::Event kbm_current;
+HWND kbm_window=nullptr;
+std::atomic<bool> kbm_holding{false};
+BOOL CALLBACK kbm_find_window(HWND h,LPARAM out) {
+    if(!IsWindowVisible(h)||GetWindow(h,GW_OWNER))return TRUE;
+    RECT r{};GetClientRect(h,&r);auto best=reinterpret_cast<HWND*>(out);RECT b{};if(*best)GetClientRect(*best,&b);
+    if(!*best||LONGLONG(r.right)*r.bottom>LONGLONG(b.right)*b.bottom)*best=h;
+    return TRUE;
+}
+// The frame's message loop (pinned build) asks PeekMessage without removing, then takes the message with GetMessage.
+// When Windows has nothing and a scripted event waits, that PeekMessage answers yes and arms the next GetMessage of
+// the game thread, which hands over the scripted WM_INPUT instead of waiting; the game dispatches it to its window
+// procedure like any real one. With no event waiting, the empty PeekMessage is the frame boundary: the script's state
+// becomes the next frame's events.
+bool kbm_armed=false;
+void kbm_fill(LPMSG msg) {
+    *msg={};msg->hwnd=kbm_window;msg->message=WM_INPUT;msg->wParam=RIM_INPUT;msg->lParam=LPARAM(redirect::kbm::Handle);msg->time=GetTickCount();
+}
+bool kbm_peek(const redirect::trace::Call& call,LPMSG msg,UINT lo,UINT hi,UINT remove) {
+    if(!pad_enabled || !real_rawinput || call.depth!=1 || call.tid!=game_thread_owner || !msg || lo || hi || (remove&PM_REMOVE))return false;
+    auto& host=thread_trace.buffer;
+    if(call.caller<host.hostBase || call.caller-host.hostBase!=mod::dispatch::PeekReturn)return false;
+    if(kbm_feed.pending()) {
+        if(!kbm_window)EnumThreadWindows(GetCurrentThreadId(),kbm_find_window,reinterpret_cast<LPARAM>(&kbm_window));
+        if(!kbm_window)return false;
+        kbm_fill(msg);kbm_armed=true;return true;
+    }
+    redirect::kbm::Input in;bool active=kbm_sample(in)==1;
+    LARGE_INTEGER now;QueryPerformanceCounter(&now);
+    auto us=uint64_t(now.QuadPart/cap_frequency.QuadPart)*1000000+uint64_t(now.QuadPart%cap_frequency.QuadPart)*1000000/uint64_t(cap_frequency.QuadPart);
+    kbm_feed.frame(active,in,us);
+    kbm_holding.store(kbm_feed.holding()||kbm_feed.pending(),std::memory_order_release);
+    return false;
+}
+uint8_t* kbm_lifted=nullptr;uint8_t kbm_lifted_value=0;
+void kbm_restore() {if(kbm_lifted){*kbm_lifted=kbm_lifted_value;kbm_lifted=nullptr;}}
+bool kbm_get(LPMSG msg) {
+    if(!kbm_armed || GetCurrentThreadId()!=game_thread_owner || !msg)return false;
+    kbm_armed=false;
+    if(!kbm_feed.pop(kbm_current))return false;
+    // The handler of this one event must not see the inactive-window flag; kbm_restore puts it back.
+    auto host=thread_trace.buffer.hostBase;
+    auto object=*reinterpret_cast<uint8_t**>(host+(kbm_current.mouse?redirect::kbm::MouseSlot:redirect::kbm::KeyboardSlot));
+    if(object) {
+        auto flag=object+(kbm_current.mouse?redirect::kbm::MouseDisabled:redirect::kbm::KeyboardDisabled);
+        if(*flag){kbm_lifted=flag;kbm_lifted_value=*flag;*flag=0;}
+    }
+    kbm_fill(msg);return true;
+}
+UINT WINAPI hook_GetRawInputData(HRAWINPUT handle,UINT command,LPVOID data,PUINT size,UINT headerSize) {
+    if(!redirect::kbm::serves(reinterpret_cast<uint64_t>(handle)))return real_rawinput(handle,command,data,size,headerSize);
+    if(command!=RID_INPUT || headerSize!=sizeof(RAWINPUTHEADER) || !size){SetLastError(ERROR_INVALID_PARAMETER);return UINT(-1);}
+    RAWINPUT r{};const auto& e=kbm_current;
+    if(e.mouse) {
+        r.header.dwType=RIM_TYPEMOUSE;r.header.dwSize=sizeof(RAWINPUTHEADER)+sizeof(RAWMOUSE);
+        r.data.mouse.usFlags=MOUSE_MOVE_RELATIVE;r.data.mouse.usButtonFlags=e.buttonFlags;r.data.mouse.lLastX=e.dx;r.data.mouse.lLastY=e.dy;
+    } else {
+        bool extended=e.vk>=0x21&&e.vk<=0x2e;   // navigation cluster and arrows
+        r.header.dwType=RIM_TYPEKEYBOARD;r.header.dwSize=sizeof(RAWINPUTHEADER)+sizeof(RAWKEYBOARD);
+        r.data.keyboard.MakeCode=USHORT(MapVirtualKeyW(e.vk,MAPVK_VK_TO_VSC));
+        r.data.keyboard.Flags=USHORT((e.up?RI_KEY_BREAK:RI_KEY_MAKE)|(extended?RI_KEY_E0:0));
+        r.data.keyboard.VKey=e.vk;r.data.keyboard.Message=e.up?WM_KEYUP:WM_KEYDOWN;
+    }
+    if(!data){*size=r.header.dwSize;return 0;}
+    if(*size<r.header.dwSize){*size=r.header.dwSize;SetLastError(ERROR_INSUFFICIENT_BUFFER);return UINT(-1);}
+    memcpy(data,&r,r.header.dwSize);return r.header.dwSize;
+}
+__attribute__((noinline)) HWND WINAPI hook_GetForegroundWindow() {
+    auto caller=reinterpret_cast<uint64_t>(__builtin_return_address(0));auto& host=thread_trace.buffer;
+    auto window=kbm_window;
+    if(window && caller>=host.hostBase && redirect::kbm::answersForeground(kbm_holding.load(std::memory_order_acquire),caller-host.hostBase))return window;
+    return real_foreground();
+}
+
 redirect::trace::Call trace_enter(redirect::trace::Api api,void* caller) noexcept {
     auto call=thread_trace.begin(api,GetCurrentThreadId(),GetTickCount64(),reinterpret_cast<uint64_t>(caller));
     if(call.sampled()) {
@@ -316,7 +399,9 @@ __attribute__((noinline)) BOOL WINAPI hook_PeekMessageA(LPMSG msg,HWND hwnd,UINT
     auto call=trace_enter(redirect::trace::Api::peek,__builtin_return_address(0));
     redirect::crash::heartbeat(call.tid);   // no-op unless COOP_CRASH_RECORD (main thread only, one atomic store)
     SetLastError(incoming);
+    if(kbm_lifted && call.tid==game_thread_owner)kbm_restore();
     auto result=real_peek(msg,hwnd,lo,hi,remove);auto error=GetLastError();
+    if(!result && kbm_peek(call,msg,lo,hi,remove)){result=TRUE;error=ERROR_SUCCESS;}
     dispatch_game_thread(call,result);
     cap_game_frame(call,result);
     thread_trace.finish(call,GetTickCount64(),result);
@@ -327,7 +412,9 @@ __attribute__((noinline)) BOOL WINAPI hook_GetMessageA(LPMSG msg,HWND hwnd,UINT 
     auto call=trace_enter(redirect::trace::Api::get,__builtin_return_address(0));
     redirect::crash::pump_blocking(call.tid,true);   // waiting for input is not a hang
     SetLastError(incoming);
-    auto result=real_get(msg,hwnd,lo,hi);auto error=GetLastError();
+    // A scripted event the frame's PeekMessage announced is handed over instead of waiting for a real message.
+    bool scripted=kbm_get(msg);
+    auto result=scripted?TRUE:real_get(msg,hwnd,lo,hi);auto error=scripted?DWORD(ERROR_SUCCESS):GetLastError();
     redirect::crash::pump_blocking(call.tid,false);
     thread_trace.finish(call,GetTickCount64(),result);
     SetLastError(error);return result; // -1, 0 (WM_QUIT), and positive results stay distinct
@@ -360,6 +447,10 @@ size_t patch(HMODULE module) {
                     replace_import(&iat->u1.Function,reinterpret_cast<FARPROC>(hook_PeekMessageA));trace_imports|=1;++count;
                 } else if(iat->u1.Function==reinterpret_cast<ULONG_PTR>(real_get)) {
                     replace_import(&iat->u1.Function,reinterpret_cast<FARPROC>(hook_GetMessageA));trace_imports|=2;++count;
+                } else if(real_rawinput && iat->u1.Function==reinterpret_cast<ULONG_PTR>(real_rawinput)) {
+                    replace_import(&iat->u1.Function,reinterpret_cast<FARPROC>(hook_GetRawInputData));trace_imports|=4;++count;
+                } else if(real_foreground && iat->u1.Function==reinterpret_cast<ULONG_PTR>(real_foreground)) {
+                    replace_import(&iat->u1.Function,reinterpret_cast<FARPROC>(hook_GetForegroundWindow));trace_imports|=8;++count;
                 }
             }
             for(auto& e:entries) if(module!=e.skip && iat->u1.Function==(ULONG_PTR)e.original) {
@@ -403,6 +494,13 @@ std::atomic<PadFn> pad_source{nullptr};
 std::atomic<bool> pad_noted{false};
 redirect::pad::Overlay pad_overlay;
 SRWLOCK pad_lock=SRWLOCK_INIT;
+int kbm_sample(redirect::kbm::Input& in) {
+    auto source=pad_source.load(std::memory_order_acquire);if(!source)return 0;
+    mod_pad_state m{};m.size=sizeof m;if(source(&m)!=1)return 0;
+    static_assert(sizeof m.keys==sizeof in.keys,"key slots");
+    memcpy(in.keys,m.keys,sizeof in.keys);in.keyCount=m.key_count;in.buttons=m.mouse_buttons;in.mouseX=m.mouse_x;in.mouseY=m.mouse_y;
+    return 1;
+}
 DWORD WINAPI hook_XInputGetState(DWORD user,void* state) {
     auto real=real_xinput.load(std::memory_order_acquire);
     DWORD result=real?real(user,state):ERROR_DEVICE_NOT_CONNECTED;
@@ -996,6 +1094,15 @@ void install_redirect(void* self,bool releaseSession) {
         if(n>=16 || !redirect::pad::parse(n?value:L"",pad_enabled)) fatal("redirect: invalid virtual pad option\n");
         if(pad_enabled && net.mode!=redirect::NetMode::enforce) fatal("redirect: virtual pad requires enforced network policy\n");
         if(pad_enabled) note(L"VIRTUAL_PAD",L"enabled",L"player 1 only; scripted by the mod");
+        if(pad_enabled && trace_enabled) {
+            // Scripted keyboard and mouse need the frame's PeekMessage hook, which the thread trace installs.
+            auto user32=GetModuleHandleW(L"user32.dll");
+            real_rawinput=user32?reinterpret_cast<GetRawInputDataFn>(real_gpa(user32,"GetRawInputData")):nullptr;
+            real_foreground=user32?reinterpret_cast<GetForegroundWindowFn>(real_gpa(user32,"GetForegroundWindow")):nullptr;
+            if(!real_rawinput||!real_foreground) fatal("redirect: raw input APIs unavailable\n");
+            if(!cap_frequency.QuadPart)QueryPerformanceFrequency(&cap_frequency);
+            note(L"VIRTUAL_KBM",L"enabled",L"scripted raw keyboard and mouse on the game thread");
+        }
     }
     {
         wchar_t value[16]{};auto n=::GetEnvironmentVariableW(L"COOP_BACKGROUND_FPS",value,16);uint32_t fps=0;
@@ -1041,7 +1148,8 @@ void install_redirect(void* self,bool releaseSession) {
     patch_all(true);
 #endif
     if(trace_enabled) {
-        if(trace_imports!=3) fatal("redirect: thread trace needs both host message imports\n");
+        if((trace_imports&3)!=3) fatal("redirect: thread trace needs both host message imports\n");
+        if(real_rawinput && (trace_imports&12)!=12) fatal("redirect: scripted input needs both host raw input imports\n");
         wchar_t address[32];swprintf(address,32,L"0x%llx",reinterpret_cast<unsigned long long>(&thread_trace.buffer));
         note(L"THREAD_TRACE",L"v1 buffer="+std::wstring(address),L"bytes="+std::to_wstring(sizeof(thread_trace.buffer))+L"; observation only; safe mutation phase unknown");
     }

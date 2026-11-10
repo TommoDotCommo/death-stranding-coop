@@ -18,6 +18,22 @@ int main(){
                          "pad S1\njump 10\n","pad S1\nwait -5\n","pad S1\nwait 1.5\n","pad S1\nstick 0x1 0 10\n"})
         CHECK(refused([&]{parse(bad,"S1");}));
     CHECK(refused([&]{parse("pad S1\n"+std::string(MaxBytes,' '),"S1");}));
+    // Keyboard and mouse steps.
+    { auto k=parse("pad S1\nkey W+SHIFT 1500\ntap E\nmouse 400 -30 500 W\nclick R 80\nkey x4C 300 mouse -200 0\nkey F5+ESC+W+W 10\n","S1");
+      CHECK(k.size()==8);
+      CHECK(k[0].keys.count==2&&k[0].keys.vk[0]==0x57&&k[0].keys.vk[1]==0x10&&k[0].ms==1500&&k[0].pad.buttons==0);
+      CHECK(k[1].keys.count==1&&k[1].keys.vk[0]==0x45&&k[1].ms==120);CHECK(k[2].keys.count==0&&k[2].ms==ReleaseGapMs);
+      CHECK(k[3].keys.mouseX==400&&k[3].keys.mouseY==-30&&k[3].keys.count==1&&k[3].ms==500);
+      CHECK(k[4].keys.mouseButtons==2&&k[4].ms==80);CHECK(k[5].keys.mouseButtons==0);
+      CHECK(k[6].keys.vk[0]==0x4c&&k[6].keys.mouseX==-200&&k[6].keys.mouseY==0);
+      CHECK(k[7].keys.count==3&&k[7].keys.vk[0]==0x74&&k[7].keys.vk[1]==0x1b);   // a repeated key counts once
+      Player q;Gamepad g;Keys held;q.load(k);
+      CHECK(q.sample(100,g,&held)&&held.count==2&&g.buttons==0);CHECK(q.sample(1700,g,&held)&&held.count==1&&held.vk[0]==0x45);
+      CHECK(q.sample(1730,g,&held)&&held.count==0);CHECK(q.sample(100000,g,&held)==false&&held.count==0&&held.mouseX==0); }
+    for(const char* bad:{"pad S1\nkey 10\n","pad S1\nkey WW 10\n","pad S1\nkey x01 10\n","pad S1\nkey xff 10\n","pad S1\nkey F13 10\n",
+                         "pad S1\nkey A+B+C+D+E+F+G+H+I 10\n","pad S1\nkey W 10 mouse 1\n","pad S1\nmouse 30000 0 10\n","pad S1\nmouse 1.5 0 10\n",
+                         "pad S1\nmouse - 0 10\n","pad S1\nclick X\n","pad S1\nclick L 0\n","pad S1\ntap\n","pad S1\nkey w 10\n"})
+        CHECK(refused([&]{parse(bad,"S1");}));
     Player p;Gamepad g;
     CHECK(!p.sample(0,g)&&p.done());
     p.load(steps);CHECK(!p.done());

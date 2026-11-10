@@ -134,7 +134,8 @@ copy `discovery_sha256` from the pinned executable entry in `profile.json`:
  "discovery_sha256":"9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b"}
 ```
 
-Both go to `instance/redirect-data/mod/mod.json` of their slot. `impairment` and `fault` are synthetic-only.
+Both go to `instance/redirect-data/mod/mod.json` of their slot. `fault` is synthetic-only; `impairment` (a 15..65 ms presence delivery delay) also works in a real game, for lab runs
+of two copies on one PC that stand in for an internet link.
 
 **Live exit test (the verifier).** Start both instances with these configs and load a game in each. The owner walks Sam in slot 0
 (a straight line of at least 20 m, then a turn on the spot) while slot 1 stands still, then the reverse. Slot 1's
@@ -732,7 +733,9 @@ Each command is a file in the mod folder. The mod consumes it and accepts it onl
   needed, 40 a read-only report (`BODY report ...` rows), 80 the game's own in-place art-parts replacement with the
   double's art parts, the call that dresses the resident double (runs alone; `ownc0` adds the report). The body is made once per world, so the mask of the first
   `own` command of a process is the one used. The log confirms it with `DOUBLE own dress mask 0x..`.
-- `pad.script`: a virtual gamepad script (`pad.h`), requires `virtual_pad` and `COOP_VIRTUAL_PAD=1`.
+- `pad.script`: a virtual gamepad, keyboard and mouse script (`pad.h`), requires `virtual_pad` and `COOP_VIRTUAL_PAD=1`.
+  The game never polls the gamepad; the keyboard and mouse steps (`key`, `tap`, `mouse`, `click`) drive it without
+  the window focus. The mod's own keys (like, ping) follow the script's keys too.
 - `puppet.marker` (map markers, `marker.h`, OFF until armed; needs `puppet_probe` and a partner mode for the partner
   marker): `on <stamp>` shows the partner as a map pin (group 4) and arms pings on V; `off <stamp>` removes the mod's
   markers; `ping <stamp>` pings at the porter's position (group 3, here and, when connected, in the partner's world as a

@@ -2,18 +2,20 @@
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parent
+
+sys.path.insert(0, str(ROOT.parent/'mod'))
+import mutants  # the shared side-by-side runner
 
 def run(args, **kwargs):
     return subprocess.run(args, cwd=ROOT, text=True, capture_output=True, **kwargs)
 
 with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
     work = Path(directory)
-    for name in ['CONFIG_ROLE', 'CONFIG_PLAY', 'LOBBY_SECRET', 'BACKUP_LINKS', 'OUTPUT_LINKS',
-                 'MISSING_CONFIG_CLOSES', 'TICKET_TARGET', 'TICKET_EXPIRY', 'TICKET_NETWORK',
-                 'BACKUP_RUNNING', 'NESTED_LAB', 'NESTED_RELEASE']:
+    def one(name):
         exe = work/name
         result = run(['g++', '-std=c++17', '-O1', '-Wall', '-Wextra', '-Werror', '-DMUTANT_'+name,
                       'core_test.cpp', 'core.cpp', '../mod/config.cpp', '../redirect/path_map.cpp', '-o', str(exe)])
@@ -23,6 +25,10 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
             result = run([str(exe), fixture])
         if result.returncode != 1 or 'launcher oracle:' not in result.stderr:
             raise SystemExit(f'SURVIVED or crashed {name}: {result.returncode}\n{result.stdout}\n{result.stderr}')
+        return name
+    for name in mutants.parallel(one, ['CONFIG_ROLE', 'CONFIG_PLAY', 'LOBBY_SECRET', 'BACKUP_LINKS', 'OUTPUT_LINKS',
+                                      'MISSING_CONFIG_CLOSES', 'TICKET_TARGET', 'TICKET_EXPIRY', 'TICKET_NETWORK',
+                                      'BACKUP_RUNNING', 'NESTED_LAB', 'NESTED_RELEASE']):
         print('killed', name)
     changes = [
         ('invite-crc', 'coop_invite.h', ' || ci_crc8(b, n - 1) != b[n - 1]', '', 'coop_invite_test.c'),

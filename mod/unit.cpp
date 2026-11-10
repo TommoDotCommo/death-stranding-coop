@@ -63,6 +63,10 @@ int main() {
     assert(mod::parseConfig(withKeys(threaded,"\"puppet_probe\":true,\"required\":true")).puppetProbe);
     assert(refused(withKeys(game,"\"puppet_probe\":true,\"required\":true")));
     assert(!mod::parseConfig(good).selfTick);
+    // The delivery-delay impairment works with the real game too (two copies on one PC standing in for an internet
+    // link); injected faults stay synthetic-only.
+    assert(!mod::parseConfig(threaded).impairment&&mod::parseConfig(withKeys(threaded,"\"impairment\":true")).impairment);
+    assert(refused(withKeys(threaded,"\"fault\":\"version\"")));assert(mod::parseConfig(withKeys(good,"\"fault\":\"version\"")).fault=="version");
     // Virtual pad: only on a ticking, required mod; off by default; never with discovery.
     assert(!mod::parseConfig(good).virtualPad);
     assert(!mod::parseConfig(good).carryVisual&&!mod::parseConfig(threaded).carryVisual);   // ds3: off by default

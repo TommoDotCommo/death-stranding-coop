@@ -64,7 +64,7 @@ Windows/game behavior is inferred from a cross-build.
 | `COOP_ISOLATE_OBJECTS` | `name|name` kernel object names to make per-copy |
 | `COOP_NETWORK_POLICY` | `enforce` (default) or `log-only` |
 | `COOP_THREAD_TRACE` | absent/`0`: off; `1`: observe main-executable message calls (requires enforced networking) |
-| `COOP_VIRTUAL_PAD` | absent/`0`: off; `1`: wrap the game's by-name `XInputGetState` lookup in `xinput1_4.dll` so a mod pad script drives player 1 (requires enforced networking, the mod, and the mod's `virtual_pad`; a mismatch refuses startup) |
+| `COOP_VIRTUAL_PAD` | absent/`0`: off; `1`: wrap the game's by-name `XInputGetState` lookup in `xinput1_4.dll` so a mod pad script drives player 1 (requires enforced networking, the mod, and the mod's `virtual_pad`; a mismatch refuses startup). With `COOP_THREAD_TRACE=1` the script's keyboard and mouse steps are fed to the game as raw input on its game thread, with or without the window focus (see "Scripted keyboard and mouse") |
 | `COOP_BACKGROUND_FPS` | absent/`0`: off; `1`–`240`: for two copies on one PC, the copy whose window is not in the foreground holds its game thread in the frame's empty `PeekMessage` until 1/n s has passed since its last frame (requires `COOP_THREAD_TRACE=1`). The copy in front is never delayed and the mod's network worker is never held. Two copies on one GPU halve each other's frame rate or worse even with the GPU half idle; the copy you look at gets its full rate back only when the other one nearly stops (measured: about 2× when the background copy is held to under 1 frame per second, about 1.2× at a quarter of its speed) |
 | `COOP_NETWORK_PEERS` | `a.b.c.d|...` co-op partners (numeric IPv4, at most 16) |
 | `COOP_CRASH_RECORD` | absent/`0`: off; `1`: crash and hang recorder (below); `2`: as `1`, and the minidump is also written at the first recorded fault. Other values refuse startup |
@@ -271,6 +271,35 @@ backends (XInput, Windows.Gaming.Input, ...). A slot's current type is at device
 XInput backend holds the `XInputGetState` pointer at +16818. On the test PC, slot 0 is type 4 (Windows.Gaming.Input,
 the connected controller) and slots 1-3 are unassigned. XInput detection runs only for unassigned or type-4 slots,
 and the wrapper answers only user 0, so it is never asked. Keyboard input drives the live tests instead.
+
+### Scripted keyboard and mouse (`virtual_kbm.h`, 2026-11-10)
+
+With `COOP_VIRTUAL_PAD=1` and `COOP_THREAD_TRACE=1` the same pad script can hold keys, move the mouse and press mouse
+buttons (`key`, `tap`, `mouse`, `click` in `mod/pad.h`), and the game takes them whether or not its window has the
+focus. Nothing is sent to the desktop: no `SendInput`, no focus change, the pointer is not moved.
+
+How: the game reads keyboard and mouse only as raw input; its window procedure hands every `WM_INPUT` to
+`GetRawInputData` and passes the record to its keyboard or mouse object. Its frame loop asks `PeekMessageA` without
+removing and takes the message with `GetMessageA`. On the game thread, in that loop only (same caller check as the
+game-thread dispatch):
+
+- the frame's empty `PeekMessageA` asks the mod for the script's state (`mod_pad`) and turns it into raw events
+  (key edges; one mouse report per frame with speed times frame time, the fraction carried, a stalled frame capped
+  at 100 ms of travel; everything released when the script ends);
+- while events wait, that `PeekMessageA` answers yes and the next `GetMessageA` returns a `WM_INPUT` for the game's
+  window with a handle only the proxy's `GetRawInputData` wrapper answers (every real handle goes to Windows);
+- the game's keyboard and mouse objects carry a "disabled" byte while the window is inactive, and their handlers
+  return at once when it is set: it is cleared for the dispatch of that one scripted event and put back before the
+  loop's next `PeekMessageA` returns;
+- the game's keyboard clears all keys every frame while another window is in the foreground: that one
+  `GetForegroundWindow` call (by return address) is answered with the game's own window while scripted keys or
+  buttons are held. No other caller is answered, so cursor clipping and centring stay tied to the real focus.
+
+`kbm_test.cpp` pins the logic with four mutants (any handle answered, foreground answered when nothing is held,
+foreground answered to any caller, keys not released when the script ends). The two extra imports are patched only in
+the main executable and only when the pad is on; startup is refused if either is missing. Live (2026-11-10, one copy,
+another window in the foreground the whole time): `key W` walked the porter 6.9 m, a `mouse` step turned the camera
+so the next walk went the other way, and he stood still when the script ended; no fault.
 
 Module snapshots retry on `ERROR_BAD_LENGTH`, the documented race with a concurrent module load, which once ended a copy at
 startup. Any other failure is still fatal, and the message includes the error code.

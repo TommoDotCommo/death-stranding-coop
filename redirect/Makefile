@@ -2,7 +2,7 @@ CXX = x86_64-w64-mingw32-g++
 FLAGS = -std=c++17 -O2 -Wall -Wextra -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++
 LIBS = -lshell32 -lole32 -luuid -lws2_32 -lwinhttp -lbcrypt -lwinmm
 PROXY_SRC = path_map.cpp module_policy.cpp audit_throttle.cpp objects.cpp network_policy.cpp crash_record.cpp redirect.cpp proxy.cpp ../mod/config.cpp
-PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h startup_policy.h release_startup_win.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h virtual_pad.h frame_cap.h iat_patch.h crash_record.h ../mod/game_thread.h ../mod/mod.h
+PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h startup_policy.h release_startup_win.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h virtual_pad.h virtual_kbm.h frame_cap.h iat_patch.h crash_record.h ../mod/game_thread.h ../mod/mod.h
 all: build/thread_trace_probe_module.dll build/thread_trace_probe.exe build/d3dcompiler_47.dll build/avrt.dll build/mutant-avrt-forward-broken.dll build/mutant-missing-config-closes.dll build/proxy_fixture.exe build/redirect_probe.exe build/redirect_probe_module.dll build/hooks-disabled.dll build/mutant-queries-unmapped.dll build/mutant-find-unmapped.dll build/mutant-attributes-unmapped.dll build/mutant-net-unhooked.dll build/net_probe.exe build/pad_probe.exe build/research-crash-fault.dll
 build:
 	mkdir -p build
@@ -78,9 +78,7 @@ CRASH_WINDOWS_MUTANTS = UNINSTALLED BEHIND NO_CHAIN HANG_SELF
 crash-record-test: crash_record_test.cpp test_crash_record_windows.py build/crash_record_probe.exe build/crash_record_probe_research.exe $(CRASH_WINDOWS_MUTANTS:%=build/mutant-crash-%.exe) | build
 	g++ -std=c++17 -Wall -Wextra -Werror crash_record_test.cpp -o build/crash-record-test
 	./build/crash-record-test
-	@for mutant in CRASH_NO_DEDUPE CRASH_NO_CAP CRASH_FIND_EDGE; do \
-	 g++ -std=c++17 -DMUTANT_$$mutant crash_record_test.cpp -o build/mutant-$$mutant || exit 1; \
-	 if ./build/mutant-$$mutant >/dev/null 2>&1; then echo "SURVIVED $$mutant"; exit 1; fi; done
+	@python3 -B ../mod/mutants.py --sources "crash_record_test.cpp" CRASH_NO_DEDUPE CRASH_NO_CAP CRASH_FIND_EDGE
 	@./build/crash_record_probe.exe --interop-check >/dev/null 2>&1; code=$$?; if test $$code -eq 126 -o $$code -eq 127; then echo "crash-record-test: no Windows interop, Windows part skipped"; exit 0; fi; \
 	 test $$code -eq 0 || { echo "crash-record-test: probe does not start ($$code)"; exit 1; }; \
 	 python3 -B test_crash_record_windows.py --exe build/crash_record_probe.exe --work build/crash-fixture || exit 1; \
@@ -92,44 +90,31 @@ test: thread-trace-test iat-race-test avrt-proxy-test crash-record-test portable
 portable-test: thread-trace-test | build
 	g++ -std=c++17 -Wall -Wextra -Werror network_policy.cpp network_test.cpp -o build/network-test
 	./build/network-test
-	@for mutant in NET_ALLOW_ALL NET_EXACT_LOOPBACK NET_NO_PEERS NET_ANY_V6 NET_MAPPED_LOCAL NET_NAME_PREFIX NET_NEVER_REFUSE NET_REFUSE_LOG_ONLY; do \
-	 g++ -std=c++17 -DMUTANT_$$mutant network_policy.cpp network_test.cpp -o build/mutant-$$mutant || exit 1; \
-	 if ./build/mutant-$$mutant >/dev/null; then echo "SURVIVED $$mutant"; exit 1; fi; done
+	@python3 -B ../mod/mutants.py --sources "network_policy.cpp network_test.cpp" NET_ALLOW_ALL NET_EXACT_LOOPBACK NET_NO_PEERS NET_ANY_V6 NET_MAPPED_LOCAL NET_NAME_PREFIX NET_NEVER_REFUSE NET_REFUSE_LOG_ONLY
 	g++ -std=c++17 -Wall -Wextra -Werror objects.cpp objects_test.cpp -o build/objects-test
 	./build/objects-test
-	@for mutant in OBJECT_NONE OBJECT_ALL OBJECT_CASE OBJECT_PREFIX; do \
-	 g++ -std=c++17 -DMUTANT_$$mutant objects.cpp objects_test.cpp -o build/mutant-$$mutant || exit 1; \
-	 if ./build/mutant-$$mutant >/dev/null; then echo "SURVIVED $$mutant"; exit 1; fi; done
+	@python3 -B ../mod/mutants.py --sources "objects.cpp objects_test.cpp" OBJECT_NONE OBJECT_ALL OBJECT_CASE OBJECT_PREFIX
 	g++ -std=c++17 -Wall -Wextra -Werror path_map.cpp module_policy.cpp module_test.cpp -o build/module-test
 	./build/module-test module_fixture.txt
-	@for mutant in MODULE_ALL MODULE_ROOT MODULE_PATCH MODULE_DEFENDER MODULE_REQUEST MODULE_FLAGS MODULE_NO_PREFIX MODULE_ANY_PREFIX MODULE_RELEASE_ROOT MODULE_RELEASE_WIDE; do \
-	 g++ -std=c++17 -DMUTANT_$$mutant path_map.cpp module_policy.cpp module_test.cpp -o build/mutant-$$mutant || exit 1; \
-	 if ./build/mutant-$$mutant module_fixture.txt; then echo "SURVIVED $$mutant"; exit 1; fi; done
+	@python3 -B ../mod/mutants.py --sources "path_map.cpp module_policy.cpp module_test.cpp" --args "module_fixture.txt" MODULE_ALL MODULE_ROOT MODULE_PATCH MODULE_DEFENDER MODULE_REQUEST MODULE_FLAGS MODULE_NO_PREFIX MODULE_ANY_PREFIX MODULE_RELEASE_ROOT MODULE_RELEASE_WIDE
 	g++ -std=c++17 -Wall -Wextra -Werror path_map.cpp path_test.cpp -o build/path-test
 	./build/path-test
-	@for mutant in DENY ROOT CASE TRAVERSAL PREFIX DEVICE NVROOT REPARSE QUERY_READS QUERY_ROOT0 FIND SUFFIX HEX; do \
-	 g++ -std=c++17 -DMUTANT_$$mutant path_map.cpp path_test.cpp -o build/mutant-$$mutant || exit 1; \
-	 if ./build/mutant-$$mutant; then echo "SURVIVED $$mutant"; exit 1; fi; done
+	@python3 -B ../mod/mutants.py --sources "path_map.cpp path_test.cpp" DENY ROOT CASE TRAVERSAL PREFIX DEVICE NVROOT REPARSE QUERY_READS QUERY_ROOT0 FIND SUFFIX HEX
 	g++ -std=c++17 -Wall -Wextra -Werror hook_list_test.cpp -o build/hook-list-test
 	./build/hook-list-test
-	@for mutant in NO_FIND NO_ATTRIBUTES; do \
-	 g++ -std=c++17 -DMUTANT_$$mutant hook_list_test.cpp -o build/mutant-hooks-$$mutant || exit 1; \
-	 if ./build/mutant-hooks-$$mutant >/dev/null 2>&1; then echo "SURVIVED $$mutant"; exit 1; fi; done
+	@python3 -B ../mod/mutants.py --sources "hook_list_test.cpp" --prefix build/mutant-hooks- NO_FIND NO_ATTRIBUTES
 	g++ -std=c++17 -Wall -Wextra -Werror pad_test.cpp -o build/pad-test
 	./build/pad-test
-	@for mutant in PAD_ANY_NAME PAD_ANY_MODULE PAD_ALL_USERS PAD_STATIC_PACKET; do \
-	 g++ -std=c++17 -DMUTANT_$$mutant pad_test.cpp -o build/mutant-$$mutant || exit 1; \
-	 if ./build/mutant-$$mutant >/dev/null 2>&1; then echo "SURVIVED $$mutant"; exit 1; fi; done
+	@python3 -B ../mod/mutants.py --sources "pad_test.cpp" PAD_ANY_NAME PAD_ANY_MODULE PAD_ALL_USERS PAD_STATIC_PACKET
+	g++ -std=c++17 -Wall -Wextra -Werror kbm_test.cpp -o build/kbm-test
+	./build/kbm-test
+	@python3 -B ../mod/mutants.py --sources "kbm_test.cpp" KBM_ANY_HANDLE KBM_ALWAYS_FOREGROUND KBM_ANY_CALLER KBM_NO_RELEASE
 	g++ -std=c++17 -Wall -Wextra -Werror frame_cap_test.cpp -o build/frame-cap-test
 	./build/frame-cap-test
-	@for mutant in CAP_FOCUSED CAP_BURST; do \
-	 g++ -std=c++17 -DMUTANT_$$mutant frame_cap_test.cpp -o build/mutant-$$mutant || exit 1; \
-	 if ./build/mutant-$$mutant >/dev/null 2>&1; then echo "SURVIVED $$mutant"; exit 1; fi; done
+	@python3 -B ../mod/mutants.py --sources "frame_cap_test.cpp" CAP_FOCUSED CAP_BURST
 	g++ -std=c++17 -Wall -Wextra -Werror audit_throttle.cpp audit_test.cpp -o build/audit-test
 	./build/audit-test
-	@for mutant in NO_DEDUP NO_RATE; do \
-	 g++ -std=c++17 -DMUTANT_$$mutant audit_throttle.cpp audit_test.cpp -o build/mutant-$$mutant || exit 1; \
-	 if ./build/mutant-$$mutant >/dev/null 2>&1; then echo "SURVIVED $$mutant"; exit 1; fi; done
+	@python3 -B ../mod/mutants.py --sources "audit_throttle.cpp audit_test.cpp" NO_DEDUP NO_RATE
 .PHONY: all test portable-test
 
 build/thread_trace_probe.exe: thread_trace_probe.cpp | build

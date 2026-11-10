@@ -1,6 +1,7 @@
 """Every read-only vehicle guard has an unchanged fake-memory oracle that rejects its mutant."""
 from pathlib import Path
 import subprocess
+import mutants as runner
 import tempfile
 
 ROOT = Path(__file__).resolve().parent
@@ -58,19 +59,22 @@ def main():
         for name in sources:
             subprocess.run(['g++', '-std=c++17', '-O1', '-pthread', '-I', str(ROOT), '-c',
                             str(ROOT / name), '-o', str(work / (name + '.o'))], check=True, capture_output=True)
-        for name, oracle, before, after in MUTANTS:
+        def one(job):
+            index, (name, oracle, before, after) = job
             source = 'discovery.cpp' if name == 'torn read accepted' else 'vehicle.cpp'
             assert sources[source].count(before) == 1, (name, before)
-            changed = work / source
+            changed = work / f'm{index}-{source}'
             changed.write_text(sources[source].replace(before, after, 1))
             subprocess.run(['g++', '-std=c++17', '-O1', '-pthread', '-I', str(ROOT), '-c',
-                            str(changed), '-o', str(work / 'mutant.o')], check=True, capture_output=True)
+                            str(changed), '-o', str(work / f'mutant{index}.o')], check=True, capture_output=True)
             other = 'vehicle.cpp' if source == 'discovery.cpp' else 'discovery.cpp'
-            exe = work / 'mutant'
-            subprocess.run(['g++', '-pthread', str(work / 'test.o'), str(work / 'mutant.o'),
+            exe = work / f'mutant{index}'
+            subprocess.run(['g++', '-pthread', str(work / 'test.o'), str(work / f'mutant{index}.o'),
                             str(work / (other + '.o')), '-o', str(exe)], check=True, capture_output=True)
-            result = subprocess.run([str(exe), oracle], capture_output=True, text=True, timeout=10)
+            result = subprocess.run([str(exe), oracle], capture_output=True, text=True, timeout=120)
             assert result.returncode == 1 and 'vehicle oracle:' in result.stderr, (name, result.returncode, result.stderr)
+            return name
+        for name in runner.parallel(one, list(enumerate(MUTANTS))):
             print('KILLED vehicle mutant:', name, flush=True)
     print(f'all {len(MUTANTS)} vehicle mutants killed')
 

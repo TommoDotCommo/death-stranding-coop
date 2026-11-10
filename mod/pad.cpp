@@ -30,6 +30,30 @@ int16_t axis(const std::string& word,size_t n){
     if(used!=word.size()||!std::isfinite(v)||v<-1||v>1)fail(n,"axis must be in [-1,1]");
     return int16_t(std::lround(v*32767));
 }
+const std::map<std::string,uint8_t> KeyNames={{"SPACE",0x20},{"ENTER",0x0d},{"ESC",0x1b},{"TAB",0x09},{"BACK",0x08},{"SHIFT",0x10},
+    {"CTRL",0x11},{"ALT",0x12},{"UP",0x26},{"DOWN",0x28},{"LEFT",0x25},{"RIGHT",0x27}};
+void keys(const std::string& word,Keys& k,size_t n){
+    std::stringstream s(word);std::string b;
+    while(std::getline(s,b,'+')){
+        unsigned vk=0;
+        if(b.size()==1&&((b[0]>='A'&&b[0]<='Z')||(b[0]>='0'&&b[0]<='9')))vk=uint8_t(b[0]);
+        else if(b.size()>=2&&b.size()<=3&&b[0]=='F'&&b.find_first_not_of("0123456789",1)==std::string::npos){
+            auto f=std::stoul(b.substr(1));if(f<1||f>12)fail(n,"unknown key "+b);vk=0x6f+unsigned(f);}
+        else if(b.size()==3&&b[0]=='x'&&b.find_first_not_of("0123456789abcdefABCDEF",1)==std::string::npos)vk=unsigned(std::stoul(b.substr(1),nullptr,16));
+        else {auto it=KeyNames.find(b);if(it==KeyNames.end())fail(n,"unknown key "+b);vk=it->second;}
+        // Mouse buttons are not keys here (click), and 0xff is not a key.
+        if(vk<8||vk>0xfe)fail(n,"key out of range "+b);
+        if(k.count>=MaxKeys)fail(n,"too many keys");
+        bool seen=false;for(size_t i=0;i<k.count;++i)seen=seen||k.vk[i]==vk;
+        if(!seen)k.vk[k.count++]=uint8_t(vk);
+    }
+    if(!k.count)fail(n,"no key");
+}
+int16_t speed(const std::string& word,size_t n){
+    if(word.empty()||word.size()>6||word.find_first_not_of("0123456789",word[0]=='-'?1:0)!=std::string::npos||word=="-")fail(n,"mouse speed must be whole counts per second");
+    auto v=std::stol(word);if(v<-MaxMouseSpeed||v>MaxMouseSpeed)fail(n,"mouse speed out of range");
+    return int16_t(v);
+}
 }
 std::vector<Step> parse(const std::string& text,const std::string& stamp){
     if(text.size()>MaxBytes)throw std::runtime_error("pad script too large");
@@ -54,6 +78,23 @@ std::vector<Step> parse(const std::string& text,const std::string& stamp){
             auto ax=axis(w[1],n),ay=axis(w[2],n);
             if(w[0]=="stick"){s.pad.lx=ax;s.pad.ly=ay;}else{s.pad.rx=ax;s.pad.ry=ay;}
             s.ms=duration(w[3],n);if(w.size()==5)buttons(w[4],s.pad,n);steps.push_back(s);
+        } else if(w[0]=="key"){
+            if(w.size()!=3&&!(w.size()==6&&w[3]=="mouse"))fail(n,"key KEYS MS [mouse DX DY]");
+            keys(w[1],s.keys,n);s.ms=duration(w[2],n);
+            if(w.size()==6){s.keys.mouseX=speed(w[4],n);s.keys.mouseY=speed(w[5],n);}
+            steps.push_back(s);
+        } else if(w[0]=="tap"||w[0]=="click"){
+            if(w.size()!=2&&w.size()!=3)fail(n,w[0]+(w[0]=="tap"?" KEYS [MS]":" L|R|M [MS]"));
+            if(w[0]=="tap")keys(w[1],s.keys,n);
+            else if(w[1]=="L")s.keys.mouseButtons=1;else if(w[1]=="R")s.keys.mouseButtons=2;else if(w[1]=="M")s.keys.mouseButtons=4;
+            else fail(n,"unknown mouse button "+w[1]);
+            s.ms=w.size()==3?duration(w[2],n):120;steps.push_back(s);
+            Step gap;gap.ms=ReleaseGapMs;gap.line="(release)";steps.push_back(gap);
+        } else if(w[0]=="mouse"){
+            if(w.size()!=4&&w.size()!=5)fail(n,"mouse DX DY MS [KEYS]");
+            s.keys.mouseX=speed(w[1],n);s.keys.mouseY=speed(w[2],n);s.ms=duration(w[3],n);
+            if(w.size()==5)keys(w[4],s.keys,n);
+            steps.push_back(s);
         } else if(w[0]=="wait"){
             if(w.size()!=2)fail(n,"wait MS");
             s.ms=duration(w[1],n);steps.push_back(s);
@@ -63,17 +104,17 @@ std::vector<Step> parse(const std::string& text,const std::string& stamp){
     if(!header)throw std::runtime_error("pad script empty");
     return steps;
 }
-bool Player::sample(uint64_t now,Gamepad& out){
-    out={};
+bool Player::sample(uint64_t now,Gamepad& out,Keys* keys){
+    out={};if(keys)*keys={};
     if(done_)return false;
     if(!started_){started_=true;start_=now;}
     uint64_t at=start_;
     for(size_t i=0;i<steps_.size();++i){
         at+=steps_[i].ms;
 #ifndef MUTANT_PADSCRIPT_TIMING
-        if(now<at){index_=i;out=steps_[i].pad;return true;}
+        if(now<at){index_=i;out=steps_[i].pad;if(keys)*keys=steps_[i].keys;return true;}
 #else
-        if(now<=at){index_=i;out=steps_[i].pad;return true;}
+        if(now<=at){index_=i;out=steps_[i].pad;if(keys)*keys=steps_[i].keys;return true;}
 #endif
     }
     index_=steps_.size();done_=true;return false;

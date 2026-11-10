@@ -2,6 +2,7 @@
 from pathlib import Path
 import subprocess
 import tempfile
+import mutants
 ROOT=Path(__file__).resolve().parent
 families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNATURE','TARGET'],
            ['game_thread_test.cpp','game_thread.cpp','discovery.cpp']),
@@ -26,12 +27,13 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('weather',['KEEP','MARGIN','RENEW'],['weather_test.cpp','weather.cpp','discovery.cpp']),
           ('ride',['LEAK','IDENTITY','PAINT'],['ride_test.cpp','ride.cpp','providers.cpp','pose.cpp','discovery.cpp','../core/core.cpp'])]
 with tempfile.TemporaryDirectory() as directory:
-    executable=Path(directory)/'mutant'
-    for family,mutants,sources in families:
-        for name in mutants:
-            macro='MUTANT_'+family.upper()+'_'+name
-            subprocess.run(['g++','-std=c++17','-O1','-pthread','-D'+macro,
-                            *(str(ROOT/s) for s in sources),'-o',str(executable)],check=True,capture_output=True)
-            result=subprocess.run([str(executable)],text=True,capture_output=True,timeout=20)
-            assert result.returncode==1 and 'oracle' in result.stderr,(macro,result.returncode,result.stderr)
-            print('KILLED',macro,flush=True)
+    builds=mutants.MacroBuilds(directory,[ROOT,ROOT.parent/'core'])
+    builds.prepare(ROOT/s for _,_,sources in families for s in sources)
+    def one(job):
+        family,name,sources=job;macro='MUTANT_'+family.upper()+'_'+name
+        executable=builds.build(macro,[ROOT/s for s in sources],Path(directory)/macro)
+        result=subprocess.run([str(executable)],text=True,capture_output=True,timeout=120)
+        assert result.returncode==1 and 'oracle' in result.stderr,(macro,result.returncode,result.stderr)
+        return macro
+    for macro in mutants.parallel(one,[(family,name,sources) for family,names,sources in families for name in names]):
+        print('KILLED',macro,flush=True)

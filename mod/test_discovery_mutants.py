@@ -1,6 +1,7 @@
 """Each broken protection must fail its own host oracle, never crash."""
 from pathlib import Path
 import subprocess
+import mutants as runner
 import tempfile
 ROOT = Path(__file__).resolve().parent
 source = (ROOT/'discovery.cpp').read_text()
@@ -28,14 +29,19 @@ mutants = [
 ]
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
-    for name, before, after in mutants:
+    test_object = tmp/'test.o'
+    subprocess.run(['g++', '-std=c++17', '-O1', '-pthread', '-I', str(ROOT), '-c', str(ROOT/'discovery_test.cpp'), '-o', str(test_object)],
+                   check=True, capture_output=True)
+    def one(job):
+        index, (name, before, after) = job
         assert before in source, name
-        cpp = tmp/'mutant.cpp'
+        cpp = tmp/f'mutant{index}.cpp'
         cpp.write_text(source.replace(before, after, 1))
-        exe = tmp/'mutant'
-        subprocess.run(['g++', '-std=c++17', '-O1', '-pthread', '-I', str(ROOT),
-                        str(ROOT/'discovery_test.cpp'), str(cpp), '-o', str(exe)],
+        exe = tmp/f'mutant{index}'
+        subprocess.run(['g++', '-std=c++17', '-O1', '-pthread', '-I', str(ROOT), str(test_object), str(cpp), '-o', str(exe)],
                        check=True, capture_output=True)
-        result = subprocess.run([str(exe), name], text=True, capture_output=True, timeout=10)
+        result = subprocess.run([str(exe), name], text=True, capture_output=True, timeout=120)
         assert result.returncode == 1 and 'oracle' in result.stderr, (name, result.returncode, result.stderr)
-        print('KILLED discovery guard', name, result.stderr.strip())
+        return name, result.stderr.strip()
+    for name, oracle in runner.parallel(one, list(enumerate(mutants))):
+        print('KILLED discovery guard', name, oracle)

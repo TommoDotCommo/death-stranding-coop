@@ -38,7 +38,9 @@ Config parseConfig(const std::string& s) {
     c.logging=boolean("logging",true);c.required=boolean("required",false);c.impairment=boolean("impairment",false);
     if(values.count("fault")) c.fault=text("fault");
     if(c.fault!="none"&&c.fault!="build"&&c.fault!="version"&&c.fault!="session") throw std::runtime_error("invalid probe fault");
-    if(c.provider!="synthetic" && (c.impairment || c.fault!="none")) throw std::runtime_error("probe options require synthetic provider");
+    // impairment (a 15..65 ms presence delivery delay) is also allowed in a real game, for lab runs that stand in for
+    // an internet link between two copies on one PC; faults stay with the synthetic probes.
+    if(c.provider!="synthetic" && c.fault!="none") throw std::runtime_error("probe faults require synthetic provider");
     c.discovery=boolean("discovery",false);
     if(c.discovery) {
         if(c.provider!="game") throw std::runtime_error("discovery requires game provider");

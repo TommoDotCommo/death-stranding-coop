@@ -16,7 +16,8 @@ class Context(c.Structure):
 
 class Pad(c.Structure):
     _fields_=[('size',c.c_uint32),('buttons',c.c_uint16),('left_trigger',c.c_uint8),('right_trigger',c.c_uint8),
-              ('lx',c.c_int16),('ly',c.c_int16),('rx',c.c_int16),('ry',c.c_int16)]
+              ('lx',c.c_int16),('ly',c.c_int16),('rx',c.c_int16),('ry',c.c_int16),
+              ('keys',c.c_uint8*8),('key_count',c.c_uint8),('mouse_buttons',c.c_uint8),('mouse_x',c.c_int16),('mouse_y',c.c_int16)]
 
 class ApiTests(unittest.TestCase):
     def test_partner_from_config(self):
@@ -135,19 +136,27 @@ class ApiTests(unittest.TestCase):
                 twin.write_text('off '+stamp+'\n');self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1)
                 self.assertEqual(status()['double']['mode'],'none')
                 # Scripted pad: refused foreign script, then press A for 300 ms; never blocks, size-checked.
-                pad=Pad(c.sizeof(Pad));self.assertEqual(c.sizeof(Pad),16)
+                pad=Pad(c.sizeof(Pad));self.assertEqual(c.sizeof(Pad),32)
                 self.assertEqual(lib.mod_pad(c.byref(pad)),0);self.assertEqual(pad.buttons,0)
                 script=root/'pad.script';script.write_text('pad other\npress A 300\n')
                 self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1);self.assertFalse(script.exists())
                 self.assertEqual(lib.mod_pad(c.byref(pad)),0)
                 script.write_text('pad '+stamp+'\npress A 300\nstick 0 1 200\n')
                 self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1);self.assertTrue(status()['pad']['running'])
-                self.assertEqual(lib.mod_pad(c.byref(pad)),1);self.assertEqual((pad.buttons,pad.ly,pad.size),(0x1000,0,16))
+                self.assertEqual(lib.mod_pad(c.byref(pad)),1);self.assertEqual((pad.buttons,pad.ly,pad.size,pad.key_count),(0x1000,0,32,0))
                 bad=Pad(15);self.assertEqual(lib.mod_pad(c.byref(bad)),-1)
                 time.sleep(.55);self.assertEqual(lib.mod_pad(c.byref(pad)),1);self.assertEqual((pad.buttons,pad.ly),(0,32767))
                 time.sleep(.25);self.assertEqual(lib.mod_pad(c.byref(pad)),0);self.assertEqual(pad.ly,0)
                 self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1);self.assertFalse(status()['pad']['running'])
                 self.assertGreaterEqual(status()['pad']['active_calls'],2)
+                # Scripted keyboard and mouse ride in the same state: keys held, mouse speed, a button; all clear after.
+                script.write_text('pad '+stamp+'\nkey W+SHIFT 300 mouse 300 -40\nclick R 200\n')
+                self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1)
+                self.assertEqual(lib.mod_pad(c.byref(pad)),1)
+                self.assertEqual((pad.key_count,pad.keys[0],pad.keys[1],pad.mouse_x,pad.mouse_y,pad.mouse_buttons,pad.buttons),(2,0x57,0x10,300,-40,0,0))
+                time.sleep(.35);self.assertEqual(lib.mod_pad(c.byref(pad)),1);self.assertEqual((pad.key_count,pad.mouse_buttons,pad.mouse_x),(0,2,0))
+                time.sleep(.45);self.assertEqual(lib.mod_pad(c.byref(pad)),0);self.assertEqual((pad.key_count,pad.mouse_buttons),(0,0))
+                self.assertEqual(lib.mod_game_thread_tick(c.byref(ctx)),1);self.assertFalse(status()['pad']['running'])
                 log=next(root.glob('mod-*.log')).read_text()
                 self.assertIn('PAD script refused: pad script line 1',log);self.assertIn('PAD script started steps=3',log)
                 self.assertIn('PAD script finished',log);self.assertIn('POSE available',log)

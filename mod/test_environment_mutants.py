@@ -1,6 +1,7 @@
 """Environment protections must fail unchanged fake-memory/callback oracles."""
 from pathlib import Path
 import subprocess
+import mutants as runner
 import tempfile
 
 ROOT = Path(__file__).resolve().parent
@@ -44,13 +45,18 @@ def main():
         for oracle, before, after in EDITS:
             assert source.count(before) == 1, (oracle, before)
             variants.append((oracle, source.replace(before, after, 1), []))
-        for oracle, changed, flags in variants:
-            path = work / 'environment.cpp'
+        def one(job):
+            index, (oracle, changed, flags) = job
+            folder = work / f'm{index}'
+            folder.mkdir()
+            path = folder / 'environment.cpp'
             path.write_text(changed)
-            exe = work / 'mutant'
+            exe = folder / 'mutant'
             subprocess.run(common + flags + [str(path)] + objects + ['-o', str(exe)], check=True, capture_output=True)
-            result = subprocess.run([str(exe), oracle], capture_output=True, text=True, timeout=10)
+            result = subprocess.run([str(exe), oracle], capture_output=True, text=True, timeout=120)
             assert result.returncode == 1 and 'environment oracle:' in result.stderr, (oracle, result.returncode, result.stderr)
+            return oracle
+        for oracle in runner.parallel(one, list(enumerate(variants))):
             print('KILLED environment mutant:', oracle, flush=True)
     print(f'all {len(variants)} environment mutants killed')
 
