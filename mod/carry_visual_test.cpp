@@ -68,6 +68,10 @@ int main(){
         // A stale record: still in the stack array, but the record names another holder.
         uint64_t other=g.alloc(0x40);g.carry({{1,{{{3,100}},{{4,200}}}}});g.record(4,200,other);
         auto t=g.read();CHECK(t&&t->size()==1&&(*t)[0].hash==100);
+        // A record without an id of its own is named by its list item; without a readable item it stays 0.
+        {Game h;h.carry({{1,{{{3,0},{4,0}}}}});uint64_t item=h.alloc(0x40);h.put<uint32_t>(item+ItemId,0x17053e1a);
+         h.put<uint64_t>(h.manager+RecordBase+RecordStride*3+RecordItem,item);
+         auto u=h.read();CHECK(u&&u->size()==2&&(*u)[0].hash==0x17053e1a&&(*u)[1].hash==0);}
         // The live layout: records beyond index 511 count; a slot that names another carrier does not.
         {Game h;h.carry({{1,{{{557,700}}}}});auto u=h.read();CHECK(u&&u->size()==1&&(*u)[0].hash==700);
          uint64_t slots=0;std::memcpy(&slots,h.mem.data()+(h.carrier+SlotArray-h.base),8);uint64_t slot=0;std::memcpy(&slot,h.mem.data()+(slots-h.base),8);

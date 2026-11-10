@@ -640,7 +640,7 @@ disconnection). It never creates, moves or deletes cargo: a cargo record held by
 real cargo, counted as this porter's. Instead the partner body shows what the partner carries on the backpack as plain
 cases (`cargo_stack.h`): one of the game's cargo case meshes per item (at most 12), each item's own carried-case model
 and appearance (its definition found by the item id; the record's variant bit travels in the summary; a plain case for
-anything else; weapons, body bags, carts and machines never), with no record, carrier or collision, packed in two
+anything else; packaged weapons and construction machines in the cases the game draws for them; body bags and carts never), with no record, carrier or collision, packed in two
 columns by size on the copy of the backpack the body wears (or on the body without one), moved every tick, removed when the summary shrinks, the body hides or a game event starts, and
 forgotten without a call when the world is replaced (`STACK N cases on the partner`, `STACK N cases removed`). Lab
 commands in `puppet.ride`: `stack N` draws N cases whatever the partner carries, `stack auto` returns to the summary,

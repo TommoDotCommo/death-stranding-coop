@@ -128,9 +128,11 @@ Api nativeApi(discovery::Sampler& s){
         if(!sp->read(loaded+0xd0,&children,4)||children>16)return std::nullopt;
         Case c;c.model=loaded;c.volume=1;return c;};
     // The item's own case: its definition by id, then the model and appearance the game would draw for it carried.
-    // `variant` is the record's +204 bit 5, as the native realization passes it. Only ordinary cases (not weapons 2,
-    // body bags 6, carts 0xa or machines 0xb; volume S..LL) whose selected model is one of the config's own case
-    // models; anything else, or an unknown id, is drawn as the plain case.
+    // `variant` is the record's +204 bit 5, as the native realization passes it. Packaged weapons (case type 2) and
+    // construction machines (0xb) are drawn like the game draws them on the backpack: live on the Episode 3 save their
+    // meshes are config models 15 and 9, with the S footprint and at most 4 children. Body bags (6), carts (0xa) and
+    // volumes beyond LL, a selected model that is not one of the config's own case models, or an unknown id are drawn
+    // as the plain case.
     a.caseFor=[sp,plain,find,selectModel,selectLook,managerSlot,definitionsSlot](uint32_t item,bool variant)->std::optional<Case>{
         uint64_t definitions=0,manager=0,config=0,array=0;uint32_t count=0;
         if(!item||!q(*sp,definitionsSlot,definitions)||!definitions||!q(*sp,managerSlot,manager)||!manager)return plain();
@@ -140,7 +142,7 @@ Api nativeApi(discovery::Sampler& s){
         uint8_t kind[4]{};if(!sp->read(def+0x3a,kind,4))return plain();   // +3a attribute, +3b case type, +3e volume
         uint8_t volume=0;if(!sp->read(def+0x3e,&volume,1))return plain();
         uint8_t type=kind[1];
-        if(type==2||type==6||type==0xa||type==0xb||volume>3)return plain();
+        if(type==6||type==0xa||volume>3)return plain();
         uint64_t wrapper=selectModel(manager,def,variant),loaded=0;
         if(!wrapper||!q(*sp,wrapper+0x30,loaded)||!loaded)return plain();
         // Only the config's own case models (indices 1..30), never an asset model nobody has inspected.
@@ -153,6 +155,7 @@ Api nativeApi(discovery::Sampler& s){
         for(double x:t.position)if(!std::isfinite(x))return 0;
         alignas(16) unsigned char p[0xa8]{};
         std::memcpy(p,&model,8);std::memcpy(p+8,&c.look,8);std::memcpy(p+0x20,t.position.data(),24);std::memcpy(p+0x38,t.rotation.data(),36);
+        // +80/+88 = 2/1: what the game passes for a record carried by the player (record +0x80 == 1).
         uint32_t two=2,none=0xffffffffu;std::memcpy(p+0x80,&two,4);std::memcpy(p+0x84,&none,4);
         p[0x88]=1;p[0x89]=1;p[0x8d]=1;p[0xa0]=1;   // retained model; no collision instance
         uint64_t m=factory(p);if(!m)return 0;

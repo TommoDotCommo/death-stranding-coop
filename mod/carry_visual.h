@@ -26,7 +26,8 @@
 namespace mod::carry {
 constexpr uint64_t PorterCarrier=0x54d0, CarrierObject=0x50, Slots=0x10, SlotArray=0x18, SlotType=0x1,
                    Stacks=0x18, StackArray=0x20, Items=0x10, ItemArray=0x18,
-                   RecordBase=0x20, RecordStride=0x240, RecordHash=0xc8, RecordKind=0x20, RecordHolder=0x90;   // see SlotCarrier
+                   RecordBase=0x20, RecordStride=0x240, RecordHash=0xc8, RecordKind=0x20, RecordHolder=0x90,   // see SlotCarrier
+                   RecordItem=0x28, ItemId=0x34;   // the record's list item and its id: used when the record's own id is 0
 constexpr uint64_t ComponentVtable=0x3dd9750;   // image offset of DSBaggage2CarrierComponent's vtable
 // The game scans 0x1e98 records (0x2c55180); live 2026-11-09 the porter's stack used records up to index 557.
 constexpr unsigned RecordCount=0x1e98;

@@ -41,6 +41,11 @@ std::optional<std::vector<Item>> readCarried(const discovery::Sampler& s,uint64_
                 uint64_t holder=0;Item it;uint32_t kind=0;
                 uint32_t flags=0;
                 if(!load(s,r+RecordHolder,holder)||!load(s,r+RecordHash,it.hash)||!load(s,r+RecordKind,kind)||!load(s,r+RecordFlags,flags))return std::nullopt;
+#ifndef MUTANT_CARRY_ITEM
+                // Some carried records have no id of their own (live, Episode 3: +0xc8 = 0 on one backpack case); the
+                // list item the game draws the case from (+0x28) names it.
+                if(!it.hash){uint64_t item=0;uint32_t id=0;if(load(s,r+RecordItem,item)&&item&&load(s,item+ItemId,id))it.hash=id;}
+#endif
 #ifndef MUTANT_CARRY_VARIANT
                 it.variant=(flags&RecordVariant)!=0;
 #endif
