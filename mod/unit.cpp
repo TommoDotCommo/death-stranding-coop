@@ -63,6 +63,9 @@ int main() {
     assert(mod::parseConfig(withKeys(threaded,"\"puppet_probe\":true,\"required\":true")).puppetProbe);
     assert(refused(withKeys(game,"\"puppet_probe\":true,\"required\":true")));
     assert(!mod::parseConfig(good).selfTick);
+    // Notices in the game's info log: off by default; only where the game thread runs.
+    assert(!mod::parseConfig(threaded).notices&&mod::parseConfig(withKeys(threaded,"\"notices\":true")).notices);
+    assert(refused(withKeys(good,"\"notices\":true"))&&refused(withKeys(game,"\"notices\":true")));
     // The delivery-delay impairment works with the real game too (two copies on one PC standing in for an internet
     // link); injected faults stay synthetic-only.
     assert(!mod::parseConfig(threaded).impairment&&mod::parseConfig(withKeys(threaded,"\"impairment\":true")).impairment);

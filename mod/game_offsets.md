@@ -4449,3 +4449,39 @@ The update positions/restarts an instance through `0x1e0b020` and `0x1bc1e30` at
 Changed files: none. Ten pinned instruction assertions passed; executable hash remained unchanged; Git remained clean at the supplied start commit. No orchestrator refinements appeared in the inbox. No live checks, builds or test suite ran.
 
 **Status (2026-11-09):** nothing of this is wired. Crouching already reaches the partner body (`Crouch_Rate` from the presence crouch flag); the struggle and death poses, alert levels and voidouts stay parked (a gameplay crater must not be driven by partner events).
+
+## Info log: the message feed, and a custom line in it (2026-11-10)
+
+Static, pinned executable, RVAs relative to `0x140000000`; table and queue contents read live (read-only).
+
+**Established — the node-graph binding:** `DSUINodeGraphBindings_sShowInfoLog` is registered at `0x30159a2` to
+`0x30550e0` (a jump to `0x3056110`). With a table item it formats the item's localized text with up to three string
+arguments (`0x3092d10`); without one it hashes a symbol name and looks the item up (`0x30929a0` -> `0x30929f0`;
+an unknown name shows "Not found info log table item"). Both end in the same add.
+
+**Established — the HUD object:** `0x307a4f0` returns `*(owner + 0x48)`, where `owner = *(base + 0x7c00128)` is
+the UI owner global that `0x30125a0` returns (the hologram-name list hangs off the same owner at `+0xf0`). Live,
+that object's vtable is `base + 0x3e53850` (`DSUIInfoLogHUDLogic`). Its fields: `+0x20` the item table (count at
+table `+0x20`, item pointers at table `+0x28`; 572 items live), `+0x28` the queue, `+0xfd0` a slim reader/writer
+lock (the imports at `0x3b3a518/528/538` are `TryAcquire/Acquire/ReleaseSRWLockExclusive`) taken around an add
+(`0x3092bae`..`0x3092cf4`).
+
+**Established — a table item:** `+0x20` id (hash of its symbol), `+0x28` localized text resource, `+0x30` icon,
+`+0x31` colour, `+0x32` sound, `+0x34` a float added to the UI clock for the entry's time (0 on every item read
+live), `+0x38..+0x47` one byte per HUD state the item may show in, `+0x48/+0x49` flag bytes. Live examples:
+"20 minutes have passed." (icon 0, sound 3, states `0x8200`), "Cargo damaged." (icon 0, `0xa010`),
+"{1} Like(s) received from {0}." (id `0x7a15e274`, icon 3, `0x1200`), "Like(s) awarded to {0}." (icon 0, none).
+
+**Established — the add:** `0x3084d10(queue, UI string*, id, icon, colour, sound, float time, flags, uint32* states)`
+(the call at `0x3092cda`: `rcx = hud + 0x28`, `rdx` the formatted text, `r8d` the item id, `r9b` the icon, then on
+the stack colour, sound, `float(UI clock) + item +0x34`, `8` if item `+0x48` | `0x20` if `+0x49`, and a pointer to
+the state mask: bit i for item `+0x38+i`, bit 0 always). The queue is 100 entries of `0x28` bytes (text handle,
+id `+8`, order `+0xc`, icon/colour/sound `+0x14..+0x16`, time `+0x18`, flags `+0x20`, states `+0x24`) with its
+count at `+0xfa0`; the add keeps them in time order and copies the text (`0x191caf0`). It needs nothing else: no
+item, no record. The UI clock is the double at `*(base + 0x7be6318) + 0xd0`. The text is the native UI string
+(`0x191ca20` from UTF-16, `0x191cad0` release), the same type the hologram name uses.
+
+**Used by the mod (`notice.h`):** one add per notice with a finished text, id `0x434f4f50`, icon 0, colour 0, sound 3,
+states `0x8201`, flags 0, time = the UI clock, under the lock; the HUD object is re-read and checked by its vtable on
+every call. Live result: see STATUS.md.
+

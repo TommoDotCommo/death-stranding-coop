@@ -1,0 +1,48 @@
+#pragma once
+// Notices: what happens to the session, told in the game's own info log (the message feed at the side of the screen).
+// The partner joined, the partner left, and, once, that nobody has arrived yet (the usual cause on a first session is
+// a firewall that does not let the game through); and when the partner disappears into a cutscene or private room
+// and comes back, so a hidden partner is explained. The game's info-log queue takes a finished text
+// (game_offsets.md "Info log"); the mod adds an entry there and nothing else: no table item, no saved state.
+#include "discovery.h"
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <string>
+namespace mod::notice {
+struct Api {
+    std::function<bool(const std::u16string& text)> show;   // true: queued in the game's info log; false: no HUD now
+};
+enum class Kind : uint8_t {Joined,Left,Alone,Away,Back};
+// The partner's name is cleaned like the name tag's (printable, no markup characters); "Your partner" without one.
+std::u16string text(Kind,const std::string& partnerName);
+class Notifier {
+public:
+    // A join waits NameMs for the partner's name. Alone: in the world this long with no partner since the mod started.
+    // Notices are GapMs apart; one the HUD does not take is tried again every RetryMs and dropped after GiveUpMs.
+    // Away: the partner has been in a game event or a private room (where his body is hidden) for AwayMs; Back when he
+    // returns after that was told.
+    static constexpr uint64_t NameMs=3000,AloneMs=25000,AwayMs=2000,GapMs=2500,RetryMs=1000,GiveUpMs=30000;static constexpr size_t MaxPending=4;
+    Notifier(Api api,std::function<void(const std::string&)> log):api_(std::move(api)),log_(std::move(log)){}
+    // One call per game-thread tick. inWorld: the porter is in the world and no game event runs (nothing is shown
+    // otherwise, but what happened meanwhile is told afterwards). connected: the session with the partner is up.
+    // partnerAway: the partner reports a game event or private room (presence flag PrivateRoom).
+    void tick(uint64_t nowMs,bool inWorld,bool connected,const std::string& partnerName,bool partnerAway=false);
+    size_t pending() const {return pending_.size();}
+    unsigned shown() const {return shown_;}
+private:
+    struct Entry {Kind kind;std::string name;uint64_t since=0,nextTry=0;bool named=false;};
+    void add(Kind kind,const std::string& name,uint64_t now);
+    Api api_;std::function<void(const std::string&)> log_;std::deque<Entry> pending_;
+    bool started_=false,connected_=false,everConnected_=false,aloneTold_=false,away_=false,awayTold_=false;uint64_t worldSince_=0,lastShown_=0,awaySince_=0;bool inWorld_=false;unsigned shown_=0;
+    std::string lastName_;
+};
+// Pinned build: the UI owner global and the UI clock global (its double at +0xd0), DSUIInfoLogHUDLogic's vtable, its
+// queue (100 entries of 0x28 bytes, count at +0xfa0) and the slim lock (SRWLOCK) the game takes around an add. A notice
+// looks like the game's plain messages ("20 minutes have passed."): icon 0, colour 0, sound 3, shown in the same
+// states; NoticeId is the id the mod's entries carry (no table item has it).
+constexpr uint64_t UiOwnerSlot=0x7c00128,UiClockSlot=0x7be6318,HudVtable=0x3e53850,Queue=0x28,QueueLock=0xfd0;
+constexpr uint8_t Icon=0,Colour=0,Sound=3;constexpr uint32_t States=0x8201,NoticeId=0x434f4f50;
+// The game's info-log queue for the pinned build (signatures checked); throws when it cannot be verified.
+Api nativeApi(discovery::Sampler&);
+}

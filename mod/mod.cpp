@@ -34,6 +34,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "cargo_stack.h"
 #include "likes.h"
 #include "nametag.h"
+#include "notice.h"
 #include "weather.h"
 #include "environment.h"
 #include "auto_continue.h"
@@ -335,6 +336,7 @@ struct Runtime final:ds::Transport {
             else if(text=="off"+stamp){rideOn=false;rideLead=0;}
             else if(text=="park"+stamp){rideLead=0xff;}   // test: the lead vehicle stops where it is
             else if(text=="rider"+stamp){rideHideRider=!rideHideRider;}
+            else if(text=="notice"+stamp){noticeTest=true;}           // test: one line in the game's info log
             else if(text=="tag on"+stamp){tagTest=true;}              // test: a name over the partner body
             else if(text=="tag off"+stamp){tagTest=false;}
             else if(text=="stack off"+stamp){stackTest=-2;}            // test: no cases drawn
@@ -438,6 +440,25 @@ struct Runtime final:ds::Transport {
             else note("LIKE dropped: no likes state\n");
         }
         likeIn.clear();
+    }
+    // --- Notices (notice.h): opt-in `notices`. The partner joined / left / nobody yet, in the game's own info log.
+    // `puppet.ride` "notice" shows a test line whatever the session does.
+    std::unique_ptr<mod::notice::Notifier> notices;std::optional<mod::notice::Api> noticeApi;bool noticeTried=false,noticeTest=false;Background<mod::notice::Api> noticeJob;
+    void tickNotices(uint64_t now) {
+        if(!config.notices&&!noticeTest)return;
+#ifndef MOD_FAKE_NETWORK
+        if(!noticeApi&&!noticeTried){
+            auto* sp=&*sampler;if(!noticeJob.ready([sp]{return mod::notice::nativeApi(*sp);}))return;   // checked beside the game
+            noticeTried=true;
+            try{noticeApi=noticeJob.job.get();note("NOTICE on\n");}
+            catch(const std::exception& e){note((std::string("NOTICE unavailable: ")+e.what()+"\n").c_str());}}
+#endif
+        if(!noticeApi)return;
+        if(noticeTest){noticeTest=false;note(noticeApi->show(u"Co-op mod: test notice.")?"NOTICE test shown\n":"NOTICE test refused: no info log now\n");}
+        if(!config.notices)return;
+        if(!notices)notices=std::make_unique<mod::notice::Notifier>(*noticeApi,[this](const std::string& row){note(row.c_str());});
+        bool connected=core&&core->connected();
+        notices->tick(now,poseAvailable&&!inEvent,connected,partnerName,connected&&(cache.remote.state.flags&ds::PrivateRoom));
     }
     // --- A name over the partner (nametag.h): one of the game's hologram-name records above the partner body.
     // On with config partner_tag; `puppet.ride` "tag on" / "tag off" test it. The name is the partner's nickname.
@@ -1287,6 +1308,8 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickMarkers(now);
             stage="likes";stages.enter("likes",mod::nowUs());
             if(twin&&gameContext)tickLikes(now);
+            stage="notices";stages.enter("notices",mod::nowUs());
+            if(gameContext)tickNotices(now);
             stage="cargo command";stages.enter("cargo command",mod::nowUs());
             if(cargoCreate&&gameContext&&std::filesystem::exists(cargoCommand)) {
                 auto text=readConfig(cargoCommand);
