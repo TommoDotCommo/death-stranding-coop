@@ -10,8 +10,9 @@ Rules:
 1. No game files, assets, saves, logs or dumps in this repository. Addresses and layouts in notes are fine.
 2. Work only in disposable test copies of the game; never install the proxy into the real game folder and never
    write to the real saves. Hash the real saves before and after every live run.
-3. Keep modded copies offline: the network policy defaults to `enforce`; do not ship a change that weakens it, and
-   never run a memory-writing feature under `log-only`.
+3. Keep modded copies off the publisher's online service: the network policy defaults to `enforce` (loopback and
+   listed partner addresses only); do not ship a change that weakens it, and never run a memory-writing feature
+   under `log-only`. A private server run by the players on loopback or a listed partner address is allowed.
 4. Every protection has a mutant that must fail its test. `make test` must stay green.
 5. Changes to `mod/config.*` need a rebuilt proxy (it embeds the config parser) and fresh probes before a launch.
    Changes to any source in `mod/build_id.py`'s list change the wire identity: run `python3 mod/build_id.py --write`

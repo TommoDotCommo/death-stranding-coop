@@ -49,7 +49,9 @@ without the session code, invites or your Windows user name ([launcher/README.md
 ## Rules this project keeps
 
 - Your own legitimately owned copy only; nothing that bypasses Steam ownership or any protection.
-- Modded copies never talk to the game's online service (see `redirect/network_policy.h`).
+- Modded copies never talk to the publisher's online service (see `redirect/network_policy.h`). A private server
+  that the players run themselves, reached over loopback or a listed partner address, is allowed (since 2026-11-11);
+  none is integrated yet, see `mod/game_offsets.md`.
 - Test copies only: never install the proxy into your real game folder, never touch your real saves.
 - No game files in this repository. Reverse-engineering notes describe addresses and layouts, not game content.
 

@@ -4485,3 +4485,108 @@ item, no record. The UI clock is the double at `*(base + 0x7be6318) + 0xd0`. The
 states `0x8201`, flags 0, time = the UI clock, under the lock; the HUD object is re-read and checked by its vtable on
 every call. Live result: see STATUS.md.
 
+## Other projects checked against this build, and a private-server trial (2026-11-11)
+
+Pinned build 13300582 (`ds.exe` SHA-256 as above). Three public projects were read and tested against the
+executable. Their code is not used here: two carry no license and one is GPL-3.0, so anything taken from them
+has to be re-derived on this build. All addresses are RVAs.
+
+### A private server exists and its client hooks fit this build
+
+[Skippeh/parcel-thief](https://github.com/Skippeh/parcel-thief) (commit `01f7cbc`, no license file, last pushed
+2024-11) is a server for the Director's Cut's online layer: built objects and vehicles ("Qpid objects"), lost
+cargo and shared lockers ("missions"), player paths ("roads"), highway resources, likes and wasted baggage. Its
+client is a DLL that does three things in the game process.
+
+Observed (static, file scan of `ds.exe`, each pattern exactly one match):
+
+| What its client uses | RVA here | Note |
+|---|---:|---|
+| String constructor from a C string | `0x190aa00` | builds the engine's counted string (ref count, CRC, length before the bytes) |
+| String destructor | `0x190ad20` | |
+| "Read incoming data" (mode, in string, out string) | `0x19da0e0` | the client replaces it: mode must be 2 |
+| "Write outgoing data" (mode, in string, out string) | `0x19da6a0` | the client replaces it: mode must be 2 |
+| Auth address pointer (its hard-coded Steam offset) | `0x4dfa130` | holds `0x144dfa108`, a string object whose text is `https://prod-pc-15.wws-gs2.com/auth/ds` |
+
+- The same project documents the transport: JSON bodies; in its replacement the body is AES-256-GCM with a
+  12-byte random nonce in front and the 16-byte tag at the end, under that project's own fixed key, and vectors
+  are integers scaled by 100000. The server answers the auth request with a gateway address for everything else.
+- The executable names three more hosts: `clientconfig.api.wwsga.me` and `ds15xs.api.wwsga.me` (with `.dev.`
+  twins) next to the strings `TelemetryClientConfig` and `/clientConfig`.
+
+Observed (live, one test copy, enforce network policy, 2026-11-11):
+
+- That project's Linux server build (release `build/replace_pg-embed_dep/2024-07-18_2`, zip SHA-256
+  `8ab02795...a15610`) starts on loopback with a placeholder Steam web API key and serves its frontend.
+- Its client DLL (same release, zip SHA-256 `e1ea91f1...a3749f`) injected about 100 ms after process start: the
+  DLL's initialisation failed and the game exited before the mod started. No error line was written, cause
+  unknown.
+- Injected into the same copy once it was in gameplay: "Successfully injected", so the four patterns matched in
+  memory and its three hooks were installed next to this project's proxy and mod. The copy kept running.
+- In that run the game made exactly one outbound attempt of its own, `WinHttpConnect clientconfig.api.wwsga.me`,
+  refused by the policy. It never tried the auth address, before or after the injection, so the local server
+  received no request from the game.
+- The real saves were unchanged after both runs.
+
+Derived:
+- A private server can sit behind the existing network policy with no change to it: loopback and listed partner
+  addresses already pass, and the publisher's hosts stay refused.
+- The game does not attempt to sign in while its configuration request is refused (or it signs in only at a
+  point this run did not reach). Which one is not established.
+
+Unknown:
+- What makes the game start the sign-in (the title screen's online step, the result of the `clientConfig`
+  request, a profile setting), and whether a local answer to `clientConfig` is needed.
+- Whether sign-in succeeds: the server checks the Steam session ticket with a real Steam web API key, which
+  this trial did not have.
+- Two copies under one Steam account would be one player to the server. Whether the server can tell them apart
+  is untested.
+- Why the early injection fails.
+
+Next step for an integration of our own: set the auth address from `mod.json` in the mod itself (the pointer
+above), and replace the two data functions with our own AES-GCM (Windows CNG has it), instead of a second
+injected DLL. Then find the sign-in trigger.
+
+### Function signatures from a music-player mod: all 31 match
+
+[HamzaEzzRa/Walking-Man](https://github.com/HamzaEzzRa/Walking-Man) (commit `13669fb`, GPL-3.0) locates 31 game
+functions by byte pattern. Each pattern matches exactly once in this build's file. The ones relevant here:
+
+| Its name | RVA here | Relation to our notes |
+|---|---:|---|
+| `GetBooleanFact` (fact resource, fact resource) -> bool | `0x1b09ba0` | reads the fact database global `0x5794720` (the one in "Story progress" above) and calls `0x1afcc10` |
+| `GetNotificationPool` | `0x307a4f0` | new here |
+| `DrawNotificationText` | `0x3084d10` | new here |
+| `CreateRuntimeUITextFromString` | `0x191c9e0` | 0x40 before our UTF-16 builder `0x191ca20` |
+| `TryFreeRuntimeUIText` / `AssignRuntimeUIText` | `0x191cad0` / `0x191caf0` | |
+| `UpdateRuntimeUIText` | `0x3646c40` | the same function as our "set text element" primitive |
+| `InGameUIDrawElement` / `InGameUIUpdateElement` | `0x3049850` / `0x30354a0` | |
+| `RenderTask` | `0x197f330` | |
+| `GamePreLoad` / `GamePreExit` | `0x1d1f090` / `0x1a12a20` | |
+| `ProcessControllerInput` | `0x2dc6440` | |
+| `InGameFlagUpdate` / `InGameAreaUpdate` | `0x36adb4` / `0x2bf11d0` | |
+| `PostMenuExit` | `0x2694a70` | |
+| `PlayUISound` | `0x303e8e0` | |
+
+Two of them land on functions this file had found independently, which supports the rest. None was called or
+hooked here; argument meanings beyond the table are that project's and unverified.
+
+### A 2022 type dump: names carry over, offsets often do not
+
+[Nukem9/HZDCoreEditor](https://github.com/Nukem9/HZDCoreEditor) (commit `af45dd8`, no license file) contains a
+dump of the original release's reflected types: 4470 classes with member offsets, including the online ones
+(`DSNetOnlineObject*`, `DSNetSync*`, `DSQpid*`, `DSOnline*Mission*`, `OTGC*` requests) and a save-state reader.
+
+Method: this build keeps a member descriptor of 0x38 bytes per reflected field in `.data` (type pointer at +0,
+member offset in the low 16 bits at +8, name pointer at +0x10), in contiguous runs per class; the known
+`CurrentEpisodeHashFact` descriptor at `0x4dc3cf0` has this shape. A scan found 30635 descriptors in 6555 runs.
+Each dumped class was matched to the run sharing most of its member names (at least 60 %).
+
+Result: 2448 classes have every dumped offset unchanged, 641 only gained members, 686 have at least one member
+at a different offset, 695 found no run. Of 90 online, cargo and road classes: 39 unchanged, 18 gained members,
+19 moved, 14 unmatched. Example: `DSMissionGoalsResource.CurrentEpisodeHashFact` is `+0x68` in both, while
+`CurrentEpisodeIndexFact` (`+0xa0` here) is absent from the dump.
+
+Derived: use the dump for names and structure, and read every offset from this build's own descriptors. The
+run matching is a heuristic (adjacent small classes can share a run), so the counts are approximate.
+
