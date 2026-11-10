@@ -145,6 +145,54 @@ std::string tail(const std::filesystem::path& file,size_t lines) {
     return clean.substr(at);
 }
 }
+namespace {
+std::string lowerPath(const std::string& s){std::string o;for(char c:s){if(c=='/')c='\\';if(c>='A'&&c<='Z')c=char(c+32);o+=c;}return o;}
+// "49000", "49000-49014", "80,49000-49014" (a rule's LocalPorts); "" and "*" mean every port; names such as RPC match none.
+bool portListed(const std::string& list,unsigned port){
+    if(list.empty()||list=="*")return true;
+    size_t i=0;
+    while(i<=list.size()){
+        size_t e=list.find(',',i);if(e==std::string::npos)e=list.size();
+        std::string part=list.substr(i,e-i);i=e+1;
+        while(!part.empty()&&part.front()==' ')part.erase(part.begin());
+        while(!part.empty()&&part.back()==' ')part.pop_back();
+        if(part.empty()||part.find_first_not_of("0123456789-")!=std::string::npos)continue;
+        auto dash=part.find('-');
+        try{
+            if(dash==std::string::npos){if(std::stoul(part)==port)return true;}
+            else if(dash>0&&dash+1<part.size()&&part.find('-',dash+1)==std::string::npos){
+                auto lo=std::stoul(part.substr(0,dash)),hi=std::stoul(part.substr(dash+1));if(lo<=port&&port<=hi)return true;}
+        }catch(const std::exception&){}
+    }
+    return false;
+}
+}
+Firewall firewallVerdict(const std::vector<FirewallRule>& rules,const std::string& gameExe,bool firewallOn,unsigned activeProfiles,unsigned port) {
+    if(!firewallOn)return Firewall::Off;
+    auto exe=lowerPath(gameExe);bool allowed=false;
+    for(auto& r:rules) {
+        if(!r.enabled||!r.inbound||!(r.profiles&activeProfiles))continue;
+        if(r.protocol!=17&&r.protocol!=256)continue;                      // UDP or any
+        if(!r.application.empty()&&lowerPath(r.application)!=exe)continue;  // another program's rule
+        if(!portListed(r.localPorts,port))continue;
+#ifndef MUTANT_FIREWALL_BLOCK_WINS
+        if(!r.allow)return Firewall::Blocked;
+        allowed=true;
+#else
+        allowed=allowed||r.allow;
+#endif
+    }
+    return allowed?Firewall::Allowed:Firewall::NoRule;
+}
+const char* firewallText(Firewall f) {
+    switch(f) {
+    case Firewall::Off:return "Windows Firewall is off for this network.";
+    case Firewall::Allowed:return "Windows Firewall lets the game receive your partner's data.";
+    case Firewall::Blocked:return "Windows Firewall BLOCKS the game: your partner's data cannot arrive. Allow ds.exe under Windows Security > Firewall & network protection > Allow an app through firewall.";
+    case Firewall::NoRule:return "Windows Firewall has no rule for the game yet: it will ask when a session starts. Choose Allow.";
+    default:return "Windows Firewall could not be read.";
+    }
+}
 std::string redact(const std::string& in) {
     std::string out;out.reserve(in.size());
     for(size_t i=0;i<in.size();) {

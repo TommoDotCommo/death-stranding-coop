@@ -68,6 +68,22 @@ int main(int argc,char** argv) {
     check(fs::file_size(root/"real/save")==18,"real save sentinel unchanged");
     check(launcher::backupAllowed(false,false)&&!launcher::backupAllowed(false,true)&&!launcher::backupAllowed(true,false),"backup requires a closed game and lobby");
     fs::create_directory_symlink(root/"real",root/"linked");rejects([&]{launcher::atomicWrite(root/"linked/child/out","x");});check(!fs::exists(root/"real/child"),"no write through linked ancestor");
+    {   // Windows Firewall verdict for the game's incoming UDP, as Windows decides it.
+        using F=launcher::Firewall;using R=launcher::FirewallRule;const std::string exe="C:\\Games\\DS\\ds.exe";const unsigned Private=2,Public=4;
+        auto verdict=[&](std::vector<R> rules,unsigned active=2,unsigned port=49000,bool on=true){return launcher::firewallVerdict(rules,exe,on,active,port);};
+        R allowUdp{"c:/games/ds/DS.EXE",true,true,true,17,"*",Private|Public},blockUdp{exe,true,false,true,17,"",Private|Public};
+        check(verdict({})==F::NoRule&&verdict({},Private,49000,false)==F::Off,"no rule: Windows will ask; firewall off");
+        check(verdict({allowUdp})==F::Allowed,"allow rule for this program, any slash and case");
+        check(verdict({allowUdp,blockUdp})==F::Blocked&&verdict({blockUdp,allowUdp})==F::Blocked,"a block rule wins over an allow rule");
+        R tcp=allowUdp;tcp.protocol=6;R other=allowUdp;other.application="C:\\Games\\Other\\ds.exe";R off=allowUdp;off.enabled=false;R out=allowUdp;out.inbound=false;
+        check(verdict({tcp})==F::NoRule&&verdict({other})==F::NoRule&&verdict({off})==F::NoRule&&verdict({out})==F::NoRule,"TCP, another program, disabled and outbound rules do not count");
+        R priv=allowUdp;priv.profiles=Private;check(verdict({priv},Public)==F::NoRule&&verdict({priv},Private|Public)==F::Allowed,"a rule counts only on an active profile");
+        R ports=allowUdp;ports.localPorts="80, 49000-49014";check(verdict({ports},Private,49001)==F::Allowed&&verdict({ports},Private,49015)==F::NoRule,"port lists and ranges");
+        R named=allowUdp;named.localPorts="RPC";check(verdict({named})==F::NoRule,"named ports match none");
+        R any=allowUdp;any.protocol=256;any.application="";check(verdict({any})==F::Allowed,"an any-program, any-protocol allow rule counts");
+        R oldBlock=blockUdp;oldBlock.localPorts="50000";check(verdict({oldBlock,allowUdp})==F::Allowed,"a block rule for another port does not count");
+        for(auto f:{F::Unknown,F::Off,F::Allowed,F::Blocked,F::NoRule})check(std::string(launcher::firewallText(f)).size()>20,"a sentence for every verdict");
+    }
     {   // Diagnostics report: what a bug report needs, without the session secret, invites, other people's addresses
         // or the Windows user name; the newest logs only, their ends only; bounded.
         const auto npos=std::string::npos;fs::path d=root/"diag";fs::create_directories(d/"redirect-data/mod");
