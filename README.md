@@ -40,6 +40,10 @@ the peer (or `bind`, if set), never all interfaces, and accepts datagrams only f
 Ports: UDP `49000 + slot`, so give the two players different slots (host 0, client 1) and allow that UDP port in the
 firewall. Windows asks once whether `ds.exe` may use the network.
 
+When a session goes wrong, the launcher's About tab has **Save diagnostics for a bug report** (also
+`deathstranding-coop.exe --diagnostics`): one text file with the versions, the config and the ends of the logs,
+without the session code, invites or your Windows user name ([launcher/README.md](launcher/README.md)).
+
 ## Rules this project keeps
 
 - Your own legitimately owned copy only; nothing that bypasses Steam ownership or any protection.

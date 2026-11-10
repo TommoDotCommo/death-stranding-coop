@@ -1,5 +1,6 @@
 #include "core.h"
 #include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <system_error>
 #ifdef _WIN32
@@ -93,6 +94,120 @@ void backup(const std::filesystem::path& data,const std::filesystem::path& desti
         auto to=dest/leaf;std::filesystem::create_directories(to);
         std::filesystem::copy(from,to,std::filesystem::copy_options::recursive);
     }
+}
+namespace {
+bool digit(char c){return c>='0'&&c<='9';}
+// "a.b.c.d" at i (each part 1..3 digits, not inside a longer number or version string): its length, else 0.
+[[maybe_unused]] size_t ipv4(const std::string& s,size_t i,unsigned parts[4]) {
+    if(i&&(digit(s[i-1])||s[i-1]=='.'))return 0;
+    size_t p=i;
+    for(int k=0;k<4;++k){
+        size_t start=p;unsigned v=0;while(p<s.size()&&digit(s[p])&&p-start<3)v=v*10+unsigned(s[p++]-'0');
+        if(p==start||v>255)return 0;
+        parts[k]=v;
+        if(k<3){if(p>=s.size()||s[p]!='.')return 0;++p;}
+    }
+    if(p<s.size()&&(digit(s[p])||s[p]=='.'))return 0;
+    return p-i;
+}
+bool startsNoCase(const std::string& s,size_t i,const char* word){
+    for(size_t k=0;word[k];++k){if(i+k>=s.size())return false;char c=s[i+k];if(c>='A'&&c<='Z')c=char(c+32);if(c!=word[k])return false;}
+    return true;
+}
+// The newest regular file in `folder` whose name starts with `prefix`; empty when there is none.
+std::filesystem::path newest(const std::filesystem::path& folder,const std::string& prefix) {
+    std::filesystem::path best;std::filesystem::file_time_type when{};std::error_code ec;
+    for(std::filesystem::directory_iterator it(folder,ec),end;!ec&&it!=end;it.increment(ec)){
+        auto name=it->path().filename().string();std::error_code e2;
+        if(name.rfind(prefix,0)!=0||name.size()<4||name.substr(name.size()-4)!=".log"||!it->is_regular_file(e2))continue;
+        auto t=it->last_write_time(e2);if(e2)continue;
+        if(best.empty()||t>when){best=it->path();when=t;}
+    }
+    return best;
+}
+// The last `lines` lines of a log as plain ASCII (the proxy writes UTF-16LE; other bytes become '?'), at most 64 KiB read.
+std::string tail(const std::filesystem::path& file,size_t lines) {
+    std::ifstream f(file,std::ios::binary);if(!f)return "(unreadable)\n";
+    f.seekg(0,std::ios::end);auto size=std::streamoff(f.tellg());const std::streamoff window=64*1024;
+    auto from=size>window?size-window:0;from-=from%2;f.seekg(from);
+    std::string raw(size_t(size-from),'\0');f.read(raw.data(),std::streamsize(raw.size()));raw.resize(size_t(f.gcount()));
+    size_t zeros=0;for(size_t i=1;i<raw.size();i+=2)zeros+=raw[i]==0;
+    bool wide=raw.size()>=2&&zeros*4>raw.size();
+    std::string text;
+    for(size_t i=0;i<raw.size();i+=wide?2:1){
+        unsigned char c=static_cast<unsigned char>(raw[i]);bool plain=!wide||(i+1<raw.size()&&raw[i+1]==0);
+        if(wide&&i==0&&c==0xff)continue;                       // byte-order mark
+        text+=(plain&&(c=='\n'||c=='\t'||(c>=32&&c<127)))?char(c):(c=='\r'?'\0':'?');
+    }
+    std::string clean;for(char c:text)if(c)clean+=c;
+    size_t at=clean.size(),seen=0;
+    while(at>0){--at;if(clean[at]=='\n'&&at+1<clean.size()&&++seen>lines){++at;break;}}
+    return clean.substr(at);
+}
+}
+std::string redact(const std::string& in) {
+    std::string out;out.reserve(in.size());
+    for(size_t i=0;i<in.size();) {
+        [[maybe_unused]] unsigned parts[4];
+#ifndef MUTANT_DIAG_SECRET
+        // "session":123 (config, status lines) and session=123 / session 123 (logs).
+        if(startsNoCase(in,i,"session")&&(i==0||!((in[i-1]>='a'&&in[i-1]<='z')||(in[i-1]>='A'&&in[i-1]<='Z')))) {
+            size_t p=i+7;while(p<in.size()&&(in[p]=='"'||in[p]==':'||in[p]=='='||in[p]==' '))++p;
+            size_t d=p;while(d<in.size()&&digit(in[d]))++d;
+            if(d>p&&p>i+7){out.append(in,i,p-i);out+="<hidden>";i=d;continue;}
+        }
+        // Invite codes: DS- followed by the code's letters and digits.
+        if(in.compare(i,3,"DS-")==0&&(i==0||!((in[i-1]>='A'&&in[i-1]<='Z')||digit(in[i-1])))) {
+            size_t p=i+3;while(p<in.size()&&((in[p]>='A'&&in[p]<='Z')||digit(in[p])||in[p]=='-'))++p;
+            if(p-i>=11){out+="DS-<hidden>";i=p;continue;}
+        }
+#endif
+#ifndef MUTANT_DIAG_ADDRESS
+        if(digit(in[i]))if(size_t n=ipv4(in,i,parts)) {
+            // This PC's loopback stays; any other address keeps its first two numbers (enough to tell LAN, VPN, internet).
+            if(parts[0]==127||(parts[0]==0&&parts[1]==0))out.append(in,i,n);
+            else out+=std::to_string(parts[0])+"."+std::to_string(parts[1])+".x.x";
+            i+=n;continue;
+        }
+#endif
+#ifndef MUTANT_DIAG_USER
+        // C:\Users\name\ and /Users/name/ (any drive, either slash): the name is replaced.
+        if((in[i]=='\\'||in[i]=='/')&&startsNoCase(in,i+1,"users")&&i+6<in.size()&&(in[i+6]=='\\'||in[i+6]=='/')) {
+            size_t p=i+7,e=p;while(e<in.size()&&in[e]!='\\'&&in[e]!='/'&&in[e]!='\n'&&in[e]!='"'&&in[e]!='\t')++e;
+            if(e>p){out.append(in,i,p-i);out+="<user>";i=e;continue;}
+        }
+#endif
+        out+=in[i++];
+    }
+    return out;
+}
+std::string diagnostics(const std::filesystem::path& data,const std::string& header) {
+    auto mod=data/"redirect-data"/"mod";auto proxy=data/"redirect-data";
+    std::string out="Death Stranding co-op diagnostics\n"+header;
+    if(out.back()!='\n')out+='\n';
+    out+="data folder: "+data.string()+"\n\n== mod.json ==\n";
+    {std::ifstream f(mod/"mod.json",std::ios::binary);std::string bytes((std::istreambuf_iterator<char>(f)),{});
+     out+=f||!bytes.empty()?bytes.substr(0,4096)+"\n":"(missing)\n";}
+    out+="\n== files ==\n";
+    for(auto& folder:{data,proxy,mod}) {
+        std::error_code ec;size_t listed=0;
+        for(std::filesystem::directory_iterator it(folder,ec),end;!ec&&it!=end&&listed<80;it.increment(ec),++listed) {
+            std::error_code e2;bool dir=it->is_directory(e2);auto size=dir?0:it->file_size(e2);
+            out+=(dir?"[folder] ":"")+std::filesystem::relative(it->path(),data,e2).generic_string()+(dir?"":"  "+std::to_string(size)+" bytes")+"\n";
+        }
+        if(ec)out+="(cannot list "+std::filesystem::relative(folder,data,ec).generic_string()+")\n";
+    }
+    struct Part{const char* title;std::filesystem::path folder;const char* prefix;size_t lines;};
+    for(auto& part:{Part{"mod log",mod,"mod-",300},Part{"proxy log",proxy,"redirect-",200},Part{"crash record",proxy,"crash-",200}}) {
+        auto file=newest(part.folder,part.prefix);
+        out+="\n== "+std::string(part.title)+(file.empty()?" ==\n(none)\n":": "+file.filename().string()+" ==\n"+tail(file,part.lines));
+        if(out.back()!='\n')out+='\n';
+    }
+    out=redact(out);
+#ifndef MUTANT_DIAG_BOUND
+    if(out.size()>DiagnosticsMax){const std::string cut="\n(report shortened)\n";out.resize(DiagnosticsMax-cut.size());out+=cut;}
+#endif
+    return out;
 }
 std::string packet(const Packet& p) {
     if(p.port<49000||p.port>49014||!p.nonce)throw std::runtime_error("Invalid lobby packet.");

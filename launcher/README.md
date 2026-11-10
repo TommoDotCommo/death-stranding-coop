@@ -55,6 +55,15 @@ ping key), his vehicle while he rides (`partner_vehicle`), the cargo he carries 
 Automatic Continue and the virtual pad stay off. Existing environment-driven test
 tools still work independently of this app.
 
+## Diagnostics for a bug report
+
+About → **Save diagnostics for a bug report** (or `deathstranding-coop.exe --diagnostics`, which shows no window)
+writes `diagnostics-<time>.txt` into the co-op data folder: the launcher version, the game folder and whether its
+executable is the supported build, which parts are installed, the mod config, the files in the data folder and the
+last lines of the newest mod, proxy and crash logs. The session code and invites are hidden, addresses other than
+this PC's loopback keep only their first two numbers, and the Windows user name in paths becomes `<user>`. The
+report is at most 256 KiB and reads nothing outside the co-op data folder (never a save).
+
 ## Steam and data
 
 Settings selects the game folder registered by Steam for app **1850570**. The
@@ -180,7 +189,7 @@ established by the portable tests or cross-build.
 
 This is a launcher foundation, not full A–K compliance. Steam friend/lobby SDK
 integration, UPnP/NAT-PMP, a checked firewall status/fix, chat/voice, controller and
-Deck navigation, update/diagnostic UI, save metadata/slot management, recent-host
+Deck navigation, update UI, save metadata/slot management, recent-host
 rename/pin/forget, automatic lobby return after game exit, and in-game discovery
 replies remain unimplemented. The launcher releases its lobby port before the mod
 binds it, so hosts are discoverable in the pre-game lobby only. Internet play uses

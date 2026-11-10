@@ -22,7 +22,7 @@ std::wstring player=L"Porter",gameFolder;
 std::string pasted,lastState,lastRows;
 uint32_t requestedSecret=0,lastScan=0;
 std::vector<HWND> controls[4];
-enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home};
+enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose};
 HWND child(int id){return GetDlgItem(window,id);}
 std::wstring text(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(n+1,0);GetWindowTextW(h,s.data(),n+1);s.resize(n);return s;}
 std::string utf8(const std::wstring& s){if(s.empty())return {};int n=WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),nullptr,0,nullptr,nullptr);std::string v(n,0);WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),v.data(),n,nullptr,nullptr);return v;}
@@ -40,6 +40,19 @@ void saveSettings(){
 }
 Session chosenSession(){Session s;s.name=utf8(player);s.port=port;return s;}
 void render();
+// The report for a bug report (core.h `diagnostics`), saved in the co-op data folder. The header is what only the
+// launcher can tell: its version, the game folder, whether its executable is the supported build, the installed parts.
+fs::path saveDiagnostics(){
+    std::error_code ec;fs::path game=gameFolder,exe=game/"ds.exe";std::string build="missing",running="unknown";
+    if(fs::is_regular_file(exe,ec)){try{build=fileHash(exe)==mod::discovery::PinnedHash?"supported build 13300582":"another build (unsupported)";}catch(const std::exception&){build="unreadable";}}
+    if(!gameFolder.empty()){try{running=gameRunning(game)?"yes":"no";}catch(const std::exception&){}}
+    std::string head="launcher: Death Stranding co-op 0.1.0-dev\ngame folder: "+(gameFolder.empty()?std::string("(not set)"):utf8(gameFolder))+"\nds.exe: "+build
+        +"\navrt.dll in the game folder: "+(fs::is_regular_file(game/"avrt.dll",ec)?"present":"missing")
+        +"\nmod.dll: "+(fs::is_regular_file(options.data/"redirect-data/mod/mod.dll",ec)?"present":"missing")
+        +"\ngame running: "+running+"\nsaved (UTC seconds): "+std::to_string(std::time(nullptr))+"\n";
+    auto file=options.data/("diagnostics-"+std::to_string(std::time(nullptr))+".txt");
+    atomicWrite(file,diagnostics(options.data,head));return file;
+}
 void switchTab(int next){selectedTab=next;TabCtrl_SetCurSel(tab,next);render();}
 void scan(bool force=false){
     if(choice!=1||net->lobby||selectedTab!=0||joinAfterScan)return;
@@ -81,7 +94,7 @@ void render(){
     if(selectedTab==1){place(210,30,120,w-60,65);place(211,30,200,w-60,180);place(OpenSaves,30,400,(w-75)/2,40);place(BackUp,45+(w-75)/2,400,(w-75)/2,40);}
     if(selectedTab==2){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(Lan,30,270,w-60,30);place(Tailscale,30,310,w-60,30);place(Privacy,30,350,w-60,30);place(Protocol,30,410,w-60,40);place(222,30,475,w-60,80);
         bool edit=!net->lobby;for(int id:{GamePath,Port,Lan,Tailscale,Privacy})EnableWindow(child(id),edit);}
-    if(selectedTab==3){place(230,30,120,w-60,240);place(Guide,30,390,w-60,40);place(Home,30,445,w-60,40);}
+    if(selectedTab==3){place(230,30,120,w-60,240);place(Guide,30,390,w-60,40);place(Home,30,445,w-60,40);place(Diagnose,30,500,w-60,40);}
 }
 void copyInvite(){
     auto code=net->invite();char msg[1024];ci_message(net->session.name.c_str(),"Death Stranding co-op","https://tommodotcommo.github.io/death-stranding-coop/join/",code.c_str(),msg,sizeof(msg));
@@ -163,6 +176,8 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
                 if(id==BackUp){if(!backupAllowed(net->lobby,gameRunning(gameFolder)))throw std::runtime_error("Leave the lobby and close the game before backing up.");auto dest=options.data/"backups"/std::to_string(std::time(nullptr));backup(options.data,dest);MessageBoxW(h,(L"Co-op saves backed up to:\n"+dest.wstring()).c_str(),L"Backup complete",MB_OK);}
                 if(id==Guide)MessageBoxW(h,L"Host: Open lobby, copy invite, wait for Ready, Start game.\nJoin: paste an invite or choose a LAN/Tailscale host, Join, Ready.\nTab moves focus; Enter confirms; Esc returns to Play.\nCo-op saves are separate. Back up with the game closed.\nThis development build exchanges read-only presence.\nNo internet matchmaking, Steam friends, voice or shared story yet.",L"Quick guide",MB_OK);
                 if(id==Home)ShellExecuteW(h,L"open",L"https://github.com/TommoDotCommo/death-stranding-coop",nullptr,nullptr,SW_SHOWNORMAL);
+                if(id==Diagnose){auto file=saveDiagnostics();ShellExecuteW(h,L"open",L"explorer.exe",(L"/select,\""+file.wstring()+L"\"").c_str(),nullptr,SW_SHOWNORMAL);
+                    MessageBoxW(h,(L"Saved:\n"+file.wstring()+L"\n\nAttach this file to a bug report. Your session code, invites and Windows user name are not in it; other addresses are shortened.").c_str(),L"Diagnostics saved",MB_OK);}
             }return 0;
         }
         if(msg==WM_CLOSE){if(net->lobby&&MessageBoxW(h,net->hosting?L"Close the lobby? Your friend will need to join again.":L"Leave the lobby? The host can keep playing.",L"Leave co-op",MB_YESNO)!=IDYES)return 0;net->leave();DestroyWindow(h);return 0;}
@@ -188,7 +203,7 @@ void buildControls(){
     SendMessageW(child(Lan),BM_SETCHECK,lan?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Tailscale),BM_SETCHECK,tailscale?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Privacy),BM_SETCHECK,privacy?BST_CHECKED:BST_UNCHECKED,0);
     control(2,Protocol,L"BUTTON",L"Open deathstranding-coop invite links in this launcher");label(2,222,L"Settings are saved on change. Each game uses two adjacent UDP ports.\nCo-op networking is always enforced offline. Other co-op rules, voice, controller navigation and router mapping are not available yet.");
     label(3,230,(L"Death Stranding co-op 0.1.0-dev\nSteam Director's Cut build 13300582\n\nExperimental; not a playable release. Native Windows launcher.\nCo-op mod standard: Play, Saves, Settings, About; DS invites and LAN/Tailscale discovery.\n\nInvite/discovery reference code: coop-mod-kit (MIT).\nNot affiliated with Kojima Productions or the game's publishers.\n\nWire version: "+wtext(wireVersion())).c_str());
-    control(3,Guide,L"BUTTON",L"Quick guide (F1)");control(3,Home,L"BUTTON",L"Project and issue tracker");
+    control(3,Guide,L"BUTTON",L"Quick guide (F1)");control(3,Home,L"BUTTON",L"Project and issue tracker");control(3,Diagnose,L"BUTTON",L"Save diagnostics for a bug report");
 }
 }
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
@@ -200,7 +215,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         choice=int(GetPrivateProfileIntW(L"launcher",L"choice",0,settingsFile.c_str()));if(choice<0||choice>2)choice=0;
         port=GetPrivateProfileIntW(L"launcher",L"port",49000,settingsFile.c_str());if(port<49000||port>49014)port=49000;
         lan=GetPrivateProfileIntW(L"launcher",L"lan",1,settingsFile.c_str());tailscale=GetPrivateProfileIntW(L"launcher",L"tailscale",1,settingsFile.c_str());privacy=GetPrivateProfileIntW(L"launcher",L"privacy",0,settingsFile.c_str());
-        bool registerOnly=false,devStart=false;std::string devPeer="127.0.0.1";uint32_t devSession=1;
+        bool registerOnly=false,devStart=false,diagnosticsOnly=false;std::string devPeer="127.0.0.1";uint32_t devSession=1;
         int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);if(!argv)throw std::runtime_error("Cannot read launcher arguments.");
         for(int i=1;i<argc;++i){std::wstring a=argv[i];auto value=[&](){if(++i>=argc)throw std::runtime_error("Missing launcher option value.");return std::wstring(argv[i]);};
             if(a==L"--dev-direct")options.direct=true;
@@ -208,6 +223,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
             else if(a==L"--data-dir")options.data=value();
             else if(a==L"--prepare-only")options.prepareOnly=true;
             else if(a==L"--register-protocol")registerOnly=true;
+            else if(a==L"--diagnostics")diagnosticsOnly=true;
             else if(a==L"--dev-start")devStart=true;
             else if(a==L"--dev-peer")devPeer=utf8(value());
             else if(a==L"--dev-session"){auto v=utf8(value());if(v.empty()||v.size()>10||v.find_first_not_of("0123456789")!=std::string::npos||std::stoull(v)>UINT32_MAX)throw std::runtime_error("Invalid development session.");devSession=uint32_t(std::stoull(v));}
@@ -222,6 +238,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         if(options.direct&&equalPath(options.data,defaultData)&&!environment(L"COOP_MODULE_INSTANCE").empty())options.data=environment(L"COOP_MODULE_INSTANCE");
         wchar_t self[32768];GetModuleFileNameW(nullptr,self,32768);executable=self;
         if(registerOnly){registerHandler(executable);return 0;}
+        // Headless: write the report and exit (no window), for a player who cannot get as far as the About tab.
+        if(diagnosticsOnly){options.game=gameFolder;saveDiagnostics();return 0;}
         std::ifstream recents(options.data/"recents.tsv",std::ios::binary);char store[CD_RECENT_BYTES+1];recents.read(store,sizeof(store));auto count=recents.gcount();if(count<=CD_RECENT_BYTES)cd_recents_decode(&net->recents,store,size_t(count));
         settingsFile=options.data/"launcher.ini";
         options.game=gameFolder;

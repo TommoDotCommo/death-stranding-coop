@@ -1,4 +1,5 @@
 #include "core.h"
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <cstdlib>
@@ -66,5 +67,28 @@ int main(int argc,char** argv) {
     check(fs::file_size(root/"real/save")==18,"real save sentinel unchanged");
     check(launcher::backupAllowed(false,false)&&!launcher::backupAllowed(false,true)&&!launcher::backupAllowed(true,false),"backup requires a closed game and lobby");
     fs::create_directory_symlink(root/"real",root/"linked");rejects([&]{launcher::atomicWrite(root/"linked/child/out","x");});check(!fs::exists(root/"real/child"),"no write through linked ancestor");
-    std::cout<<"PASS: launcher config, DS invites, discovery, rendezvous, safe release startup and isolated backups\n";
+    {   // Diagnostics report: what a bug report needs, without the session secret, invites, other people's addresses
+        // or the Windows user name; the newest logs only, their ends only; bounded.
+        const auto npos=std::string::npos;fs::path d=root/"diag";fs::create_directories(d/"redirect-data/mod");
+        {std::ofstream f(d/"redirect-data/mod/mod.json");f<<"{\"role\":\"host\",\"peer\":\"203.0.113.7\",\"session\":305419896,\"nickname\":\"Porter\"}";}
+        {std::ofstream f(d/"redirect-data/mod/mod-1-a.log");f<<"old log\n";}
+        {std::ofstream f(d/"redirect-data/mod/mod-2-b.log");
+         for(int i=0;i<400;++i)f<<"line "<<i<<" peer 203.0.113.7:49001 session=305419896 at C:\\Users\\Tom Smith\\AppData\\Local\\X\n";
+         f<<"HANDSHAKE ok 127.0.0.1 version 1.2.3.4.5\n";}
+        fs::last_write_time(d/"redirect-data/mod/mod-1-a.log",fs::last_write_time(d/"redirect-data/mod/mod-2-b.log")-std::chrono::hours(1));
+        {std::ofstream f(d/"redirect-data/redirect-9-c.log",std::ios::binary);std::string s="READY\tinvite DS-ABCD1234EFGH5678 from /Users/tom/x\r\n";
+         f.put(char(0xff));f.put(char(0xfe));for(char c:s){f.put(c);f.put(0);}}
+        auto r=launcher::diagnostics(d,"launcher 0.1.0 test\ngame folder ok");
+        check(r.find("launcher 0.1.0 test")!=npos&&r.find("\"role\":\"host\"")!=npos&&r.find("mod-2-b.log")!=npos&&r.find("line 399 ")!=npos
+              &&r.find("READY")!=npos&&r.find("crash record ==\n(none)")!=npos&&r.find("redirect-data/mod/mod.json")!=npos,"diagnostics content");
+        check(r.find("old log")==npos&&r.find("line 50 ")==npos&&r.find("line 101 ")!=npos,"newest log, last lines only");
+        check(r.find("305419896")==npos&&r.find("ABCD1234")==npos&&r.find("\"session\":<hidden>")!=npos&&r.find("DS-<hidden>")!=npos,"session secret and invite hidden");
+        check(r.find("203.0.113.7")==npos&&r.find("203.0.x.x:49001")!=npos&&r.find("127.0.0.1")!=npos&&r.find("1.2.3.4.5")!=npos,"other addresses shortened; loopback and version numbers kept");
+        check(r.find("Tom Smith")==npos&&r.find("Users\\<user>\\AppData")!=npos&&r.find("/Users/<user>/x")!=npos,"Windows user name hidden");
+        check(launcher::redact("sessions 12 DS-AB 10.1.2.3 300.1.2.3 x\\users\\")=="sessions 12 DS-AB 10.1.x.x 300.1.2.3 x\\users\\","only real secrets, addresses and names change");
+        auto big=launcher::diagnostics(d,std::string(400000,'h'));
+        check(big.size()<=launcher::DiagnosticsMax&&big.find("(report shortened)")!=npos&&r.size()<launcher::DiagnosticsMax,"report bounded");
+        check(launcher::diagnostics(root/"no-such-folder","h").find("(missing)")!=npos,"a missing data folder still gives a report");
+    }
+    std::cout<<"PASS: launcher config, DS invites, discovery, rendezvous, safe release startup, isolated backups and diagnostics\n";
 }
