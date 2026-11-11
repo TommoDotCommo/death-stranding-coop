@@ -14,7 +14,7 @@ struct Api {
     // true: queued in the game's info log; false: no HUD now. icon: PlainIcon or LikeIcon (the game's own icon numbers).
     std::function<bool(const std::u16string& text,uint8_t icon)> show;
 };
-enum class Kind : uint8_t {Joined,Left,Alone,Away,Back,Liked,Down,Up,Caught,Free,Call};
+enum class Kind : uint8_t {Joined,Left,Alone,Away,Back,Liked,Down,Up,Caught,Free,Call,Slow,Steady};
 constexpr uint8_t PlainIcon=0,LikeIcon=3;   // "20 minutes have passed." / "{1} Like(s) received from {0}."
 uint8_t icon(Kind);
 // The partner's name is cleaned like the name tag's (printable, no markup characters); "Your partner" without one.
@@ -39,6 +39,11 @@ public:
     // The partner calls out (presence flag Call): told when it starts, at most once every CallGapMs.
     static constexpr uint64_t CallGapMs=8000;
     void call(uint64_t nowMs,bool connected,bool calling);
+    // A slow link (core: the delay at which the partner is shown follows the link): told once the partner has been shown
+    // SlowMs or more behind for LinkHoldMs; "steady again" once it has been under SteadyMs that long. Never repeated
+    // while it stays slow; nothing when the session ends.
+    static constexpr uint64_t SlowMs=300,SteadyMs=200,LinkHoldMs=5000;
+    void link(uint64_t nowMs,bool connected,uint32_t delayMs);
     // Something the partner did that is worth a line of its own (Liked: his like has just been given to this porter).
     void event(Kind kind,const std::string& partnerName,uint64_t nowMs){add(kind,partnerName.empty()?lastName_:partnerName,nowMs);}
     size_t pending() const {return pending_.size();}
@@ -49,6 +54,7 @@ private:
     Api api_;std::function<void(const std::string&)> log_;std::deque<Entry> pending_;
     bool started_=false,connected_=false,everConnected_=false,aloneTold_=false,away_=false,awayTold_=false,joining_=false;uint64_t worldSince_=0,lastShown_=0,awaySince_=0;bool inWorld_=false;unsigned shown_=0;
     std::string lastName_;bool down_=false,caught_=false,calling_=false,callTold_=false;uint64_t lastCall_=0;
+    bool slow_=false;uint64_t linkSince_=0;
 };
 // Pinned build: the UI owner global and the UI clock global (its double at +0xd0), DSUIInfoLogHUDLogic's vtable, its
 // queue (100 entries of 0x28 bytes, count at +0xfa0) and the slim lock (SRWLOCK) the game takes around an add. A notice

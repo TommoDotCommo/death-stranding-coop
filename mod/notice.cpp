@@ -26,6 +26,8 @@ std::u16string text(Kind kind,const std::string& partnerName){
     case Kind::Caught:return name+u" has been caught by BTs.";
     case Kind::Free:return name+u" got free.";
     case Kind::Call:return name+u" is calling out.";
+    case Kind::Slow:return u"The connection to "+name+u" is slow. You see each other a moment late.";
+    case Kind::Steady:return u"The connection to "+name+u" is steady again.";
     }
     return {};
 }
@@ -67,6 +69,21 @@ void Notifier::call(uint64_t now,bool connected,bool calling){
     if(callTold_&&now-lastCall_<CallGapMs)return;
 #endif
     callTold_=true;lastCall_=now;add(Kind::Call,lastName_,now);
+}
+void Notifier::link(uint64_t now,bool connected,uint32_t delayMs){
+    if(!connected){slow_=false;linkSince_=0;return;}
+    // Waiting for the other state: slow when not yet told slow, steady when told slow. The middle band keeps what was told.
+    bool other=slow_?delayMs<SteadyMs:delayMs>=SlowMs;
+    if(!other){linkSince_=0;return;}
+    if(!linkSince_)linkSince_=now;
+#ifndef MUTANT_NOTICE_LINK_HOLD
+    if(now-linkSince_<LinkHoldMs)return;
+#endif
+#ifndef MUTANT_NOTICE_LINK_ONCE
+    slow_=!slow_;linkSince_=0;add(slow_?Kind::Slow:Kind::Steady,lastName_,now);
+#else
+    add(Kind::Slow,lastName_,now);
+#endif
 }
 void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& partnerName,bool partnerAway){
     if(!partnerName.empty())lastName_=partnerName;
@@ -130,7 +147,7 @@ void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& 
 #endif
     if(api_.show&&api_.show(text(e.kind,e.name),icon(e.kind))){
         ++shown_;lastShown_=now;if(e.kind==Kind::Joined)joining_=false;
-        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call"};
+        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call","slow","steady"};
         log_(std::string("NOTICE shown: ")+names[unsigned(e.kind)]+"\n");
         pending_.pop_front();return;
     }

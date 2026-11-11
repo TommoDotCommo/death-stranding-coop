@@ -491,6 +491,7 @@ struct Runtime final:ds::Transport {
         // Away: he reports an event or private room, or no pose of his has arrived (his game is at the title screen or
         // loading: without this a join was told at once, then "away" and "back" while he loaded).
         notices->call(now,connected,connected&&(cache.remote.state.flags&ds::Call));
+        notices->link(now,connected,connected?core->presentationDelayMs():0);
         notices->status(now,connected,connected&&(cache.remote.state.flags&ds::Down),connected&&(cache.remote.state.flags&ds::Caught));
         notices->tick(now,poseAvailable&&!inEvent,connected,partnerName,connected&&((cache.remote.state.flags&ds::PrivateRoom)||!cache.remote.visible));
     }

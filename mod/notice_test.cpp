@@ -44,6 +44,18 @@ int main(){
         run(false,10);run(true,10);CHECK(h.shown.size()==2);                       // again within the gap: not told
         run(false,int(Notifier::CallGapMs/50)+10);run(true,80);CHECK(h.shown.size()==3);
     }
+    {   // A slow link: told after it has lasted, once; a dip into the middle band changes nothing; steady again after it lasted.
+        Hud h;auto n=h.make();uint64_t t=1000;auto run=[&](uint32_t delay,uint64_t ms,bool connected=true){for(uint64_t end=t+ms;t<end;){n.link(t,connected,delay);n.tick(t+=50,true,connected,"Higgs");}};
+        run(120,6000);CHECK(h.shown.size()==1);
+        run(350,Notifier::LinkHoldMs-500);CHECK(h.shown.size()==1);                 // not long enough
+        run(120,500);run(350,Notifier::LinkHoldMs-500);CHECK(h.shown.size()==1);    // the wait starts again
+        run(350,4000);CHECK(h.shown.size()==2&&h.shown[1]==u"The connection to Higgs is slow. You see each other a moment late.");
+        run(450,20000);CHECK(h.shown.size()==2);                                    // told once
+        run(250,20000);CHECK(h.shown.size()==2);                                    // between the limits: still slow
+        run(150,Notifier::LinkHoldMs+4000);CHECK(h.shown.size()==3&&h.shown[2]==u"The connection to Higgs is steady again.");
+        run(400,Notifier::LinkHoldMs+4000);CHECK(h.shown.size()==4);
+        run(400,1000,false);run(120,20000,false);CHECK(h.shown.size()==5&&h.shown[4]==u"Higgs left the session.");   // no "steady" after he left
+    }
     {   // No name ever: told after the wait, as "Your partner".
         Hud h;auto n=h.make();uint64_t t=1000;n.tick(t,true,true,"");
         for(;t<1000+Notifier::NameMs-50;t+=50)n.tick(t,true,true,"");
