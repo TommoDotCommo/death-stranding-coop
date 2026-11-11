@@ -1,4 +1,5 @@
 #include "config.h"
+#include "link.h"
 #include <map>
 #include <stdexcept>
 #include <cctype>
@@ -19,7 +20,7 @@ Config parseConfig(const std::string& s) {
         ws();if(at==s.size() || s[at]!=',') break;++at;
     }
     take('}');ws();if(at!=s.size()) throw std::runtime_error("trailing JSON");
-    for(auto& kv:values) if(!std::set<std::string>{"slot","share_environment","join_move","carry_visual","partner","partner_gear","partner_marker","partner_vehicle","partner_likes","partner_tag","notices","online_server","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
+    for(auto& kv:values) if(!std::set<std::string>{"slot","share_environment","join_move","carry_visual","partner","partner_gear","partner_marker","partner_vehicle","partner_likes","partner_tag","notices","online_server","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","link","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
     auto text=[&](const char* k){if(!strings.count(k)) throw std::runtime_error(std::string("missing/string expected: ")+k);return values.at(k);};
     auto number=[&](const char* k){auto v=values[k];if(strings.count(k)||v.empty()||v.size()>15||v.find_first_not_of("0123456789")!=std::string::npos||(v.size()>1&&v[0]=='0')) throw std::runtime_error(std::string("invalid integer: ")+k);return std::stoull(v);};
     auto boolean=[&](const char* k,bool d){if(!values.count(k)) return d;auto v=values[k];if(strings.count(k)||(v!="true"&&v!="false")) throw std::runtime_error("boolean expected");return v=="true";};
@@ -36,6 +37,7 @@ Config parseConfig(const std::string& s) {
     }
     if((c.role!="none"&&c.role!="host"&&c.role!="guest"&&c.role!="client")||(c.provider!="synthetic"&&c.provider!="game")||c.nickname.empty()||c.nickname.size()>32) throw std::runtime_error("invalid role/provider/nickname");
     c.logging=boolean("logging",true);c.required=boolean("required",false);c.impairment=boolean("impairment",false);
+    if(values.count("link")) {c.link=text("link");link::Profile p;if(!link::profile(c.link,p)) throw std::runtime_error("link must be none, internet or poor");}
     if(values.count("fault")) c.fault=text("fault");
     if(c.fault!="none"&&c.fault!="build"&&c.fault!="version"&&c.fault!="session") throw std::runtime_error("invalid probe fault");
     // impairment (a 15..65 ms presence delivery delay) is also allowed in a real game, for lab runs that stand in for

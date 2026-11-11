@@ -117,7 +117,7 @@ Pieces (all game-free tested with fake memory in `pose_test.cpp`, mutants in `te
   4 lines a second, bounded by `presence_log_max_mib` (default 8, hard max 32; the discovery `Budget`). Hitting the cap or a write
   failure stops the log with a message and not the mod. Each line: `t_us` (the monotonic clock all processes on a host share),
   `local` (`available`; if available adapter-axis `x`, `y` up, `z`, `yaw_deg`, `speed`; otherwise `reason`) and `remote`
-  (`visible`, `stale`, `snapped`; if visible `x`, `y`, `z`, `yaw_deg` of the interpolated render, 120 ms behind real time).
+  (`visible`, `stale`, `snapped`, `delay_ms`, `late`; if visible `x`, `y`, `z`, `yaw_deg` of the interpolated render, `delay_ms` behind real time: 120 ms on a quick link, more on a slow one; `late` = shown past the newest sample).
 
 Config for slot 0 (host) and slot 1 (client); ports are `49000 + slot`; use one freshly generated nonzero `session` for both;
 copy `discovery_sha256` from the pinned executable entry in `profile.json`:
@@ -135,7 +135,10 @@ copy `discovery_sha256` from the pinned executable entry in `profile.json`:
 ```
 
 Both go to `instance/redirect-data/mod/mod.json` of their slot. `fault` is synthetic-only; `impairment` (a 15..65 ms presence delivery delay) also works in a real game, for lab runs
-of two copies on one PC that stand in for an internet link.
+of two copies on one PC that stand in for an internet link. `link` (`"none"`, `"internet"`, `"poor"`; `link.h`) is the fuller stand-in: every
+received packet of every kind is lost or delayed by the profile (`internet`: 2 %, 40..80 ms; `poor`: 12 %, 100..300 ms), the same way in every
+run. The log says `LINK stand-in ...` at the start, `LINK ... lost N of M` every hundred losses, and `LINK partner shown N ms behind`
+whenever the presentation delay has moved by more than 30 ms (that line also appears on a real slow link).
 
 **Live exit test (the verifier).** Start both instances with these configs and load a game in each. The owner walks Sam in slot 0
 (a straight line of at least 20 m, then a turn on the spot) while slot 1 stands still, then the reverse. Slot 1's
@@ -338,8 +341,9 @@ sqrt(10^2+20^2)*w^2 = 24.52 m/s². The 120 ms playout delay covers a normal
 50 ms send interval plus up to 65 ms injected delivery jitter with 5 ms margin.
 Pose-cache age (normally <=10 ms) can occasionally exhaust that margin; using
 its true timestamp lets the existing bounded dead reckoning cover a small gap
-rather than shifting the whole trajectory. The delay remains 120 ms: increasing
-it would change the measurement target and hide scheduling defects. The core's
+rather than shifting the whole trajectory. 120 ms is the least delay. Since 2026-11-12 the core raises it when
+samples arrive later than that covers (95th percentile of their lateness plus two send intervals, at most 500 ms,
+moved at a tenth of real time; `core.h`), and every comparison here uses the delay of the moment. The core's
 150 ms extrapolation cap, horizontal-only motion, freeze/staleness, teleport,
 floor, speed, reorder, build and session protections remain active.
 

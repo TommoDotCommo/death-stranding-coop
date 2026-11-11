@@ -83,6 +83,7 @@ struct Protection {
     bool vehicle=true, vehicleLerp=true;
     bool environmentRange=true, environmentRole=true, environmentOrder=true, environmentFresh=true, environmentRate=true;
     bool floor=true, extrapolate=true, stale=true, gate=true, timeout=true, buffer=true, rate=true;
+    bool adapt=true, refine=true;
 };
 Bytes encode(Packet); // throws invalid_argument for nonfinite state
 Error decode(const uint8_t*, size_t, Packet&);
@@ -91,7 +92,7 @@ Error decodeForTest(const uint8_t*, size_t, Packet&, Protection);
 bool sanitiseForTest(State&, Protection);
 #endif
 struct Snapshot { State state; uint64_t time=0; uint32_t sequence=0; };
-struct Render { State state; bool visible=false, stale=true, snapped=false; };
+struct Render { State state; bool visible=false, stale=true, snapped=false, late=false; uint32_t delayMs=0; };   // late: shown past the newest sample (nothing to interpolate to)
 // Pure frame sampler. No interpolation across teleport, private room, any quantised Y change or >8 m gap.
 Render sample(const std::deque<Snapshot>&, uint64_t now, uint32_t delay=120, uint32_t extrapolate=150);
 struct StateProvider {
@@ -106,6 +107,14 @@ struct StateProvider {
 };
 // One configured peer only. Adapter must filter source endpoint before invoking receive.
 struct Transport { virtual ~Transport()=default; virtual void send(const Bytes&)=0; };
+// Presentation delay that follows the link: the 95th percentile of how late the last DelayWindow presence samples
+// arrived (against their own mapped time) plus DelayMarginMs (two send intervals: one lost packet is bridged by
+// interpolation), never under Config::delayMs, never over DelayMaxMs, moved by at most DelaySlew of elapsed time.
+constexpr uint32_t DelayMaxMs=500, DelayMarginMs=100; constexpr size_t DelayWindow=64, DelayWarmup=8; constexpr double DelaySlew=0.1;
+// Clock mapping: the first answered ping sets it; afterwards it moves toward the offset implied by the quickest of the
+// last ClockWindow round trips (the least lopsided one), by at most ClockSlew of elapsed time, so buffered samples keep
+// their order and playback speed changes by one percent at most.
+constexpr size_t ClockWindow=16; constexpr double ClockSlew=0.01;
 struct Config { Role role=Role::Host; uint64_t session=1, nonce=1; uint32_t delayMs=120; ProgressPolicy progressPolicy=ProgressPolicy::Warn; };
 uint16_t portForSlot(unsigned slot); // throws if slot outside 0..15
 class Core {
@@ -131,6 +140,10 @@ public:
     double rttMs() const { return rtt_; }
     double clockOffsetMs() const { return offset_; } // remote minus local
     Render render(uint64_t now) const;
+    // How far behind the partner's own time the partner is shown right now. It starts at Config::delayMs (the least)
+    // and follows the link: late packets (latency, jitter, a clock mapping that is off) raise it up to DelayMaxMs,
+    // slowly enough that the change does not show.
+    uint32_t presentationDelayMs() const { return uint32_t(delay_+.5); }
     void queueCargo(CargoEvent);              // sequence is assigned here
     std::vector<CargoEvent> takeCargo();      // received events, each exactly once, in order
     size_t cargoPending() const { return cargoOut_.size(); }
@@ -147,6 +160,9 @@ private:
     uint64_t lastLocalSample_=0;
     uint32_t outgoing_=0, incoming_=0;
     double rtt_=-1, offset_=0;
+    std::deque<int32_t> lateness_; double delay_=0; uint64_t delayAt_=0;
+    std::deque<std::pair<double,double>> pongs_; uint64_t offsetAt_=0;   // (round trip, offset it implies), newest last
+    void adaptDelay(uint64_t now);
     State sentState_{};
     std::deque<CargoEvent> cargoOut_; std::vector<CargoEvent> cargoIn_;
     uint32_t cargoNext_=0, cargoSeen_=0; uint64_t nextCargo_=0, cargoIds_=0;

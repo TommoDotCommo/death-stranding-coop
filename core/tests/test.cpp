@@ -226,6 +226,28 @@ void sessionTests() {
     { Fixture f; for(unsigned t=0;t<500;++t) { f.provider.local.position[0]=t*.001; f.core.tick(t); } unsigned count=0; for(auto& b:f.transport.packets) count+=b[6]==uint8_t(Kind::Presence); check(count<=10&&count>=2,"rate"); }
     { Fixture f; f.core.tick(3001); check(!f.core.connected(),"timeout"); Packet p; p.kind=Kind::Ack; p.role=Role::Client; p.session=42; p.nonce=201; p.echo=101; check(f.receive(p,3100)==Error::None&&f.core.connected(),"reconnect"); check(f.receive(f.presence(1,3200),3200)==Error::Nonce,"old_connection_replay"); }
     { Fixture f; auto p=f.presence(1,100); p.kind=Kind::Bye; f.receive(p,100); check(!f.core.connected()&&f.core.buffered()==0,"bye"); }
+    // The clock mapping is refined (refine): a lopsided first round trip sets it 40 ms off; quicker round trips pull it to
+    // the truth (remote = local + 50) at one percent of elapsed time, and a later slow, lopsided one does not pull it away.
+    { Fixture f; auto pong=[&](uint64_t sent,uint64_t out,uint64_t back){ f.core.tick(sent); Packet p; p.kind=Kind::Pong; p.role=Role::Client; p.session=42; p.nonce=200; p.echo=100; p.t0=sent; p.t1=p.t2=sent+out+50; return f.receive(p,sent+out+back); };
+      check(pong(100,90,10)==Error::None&&f.core.clockOffsetMs()==90,"refine_first");
+      check(pong(1100,5,5)==Error::None&&std::abs(f.core.clockOffsetMs()-80.9)<.001,"refine");
+      for(uint64_t t=2100;t<=6100;t+=1000) pong(t,5,5);
+      check(std::abs(f.core.clockOffsetMs()-50)<.001,"refine");
+      check(pong(7100,150,10)==Error::None&&std::abs(f.core.clockOffsetMs()-50)<.001,"refine_keeps_the_quickest"); }
+    // The presentation delay follows the link (adapt): late samples raise it at once while a connection starts, a
+    // better link lowers it only once the window agrees and never faster than DelaySlew, a worse one raises it the same way.
+    { Fixture f; f.core.tick(100); Packet p; p.kind=Kind::Pong; p.role=Role::Client; p.session=42; p.nonce=200; p.echo=100; p.t0=100; p.t1=100; p.t2=100;
+      check(f.receive(p,100)==Error::None&&f.core.presentationDelayMs()==120,"adapt");
+      uint32_t seq=0; uint64_t t=1000; bool smooth=true; uint32_t before=0;
+      auto run=[&](int count,uint64_t late){ for(int i=0;i<count;++i) { t+=50; before=f.core.presentationDelayMs(); ++seq; check(f.receive(f.presence(seq,t,seq*.1),t+late)==Error::None,"adapt_receive");
+          uint32_t after=f.core.presentationDelayMs(); if(seq>DelayWarmup+1&&(after>before?after-before:before-after)>uint32_t(DelaySlew*50)+1) smooth=false; } };
+      run(40,200); check(f.core.presentationDelayMs()==200+DelayMarginMs,"adapt");
+      check(!f.core.render(t+200).late,"adapt");
+      run(20,10); check(f.core.presentationDelayMs()==200+DelayMarginMs,"adapt_keeps_through_a_good_spell");
+      run(120,10); check(f.core.presentationDelayMs()==120,"adapt_back_to_least");
+      run(1,400); check(f.core.presentationDelayMs()<=126,"adapt_one_late_packet");
+      run(200,400); check(f.core.presentationDelayMs()==DelayMaxMs,"adapt_most");
+      check(smooth,"adapt_slew"); }
     { Fixture f; f.core.tick(100); Packet p; p.kind=Kind::Pong; p.role=Role::Client; p.session=42; p.nonce=200; p.echo=100; p.t0=100; p.t1=160; p.t2=170;
       check(f.receive(p,130)==Error::None&&f.core.rttMs()==20&&f.core.clockOffsetMs()==50,"ping_clock"); check(f.receive(p,140)==Error::Time,"ping"); }
     { Fixture f; Packet p=f.presence(1,100); p.kind=Kind::Hello; p.nonce=300; check(f.receive(p,100)==Error::Nonce,"hello_cannot_replace_peer"); }
@@ -245,7 +267,7 @@ State trajectory(uint64_t time,int side,uint64_t seed) {
     s.yaw=std::sin(u); s.phase=std::fmod(u,1.); return s;
 }
 void fuzz() {
-    std::vector<double> errors; double finalMax=0; uint64_t accepted=0, drops=0, duplicates=0;
+    std::vector<double> errors,delays; double finalMax=0; uint64_t late=0; uint64_t accepted=0, drops=0, duplicates=0;
     for(uint64_t seed=1;seed<=500;++seed) {
         coopfuzz::LossyLink link(2,seed); link.setLink({20,150,.10,.05,0});
         Fake a,b; a.progress={uint32_t(seed%15),uint32_t(seed)};
@@ -266,7 +288,8 @@ void fuzz() {
             for(auto& e:bc.takeCargo()) delivered.push_back(e.item);
             if((now>=2500&&now<5900)||(now>=11500&&now<12000)) {
                 for(int side=0;side<2;++side) {
-                    Render r=(side?bc:ac).render(now+clocks[side]); State truth=trajectory(now>120?now-120:0,1-side,seed);
+                    auto& core=side?bc:ac; Render r=core.render(now+clocks[side]); uint64_t d=core.presentationDelayMs(); State truth=trajectory(now>d?now-d:0,1-side,seed);
+                    check(d>=120&&d<=DelayMaxMs,"fuzz_delay_range"); delays.push_back(double(d)); late+=r.late;
                     check(r.visible,"fuzz_visible"); double error=0; for(int k=0;k<3;++k) error+=std::pow(r.state.position[k]-truth.position[k],2); errors.push_back(std::sqrt(error));
                     check(error<4.,"fuzz_convergence_bound_2m");
                 }
@@ -287,15 +310,21 @@ void fuzz() {
             auto structured=encode(Packet{}); patch(structured,rng.range(0,119),rng.next(),1); decode(structured.data(),structured.size(),p); }
     }
     std::sort(errors.begin(),errors.end()); auto pct=[&](double p){ return errors[size_t(p*(errors.size()-1))]; };
-    std::printf("FUZZ seeds=1..500 sessions=500 samples=%zu loss=10%% duplicate=5%% latency=20..150ms delay=120ms\n",errors.size());
+    std::printf("FUZZ seeds=1..500 sessions=500 samples=%zu loss=10%% duplicate=5%% latency=20..150ms delay=follows the link (120 ms least)\n",errors.size());
     std::printf("ERROR metres delayed_truth p50=%.6f p95=%.6f p99=%.6f max=%.6f final_max=%.6f accepted=%llu lost=%llu duplicated=%llu\n",pct(.5),pct(.95),pct(.99),errors.back(),finalMax,(unsigned long long)accepted,(unsigned long long)drops,(unsigned long long)duplicates);
+    std::sort(delays.begin(),delays.end());
+    std::printf("DELAY ms shown behind the sender p50=%.0f p95=%.0f max=%.0f\n",delays[delays.size()/2],delays[size_t(.95*(delays.size()-1))],delays.back());
+    std::printf("LATE shown past the newest sample: %.2f %% of frames\n",100.*double(late)/double(errors.size()));
+    // The delay follows the link: with latencies up to 150 ms and one packet in ten lost, the partner is still drawn
+    // between two real samples nearly always. With the fixed 120 ms it was past the newest one in a third of frames.
+    check(double(late)<.03*double(errors.size()),"adapt");
     check(pct(.99)<.8,"fuzz_p99_bound_0_8m");
 }
 }
 int main(int argc,char** argv) {
     auto start=std::chrono::steady_clock::now(); std::string mutant=argc>1?argv[1]:"";
 #define MUTATE(name) if(mutant==#name) protection.name=false
-    MUTATE(version); MUTATE(range); MUTATE(teleport); MUTATE(duplicate); MUTATE(delay); MUTATE(session); MUTATE(build);
+    MUTATE(version); MUTATE(range); MUTATE(teleport); MUTATE(duplicate); MUTATE(delay); MUTATE(adapt); MUTATE(refine); MUTATE(session); MUTATE(build);
     MUTATE(magic); MUTATE(checksum); MUTATE(reserved); MUTATE(nonce); MUTATE(time); MUTATE(speed); MUTATE(floor); MUTATE(extrapolate); MUTATE(stale); MUTATE(gate); MUTATE(timeout); MUTATE(buffer); MUTATE(rate); MUTATE(length); MUTATE(kind); MUTATE(role); MUTATE(handshake); MUTATE(ping); MUTATE(pingHistory); MUTATE(clamp); MUTATE(finite); MUTATE(cargoOrder); MUTATE(cargoAck); MUTATE(cargoOnce); MUTATE(progressReady); MUTATE(progress); MUTATE(progressUnknown); MUTATE(progressFlag); MUTATE(progressPolicy); MUTATE(vehicle); MUTATE(vehicleLerp);
 #undef MUTATE
     parserTests(); cargoTests(); progressTests(); sessionTests(); if(mutant.empty()&&failures==0) fuzz();

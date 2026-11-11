@@ -10,7 +10,7 @@ print(clean.stdout, end='')
 if clean.returncode:
     print(clean.stderr)
     sys.exit(1)
-mutants = ['version', 'range', 'teleport', 'duplicate', 'delay', 'session', 'build',
+mutants = ['version', 'range', 'teleport', 'duplicate', 'delay', 'adapt', 'refine', 'session', 'build',
            'magic', 'checksum', 'reserved', 'nonce', 'time', 'speed', 'floor',
            'extrapolate', 'stale', 'gate', 'timeout', 'buffer', 'rate', 'length', 'kind', 'role', 'handshake', 'ping', 'pingHistory', 'clamp', 'finite', 'cargoOrder', 'cargoAck', 'cargoOnce', 'progressReady', 'progress', 'progressUnknown', 'progressFlag', 'progressPolicy', 'vehicle', 'vehicleLerp']
 bad = 0

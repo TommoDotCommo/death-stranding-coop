@@ -35,6 +35,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "likes.h"
 #include "online.h"
 #include "vitals.h"
+#include "link.h"
 #include "nametag.h"
 #include "notice.h"
 #include "weather.h"
@@ -682,7 +683,7 @@ struct Runtime final:ds::Transport {
 #else
     int log=-1,presenceLog=-1;
 #endif
-    struct Pending {uint64_t receivedUs;uint64_t due;ds::Bytes b;size_t size;};std::vector<Pending> pending;
+    struct Pending {uint64_t receivedUs;uint64_t due;ds::Bytes b;size_t size;};std::vector<Pending> pending;mod::link::Profile linkProfile;uint64_t linkLost=0;uint32_t notedDelay=120;
     void note(const char* s) {
         std::cerr<<"mod: "<<s<<'\n';
 #ifdef _WIN32
@@ -778,7 +779,9 @@ struct Runtime final:ds::Transport {
                     ++received;
                     if(n!=int(ds::WireSize)||source.sin_addr.s_addr!=peer.sin_addr.s_addr||source.sin_port!=peer.sin_port) {++dropped;continue;}
                     memcpy(b.data(),raw,b.size());
-                    uint64_t delay=config.impairment && b[6]==uint8_t(ds::Kind::Presence)?15+(received*17)%51:0;
+                    auto fate=mod::link::fate(linkProfile,config.impairment,received,b[6]==uint8_t(ds::Kind::Presence));
+                    if(fate.lost) {if(++linkLost%100==0){std::ostringstream o;o<<"LINK "<<config.link<<" lost "<<linkLost<<" of "<<received<<" received\n";note(o.str().c_str());}continue;}
+                    uint64_t delay=fate.delayMs;
                     if(pending.size()>=256) {++dropped;continue;}
                     pending.push_back({mod::nowUs(),now+delay,b,size_t(n)});
                 }
@@ -790,7 +793,7 @@ struct Runtime final:ds::Transport {
         } catch(const std::exception& e) {std::lock_guard<std::timed_mutex> guard(mutex);failed=true;failure=e.what();try{note(failure.c_str());}catch(...){}running=false;}
     }
     void init(const std::filesystem::path& path) {
-        config=mod::parseConfig(readConfig(path));
+        config=mod::parseConfig(readConfig(path));mod::link::profile(config.link,linkProfile);
         cache.progressReady=config.provider!="game";
         if(config.logging) {
 #ifdef _WIN32
@@ -1019,7 +1022,9 @@ struct Runtime final:ds::Transport {
         sockaddr_in local{};local.sin_family=AF_INET;local.sin_port=htons(ds::portForSlot(config.slot));local.sin_addr.s_addr=htonl(localAddress);
         if(bind(socket,reinterpret_cast<sockaddr*>(&local),sizeof(local))) throw std::runtime_error("slot UDP bind failed (busy?)");
         {std::ostringstream o;o<<"NET local "<<(localAddress>>24)<<'.'<<((localAddress>>16)&255)<<'.'<<((localAddress>>8)&255)<<'.'<<(localAddress&255)
-                              <<':'<<ds::portForSlot(config.slot)<<" peer "<<config.peer<<':'<<ds::portForSlot(config.peerSlot)<<"\n";note(o.str().c_str());}
+                              <<':'<<ds::portForSlot(config.slot)<<" peer "<<config.peer<<':'<<ds::portForSlot(config.peerSlot)<<"\n";
+         if(config.link!="none")o<<"LINK stand-in "<<config.link<<": loss "<<linkProfile.lossPerMille/10.0<<" %, delay "<<linkProfile.delayMinMs<<".."<<linkProfile.delayMinMs+linkProfile.delaySpanMs-1<<" ms on every received packet\n";
+         note(o.str().c_str());}
 #ifdef _WIN32
         u_long nonblock=1;if(ioctlsocket(socket,FIONBIO,&nonblock)) throw std::runtime_error("nonblocking UDP failed");
 #else
@@ -1273,6 +1278,9 @@ struct Runtime final:ds::Transport {
             }
             // Render at the actual apply time, not the preceding network iteration.
             core->frame(now);provider->applyRemote(cache.remote);
+            // The delay follows the link (core): say so when it has moved, so a log shows what the link was like.
+            if(core->connected()){uint32_t d=core->presentationDelayMs();if(d>notedDelay+30||d+30<notedDelay){
+                std::ostringstream o;o<<"LINK partner shown "<<d<<" ms behind (was "<<notedDelay<<"), round trip "<<std::lround(core->rttMs())<<" ms\n";note(o.str().c_str());notedDelay=d;}}
             stage="puppet";stages.enter("puppet",mod::nowUs());
             if(puppet&&gameContext) {
                 if(!puppet->armed()&&std::filesystem::exists(puppetCommand)) {
@@ -1450,7 +1458,7 @@ struct Runtime final:ds::Transport {
             if(gameContext){auto line=stages.report(mod::nowUs());if(!line.empty())note(line.c_str());}
             if(!cache.available && !game) {err="provider unavailable during tick";note(err.c_str());return false;}
             if(now-startedAt>1000 && config.provider=="synthetic" && cache.remote.visible && core->connected()) {
-                auto truth=mod::trajectory(now>120?now-120:0,config.peerSlot);double e=0;
+                uint64_t behind=core->presentationDelayMs();auto truth=mod::trajectory(now>behind?now-behind:0,config.peerSlot);double e=0;
                 for(unsigned i=0;i<3;++i) e+=std::pow(cache.remote.state.position[i]-truth.position[i],2);
                 if(errors.size()<100000)errors.push_back(std::sqrt(e));
             }
@@ -1513,7 +1521,9 @@ MOD_API void mod_test_deliver(const unsigned char* bytes) {
     auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);++r.received;
     if(r.pending.size()>=256){++r.dropped;return;}
     ds::Bytes b;memcpy(b.data(),bytes,b.size());
-    uint64_t delay=r.config.impairment&&b[6]==uint8_t(ds::Kind::Presence)?15+(r.received*17)%51:0;
+    auto fate=mod::link::fate(r.linkProfile,r.config.impairment,r.received,b[6]==uint8_t(ds::Kind::Presence));
+    if(fate.lost){++r.linkLost;return;}
+    uint64_t delay=fate.delayMs;
     r.pending.push_back({mod::nowUs(),mod::nowMs()+delay,b,b.size()});
 }
 #endif
@@ -1582,7 +1592,7 @@ unsigned mod_status(char* out,unsigned cap) {
         s=std::string("{\"discovery\":true,\"failed\":")+(runtime->discovery->failed()?"true":"false")+"}";
     } else if(runtime) {auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);auto errors=r.errors;std::sort(errors.begin(),errors.end());
         auto p=[&](double q){return errors.empty()?-1.:errors[size_t((errors.size()-1)*q)];};
-        std::ostringstream o;o<<"{\"handshake\":"<<(r.paired?"true":"false")<<",\"connected\":"<<(r.core->connected()?"true":"false")<<",\"sent\":"<<r.sent<<",\"received\":"<<r.received<<",\"dropped\":"<<r.dropped<<",\"accepted\":"<<r.core->accepted()<<",\"wrong_accepted\":"<<r.wrongAccepted<<",\"build_refused\":"<<r.buildRefused<<",\"version_refused\":"<<r.versionRefused<<",\"session_refused\":"<<r.sessionRefused<<",\"rtt_ms\":"<<r.measuredRtt<<",\"current_rtt_ms\":"<<r.core->rttMs()<<",\"samples\":"<<errors.size()<<",\"error_p50\":"<<p(.5)<<",\"error_p95\":"<<p(.95)<<",\"error_p99\":"<<p(.99)<<",\"error_max\":"<<p(1)<<",\"failed\":"<<(r.failed?"true":"false")<<",\"self_tick\":{\"enabled\":"<<(r.config.selfTick?"true":"false")<<",\"ticks\":"<<r.ticks<<"},\"pose\":{\"available\":"<<(r.poseAvailable?"true":"false")<<",\"reason\":\""<<r.poseReason<<"\"}";
+        std::ostringstream o;o<<"{\"handshake\":"<<(r.paired?"true":"false")<<",\"connected\":"<<(r.core->connected()?"true":"false")<<",\"sent\":"<<r.sent<<",\"received\":"<<r.received<<",\"dropped\":"<<r.dropped<<",\"link_lost\":"<<r.linkLost<<",\"accepted\":"<<r.core->accepted()<<",\"wrong_accepted\":"<<r.wrongAccepted<<",\"build_refused\":"<<r.buildRefused<<",\"version_refused\":"<<r.versionRefused<<",\"session_refused\":"<<r.sessionRefused<<",\"rtt_ms\":"<<r.measuredRtt<<",\"current_rtt_ms\":"<<r.core->rttMs()<<",\"samples\":"<<errors.size()<<",\"error_p50\":"<<p(.5)<<",\"error_p95\":"<<p(.95)<<",\"error_p99\":"<<p(.99)<<",\"error_max\":"<<p(1)<<",\"failed\":"<<(r.failed?"true":"false")<<",\"self_tick\":{\"enabled\":"<<(r.config.selfTick?"true":"false")<<",\"ticks\":"<<r.ticks<<"},\"pose\":{\"available\":"<<(r.poseAvailable?"true":"false")<<",\"reason\":\""<<r.poseReason<<"\"}";
         o<<",\"game_thread\":{\"enabled\":"<<(r.config.gameThread?"true":"false")<<",\"verified\":"<<(r.dispatchVerified?"true":"false")<<",\"thread_id\":"<<r.gameGate.thread()<<",\"rejected\":"<<r.gameRejected<<"},\"puppet\":{\"enabled\":"<<(r.puppet?"true":"false")<<",\"stage\":\""<<(r.puppet?r.puppet->stage():"disabled")<<"\",\"actor\":"<<(r.puppet?r.puppet->actor():0)<<"}";
         o<<",\"pad\":{\"enabled\":"<<(r.config.virtualPad?"true":"false")<<",\"running\":"<<(r.padRunning?"true":"false")<<",\"calls\":"<<padShared.calls.load()<<",\"active_calls\":"<<padShared.active.load()<<"}";
         o<<",\"event\":"<<(r.inEvent?"true":"false")<<",\"cargo\":{\"sent\":"<<r.cargoSent<<",\"created\":"<<r.cargoMade<<",\"taken\":"<<r.cargoTaken<<",\"removed\":"<<r.cargoRemoved<<",\"shared\":"<<r.cargoSync.shared()<<",\"mirrored\":"<<r.cargoSync.mirrored()<<",\"structures_sent\":"<<r.structSent<<",\"structures_created\":"<<r.structMade<<",\"pending\":"<<(r.core?r.core->cargoPending():0)<<"}";
@@ -1594,7 +1604,7 @@ unsigned mod_status(char* out,unsigned cap) {
 #else
         <<"steady_clock"
 #endif
-        <<"\",\"frequency_hz\":"<<mod::clockFrequency()<<",\"clock_quantum_us\":"<<1000000./mod::clockFrequency()<<",\"observed_step_us\":"<<r.observedClockStep<<",\"wire_quantum_us\":1000,\"interpolation_ms\":120,\"extrapolation_cap_ms\":150,\"bucket_upper_us\":[";
+        <<"\",\"frequency_hz\":"<<mod::clockFrequency()<<",\"clock_quantum_us\":"<<1000000./mod::clockFrequency()<<",\"observed_step_us\":"<<r.observedClockStep<<",\"wire_quantum_us\":1000,\"interpolation_ms\":"<<r.core->presentationDelayMs()<<",\"extrapolation_cap_ms\":150,\"bucket_upper_us\":[";
         for(size_t i=0;i<mod::Histogram::limits.size();++i)o<<(i?",":"")<<mod::Histogram::limits[i];
         o<<"],\"network_tick\":"<<r.networkTick.json()<<",\"provider_tick\":"<<r.providerTick.json()<<",\"presence_send\":"<<r.sendInterval.json()<<",\"sample_age\":"<<r.sampleAge.json()<<",\"receive_to_apply\":"<<r.receiveApply.json()<<",\"delivery_lateness\":"<<r.deliveryLateness.json()
         <<",\"ping_sent\":"<<r.pingSent<<",\"pong_received\":"<<r.pongReceived<<",\"first_ping_ms\":"<<(r.pingSent?int64_t(r.firstPing):-1)<<",\"last_ping_ms\":"<<(r.pingSent?int64_t(r.lastPing):-1)<<",\"first_pong_ms\":"<<(r.pongReceived?int64_t(r.firstPong):-1)<<",\"last_pong_ms\":"<<(r.pongReceived?int64_t(r.lastPong):-1)<<"}}";s=o.str();}

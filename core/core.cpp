@@ -86,10 +86,12 @@ bool verticalJump(const Snapshot& a,const Snapshot& z) {
     return dy/(double(z.time-a.time)/1000.)>FloorSpeedMax;
 }
 Render sampling(const std::deque<Snapshot>& b,uint64_t now,uint32_t delay,uint32_t extrap,const Protection& p) {
-    Render r; if(b.empty()) return r;
+    Render r; r.delayMs=delay; if(b.empty()) return r;
     const auto& latest=b.back();
     uint64_t age=now>=latest.time?now-latest.time:0;
-    r.stale=p.stale && age>500; r.visible=(!p.stale||age<=1500) && !(latest.state.flags&PrivateRoom);
+    // A longer presentation delay (a slow link) moves the staleness limits with it: 500 and 1500 ms at the least delay.
+    uint64_t slack=delay>120?delay-120:0;
+    r.stale=p.stale && age>500+slack; r.visible=(!p.stale||age<=1500+slack) && !(latest.state.flags&PrivateRoom);
     uint64_t target=now>delay?now-delay:0;
     r.state=b.front().state;
     for(size_t i=1;i<b.size();++i) {
@@ -115,6 +117,7 @@ Render sampling(const std::deque<Snapshot>& b,uint64_t now,uint32_t delay,uint32
         r.state=z.state; r.snapped=jump;
     }
     // Do not invent vertical motion: without collision geometry even a 1 cm Y blend can cross a floor.
+    r.late=target>latest.time;
     if(target>latest.time && !(latest.state.flags&(Teleport|PrivateRoom))) {
         double dt=double(p.extrapolate?std::min<uint64_t>(target-latest.time,extrap):target-latest.time)/1000.;
         for(int k:{0,2}) r.state.position[k]=std::clamp(r.state.position[k]+r.state.velocity[k]*dt,-100000.,100000.);
@@ -176,6 +179,7 @@ Error decodeForTest(const uint8_t* b,size_t n,Packet& q,Protection p) { return p
 Render sample(const std::deque<Snapshot>& b,uint64_t now,uint32_t delay,uint32_t extrap) { return sampling(b,now,delay,extrap,{}); }
 uint16_t portForSlot(unsigned slot) { if(slot>=16) throw std::out_of_range("slot must be 0..15"); return uint16_t(49000+slot); }
 Core::Core(Config c,StateProvider& p,Transport& t):config_(c),provider_(p),transport_(t) {
+    delay_=c.delayMs;
     if(!c.session||!c.nonce||c.delayMs>1000||(c.role!=Role::Host&&c.role!=Role::Client)) throw std::invalid_argument("invalid config");
 }
 ProgressStatus compareProgress(Progress a,Progress b) {
@@ -198,7 +202,7 @@ void Core::send(Kind k,uint64_t now) {
     transport_.send(encode(q));
 }
 void Core::reset(bool rotate) {
-    connected_=false; sentHello_=false; peer_=0; snapshots_.clear(); haveSequence_=false; haveTeleport_=false; haveSent_=false; clockValid_=false; pendingPings_.clear(); rtt_=-1; offset_=0;
+    connected_=false; sentHello_=false; peer_=0; snapshots_.clear(); haveSequence_=false; haveTeleport_=false; haveSent_=false; clockValid_=false; pendingPings_.clear(); rtt_=-1; offset_=0; lateness_.clear(); delay_=config_.delayMs; pongs_.clear();
     nextHello_=nextSend_=nextPing_=0; outgoing_=0;
     haveEnvironment_=false;environmentOut_=environmentIn_=0;environmentReceived_=environmentStamp_=0;
     // Send/apply rate limits survive reconnects; changing a nonce cannot accelerate native calls.
@@ -207,9 +211,20 @@ void Core::reset(bool rotate) {
     cargoSeen_=0; cargoIn_.clear(); cargoNext_=0; for(auto& e:cargoOut_) e.sequence=++cargoNext_; nextCargo_=0;
     if(rotate) { if(config_.nonce==std::numeric_limits<uint64_t>::max()) throw std::overflow_error("nonce exhausted"); ++config_.nonce; }
 }
+void Core::adaptDelay(uint64_t now) {
+    double least=config_.delayMs, most=std::max<double>(config_.delayMs,DelayMaxMs), target=least;
+    if(protections_.adapt && !lateness_.empty()) {
+        auto sorted=std::vector<int32_t>(lateness_.begin(),lateness_.end()); std::sort(sorted.begin(),sorted.end());
+        target=std::clamp(double(sorted[(sorted.size()-1)*95/100])+DelayMarginMs,least,most);
+    }
+    // Nothing is on screen yet during the first samples of a connection: take the target at once.
+    double step=lateness_.size()<=DelayWarmup?most:DelaySlew*double(now>delayAt_?now-delayAt_:0);
+    delay_=std::clamp(target,delay_-step,delay_+step); delay_=std::clamp(delay_,least,most); delayAt_=now;
+}
 void Core::tick(uint64_t now) {
     if(connected_ && protections_.timeout && now-lastReceive_>3000) reset(true);
     if(!connected_&&protections_.progressReady&&!provider_.readyForSession())return;
+    adaptDelay(now);
     if(!connected_) { if(now>=nextHello_) { send(Kind::Hello,now); nextHello_=now+250; } return; }
     if(now>=nextPing_) { send(Kind::Ping,now); nextPing_=now+((clockValid_||!protections_.pingRetry)?1000:100); }
     if(!cargoOut_.empty() && now>=nextCargo_) { sendCargo(cargoOut_.front(),now); nextCargo_=now+200; }
@@ -275,7 +290,13 @@ Error Core::receive(const uint8_t* b,size_t n,uint64_t now) {
         rtt_=double(now-q.t0)-double(q.t2-q.t1);
         double candidate=((double(q.t1)-double(q.t0))+(double(q.t2)-double(now)))/2.;
         // Keep the established timeline stable; clock updates cannot reorder buffered snapshots.
-        if(!clockValid_) { offset_=candidate; clockValid_=true; }
+        if(!clockValid_) { offset_=candidate; clockValid_=true; offsetAt_=now; }
+        pongs_.push_back({rtt_,candidate}); while(pongs_.size()>ClockWindow) pongs_.pop_front();
+        if(protections_.refine) {
+            auto best=std::min_element(pongs_.begin(),pongs_.end()); double step=ClockSlew*double(now>offsetAt_?now-offsetAt_:0);
+            offset_=std::clamp(best->second,offset_-step,offset_+step);
+        }
+        offsetAt_=now;
         lastReceive_=now; return fail(Error::None);
     }
     if(q.kind==Kind::Cargo) {
@@ -312,6 +333,7 @@ Error Core::receive(const uint8_t* b,size_t n,uint64_t now) {
     // Samples on a new clock mapping are admitted only once they advance the existing timeline.
     snapshots_.push_back({q.state,localTime,q.sequence});
     if(protections_.buffer) while(snapshots_.size()>64) snapshots_.pop_front();
+    if(clockValid_) { lateness_.push_back(int32_t(std::clamp(double(now)-mapped,-2000.,2000.))); while(lateness_.size()>DelayWindow) lateness_.pop_front(); adaptDelay(now); }
     incoming_=q.sequence; haveSequence_=true; lastArrival_=q.stamp; lastReceive_=now; ++accepted_;
     if(teleport) { haveTeleport_=true; lastTeleport_=now; }
     return fail(Error::None);
@@ -330,7 +352,7 @@ void Core::sendCargo(const CargoEvent& e,uint64_t now) {
     transport_.send(encode(q));
 }
 Render Core::render(uint64_t now) const {
-    auto r=sampling(snapshots_,now,protections_.delay?config_.delayMs:0,150,protections_);
+    auto r=sampling(snapshots_,now,protections_.delay?presentationDelayMs():0,150,protections_);
     r.state.flags&=uint16_t(~ProgressMismatch);
     if(protections_.progressFlag&&progressStatus_==ProgressStatus::Mismatch)r.state.flags|=ProgressMismatch;
     return r;

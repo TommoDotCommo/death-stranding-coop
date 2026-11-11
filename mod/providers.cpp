@@ -100,6 +100,7 @@ void GameProvider::applyRemote(const ds::Render& r) {
     if(available_&&local_.vehicle) o<<",\"vehicle\":"<<int(local_.vehicle)<<",\"vehicle_deg\":["<<deg(local_.vehicleAngles[0])<<','<<deg(local_.vehicleAngles[1])<<','<<deg(local_.vehicleAngles[2])<<']';
     else o<<",\"reason\":\""<<reason_<<'"';
     o<<"},\"remote\":{\"visible\":"<<(r.visible?"true":"false")<<",\"stale\":"<<(r.stale?"true":"false")<<",\"snapped\":"<<(r.snapped?"true":"false");
+    o<<",\"delay_ms\":"<<r.delayMs<<",\"late\":"<<(r.late?"true":"false");   // how far behind the partner's time; shown past the newest sample
     o<<",\"flags\":"<<r.state.flags<<",\"gated\":"<<(isInCutsceneOrLoading()?"true":"false");   // partner's flags; our gate
     if(r.visible) o<<",\"x\":"<<r.state.position[0]<<",\"y\":"<<r.state.position[1]<<",\"z\":"<<r.state.position[2]<<",\"yaw_deg\":"<<deg(r.state.yaw);
     if(r.visible&&r.state.vehicle) o<<",\"vehicle\":"<<int(r.state.vehicle)<<",\"vehicle_offset\":["<<r.state.vehicleOffset[0]<<','<<r.state.vehicleOffset[1]<<','<<r.state.vehicleOffset[2]

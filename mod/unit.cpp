@@ -69,6 +69,9 @@ int main() {
     // The delivery-delay impairment works with the real game too (two copies on one PC standing in for an internet
     // link); injected faults stay synthetic-only.
     assert(!mod::parseConfig(threaded).impairment&&mod::parseConfig(withKeys(threaded,"\"impairment\":true")).impairment);
+    // The stand-in link takes a known profile only; none by default.
+    assert(mod::parseConfig(threaded).link=="none"&&mod::parseConfig(withKeys(threaded,"\"link\":\"internet\"")).link=="internet"&&mod::parseConfig(withKeys(threaded,"\"link\":\"poor\"")).link=="poor");
+    assert(refused(withKeys(threaded,"\"link\":\"lan\"")));
     assert(refused(withKeys(threaded,"\"fault\":\"version\"")));assert(mod::parseConfig(withKeys(good,"\"fault\":\"version\"")).fault=="version");
     // Virtual pad: only on a ticking, required mod; off by default; never with discovery.
     assert(!mod::parseConfig(good).virtualPad);

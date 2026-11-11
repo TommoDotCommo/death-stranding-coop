@@ -39,7 +39,7 @@ int main(int argc,char** argv) {
                     p[side].local=mod::trajectory(time,side);p[side].sampled=time;
                     if(!legacy)cores[side]->frame(time);
                     if(us>1000000 && p[side].remote.visible) {
-                        auto truth=mod::trajectory(10000+us/1000-120,1-side);double error=0;
+                        auto truth=mod::trajectory(10000+us/1000-cores[side]->presentationDelayMs(),1-side);double error=0;
                         for(unsigned k=0;k<3;++k)error+=std::pow(p[side].remote.state.position[k]-truth.position[k],2);
                         errors.push_back(std::sqrt(error));
                     }
