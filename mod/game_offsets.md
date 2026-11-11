@@ -4783,6 +4783,12 @@ Observed:
   request was the same with full material data (`mt`) on the server, and its record stayed in state 0. Other
   producers of requests: `0x2c47b2c`, `0x2c482f0` (clears `+0x647`), `0x2c60312`, `0x2c823c2`, `0x2c8877d` (sets
   `+0x64a`), `0x2c9b86f` (sets `+0x644`); which one the build menu uses, and what the flags mean, is unknown.
+  (Offsets here are into the request; `CreateConstruction`'s bool is request `+0x620` and its constant 1 is `+0x645`:
+  the "+640" and "+665" of the Structures section above are stack offsets of that function.)
+- The flags are not the cause: requests built by the mod (the research command `request`, same steps as
+  `CreateConstruction`) with the built set, the save's extra two and the bytes common to both, for a bridge, a rain
+  shelter and a postbox outdoors, all gave records in state 0, not drawn. Ladders reach state 2 at once. What
+  completes a heavy structure outside a load is unknown.
 - Likes. `OTGCGetLikeHistoryOneResponse` (missed by the first dump): `t` int64, `oid`, `lp`, `lp2` int, `uid` (from),
   `sc` int32 (summarised count), `lt` (like type). The game asks `getLikeHistory` once, about a minute after signing
   in, with `{"uid":"","since":0}`. Live: after another player's `sendLike` for a ladder this game had uploaded in an

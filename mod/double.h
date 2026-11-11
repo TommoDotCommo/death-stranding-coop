@@ -79,6 +79,10 @@ std::function<void(uint32_t)> nativeCargoDelete(discovery::Sampler&);
 // lock); asynchronous. Types: Stage/Player/Net variants, e.g. 24..26 Ladder, 27..29 FieldRope, 30..32 Bridge30m
 // (game_offsets.md, "Structures"). The bool is stored at request +640; its meaning is unknown.
 std::function<void(uint8_t,const Transform&,bool)> nativeConstruct(discovery::Sampler&);
+// Research: the same request CreateConstruction (2cd6c00) queues, built here so that chosen flag bytes of the request
+// can be set (offsets into the 0x6c8-byte request, 0x600..0x67f; game_offsets.md "Why it stays pending"). Returns the
+// new construction id. Game thread only.
+std::function<uint32_t(uint8_t,const Transform&,const std::vector<uint16_t>&)> nativeConstructRequest(discovery::Sampler&);
 // ArtPartsData (component vtable 3cf2b18, entity+180) get-or-create accessors for the cover (22b2010, cached at +60),
 // cover+animation (22b1f80, +68) and facial-rig (22b20a0, +70) model components. Game thread. False when the body's
 // ArtPartsData is missing or not its own, or a component did not appear.

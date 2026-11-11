@@ -233,7 +233,7 @@ struct Runtime final:ds::Transport {
     std::filesystem::path environmentCommand;std::unique_ptr<mod::environment::Reader> environmentReader;
     std::unique_ptr<mod::environment::Sync> environmentSync;uint64_t environmentReadAt=0,environmentApplyAt=0;bool environmentSend=false;
     std::unique_ptr<mod::weather::Share> weatherShare;std::optional<float> hostRain;uint64_t hostRainAt=0;   // guest: shared rain
-    std::function<void(uint32_t)> cargoGive,cargoDelete;std::function<void(uint8_t,const mod::puppet::Transform&,bool)> construct;std::function<bool(uint64_t,unsigned,bool)> partToggle;
+    std::function<void(uint32_t)> cargoGive,cargoDelete;std::function<void(uint8_t,const mod::puppet::Transform&,bool)> construct;std::function<uint32_t(uint8_t,const mod::puppet::Transform&,const std::vector<uint16_t>&)> constructRequest;std::function<bool(uint64_t,unsigned,bool)> partToggle;
     std::function<void(const std::array<float,4>&,const std::array<float,4>&,const mod::puppet::Transform&,bool,bool,bool)> unconstruct;
     std::function<void()> continueLastSave;mod::AutoContinue autoContinue;bool autoNoted=false,continueAgain=false;
     std::function<bool()> gameEvent;bool inEvent=false;uint64_t eventOverAt=0;std::atomic<bool> fakeEvent{false};
@@ -885,7 +885,7 @@ struct Runtime final:ds::Transport {
                 twinApi.effects=[](uint64_t,bool){};
 #else
                 auto twinApi=mod::puppet::nativeDoubleApi(*sampler);
-                cargoCreate=mod::puppet::nativeCargoCreate(*sampler);cargoGive=mod::puppet::nativeCargoGive(*sampler);cargoDelete=mod::puppet::nativeCargoDelete(*sampler);construct=mod::puppet::nativeConstruct(*sampler);partToggle=mod::puppet::nativePartToggle(*sampler);unconstruct=mod::puppet::nativeRemoveConstructions(*sampler);
+                cargoCreate=mod::puppet::nativeCargoCreate(*sampler);cargoGive=mod::puppet::nativeCargoGive(*sampler);cargoDelete=mod::puppet::nativeCargoDelete(*sampler);construct=mod::puppet::nativeConstruct(*sampler);try{constructRequest=mod::puppet::nativeConstructRequest(*sampler);}catch(const std::exception& e){note((std::string("CONSTRUCT request unavailable: ")+e.what()+"\n").c_str());}partToggle=mod::puppet::nativePartToggle(*sampler);unconstruct=mod::puppet::nativeRemoveConstructions(*sampler);
                 gameEvent=mod::puppet::nativeGameEvent(*sampler);
                 if(config.autoContinue){continueLastSave=mod::puppet::nativeContinueLastSave(*sampler);autoContinue=mod::AutoContinue(true);}
                 body=std::make_unique<mod::body::Probe>(mod::body::nativeApi(*sampler),sampler->base+0x3d7de48,[this](const std::string& row){note(row.c_str());});
@@ -1362,6 +1362,24 @@ struct Runtime final:ds::Transport {
                     if(l>.5){t.position[0]+=4*fx/l;t.position[1]+=4*fy/l;}
                     unconstruct({-3,-3,-5,0},{3,3,5,0},t,*mask&1,*mask&2,*mask&4);
                     note(("UNBUILD mask "+std::to_string(*mask)+"\n").c_str());
+                }
+                else if(auto code=mod::puppet::parseCargoCommand(text,mod::runStamp(),"request");code&&constructRequest&&anchor.entity&&anchor.pose.available) {
+                    // Research: "request <type + 1000*variant> <stamp>" queues a construction request built by the mod,
+                    // 4 m in front of the porter, with a set of the request's flag bytes (game_offsets.md):
+                    // 0 none, 1 the bytes both built and downloaded requests have, 2 + the built ones, 3 + the save's
+                    // extra two, 4 = 3 + the upload flag.
+                    uint32_t kind=*code%1000,variant=*code/1000;std::vector<uint16_t> flags;
+                    if(variant>=1)flags.insert(flags.end(),{0x625,0x627,0x631,0x632,0x634,0x63b});
+                    if(variant>=2)flags.insert(flags.end(),{0x641,0x644,0x647});
+                    if(variant>=3)flags.insert(flags.end(),{0x63d,0x63e});
+                    if(variant>=4)flags.push_back(0x620);
+                    if(kind>=46||variant>4)note("CONSTRUCT request refused: out of range\n");
+                    else {
+                        auto t=mod::puppet::transform(anchor.pose);double fx=t.rotation[3],fy=t.rotation[4],l=std::hypot(fx,fy);
+                        if(l>.5){t.position[0]+=4*fx/l;t.position[1]+=4*fy/l;}
+                        auto id=constructRequest(uint8_t(kind),t,flags);
+                        std::ostringstream o;o<<"CONSTRUCT request type "<<kind<<" variant "<<variant<<" id "<<id<<" at "<<t.position[0]<<","<<t.position[1]<<","<<t.position[2]<<"\n";note(o.str().c_str());
+                    }
                 }
                 else if(auto type=mod::puppet::parseCargoCommand(text,mod::runStamp(),"construct");type&&construct&&anchor.entity&&anchor.pose.available) {
                     // Structure experiment: "construct <type> <stamp>" (type < 46; +100 sets the flag) 4 m in front of the porter.

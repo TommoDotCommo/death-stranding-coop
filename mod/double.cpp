@@ -547,6 +547,36 @@ std::function<void(uint8_t,const Transform&,bool)> nativeConstruct(discovery::Sa
     return [make](uint8_t type,const Transform& t,bool flag){make(type,&t,flag);};
 #endif
 }
+std::function<uint32_t(uint8_t,const Transform&,const std::vector<uint16_t>&)> nativeConstructRequest(discovery::Sampler& s){
+#ifndef _WIN32
+    (void)s;throw std::runtime_error("native construction API requires Windows");
+#else
+    struct Site{uint64_t rva;std::vector<uint8_t> bytes;};
+    const Site sites[]={{0x277fde0,{0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48}},   // request constructor
+                        {0x262a860,{0x48,0x83,0xec,0x28,0x48,0x8b,0x05,0x7d,0xe8,0x4b,0x05,0x48,0x85,0xc0,0x74,0x12}},   // the word at request +2
+                        {0x2ccf1d0,{0x0f,0xb6,0xc1,0x83,0xf8,0x2d,0x77,0x21,0x48,0x8d,0x15,0x21,0x0e,0x33,0xfd,0x0f}},   // type -> id kind
+                        {0x2c5bd80,{0x40,0x53,0x44,0x0f,0xb6,0xda,0x48,0x8b,0xd9,0x84,0xd2,0x74,0x36,0x80,0xfa,0x02}},   // new id of that kind
+                        {0x2c2acf0,{0x48,0x89,0x5c,0x24,0x20,0x41,0x56,0x48,0x83,0xec,0x20,0x48,0x89,0x7c,0x24,0x40}},   // queue push
+                        {0x28aca00,{0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57}}};  // request destructor
+    for(auto& site:sites){std::vector<uint8_t> got(site.bytes.size());require(s.read(s.base+site.rva,got.data(),got.size())&&got==site.bytes,"construction request function differs");}
+    const uint64_t base=s.base;auto* sp=&s;
+    return [base,sp](uint8_t type,const Transform& t,const std::vector<uint16_t>& flags)->uint32_t{
+        uint64_t manager=0;if(!sp->read(base+0x7bf4960,&manager,8)||!manager)return 0;
+        alignas(32) static uint8_t request[0x6c8+0x40];std::memset(request,0,sizeof request);
+        reinterpret_cast<void(*)(void*)>(base+0x277fde0)(request);
+        request[0]=type;std::memcpy(request+8,t.position.data(),24);std::memcpy(request+0x20,t.rotation.data(),36);
+        uint16_t word=reinterpret_cast<uint16_t(*)(void*)>(base+0x262a860)(*reinterpret_cast<void**>(base+0x7be6318));std::memcpy(request+2,&word,2);
+        uint8_t kind=reinterpret_cast<uint8_t(*)(uint8_t)>(base+0x2ccf1d0)(type);
+        uint32_t id=reinterpret_cast<uint32_t(*)(void*,uint8_t)>(base+0x2c5bd80)(reinterpret_cast<void*>(manager),kind);std::memcpy(request+0x48,&id,4);
+        request[0x645]=1;
+        for(auto f:flags)if(f>=0x600&&f<0x680)request[f]=1;
+        auto* lock=reinterpret_cast<CRITICAL_SECTION*>(manager+0x56a5b8);EnterCriticalSection(lock);
+        reinterpret_cast<void(*)(void*,void*)>(base+0x2c2acf0)(reinterpret_cast<void*>(manager+0x56a278),request);
+        LeaveCriticalSection(lock);
+        reinterpret_cast<void(*)(void*)>(base+0x28aca00)(request);
+        return id;};
+#endif
+}
 std::function<void(const std::array<float,4>&,const std::array<float,4>&,const Transform&,bool,bool,bool)> nativeRemoveConstructions(discovery::Sampler& s){
 #ifndef _WIN32
     (void)s;throw std::runtime_error("native construction API requires Windows");
