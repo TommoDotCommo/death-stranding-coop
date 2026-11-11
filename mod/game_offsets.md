@@ -4775,6 +4775,14 @@ Observed:
   on screen neither copy drew the bridge with its porter standing next to it (screenshots in both): a structure in
   state 0 is not drawn. The pause menu's System page has a "Log In" item, greyed out while signed in: the title
   menu's `OnLogin` is not the only place the game offers a sign-in. Resting outdoors for six minutes and getting up produced no cairn upload.
+- Why it stays pending (2026-11-12, the request queue at manager `+0x56a278` sampled from outside while a copy
+  loaded: count, capacity, pointer; 0x6c8-byte requests). The requests for the save's own built net bridges carry
+  flag bytes `+0x63d`, `+0x63e`, `+0x641`, `+0x644`, `+0x647` = 1 (most built structures of the save: `+0x641`,
+  `+0x643`, `+0x644`, `+0x647`); the game's request for the downloaded bridge has none of those and instead
+  `+0x62d` and `+0x639` = 1. `CreateConstruction` sets only `+0x640` (its bool) and `+0x645`. The downloaded bridge's
+  request was the same with full material data (`mt`) on the server, and its record stayed in state 0. Other
+  producers of requests: `0x2c47b2c`, `0x2c482f0` (clears `+0x647`), `0x2c60312`, `0x2c823c2`, `0x2c8877d` (sets
+  `+0x64a`), `0x2c9b86f` (sets `+0x644`); which one the build menu uses, and what the flags mean, is unknown.
 - Likes. `OTGCGetLikeHistoryOneResponse` (missed by the first dump): `t` int64, `oid`, `lp`, `lp2` int, `uid` (from),
   `sc` int32 (summarised count), `lt` (like type). The game asks `getLikeHistory` once, about a minute after signing
   in, with `{"uid":"","since":0}`. Live: after another player's `sendLike` for a ladder this game had uploaded in an
