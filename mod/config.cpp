@@ -19,7 +19,7 @@ Config parseConfig(const std::string& s) {
         ws();if(at==s.size() || s[at]!=',') break;++at;
     }
     take('}');ws();if(at!=s.size()) throw std::runtime_error("trailing JSON");
-    for(auto& kv:values) if(!std::set<std::string>{"slot","share_environment","join_move","carry_visual","partner","partner_gear","partner_marker","partner_vehicle","partner_likes","partner_tag","notices","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
+    for(auto& kv:values) if(!std::set<std::string>{"slot","share_environment","join_move","carry_visual","partner","partner_gear","partner_marker","partner_vehicle","partner_likes","partner_tag","notices","online_server","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
     auto text=[&](const char* k){if(!strings.count(k)) throw std::runtime_error(std::string("missing/string expected: ")+k);return values.at(k);};
     auto number=[&](const char* k){auto v=values[k];if(strings.count(k)||v.empty()||v.size()>15||v.find_first_not_of("0123456789")!=std::string::npos||(v.size()>1&&v[0]=='0')) throw std::runtime_error(std::string("invalid integer: ")+k);return std::stoull(v);};
     auto boolean=[&](const char* k,bool d){if(!values.count(k)) return d;auto v=values[k];if(strings.count(k)||(v!="true"&&v!="false")) throw std::runtime_error("boolean expected");return v=="true";};
@@ -81,6 +81,11 @@ Config parseConfig(const std::string& s) {
     if(c.notices&&(c.provider!="game"||!c.gameThread))throw std::runtime_error("notices require the game provider and game_thread");
     if(c.partnerTag&&!c.puppetProbe)throw std::runtime_error("partner_tag requires puppet_probe");
 #endif
+    if(values.count("online_server")){
+        c.onlineServer=text("online_server");
+        if(c.provider!="game"||!c.gameThread)throw std::runtime_error("online_server requires the game provider and game_thread");
+        if(!onlineAddress(c.onlineServer,c.peerAddress))throw std::runtime_error("online_server must be http://ADDRESS:PORT/path on loopback or the partner's address");
+    }
     c.partnerGear=boolean("partner_gear",false);
     if(c.partnerGear&&c.provider!="game")throw std::runtime_error("partner_gear requires game provider");
     c.carryVisual=boolean("carry_visual",false);
@@ -123,5 +128,27 @@ std::optional<uint32_t> peerAddress(const std::string& t){
     if(first==0||first>=224)return std::nullopt;   // 0/8, multicast 224/4, reserved 240/4 and broadcast
 #endif
     return a;
+}
+std::optional<std::string> onlineAddress(const std::string& url,uint32_t peer){
+    const std::string scheme="http://";
+    if(url.size()>OnlineAddressMax||url.compare(0,scheme.size(),scheme)!=0)return std::nullopt;
+    size_t colon=url.find(':',scheme.size()),slash=url.find('/',scheme.size());
+    if(colon==std::string::npos||slash==std::string::npos||colon>slash)return std::nullopt;
+    auto host=peerAddress(url.substr(scheme.size(),colon-scheme.size()));
+    if(!host)return std::nullopt;
+#ifndef MUTANT_ONLINE_HOST_ANY
+    if((*host>>24)!=127&&*host!=peer)return std::nullopt;
+#endif
+    auto port=url.substr(colon+1,slash-colon-1);
+    if(port.empty()||port.size()>5||port[0]=='0'||port.find_first_not_of("0123456789")!=std::string::npos||std::stoul(port)>65535)return std::nullopt;
+    for(size_t i=slash;i<url.size();++i){
+        char c=url[i];
+        bool ok=(c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='/'||c=='_'||c=='-'||c=='.';
+#ifndef MUTANT_ONLINE_PATH_ANY
+        if(!ok)return std::nullopt;
+#endif
+        (void)ok;
+    }
+    return url;
 }
 }

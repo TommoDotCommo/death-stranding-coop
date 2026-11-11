@@ -33,6 +33,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "ride.h"
 #include "cargo_stack.h"
 #include "likes.h"
+#include "online.h"
 #include "nametag.h"
 #include "notice.h"
 #include "weather.h"
@@ -441,6 +442,30 @@ struct Runtime final:ds::Transport {
             else note("LIKE dropped: no likes state\n");
         }
         likeIn.clear();
+    }
+    // --- A private online server (online.h): opt-in `online_server`. The game's sign-in address is pointed at it as
+    // soon as the image is checked, and the game is asked to sign in while its login task is idle.
+    std::optional<mod::online::Api> onlineApi;bool onlineTried=false,onlinePointed=false;Background<mod::online::Api> onlineJob;
+    mod::online::Requester onlineAsk;mod::online::State onlineSeen;
+    void tickOnline(uint64_t now) {
+        if(config.onlineServer.empty())return;
+#ifndef MOD_FAKE_NETWORK
+        if(!onlineApi&&!onlineTried){
+            auto* sp=&*sampler;if(!onlineJob.ready([sp]{return mod::online::nativeApi(*sp);}))return;
+            onlineTried=true;
+            try{onlineApi=onlineJob.job.get();}
+            catch(const std::exception& e){note((std::string("ONLINE unavailable: ")+e.what()+"\n").c_str());}}
+#endif
+        if(!onlineApi)return;
+        if(!onlinePointed){
+            onlinePointed=true;
+            if(!onlineApi->plain()||!onlineApi->point(config.onlineServer)){note("ONLINE unavailable: address or body functions not set\n");onlineApi.reset();return;}
+            note(("ONLINE server "+config.onlineServer+"\n").c_str());}
+        auto st=onlineApi->state();
+        if(!(st==onlineSeen)){
+            onlineSeen=st;
+            note(("ONLINE login task state "+std::to_string(st.taskState)+" step "+std::to_string(st.step)+" error "+std::to_string(st.error)+(st.signedIn()?" (signed in)":"")+"\n").c_str());}
+        if(onlineAsk.tick(now,st))note(onlineApi->request()?"ONLINE sign-in asked\n":"ONLINE sign-in not asked: no login task\n");
     }
     // --- Notices (notice.h): opt-in `notices`. The partner joined / left / nobody yet, in the game's own info log.
     // `puppet.ride` "notice" shows a test line whatever the session does.
@@ -1309,6 +1334,8 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickMarkers(now);
             stage="likes";stages.enter("likes",mod::nowUs());
             if(twin&&gameContext)tickLikes(now);
+            stage="online";stages.enter("online",mod::nowUs());
+            if(gameContext)tickOnline(now);
             stage="notices";stages.enter("notices",mod::nowUs());
             if(gameContext)tickNotices(now);
             stage="cargo command";stages.enter("cargo command",mod::nowUs());

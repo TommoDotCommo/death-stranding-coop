@@ -20,6 +20,7 @@ struct Config {
     bool partnerMarker=false; // the partner's map pin and the partner's pings from the start (marker.h); no ping key
     bool partnerGear=false;   // the porter's visible gear copied onto the partner's own body (gear.h)
     bool carryVisual=false;   // ds3: send what the porter carries, show what the partner carries (carry_visual.h)
+    std::string onlineServer;  // a private server's sign-in address for the game's online layer (online.h); empty = none
     unsigned presenceLogMaxMiB=8;
     std::string shareEnvironment="off"; // "host": the host's time and rain; "rain": its rain only (weather.h)
     discovery::Options discoveryOptions;
@@ -29,4 +30,8 @@ Config parseConfig(const std::string&);
 // A numeric IPv4 address a co-op peer may have: loopback 127.0.0.0/8, or any unicast address (LAN, a VPN such as
 // Tailscale, or public). Refuses names, 0.0.0.0/8, broadcast, multicast and reserved 240/4. Host byte order.
 std::optional<uint32_t> peerAddress(const std::string&);
+// A private online server's sign-in address: "http://A.B.C.D:PORT/path" with A.B.C.D loopback (127/8) or exactly
+// `peer` (host byte order), and a path of letters, digits and / _ - . only. Returns it unchanged, or nullopt.
+constexpr size_t OnlineAddressMax=120;
+std::optional<std::string> onlineAddress(const std::string& url,uint32_t peer);
 }

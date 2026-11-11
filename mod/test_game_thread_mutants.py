@@ -22,6 +22,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('gear',['CARGO','HIDDEN','NESTED','STALE_WORLD','VISIBILITY','SLOTS','FLICKER','ORDINAL','MIXED','RESEND','FIELDS'],['gear_test.cpp','gear.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
           ('nametag',['MARKUP','STILL','ORDER'],['nametag_test.cpp','nametag.cpp','discovery.cpp','../core/core.cpp']),
           ('notice',['BOUND','LEFT','ALONE_ONCE','NAME_WAIT','WORLD','GAP','AWAY_SETTLE','BACK_PAIRED','LIKE_ICON','JOIN_HOLD'],['notice_test.cpp','notice.cpp','nametag.cpp','discovery.cpp','../core/core.cpp']),
+          ('online',['HOST_ANY','PATH_ANY','ASK_BUSY','ASK_FOREVER','ASK_GAP'],['online_test.cpp','online.cpp','config.cpp','discovery.cpp']),
           ('likes',['GAP','CAP'],['likes_test.cpp','likes.cpp','discovery.cpp','../core/core.cpp']),
           ('stack',['EXTRA','LEAK','COLUMN'],['cargo_stack_test.cpp','cargo_stack.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
           ('outfit',['COUNT','SKIP','RESEND','ELEMENTS'],['outfit_test.cpp','outfit.cpp','discovery.cpp']),
