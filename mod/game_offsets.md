@@ -4751,10 +4751,26 @@ Observed:
   `e` PileStone (cairn), `o` Road (23-character ids), `x` Mushroom, `g` ChiralBridge, `j` JumpStand. Ids starting
   with a capital (`B`, `L`) are in the second list.
 
-Derived: a served object does persist; the rain shelters were taken down by the game after it had made them, at
-positions chosen without knowing the ground, so its own placement rules are the likely cause (not shown).
+- Uploads. The third argument of `CreateConstruction` (the bool at request `+640`) is the upload flag: with it set,
+  a `PlayerLadder` built outdoors was uploaded at once with
+  `{"x":9,"y":7,"m":22123,"t":"l","px":…,"py":…,"pz":…,"rx":…,"ry":…,"rz":…,"exp":5,"q":226,"st":"0","p":0,"lp":0}`:
+  positions and angles (degrees) times 10^5 with `exp` 5, `m` the area's `aid`, `x`/`y` a grid cell. Without the
+  flag nothing is uploaded.
+- The game reads an object's kind from the first letter of the id the server answers with. An id not starting with
+  the type letter gave type 24 (none) in the builder's list, state Removed, and a `deleteObject` two seconds after
+  the upload. With ids of the game's own shape (the letter and 12 characters) the ladder stayed: state 2 in the
+  first list, no delete.
+- A kind the area's request did not ask for is refused: a second copy of the same save asked for no ladders (the
+  area holds its full number), and a ladder served anyway went to Fail in each of the five arrays.
+- A `PlayerRainShelter` built the same way was uploaded (`"t":"n"`, only `rz` set, `"st":""`); a second copy as
+  another player received it, made a `NetRainShelter` record at its place and removed it after about three seconds
+  (state Removed), like the hand-made ones. The builder's own shelter was in construction state 0.
 
-Unknown: the exact rule that removed the shelters; the letters of the remaining kinds (zipline, catapult, truck,
-signboard, highway); what distinguishes the five arrays and the second list; the grid `m`; the key names of the
-`lookup` answer; and what makes the game upload a structure (no object upload has been seen yet).
+Derived: a served object does persist, and the game uploads what is built with the flag; ladders and cairns work
+both ways. Rain shelters are taken down by the receiving game after it has made them, with genuine upload data too;
+the cause is unknown (the builder's shelter being unfinished is a candidate).
+
+Unknown: why received shelters are removed; the letters of the remaining kinds (zipline, catapult, truck,
+signboard, highway); what distinguishes the five arrays and the second list; the grid cell `x`/`y`; the key names of
+the `lookup` answer; and whether a build through the game's own menu sets the same flag (assumed, not seen).
 

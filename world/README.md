@@ -6,7 +6,8 @@ publisher's service and holds none of its keys; modded copies stay refused there
 
 Status (2026-11-11): the game signs in and stays signed in, two copies are two players, and built objects are stored
 and handed to the other players of an area. Live: cairns one player built on the server were activated in another
-player's game and stayed. The game uploading its own buildings has not been seen yet (see "Not done").
+player's game and stayed, and a ladder the game built with its upload flag was uploaded, kept and found by the
+other player on the server (see "Not done" for what is missing).
 
 ## Run
 
@@ -55,8 +56,9 @@ prefix and the bearer token.
 
 ## Not done
 
-- Uploads: a ladder made through the mod's test command is not uploaded by the game; a build through the game's own
-  menus has not been driven yet, so `createObject` has only been called by tests.
+- A build through the game's own menus has not been driven yet (the upload was made with `CreateConstruction` and
+  its upload flag). A game only takes the kinds its area still has room for: two copies of a crowded save exchange
+  no ladders. Rain shelters are made by the receiving game and taken down again.
 - Positions are `px, py, pz` divided by 10 to the power `exp` (2 when missing: centimetres), in the game's x, y, z.
   The server stores and returns what the builder sent.
 - Roads, highway resources, missions (lost cargo and shared lockers), wasted cargo, rankings, profiles, relationships.
