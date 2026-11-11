@@ -35,4 +35,8 @@ with tempfile.TemporaryDirectory() as d:
         r=c.getresponse();assert r.status==200 and len(json.loads(r.read())['objects'])==1
     finally:
         p.kill();p.wait()
+    # --idle-exit: a server nobody asks anything leaves by itself.
+    port=free_port();p=subprocess.Popen([exe,'--port',str(port),'--idle-exit','1'],stdout=subprocess.PIPE,text=True)
+    try:assert p.wait(timeout=20)==0
+    finally:p.kill()
 print('server socket test passed')

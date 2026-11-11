@@ -12,17 +12,19 @@ other player on the server (see "Not done" for what is missing).
 ## Run
 
 ```
-coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] [--log events.log] [--trace calls.log]
+coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] [--log events.log] [--trace calls.log] [--idle-exit SECONDS]
 ```
 
 - `--bind`: the address to listen on (default loopback). For a partner on another PC, the address he reaches you at.
 - `--data`: the world file, written after every change (temporary file, then rename). Without it nothing is kept.
 - `--prefix`: a secret first path element. Requests without it get 404 and change nothing. Use one whenever the
   server listens beyond loopback: the Steam ticket is not checked, so the prefix is what makes someone a player.
+- `--idle-exit SECONDS`: leave when no game has asked anything for that long (the launcher starts it with six hours).
 - `--trace`: every call with its body, for research. Bodies name other accounts (the game looks up the Steam
   friends list); keep the file private. The sign-in ticket is never written.
 
-Each copy of the game gets the address in its `mod.json` (`mod/README.md`, "A private online server"):
+The launcher does all of this for a session when "Shared world" is on in its Settings (`launcher/README.md`). By
+hand, each copy of the game gets the address in its `mod.json` (`mod/README.md`, "A private online server"):
 
 ```
 "online_server": "http://127.0.0.1:8089/SECRET/auth/ds"             one Steam account per player
@@ -62,4 +64,4 @@ prefix and the bearer token.
 - Positions are `px, py, pz` divided by 10 to the power `exp` (2 when missing: centimetres), in the game's x, y, z.
   The server stores and returns what the builder sent.
 - Roads, highway resources, missions (lost cargo and shared lockers), wasted cargo, rankings, profiles, relationships.
-- Running inside the launcher, and the launcher writing `online_server` for both players.
+- The guest's launcher is not told whether the host turned the shared world on (both tick the box).

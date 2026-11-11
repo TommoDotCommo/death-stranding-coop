@@ -15,14 +15,14 @@ std::unique_ptr<Network> net;
 LaunchOptions options;
 fs::path settingsFile,executable;
 int selectedTab=0,choice=0;
-bool lan=true,tailscale=true,privacy=false,initializing=true,joinAfterScan=false,joinScanStarted=false,remembered=false;
+bool lan=true,tailscale=true,privacy=false,sharedWorld=false,initializing=true,joinAfterScan=false,joinScanStarted=false,remembered=false;
 std::string joinQuery;
 unsigned port=49000;
 std::wstring player=L"Porter",gameFolder;
 std::string pasted,lastState,lastRows;
 uint32_t requestedSecret=0,lastScan=0;
 std::vector<HWND> controls[4];
-enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose};
+enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World};
 HWND child(int id){return GetDlgItem(window,id);}
 std::wstring text(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(n+1,0);GetWindowTextW(h,s.data(),n+1);s.resize(n);return s;}
 std::string utf8(const std::wstring& s){if(s.empty())return {};int n=WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),nullptr,0,nullptr,nullptr);std::string v(n,0);WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),v.data(),n,nullptr,nullptr);return v;}
@@ -36,7 +36,7 @@ void saveSettings(){
     if(initializing)return;
     std::string name=utf8(player),game=utf8(gameFolder);
     if(name.find_first_of("\r\n")!=std::string::npos||game.find_first_of("\r\n")!=std::string::npos)return;
-    atomicWrite(settingsFile,"[launcher]\nname="+name+"\ngame="+game+"\nchoice="+std::to_string(choice)+"\nport="+std::to_string(port)+"\nlan="+std::to_string(lan)+"\ntailscale="+std::to_string(tailscale)+"\nprivacy="+std::to_string(privacy)+"\n");
+    atomicWrite(settingsFile,"[launcher]\nname="+name+"\ngame="+game+"\nchoice="+std::to_string(choice)+"\nport="+std::to_string(port)+"\nlan="+std::to_string(lan)+"\ntailscale="+std::to_string(tailscale)+"\nprivacy="+std::to_string(privacy)+"\nworld="+std::to_string(sharedWorld)+"\n");
 }
 Session chosenSession(){Session s;s.name=utf8(player);s.port=port;return s;}
 void render();
@@ -92,8 +92,8 @@ void render(){
         set(Status,wtext(net->status));refreshRows();
     }
     if(selectedTab==1){place(210,30,120,w-60,65);place(211,30,200,w-60,180);place(OpenSaves,30,400,(w-75)/2,40);place(BackUp,45+(w-75)/2,400,(w-75)/2,40);}
-    if(selectedTab==2){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(Lan,30,270,w-60,30);place(Tailscale,30,310,w-60,30);place(Privacy,30,350,w-60,30);place(Protocol,30,410,w-60,40);place(222,30,475,w-60,80);
-        bool edit=!net->lobby;for(int id:{GamePath,Port,Lan,Tailscale,Privacy})EnableWindow(child(id),edit);}
+    if(selectedTab==2){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(Lan,30,270,w-60,30);place(Tailscale,30,310,w-60,30);place(Privacy,30,350,w-60,30);place(World,30,390,w-60,30);place(Protocol,30,440,w-60,40);place(222,30,500,w-60,80);
+        bool edit=!net->lobby;for(int id:{GamePath,Port,Lan,Tailscale,Privacy,World})EnableWindow(child(id),edit);}
     if(selectedTab==3){place(230,30,120,w-60,240);place(Guide,30,390,w-60,40);place(Home,30,445,w-60,40);place(Diagnose,30,500,w-60,40);}
 }
 void copyInvite(){
@@ -170,7 +170,7 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
                 if(id==Copy)copyInvite();
                 if(id==Leave){net->leave();render();}
                 if(id==Ready){net->setReady();render();}
-                if(id==Lan||id==Tailscale||id==Privacy){auto checked=SendMessageW(child(id),BM_GETCHECK,0,0)==BST_CHECKED;if(id==Lan)lan=checked;if(id==Tailscale)tailscale=checked;if(id==Privacy)privacy=checked;saveSettings();}
+                if(id==Lan||id==Tailscale||id==Privacy||id==World){auto checked=SendMessageW(child(id),BM_GETCHECK,0,0)==BST_CHECKED;if(id==Lan)lan=checked;if(id==Tailscale)tailscale=checked;if(id==Privacy)privacy=checked;if(id==World){sharedWorld=checked;options.sharedWorld=checked;}saveSettings();}
                 if(id==Protocol){registerHandler(executable);MessageBoxW(h,L"Invite links now open this launcher for your Windows account.",L"Invite links",MB_OK);}
                 if(id==OpenSaves){fs::create_directories(options.data/"redirect-data");ShellExecuteW(h,L"open",(options.data/"redirect-data").c_str(),nullptr,nullptr,SW_SHOWNORMAL);}
                 if(id==BackUp){if(!backupAllowed(net->lobby,gameRunning(gameFolder)))throw std::runtime_error("Leave the lobby and close the game before backing up.");auto dest=options.data/"backups"/std::to_string(std::time(nullptr));backup(options.data,dest);MessageBoxW(h,(L"Co-op saves backed up to:\n"+dest.wstring()).c_str(),L"Backup complete",MB_OK);}
@@ -199,8 +199,8 @@ void buildControls(){
     control(1,OpenSaves,L"BUTTON",L"Open co-op save folder");control(1,BackUp,L"BUTTON",L"Back up co-op saves");
     label(2,220,L"Launcher / game folder (applies next start)\nSteam mode must use the folder registered with Steam.");control(2,GamePath,L"EDIT",gameFolder.c_str(),ES_AUTOHSCROLL);
     label(2,221,L"Network / host UDP port (49000..49014)");control(2,Port,L"EDIT",std::to_wstring(port).c_str(),ES_NUMBER|ES_AUTOHSCROLL);
-    control(2,Lan,L"BUTTON",L"Find games on my network",BS_AUTOCHECKBOX);control(2,Tailscale,L"BUTTON",L"Find friends on Tailscale",BS_AUTOCHECKBOX);control(2,Privacy,L"BUTTON",L"Invite only (host decides)",BS_AUTOCHECKBOX);
-    SendMessageW(child(Lan),BM_SETCHECK,lan?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Tailscale),BM_SETCHECK,tailscale?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Privacy),BM_SETCHECK,privacy?BST_CHECKED:BST_UNCHECKED,0);
+    control(2,Lan,L"BUTTON",L"Find games on my network",BS_AUTOCHECKBOX);control(2,Tailscale,L"BUTTON",L"Find friends on Tailscale",BS_AUTOCHECKBOX);control(2,Privacy,L"BUTTON",L"Invite only (host decides)",BS_AUTOCHECKBOX);control(2,World,L"BUTTON",L"Shared world (experimental; both players turn it on): each other's ladders and cairns through the game's own online layer",BS_AUTOCHECKBOX);
+    SendMessageW(child(Lan),BM_SETCHECK,lan?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Tailscale),BM_SETCHECK,tailscale?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Privacy),BM_SETCHECK,privacy?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(World),BM_SETCHECK,sharedWorld?BST_CHECKED:BST_UNCHECKED,0);
     control(2,Protocol,L"BUTTON",L"Open deathstranding-coop invite links in this launcher");label(2,222,L"Settings are saved on change. Each game uses two adjacent UDP ports.\nCo-op networking is always enforced offline. Other co-op rules, voice, controller navigation and router mapping are not available yet.");
     label(3,230,(L"Death Stranding co-op 0.1.0-dev\nSteam Director's Cut build 13300582\n\nExperimental; not a playable release. Native Windows launcher.\nCo-op mod standard: Play, Saves, Settings, About; DS invites and LAN/Tailscale discovery.\n\nInvite/discovery reference code: coop-mod-kit (MIT).\nNot affiliated with Kojima Productions or the game's publishers.\n\nWire version: "+wtext(wireVersion())).c_str());
     control(3,Guide,L"BUTTON",L"Quick guide (F1)");control(3,Home,L"BUTTON",L"Project and issue tracker");control(3,Diagnose,L"BUTTON",L"Save diagnostics for a bug report");
@@ -214,14 +214,15 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         player=read(L"name",L"Porter");gameFolder=read(L"game",steamGame().c_str());
         choice=int(GetPrivateProfileIntW(L"launcher",L"choice",0,settingsFile.c_str()));if(choice<0||choice>2)choice=0;
         port=GetPrivateProfileIntW(L"launcher",L"port",49000,settingsFile.c_str());if(port<49000||port>49014)port=49000;
-        lan=GetPrivateProfileIntW(L"launcher",L"lan",1,settingsFile.c_str());tailscale=GetPrivateProfileIntW(L"launcher",L"tailscale",1,settingsFile.c_str());privacy=GetPrivateProfileIntW(L"launcher",L"privacy",0,settingsFile.c_str());
-        bool registerOnly=false,devStart=false,diagnosticsOnly=false;std::string devPeer="127.0.0.1";uint32_t devSession=1;
+        lan=GetPrivateProfileIntW(L"launcher",L"lan",1,settingsFile.c_str());tailscale=GetPrivateProfileIntW(L"launcher",L"tailscale",1,settingsFile.c_str());privacy=GetPrivateProfileIntW(L"launcher",L"privacy",0,settingsFile.c_str());sharedWorld=GetPrivateProfileIntW(L"launcher",L"world",0,settingsFile.c_str())!=0;
+        bool registerOnly=false,devStart=false,diagnosticsOnly=false,forceWorld=false;std::string devPeer="127.0.0.1";uint32_t devSession=1;
         int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);if(!argv)throw std::runtime_error("Cannot read launcher arguments.");
         for(int i=1;i<argc;++i){std::wstring a=argv[i];auto value=[&](){if(++i>=argc)throw std::runtime_error("Missing launcher option value.");return std::wstring(argv[i]);};
             if(a==L"--dev-direct")options.direct=true;
             else if(a==L"--game-dir")gameFolder=value();
             else if(a==L"--data-dir")options.data=value();
             else if(a==L"--prepare-only")options.prepareOnly=true;
+            else if(a==L"--shared-world")forceWorld=true;
             else if(a==L"--register-protocol")registerOnly=true;
             else if(a==L"--diagnostics")diagnosticsOnly=true;
             else if(a==L"--dev-start")devStart=true;
@@ -232,11 +233,13 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
             else if(a.rfind(L"deathstranding-coop://",0)==0){pasted=utf8(a);choice=1;}
             else throw std::runtime_error("Unknown launcher option.");
         }LocalFree(argv);
+        if(forceWorld)sharedWorld=true;
+        options.sharedWorld=sharedWorld;
         auto defaultData=known(FOLDERID_LocalAppData)/"DeathStrandingCoop";
         if(!options.direct&&!equalPath(options.data,defaultData))throw std::runtime_error("Custom data folders require --dev-direct.");
         if(devStart&&!options.direct)throw std::runtime_error("--dev-start requires --dev-direct.");
         if(options.direct&&equalPath(options.data,defaultData)&&!environment(L"COOP_MODULE_INSTANCE").empty())options.data=environment(L"COOP_MODULE_INSTANCE");
-        wchar_t self[32768];GetModuleFileNameW(nullptr,self,32768);executable=self;
+        wchar_t self[32768];GetModuleFileNameW(nullptr,self,32768);executable=self;options.world=executable.parent_path()/L"coop-world.exe";
         if(registerOnly){registerHandler(executable);return 0;}
         // Headless: write the report and exit (no window), for a player who cannot get as far as the About tab.
         if(diagnosticsOnly){options.game=gameFolder;saveDiagnostics();return 0;}

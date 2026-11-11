@@ -24,6 +24,30 @@ static void safeAncestors(const std::filesystem::path& path) {
 #endif
     }
 }
+unsigned worldPort(const Session& s){return 49100+(s.port-49000);}
+std::string worldPrefix(const Session& s){return "w"+std::to_string(s.secret);}
+namespace {bool onePc(const Session& s){auto a=mod::peerAddress(s.peer);return a&&(*a>>24)==127;}}
+std::string worldAddress(const Session& s){
+#ifndef MUTANT_WORLD_GUEST_ADDRESS
+    std::string at=s.host?"127.0.0.1":s.peer;
+#else
+    std::string at="127.0.0.1";
+#endif
+    std::string who;
+#ifndef MUTANT_WORLD_ONE_ACCOUNT
+    if(onePc(s))who=s.host?"/k/host":"/k/guest";
+#endif
+    return "http://"+at+":"+std::to_string(worldPort(s))+"/"+worldPrefix(s)+who+"/auth/ds";
+}
+std::vector<std::string> worldArguments(const Session& s,const std::string& dataFile){
+    if(!s.host||!s.sharedWorld||s.solo)return {};
+#ifndef MUTANT_WORLD_BIND
+    std::string bind=onePc(s)?"127.0.0.1":"0.0.0.0";
+#else
+    std::string bind="0.0.0.0";
+#endif
+    return {"--port",std::to_string(worldPort(s)),"--bind",bind,"--prefix",worldPrefix(s),"--data",dataFile,"--idle-exit","21600"};
+}
 std::string config(const Session& s) {
     if(s.port<49000||s.port>49014||!s.secret||!mod::peerAddress(s.peer))throw std::runtime_error("Use a unicast IPv4 peer and host port 49000..49014.");
     if(s.name.empty()||s.name.size()>32)throw std::runtime_error("Your name must have 1..32 characters.");
@@ -42,7 +66,12 @@ std::string config(const Session& s) {
 #else
     const std::string play="\"self_tick\":true";
 #endif
-    std::string json="{\"role\":\""+std::string(host?"host":"client")+"\",\"peer\":\""+s.peer+"\",\"slot\":"+std::to_string(slot+(s.host?0:1))+",\"peer_slot\":"+std::to_string(slot+(s.host?1:0))+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)+",\"required\":true,\"logging\":true,"+play+",\"discovery_sha256\":\""+mod::discovery::PinnedHash+"\"}\n";
+#ifndef MUTANT_WORLD_SOLO
+    const std::string world=s.sharedWorld&&!s.solo?",\"online_server\":\""+worldAddress(s)+"\"":"";
+#else
+    const std::string world=s.sharedWorld?",\"online_server\":\""+worldAddress(s)+"\"":"";
+#endif
+    std::string json="{\"role\":\""+std::string(host?"host":"client")+"\",\"peer\":\""+s.peer+"\",\"slot\":"+std::to_string(slot+(s.host?0:1))+",\"peer_slot\":"+std::to_string(slot+(s.host?1:0))+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)+",\"required\":true,\"logging\":true,"+play+world+",\"discovery_sha256\":\""+mod::discovery::PinnedHash+"\"}\n";
     mod::parseConfig(json); // Use the production schema before writing anything.
     return json;
 }

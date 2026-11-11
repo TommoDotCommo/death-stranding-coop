@@ -50,7 +50,7 @@ inline std::string fileHash(const fs::path& path) {
     if(!ok)throw std::runtime_error("Cannot read the game executable. Check the game folder and try again.");
     std::string out;for(auto b:result){out+="0123456789abcdef"[b>>4];out+="0123456789abcdef"[b&15];}return out;
 }
-struct LaunchOptions {fs::path game,data;bool direct=false,prepareOnly=false;};
+struct LaunchOptions {fs::path game,data,world;bool direct=false,prepareOnly=false,sharedWorld=false;};   // world: coop-world.exe (beside the launcher)
 inline release_startup::Values launchValues(const LaunchOptions& o,const Session& s) {
     release_startup::Values v;
     auto put=[&](const char* key,const fs::path& fallback) {auto p=o.direct?environment(release_startup::wide(key).c_str()):fs::path();v[key]=asciiPath(p.empty()?fallback:p);};
@@ -66,7 +66,7 @@ inline release_startup::Values launchValues(const LaunchOptions& o,const Session
     return v;
 }
 inline void launchGame(const LaunchOptions& o,Session s,bool solo=false) {
-    s.solo=solo;
+    s.solo=solo;s.sharedWorld=o.sharedWorld;
     auto exe=o.game/L"ds.exe";
     if(gameRunning(o.game))throw std::runtime_error("This game copy is already running. Close it before starting a new session.");
     if(fileHash(exe)!=mod::discovery::PinnedHash)throw std::runtime_error("This game build is unsupported. Use Steam Director's Cut build 13300582.");
@@ -80,6 +80,15 @@ inline void launchGame(const LaunchOptions& o,Session s,bool solo=false) {
         for(auto& e:values)if(!SetEnvironmentVariableW(wtext(e.first).c_str(),wtext(e.second).c_str()))throw std::runtime_error("Cannot set the isolated child environment.");
     } else atomicWrite(o.data/"launcher-session.ini",bytes);
     if(o.prepareOnly)return;
+    // Shared world: the host's launcher runs the group's server (a second start cannot take the port and leaves).
+    if(auto arguments=worldArguments(s,asciiPath(o.data/"world"/"world.json"));!arguments.empty()) {
+        if(!fs::is_regular_file(o.world))throw std::runtime_error("The shared-world server (coop-world.exe) is missing beside the launcher. Repair the package or turn the shared world off in Settings.");
+        fs::create_directories(o.data/"world");
+        std::wstring command=L"\""+o.world.wstring()+L"\"";for(auto& a:arguments)command+=L" \""+wtext(a)+L"\"";
+        STARTUPINFOW startup{};startup.cb=sizeof(startup);PROCESS_INFORMATION process{};
+        if(!CreateProcessW(o.world.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&startup,&process))throw std::runtime_error("Windows could not start the shared-world server.");
+        CloseHandle(process.hThread);CloseHandle(process.hProcess);
+    }
     if(o.direct) {
         std::wstring command=L"\""+exe.wstring()+L"\"";STARTUPINFOW startup{};startup.cb=sizeof(startup);PROCESS_INFORMATION process{};
         if(!CreateProcessW(exe.c_str(),command.data(),nullptr,nullptr,FALSE,0,nullptr,o.game.c_str(),&startup,&process))throw std::runtime_error("Windows could not start the test copy. Check the folder and try again.");

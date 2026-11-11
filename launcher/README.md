@@ -56,6 +56,25 @@ nobody has arrived yet (`notices`), the host's rain and timefall in the guest's 
 Automatic Continue and the virtual pad stay off. Existing environment-driven test
 tools still work independently of this app.
 
+## Shared world (experimental, off by default)
+
+Settings has "Shared world". With it on, the game's own online layer runs on a server of the group's own
+(`../world/README.md`): the host's launcher starts `coop-world.exe` (beside the launcher) when the session starts, and
+each game gets the server's address as `online_server`. Both players turn it on; nothing tells the guest that the
+host has not.
+
+- The server listens on TCP port 49100 + the session's slot (49100 for UDP port 49000), on loopback when both games
+  are on one PC and on all addresses otherwise. The first path element is `w` and the session secret, so only the
+  session's players reach it. The host's Windows Firewall has to let `coop-world.exe` receive on that port.
+- The host's game signs in at `127.0.0.1`, the guest's at the host's address. On one PC both games are one Steam
+  account, so the address also names the player (`/k/host`, `/k/guest`).
+- The world file is `world\world.json` in the co-op data folder; it is kept between sessions. The server leaves by
+  itself six hours after the last request.
+- Not in a solo session. `--shared-world` turns it on for one start from the command line.
+
+What it gives today is small: ladders and cairns each player builds are stored and handed to the other game, which
+takes only the kinds its area still has room for (`../STATUS.md`).
+
 ## Diagnostics for a bug report
 
 About → **Save diagnostics for a bug report** (or `deathstranding-coop.exe --diagnostics`, which shows no window)

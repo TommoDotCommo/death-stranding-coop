@@ -15,7 +15,18 @@ struct Session {
     unsigned port=49000;
     uint32_t secret=1;
     bool solo=false;   // "Play solo": nobody is expected, so the session notices (and their "no partner yet" hint) stay off
+    // Opt-in: the game's own online layer (other players' structures, signs, likes) on the group's own server
+    // (world/README.md). The host's launcher runs the server; both games get its address as `online_server`.
+    bool sharedWorld=false;
 };
+// The shared world's server for a session: its TCP port (49100 + the session's slot), the secret path element both
+// players derive from the session secret, the address a game signs in to (the host's game on loopback, the guest's at
+// the host; on one PC, where both games are the same Steam account, the address names the player), and the server's
+// command line (host only; it listens beyond loopback only when the partner is on another PC).
+unsigned worldPort(const Session&);
+std::string worldPrefix(const Session&);
+std::string worldAddress(const Session&);
+std::vector<std::string> worldArguments(const Session&,const std::string& dataFile);
 std::string config(const Session&);
 void atomicWrite(const std::filesystem::path&,const std::string&);
 void writeConfig(const std::filesystem::path& data,const Session&);

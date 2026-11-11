@@ -14,6 +14,20 @@ int main(int argc,char** argv) {
         check(c.role==(host?"host":"client")&&c.slot==(host?3:4)&&c.peerSlot==(host?4:3),"role and exact ports");
         check(c.peer==s.peer&&c.session==s.secret&&c.required&&!c.selfTick&&c.gameThread&&c.puppetProbe&&c.partner=="own"&&c.partnerGear&&c.partnerMarker&&c.partnerVehicle&&c.notices&&c.shareEnvironment=="rain"&&!c.autoContinue&&!c.virtualPad,"session and play defaults");}
     {auto solo=s;solo.solo=true;check(!mod::parseConfig(launcher::config(solo)).notices&&mod::parseConfig(launcher::config(s)).notices,"no session notices in a solo session");}
+    {   // Shared world (opt-in): the host's game signs in on loopback, the guest's at the host; one secret path for both.
+        auto h=s;h.host=true;h.sharedWorld=true;auto g=h;g.host=false;
+        check(mod::parseConfig(launcher::config(s)).onlineServer.empty(),"no online server unless asked");
+        check(mod::parseConfig(launcher::config(h)).onlineServer=="http://127.0.0.1:49103/w305419896/auth/ds","host signs in on loopback");
+        check(mod::parseConfig(launcher::config(g)).onlineServer=="http://100.90.1.2:49103/w305419896/auth/ds","guest signs in at the host");
+        auto a=launcher::worldArguments(h,"D");
+        check(a==std::vector<std::string>{"--port","49103","--bind","0.0.0.0","--prefix","w305419896","--data","D","--idle-exit","21600"},"server command line");
+        check(launcher::worldArguments(g,"D").empty(),"only the host runs the server");
+        auto off=h;off.sharedWorld=false;check(launcher::worldArguments(off,"D").empty(),"no server unless asked");
+        auto solo=h;solo.solo=true;check(launcher::worldArguments(solo,"D").empty()&&mod::parseConfig(launcher::config(solo)).onlineServer.empty(),"no shared world in a solo session");
+        auto lh=h;lh.peer="127.0.0.1";auto lg=g;lg.peer="127.0.0.1";   // one PC: one Steam account, so the address names the player
+        check(mod::parseConfig(launcher::config(lh)).onlineServer=="http://127.0.0.1:49103/w305419896/k/host/auth/ds"&&mod::parseConfig(launcher::config(lg)).onlineServer=="http://127.0.0.1:49103/w305419896/k/guest/auth/ds","two players on one PC");
+        check(launcher::worldArguments(lh,"D")[3]=="127.0.0.1","loopback only on one PC");
+    }
     for(auto peer:{"0.0.0.0","example.com","255.255.255.255","192.168.01.2","224.0.0.1"}) {s.peer=peer;rejects([&]{launcher::config(s);});}s.peer="127.0.0.1";
     for(auto port:{0u,48999u,49015u,65535u}) {s.port=port;rejects([&]{launcher::config(s);});}s.port=49000;
     for(auto name:{"", "x\"", "x\\", "x\n", "012345678901234567890123456789012"}){s.name=name;rejects([&]{launcher::config(s);});}s.name="Porter";

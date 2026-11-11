@@ -57,13 +57,16 @@ class InstallUninstall(Base):
     def test_optional_launcher_is_installed_verified_and_uninstalled(self):
         launcher = self.root/'launcher.exe'
         launcher.write_bytes(b'MZ fake launcher')
+        world = self.root/'world.exe'
+        world.write_bytes(b'MZ fake world server')
         self.package = self.root/'package-with-launcher'
         make_package.build_package(self.package, '1.0', self.root/'src-1.0/proxy.dll',
-                                   self.root/'src-1.0/mod.dll', launcher=launcher,
+                                   self.root/'src-1.0/mod.dll', launcher=launcher, world=world,
                                    builds=[dict(name='test build', sha256=EXE_HASH)])
         before = snapshot(self.game)
         self.install()
         self.assertEqual((self.game/'deathstranding-coop.exe').read_bytes(), launcher.read_bytes())
+        self.assertEqual((self.game/'coop-world.exe').read_bytes(), world.read_bytes())   # beside the launcher, which starts it
         self.assertEqual(ci.status(self.package, self.game, self.data)['state'], ci.UP_TO_DATE)
         self.uninstall()
         self.assertEqual(snapshot(self.game), before)

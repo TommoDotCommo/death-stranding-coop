@@ -1,5 +1,6 @@
 // coop-world: the players' own server for the game's shared world (README.md). One process, one world file.
 //   coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] [--log events.log] [--trace calls.log]
+//              [--idle-exit SECONDS]
 // Plain HTTP/1.1 with keep-alive, one thread per connection, bounded sizes. It only answers; it never connects out.
 #include "front.h"
 #include <atomic>
@@ -26,7 +27,7 @@ static void closeSocket(sock_t s){close(s);}
 #endif
 namespace {
 constexpr size_t MaxHeader=16*1024,MaxBody=4*1024*1024;constexpr int MaxConnections=32,IdleSeconds=60;
-std::mutex outLock;std::atomic<int> connections{0};
+std::mutex outLock;std::atomic<int> connections{0};std::atomic<int64_t> lastRequest{0};
 std::string dataPath,logPath,tracePath;
 void line(const std::string& text){
     std::lock_guard<std::mutex> g(outLock);std::cout<<text<<std::endl;
@@ -67,6 +68,7 @@ void serve(sock_t s,world::Front& front,world::World& w){
         while(buffer.size()<length){auto n=recv(s,chunk,sizeof chunk,0);if(n<=0)return;buffer.append(chunk,size_t(n));}
         r.body=buffer.substr(0,length);buffer.erase(0,length);
         world::Reply reply;
+        lastRequest=nowSeconds();
         try{reply=front.handle(r,nowSeconds());}
         catch(const std::exception& e){reply.status=500;reply.body="{}";line(std::string("error: ")+e.what());}
         save(w);
@@ -80,12 +82,12 @@ void serve(sock_t s,world::Front& front,world::World& w){
 }
 }
 int main(int argc,char** argv){
-    std::string bind="127.0.0.1",prefix;int port=0;
+    std::string bind="127.0.0.1",prefix;int port=0;long idleExit=0;
     for(int i=1;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc){std::cerr<<"missing value for "<<a<<"\n";std::exit(2);}return std::string(argv[++i]);};
         if(a=="--port")port=std::atoi(next().c_str());else if(a=="--bind")bind=next();else if(a=="--data")dataPath=next();
-        else if(a=="--prefix")prefix=next();else if(a=="--log")logPath=next();else if(a=="--trace")tracePath=next();
-        else{std::cerr<<"usage: coop-world --port N [--bind ADDRESS] [--data FILE] [--prefix SECRET] [--log FILE] [--trace FILE]\n";return 2;}}
+        else if(a=="--prefix")prefix=next();else if(a=="--log")logPath=next();else if(a=="--trace")tracePath=next();else if(a=="--idle-exit")idleExit=std::atol(next().c_str());
+        else{std::cerr<<"usage: coop-world --port N [--bind ADDRESS] [--data FILE] [--prefix SECRET] [--log FILE] [--trace FILE] [--idle-exit SECONDS]\n";return 2;}}
     if(port<1||port>65535){std::cerr<<"--port 1..65535 required\n";return 2;}
     for(char c:prefix)if(!std::isalnum(static_cast<unsigned char>(c))&&c!='-'&&c!='_'){std::cerr<<"--prefix: letters, digits, - and _ only\n";return 2;}
 #ifdef _WIN32
@@ -105,6 +107,10 @@ int main(int argc,char** argv){
     setsockopt(listener,SOL_SOCKET,SO_REUSEADDR,reinterpret_cast<const char*>(&yes),sizeof yes);
 #endif
     if(::bind(listener,reinterpret_cast<sockaddr*>(&address),sizeof address)!=0||listen(listener,16)!=0){std::cerr<<"cannot listen on "<<bind<<":"<<port<<"\n";return 1;}
+    if(idleExit>0){
+        // Started by a launcher for one session: leave when no game has asked anything for this long.
+        lastRequest=nowSeconds();
+        std::thread([idleExit,&w]{while(true){std::this_thread::sleep_for(std::chrono::seconds(5));if(nowSeconds()-lastRequest.load()>=idleExit){save(w);line("idle: leaving");std::_Exit(0);}}}).detach();}
     line("coop-world listening on "+bind+":"+std::to_string(port)+(prefix.empty()?"":" (secret prefix set)"));
     while(true){
         sock_t s=accept(listener,nullptr,nullptr);

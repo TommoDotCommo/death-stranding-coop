@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
         if result.returncode != 1 or 'launcher oracle:' not in result.stderr:
             raise SystemExit(f'SURVIVED or crashed {name}: {result.returncode}\n{result.stdout}\n{result.stderr}')
         return name
-    for name in mutants.parallel(one, ['CONFIG_ROLE', 'CONFIG_PLAY', 'LOBBY_SECRET', 'BACKUP_LINKS', 'OUTPUT_LINKS',
+    for name in mutants.parallel(one, ['CONFIG_ROLE', 'CONFIG_PLAY', 'WORLD_GUEST_ADDRESS', 'WORLD_ONE_ACCOUNT', 'WORLD_BIND', 'WORLD_SOLO', 'LOBBY_SECRET', 'BACKUP_LINKS', 'OUTPUT_LINKS',
                                       'MISSING_CONFIG_CLOSES', 'TICKET_TARGET', 'TICKET_EXPIRY', 'TICKET_NETWORK',
                                       'BACKUP_RUNNING', 'NESTED_LAB', 'NESTED_RELEASE',
                                       'DIAG_SECRET', 'DIAG_ADDRESS', 'DIAG_USER', 'DIAG_BOUND', 'FIREWALL_BLOCK_WINS']):

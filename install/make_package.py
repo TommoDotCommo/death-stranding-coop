@@ -2,6 +2,7 @@
 """Build the drop-in package folder: proxy + mod + coop-mod.json (J5). Usage:
 
     make_package.py --out DIR --version V --proxy redirect/build/avrt.dll --mod mod/build/mod.dll
+                    [--launcher launcher/build/deathstranding-coop.exe] [--world world/build/coop-world.exe]
 """
 import argparse
 import json
@@ -15,12 +16,14 @@ GAME = dict(name='DEATH STRANDING DIRECTOR\'S CUT', steam_appid=1850570, exe=['d
                          sha256='9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b')])
 
 
-def build_package(out, version, proxy, mod, proxy_name='avrt.dll', builds=None, launcher=None):
+def build_package(out, version, proxy, mod, proxy_name='avrt.dll', builds=None, launcher=None, world=None):
     out = Path(out)
     out.mkdir(parents=True)
     layout = [('game', proxy_name, proxy), ('data', 'redirect-data/mod/mod.dll', mod)]
     if launcher is not None:
         layout.append(('game', 'deathstranding-coop.exe', launcher))
+    if world is not None:   # the shared-world server the launcher starts for a host (world/README.md)
+        layout.append(('game', 'coop-world.exe', world))
     files = []
     for root, rel, source in layout:
         dest = out/rel
@@ -45,5 +48,6 @@ if __name__ == '__main__':
     p.add_argument('--proxy', required=True)
     p.add_argument('--mod', required=True)
     p.add_argument('--launcher', help='built deathstranding-coop.exe to include beside ds.exe')
+    p.add_argument('--world', help='built coop-world.exe to include beside the launcher')
     a = p.parse_args()
-    build_package(a.out, a.version, a.proxy, a.mod, launcher=a.launcher)
+    build_package(a.out, a.version, a.proxy, a.mod, launcher=a.launcher, world=a.world)
