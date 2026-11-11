@@ -4682,6 +4682,35 @@ Result: 129 classes named `OTGC…` with 470 members, 23 of them without a JSON 
 | `OTGCFindQpidObjectsResponseSet` | `ro` roads, `m` missions, `oa`, `ob`, `od`, `oe`, `op`: object arrays |
 
 Object types on the wire are the value names of the enum `OTGCCommonObjectType` (`0x4d82c30`), in value order:
-`m z c p a r l s w b t v k n h e u i o x g j d`. Which structure each letter is, what the five object arrays of an
-answer mean, and the units of the positions are unknown: no object upload has been seen yet.
+`m z c p a r l s w b t v k n h e u i o x g j d`.
+
+Observed (static): the function that fills an upload's query (`OTGCCreateObjectQuery`: grid `x`, `y`, `m` and type `t`;
+the switch at `0x2caebe6` on the construction type byte at `+0x34`, tables `0x2cafe64` and `0x2cafe28`) picks the
+letter from the structure's `EDSConstructionPointType` (the type number of the construction table, "Structures"
+above; enum descriptor `0x4c33550`, 49 names):
+
+| Construction type | Letter |
+|---|---|
+| 3 `PlayerSafetyHouse` | `s` |
+| 6 `PlayerPost`, 7 `NetPost` | `p` |
+| 9 `PlayerWatchTower` | `w` |
+| 12 (unnamed, `_#1`) | `a` |
+| 15 `PlayerCharger` | `c` |
+| 18 `PlayerRainShelter` | `n` |
+| 25 `PlayerLadder` | `l` |
+| 28 `PlayerFieldRope` | `r` |
+| 36 `RoadRebuilder` | `h` |
+| 22 `PlayerZipline`, 31 and 34 (bridges), 41, 44 (unnamed) | own code blocks with extra data; letters not read yet (`b`, `g` and `j` are set in that function) |
+
+Every other construction type takes the default path (no upload query). The game's own list of online object kinds is
+the enum `EDSNetSyncObjectType` (`0x4dfaba0`, 24 names: Post, Zipline, Charger, Catapult, SafetyHouse, WatchTower,
+Bridge, RainShelter, FieldRope, Ladder, VehicleBike, VehicleTruck, Signboard, NationalRoute, PileStone, Road,
+PersonalBaggage, DeliveryBaggage, SupplyMission, Mushroom, ChiralBridge, JumpStand, SpeedCar, CatapultShell).
+
+Observed (live): with an Episode 3 save at Lake Knot the game asked `findQpidObjects` for area `q` 226 (`aid` 22123)
+with the counts `t` 33, `x` 3, `b` 2, `v` 4, `n` 1, `h` 5, `e` 5: an area asks only for some kinds. A ladder made by
+calling `CreateConstruction` (the mod's test command) was not uploaded within four minutes.
+
+Unknown: the letters of the remaining kinds, what the five object arrays of an answer mean, the units of positions
+and of the grid, and what makes the game upload a structure (no object upload has been seen yet).
 
