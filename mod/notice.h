@@ -14,7 +14,7 @@ struct Api {
     // true: queued in the game's info log; false: no HUD now. icon: PlainIcon or LikeIcon (the game's own icon numbers).
     std::function<bool(const std::u16string& text,uint8_t icon)> show;
 };
-enum class Kind : uint8_t {Joined,Left,Alone,Away,Back,Liked,Down,Up,Caught,Free};
+enum class Kind : uint8_t {Joined,Left,Alone,Away,Back,Liked,Down,Up,Caught,Free,Call};
 constexpr uint8_t PlainIcon=0,LikeIcon=3;   // "20 minutes have passed." / "{1} Like(s) received from {0}."
 uint8_t icon(Kind);
 // The partner's name is cleaned like the name tag's (printable, no markup characters); "Your partner" without one.
@@ -36,6 +36,9 @@ public:
     // What has happened to the partner (presence flags Down and Caught, vitals.h): told once when it starts and once
     // when it is over, only while connected; a partner who leaves in that state just leaves.
     void status(uint64_t nowMs,bool connected,bool down,bool caught);
+    // The partner calls out (presence flag Call): told when it starts, at most once every CallGapMs.
+    static constexpr uint64_t CallGapMs=8000;
+    void call(uint64_t nowMs,bool connected,bool calling);
     // Something the partner did that is worth a line of its own (Liked: his like has just been given to this porter).
     void event(Kind kind,const std::string& partnerName,uint64_t nowMs){add(kind,partnerName.empty()?lastName_:partnerName,nowMs);}
     size_t pending() const {return pending_.size();}
@@ -45,7 +48,7 @@ private:
     void add(Kind kind,const std::string& name,uint64_t now);
     Api api_;std::function<void(const std::string&)> log_;std::deque<Entry> pending_;
     bool started_=false,connected_=false,everConnected_=false,aloneTold_=false,away_=false,awayTold_=false,joining_=false;uint64_t worldSince_=0,lastShown_=0,awaySince_=0;bool inWorld_=false;unsigned shown_=0;
-    std::string lastName_;bool down_=false,caught_=false;
+    std::string lastName_;bool down_=false,caught_=false,calling_=false,callTold_=false;uint64_t lastCall_=0;
 };
 // Pinned build: the UI owner global and the UI clock global (its double at +0xd0), DSUIInfoLogHUDLogic's vtable, its
 // queue (100 entries of 0x28 bytes, count at +0xfa0) and the slim lock (SRWLOCK) the game takes around an add. A notice

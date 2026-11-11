@@ -27,6 +27,12 @@ int main(){
     Reporter c;c.flags(1000,alive);c.flags(2000,caught);CHECK(c.flags(2000+Reporter::HoldMs,caught)==ds::Caught);
     State both=dead;both.caught=true;c.flags(5000,both);CHECK(c.flags(5000+Reporter::ClearMs,both)==ds::Down);   // dead wins
     Reporter u;CHECK(u.flags(1000,unknown)==0&&u.flags(9000,unknown)==0);
+    // A call-out: only the shout's own pair of values; raised at once, held, and once per call.
+    CHECK(calling(10.f,4.f));CHECK(!calling(10.f,0.f));CHECK(!calling(3.f,4.f));CHECK(!calling(std::nullopt,4.f));CHECK(!calling(10.f,std::nullopt));
+    CallReporter cr;CHECK(cr.flags(1000,false)==0);CHECK(cr.flags(2000,true)==ds::Call);CHECK(cr.flags(2100,false)==ds::Call);   // a 0.1 s call still shows
+    CHECK(cr.flags(2000+CallReporter::CallHoldMs,false)==0);
+    CHECK(cr.flags(5000,true)==ds::Call);CHECK(cr.flags(5000+CallReporter::CallHoldMs,true)==0);   // a held key is one call
+    CHECK(cr.flags(9000,false)==0);CHECK(cr.flags(9100,true)==ds::Call);
     if(failures)return 1;
     std::puts("vitals tests passed");return 0;
 }

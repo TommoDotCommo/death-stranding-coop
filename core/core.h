@@ -18,8 +18,9 @@ enum class Error { None, Length, Magic, Version, Checksum, Reserved, Kind, Role,
 const char* reason(Error);
 enum Flag : uint16_t { Sprint=1, Crouch=2, Cargo=4, Vehicle=8, PrivateRoom=16, Teleport=32, ProgressMismatch=64,
     Down=128,     // the porter is dead or collapsed (mod/vitals.h)
-    Caught=256 }; // the porter is being dragged or held by BTs
-constexpr uint16_t FlagMask=511;
+    Caught=256,   // the porter is being dragged or held by BTs
+    Call=512 };   // the porter is calling out (the shout key)
+constexpr uint16_t FlagMask=1023;
 struct State {
     std::array<double,3> position{}, velocity{}; // metres, metres/second; Y is up in this adapter convention
     double yaw=0, phase=0; // radians [-pi,pi], normalised [0,1]

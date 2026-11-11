@@ -1042,6 +1042,9 @@ or Caught (dead wins); it is dropped a second after the state ends. A porter tha
 dead. With `notices` the partner's info log tells it once when it starts and once when it is over ("is down", "is
 back on his feet", "has been caught by BTs", "got free"). The log line `VITALS known= dead= caught= crouch=` appears
 on every change. While the partner is down his body is laid on its back where he fell (`puppet.h` `laidDown`: the body's transform, lifted 18 cm; the game's own death controls do not move the body) and stands again when he is up; the log says `BODY laid down` / `BODY upright again`. The stand-in partner reports the states with `--down ON OFF` and `--caught ON OFF`.
-Game-free: `vitals_test.cpp` (three mutants), the notices in `notice_test.cpp` (two more mutants), the flags in the
+A call-out (the shout key) is read the same way from two upper-body animation values and sent as the presence flag
+Call, kept for 1.5 s so a short call still arrives; with `notices` the partner reads "is calling out" (once per call,
+at most every 8 s). The log says `CALL the porter calls out` / `CALL over`.
+Game-free: `vitals_test.cpp` (five mutants), the notices in `notice_test.cpp` (three more mutants), the flags in the
 core's tests.
 

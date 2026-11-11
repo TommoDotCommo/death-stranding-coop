@@ -449,6 +449,7 @@ struct Runtime final:ds::Transport {
     std::optional<mod::online::Api> onlineApi;bool onlineTried=false,onlinePointed=false;Background<mod::online::Api> onlineJob;
     mod::online::Requester onlineAsk;mod::online::State onlineSeen;
     mod::vitals::Reporter vitalsReport;mod::vitals::State vitalsSeen;uint64_t vitalsAt=0;uint16_t vitalsFlags=0;bool partnerLaid=false;
+    mod::vitals::CallReporter callReport;mod::puppet::FloatVariable callTypeVar,callForceVar;bool callSeen=false;
     void tickOnline(uint64_t now) {
         if(config.onlineServer.empty())return;
 #ifndef MOD_FAKE_NETWORK
@@ -488,6 +489,7 @@ struct Runtime final:ds::Transport {
         bool connected=core&&core->connected();
         // Away: he reports an event or private room, or no pose of his has arrived (his game is at the title screen or
         // loading: without this a join was told at once, then "away" and "back" while he loaded).
+        notices->call(now,connected,connected&&(cache.remote.state.flags&ds::Call));
         notices->status(now,connected,connected&&(cache.remote.state.flags&ds::Down),connected&&(cache.remote.state.flags&ds::Caught));
         notices->tick(now,poseAvailable&&!inEvent,connected,partnerName,connected&&((cache.remote.state.flags&ds::PrivateRoom)||!cache.remote.visible));
     }
@@ -1248,6 +1250,11 @@ struct Runtime final:ds::Transport {
                     vitalsAt=now+100;auto v=mod::vitals::read(*sampler,anchor.entity);vitalsFlags=vitalsReport.flags(now,v);
                     if(!(v==vitalsSeen)){vitalsSeen=v;note(("VITALS known="+std::to_string(v.known)+" dead="+std::to_string(v.dead)+" caught="+std::to_string(v.caught)+" crouch="+std::to_string(v.crouch)+"\n").c_str());}}
                 cache.local.flags|=vitalsFlags;
+                // A call-out (the shout key), from the upper-body layer's two values.
+                {bool callingNow=mod::vitals::calling(mod::puppet::readFloatVariable(*sampler,anchor.entity,animatorVtable,"Basic_Upper_Type",callTypeVar),
+                                                     mod::puppet::readFloatVariable(*sampler,anchor.entity,animatorVtable,"Basic_Upper_Force_Type",callForceVar));
+                    if(callingNow!=callSeen){callSeen=callingNow;note(callingNow?"CALL the porter calls out\n":"CALL over\n");}
+                    cache.local.flags|=callReport.flags(now,callingNow);}
                 stages.enter("start",mod::nowUs());
             }
             if(cache.available) {

@@ -25,6 +25,7 @@ std::u16string text(Kind kind,const std::string& partnerName){
     case Kind::Up:return name+u" is back on his feet.";
     case Kind::Caught:return name+u" has been caught by BTs.";
     case Kind::Free:return name+u" got free.";
+    case Kind::Call:return name+u" is calling out.";
     }
     return {};
 }
@@ -57,6 +58,15 @@ void Notifier::status(uint64_t now,bool connected,bool down,bool caught){
         else add(Kind::Free,lastName_,now);
 #endif
     }
+}
+void Notifier::call(uint64_t now,bool connected,bool calling){
+    if(!connected){calling_=false;return;}
+    bool started=calling&&!calling_;calling_=calling;
+    if(!started)return;
+#ifndef MUTANT_NOTICE_CALL_GAP
+    if(callTold_&&now-lastCall_<CallGapMs)return;
+#endif
+    callTold_=true;lastCall_=now;add(Kind::Call,lastName_,now);
 }
 void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& partnerName,bool partnerAway){
     if(!partnerName.empty())lastName_=partnerName;
@@ -120,7 +130,7 @@ void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& 
 #endif
     if(api_.show&&api_.show(text(e.kind,e.name),icon(e.kind))){
         ++shown_;lastShown_=now;if(e.kind==Kind::Joined)joining_=false;
-        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free"};
+        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call"};
         log_(std::string("NOTICE shown: ")+names[unsigned(e.kind)]+"\n");
         pending_.pop_front();return;
     }

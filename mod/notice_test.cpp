@@ -36,6 +36,14 @@ int main(){
         run(false,true,false);CHECK(h.shown.size()==8&&h.shown[7]==u"Higgs left the session.");       // leaves while down: just leaves
         run(true,false,false);CHECK(h.shown.size()==9&&h.shown[8]==u"Higgs joined your session.");    // and no "back on his feet" on return
     }
+    {   // The partner calls out: told when it starts, not while it lasts, and not again within the gap.
+        Hud h;auto n=h.make();uint64_t t=1000;auto run=[&](bool calling,int ticks){for(int i=0;i<ticks;++i){n.call(t,true,calling);n.tick(t+=50,true,true,"Higgs");}};
+        run(false,80);CHECK(h.shown.size()==1);
+        run(true,30);CHECK(h.shown.size()==2&&h.shown[1]==u"Higgs is calling out.");
+        run(true,100);CHECK(h.shown.size()==2);
+        run(false,10);run(true,10);CHECK(h.shown.size()==2);                       // again within the gap: not told
+        run(false,int(Notifier::CallGapMs/50)+10);run(true,80);CHECK(h.shown.size()==3);
+    }
     {   // No name ever: told after the wait, as "Your partner".
         Hud h;auto n=h.make();uint64_t t=1000;n.tick(t,true,true,"");
         for(;t<1000+Notifier::NameMs-50;t+=50)n.tick(t,true,true,"");
