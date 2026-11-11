@@ -4545,8 +4545,16 @@ Unknown:
   this trial did not have.
 - Two copies under one Steam account would be one player to the server. Whether the server can tell them apart
   is untested.
-- Why injection in the first 100 ms fails. A simple scan for RIP-relative references to the auth pointer and to
-  the `clientConfig` strings found none, so the sign-in code reaches them another way (a table or a member).
+- Why injection in the first 100 ms fails.
+
+Static leads for the sign-in gate (2026-11-11, nothing called): no code references the auth pointer `0x4dfa130`
+directly. A pointer table at `0x4dfa1f0` lists it first, next to three environment names (`prod-pc`,
+`prod-qa-pc`, `dev-stable-pc`) and the reflected enum `EOTGCAuthProvider` (`OTGC` is the prefix of the online
+request types). Code at `0x348ccdc` and `0x348ccef` reads that table and `0x348cb3d` reads the neighbouring
+string pointer `0x4dfa178`; the enum's descriptor `0x4dfa0b8` is referenced from `0x346fd8d`, `0x34709a4`,
+`0x3470cc4`, `0x3470f2a` and `0x34afb49`. The function around `0x348cb3d..0x348ccef` is therefore the likely
+builder of the sign-in request, and its callers are where to look for what decides to sign in. `/clientConfig`
+is referenced from `0x2afe15d`.
 
 Next step for an integration of our own: set the auth address from `mod.json` in the mod itself (the pointer
 above), and replace the two data functions with our own AES-GCM (Windows CNG has it), instead of a second
