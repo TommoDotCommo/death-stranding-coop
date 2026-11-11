@@ -4711,6 +4711,37 @@ Observed (live): with an Episode 3 save at Lake Knot the game asked `findQpidObj
 with the counts `t` 33, `x` 3, `b` 2, `v` 4, `n` 1, `h` 5, `e` 5: an area asks only for some kinds. A ladder made by
 calling `CreateConstruction` (the mod's test command) was not uploaded within four minutes.
 
-Unknown: the letters of the remaining kinds, what the five object arrays of an answer mean, the units of positions
-and of the grid, and what makes the game upload a structure (no object upload has been seen yet).
+### What the game does with a served object (2026-11-11, live, one test copy, Episode 3 save)
+
+Method: a logging server on loopback answered `findQpidObjects` for area 226 with hand-made `OTGCObjectResponse`
+objects of type `n`; state was read from the process (the construction table, and the lists below).
+
+Observed:
+
+- The online object manager is the global at `0x7c1abf0`. At `+0x1e8` it has a map from area id to three lists
+  (24-byte entries, area id at `+8`, value at `+0x10`; lists at value `+8/+0x10`, `+0x18/+0x20`, `+0x28/+0x30`). A list
+  element has the object id string at `+8`, its `EDSNetSyncObjectType` at `+0x10` and its state at `+0x11`
+  (`EDSNetSyncObjectState`, descriptor `0x4dfa2f0`: 0 Downloaded, 1 Activating, 2 Activated, 3 Zombie, 4 Fail,
+  5 AlwaysFail, 6 Removed). The set-state function is `0x349a040` (lists, id, state, area); states from 4 up move the
+  element to the third list. With the save alone, area 226 had 89 elements in state 2 in the first list; their ids
+  are the type letter and 12 characters (some `o` and 22).
+- Served objects of type `n` arrive as type 7 (RainShelter): `n` is the rain shelter.
+- The position is `l[i] / 10^exp` in the game's x, y, z (static: `0x3482500`, three divisions by `pow(10, exp)`;
+  an `exp` of zero or less counts as 2). `exp` is a decimal exponent, not a time. An object whose `l` does not have
+  exactly three numbers is set to AlwaysFail (`0x34824ea`). Live: with `exp` 2 and `l` in centimetres a construction
+  record of type 19 (`NetRainShelter`) appeared at exactly the served position.
+- An area asks for a number per kind (`ct`); with `n` 1 only the first of five served shelters was tried, the other
+  four went to Fail.
+- Before that, an object with at least `net.param +0xf0` (3 when absent) tags equal to one fixed string is set to
+  Fail (`0x3482150`).
+- The created construction record (state 0) was gone again within about three seconds and the element went to state
+  6 (Removed), at each of four outdoor positions. The removal method is the manager's virtual at `0x3487d70`
+  (state 6, or 3 when its flag is set).
+- All five arrays of the answer (`oa`, `ob`, `od`, `oe`, `op`) are read; an object in any of them is kept. After the
+  objects arrive the game sends `lookup` with their creators' ids.
+
+Unknown: why the game removes the created structure again (candidates: the creator lookup's answer, whose key names
+are not in the reflection data; missing material or level data; a rule about the area's existing structures); the
+letters of the remaining kinds; what distinguishes the five arrays; the grid `m`; and what makes the game upload a
+structure (no object upload has been seen yet).
 
