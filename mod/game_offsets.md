@@ -4526,13 +4526,17 @@ Observed (live, one test copy, enforce network policy, 2026-11-11):
 - In that run the game made exactly one outbound attempt of its own, `WinHttpConnect clientconfig.api.wwsga.me`,
   refused by the policy. It never tried the auth address, before or after the injection, so the local server
   received no request from the game.
-- The real saves were unchanged after both runs.
+- Second trial the same day, with a real Steam web API key on the server and an Episode 3 save: the client DLL
+  injected about 2.5 s after process start (once this project's mod had started) loaded without a crash, so the
+  auth address was replaced before the title screen. The game loaded into gameplay and again made only the one
+  refused `clientconfig.api.wwsga.me` attempt; the server received no request.
+- The real saves were unchanged after all runs.
 
 Derived:
 - A private server can sit behind the existing network policy with no change to it: loopback and listed partner
   addresses already pass, and the publisher's hosts stay refused.
-- The game does not attempt to sign in while its configuration request is refused (or it signs in only at a
-  point this run did not reach). Which one is not established.
+- The game does not attempt to sign in while its configuration request is refused, with either an Episode 1 or
+  an Episode 3 save. That the refused request is the cause is a guess; nothing here shows it.
 
 Unknown:
 - What makes the game start the sign-in (the title screen's online step, the result of the `clientConfig`
@@ -4541,7 +4545,8 @@ Unknown:
   this trial did not have.
 - Two copies under one Steam account would be one player to the server. Whether the server can tell them apart
   is untested.
-- Why the early injection fails.
+- Why injection in the first 100 ms fails. A simple scan for RIP-relative references to the auth pointer and to
+  the `clientConfig` strings found none, so the sign-in code reaches them another way (a table or a member).
 
 Next step for an integration of our own: set the auth address from `mod.json` in the mod itself (the pointer
 above), and replace the two data functions with our own AES-GCM (Windows CNG has it), instead of a second
