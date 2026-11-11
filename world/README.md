@@ -38,7 +38,7 @@ loopback, a LAN or a VPN.
 |---|---|
 | `GET …/auth/ds?provider=steam&display_name=&code=TICKET` | the player (stable id per account) and a session: token and gateway address |
 | `…/gate/e/getVersion` | major 0, minor 12 (the game refuses anything else) |
-| `createObject`, `updateObject`, `deleteObject` | stored; only the builder changes or removes an object |
+| `createObject`, `updateObject`, `deleteObject` | stored; the new id is the type letter and 12 characters (the game reads the kind from that letter); only the builder changes or removes an object |
 | `findQpidObjects` | the other players' objects in that area, at most the asked number per type, never the asker's own |
 | `getQpidObjects`, `sendLike`, `lookup`, `reverseLookup` | from the stored objects and players |
 | `getRankingSchedules`, `getWastedBaggages`, `findMissions`, `getOrderedMissions`, `getLikeHistory`, … | empty lists |

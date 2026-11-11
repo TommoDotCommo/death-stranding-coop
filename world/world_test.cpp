@@ -28,6 +28,10 @@ int main(){
     // Ann builds; Bob finds it in that area, Ann does not get her own back, another area is empty.
     auto made=w.call(ta,"createObject","{\"data\":\"{\"x\":1,\"y\":2,\"m\":3,\"t\":\"l\",\"px\":10,\"py\":20,\"pz\":30,\"rx\":0,\"ry\":90,\"rz\":0,\"q\":226,\"lp\":0}\"}",100);
     CHECK(made.status==200);auto obj=json::parse(made.body);auto id=obj.get("id").string();
+    CHECK(id.size()==13&&id[0]=='l');   // the game reads the kind from the id's first letter
+    CHECK(w.call(ta,"createObject","{\"t\":\"ladder\",\"q\":226}",100).status==400);CHECK(w.call(ta,"createObject","{\"t\":\"L\",\"q\":226}",100).status==400);
+    {auto other=json::parse(w.call(ta,"createObject","{\"t\":\"e\",\"q\":7}",100).body).get("id").string();CHECK(other.size()==13&&other[0]=='e'&&other.substr(1)!=id.substr(1));
+     CHECK(w.call(ta,"deleteObject","{\"id\":\""+other+"\"}",100).status==200);}
     CHECK(!id.empty()&&obj.get("c").string()==playerId("steam-a")&&obj.get("l").items().size()==3&&obj.get("l").items()[1].integer()==20&&obj.get("ut").integer()==100);
     auto find=[&](const std::string& token,const char* body){return json::parse(w.call(token,"findQpidObjects",body,200).body).get("n").get("oa").items().size();};
     CHECK(find(tb,"{\"q\":226,\"o\":{\"ct\":{\"l\":5}}}")==1);

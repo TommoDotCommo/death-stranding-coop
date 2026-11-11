@@ -85,7 +85,24 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
 #ifndef MUTANT_WORLD_OBJECT_CAP
         if(mine>=MaxObjectsPerPlayer){note("refused createObject: "+me.id+" has too many");return refuse(403,"too-many","too many objects");}
 #endif
-        Object o;o.id="o"+std::to_string(nextObject_++)+"_"+me.id.substr(5,6);o.creator=me.id;o.post=in;o.updated=now;o.likes=in.get("lp").integer();
+        // The game reads an object's kind from the first letter of its id (its own ids are the type letter and 12
+        // characters): an id of any other shape makes the builder's game delete its upload at once.
+        const std::string type=in.get("t").string();
+#ifndef MUTANT_WORLD_ID_LETTER
+        if(type.size()!=1||type[0]<'a'||type[0]>'z')return refuse(400,"bad-object","object type must be one letter");
+#endif
+        Object o;
+        do{
+            const char* digits="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+#ifndef MUTANT_WORLD_ID_LETTER
+            o.id=type;
+#else
+            o.id="o";
+#endif
+            uint64_t h=fnv(me.id,nextObject_++*0x9e3779b97f4a7c15ull);
+            for(int i=0;i<12;++i){o.id+=digits[h%62];h/=62;if(i==5)h^=fnv(o.id,nextObject_);}
+        }while(objects_.count(o.id));
+        o.creator=me.id;o.post=in;o.updated=now;o.likes=in.get("lp").integer();
         auto& kept=objects_[o.id]=o;dirty_=true;note("object "+kept.id+" type "+in.get("t").string()+" in area "+std::to_string(in.get("q").integer())+" by "+me.name);
         return ok(objectResponse(kept));}
     if(name=="deleteObject"||name=="updateObject"){
