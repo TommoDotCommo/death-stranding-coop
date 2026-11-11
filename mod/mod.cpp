@@ -793,7 +793,7 @@ struct Runtime final:ds::Transport {
         } catch(const std::exception& e) {std::lock_guard<std::timed_mutex> guard(mutex);failed=true;failure=e.what();try{note(failure.c_str());}catch(...){}running=false;}
     }
     void init(const std::filesystem::path& path) {
-        config=mod::parseConfig(readConfig(path));mod::link::profile(config.link,linkProfile);
+        config=mod::parseConfig(readConfig(path));config.link=mod::link::chosen(config.link,std::getenv("COOP_LINK"));mod::link::profile(config.link,linkProfile);
         cache.progressReady=config.provider!="game";
         if(config.logging) {
 #ifdef _WIN32

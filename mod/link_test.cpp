@@ -30,5 +30,7 @@ int main() {
         CHECK(reordered);
     }
     CHECK(poor.lossPerMille>internet.lossPerMille&&poor.delayMinMs>internet.delayMinMs);
+    CHECK(chosen("none",nullptr)=="none"&&chosen("none","poor")=="poor"&&chosen("none","lan")=="none"&&chosen("none","")=="none");
+    CHECK(chosen("internet","poor")=="internet"&&chosen("poor",nullptr)=="poor");
     puts("link test ok");
 }

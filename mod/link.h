@@ -15,6 +15,16 @@ inline bool profile(const std::string& name,Profile& out) {
     if(name=="poor") {out={120,100,201};return true;}
     return false;
 }
+// Which profile a run uses: the config's, or, when the config names none, a valid one from the environment
+// (COOP_LINK, so a test run can put any setup on the stand-in link without changing its config). Anything else: none.
+inline std::string chosen(const std::string& configured,const char* environment) {
+    Profile p;
+#ifndef MUTANT_LINK_ENV_WINS
+    if(configured!="none") return configured;
+#endif
+    if(environment&&profile(environment,p)) return environment;
+    return configured;
+}
 inline uint32_t mix(uint64_t n) {n^=n>>33;n*=0xff51afd7ed558ccdULL;n^=n>>33;n*=0xc4ceb9fe1a85ec53ULL;n^=n>>33;return uint32_t(n);}
 inline Fate fate(const Profile& p,bool impairment,uint64_t received,bool presence) {
     Fate f;

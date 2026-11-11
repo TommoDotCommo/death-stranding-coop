@@ -138,7 +138,8 @@ Both go to `instance/redirect-data/mod/mod.json` of their slot. `fault` is synth
 of two copies on one PC that stand in for an internet link. `link` (`"none"`, `"internet"`, `"poor"`; `link.h`) is the fuller stand-in: every
 received packet of every kind is lost or delayed by the profile (`internet`: 2 %, 40..80 ms; `poor`: 12 %, 100..300 ms), the same way in every
 run. The log says `LINK stand-in ...` at the start, `LINK ... lost N of M` every hundred losses, and `LINK partner shown N ms behind`
-whenever the presentation delay has moved by more than 30 ms (that line also appears on a real slow link).
+whenever the presentation delay has moved by more than 30 ms (that line also appears on a real slow link). When the config names no
+profile, the environment variable `COOP_LINK` may name one, so a test run can put any setup on the stand-in link.
 
 **Live exit test (the verifier).** Start both instances with these configs and load a game in each. The owner walks Sam in slot 0
 (a straight line of at least 20 m, then a turn on the spot) while slot 1 stands still, then the reverse. Slot 1's
