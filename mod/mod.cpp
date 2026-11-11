@@ -484,7 +484,9 @@ struct Runtime final:ds::Transport {
         if(!config.notices)return;
         if(!notices)notices=std::make_unique<mod::notice::Notifier>(*noticeApi,[this](const std::string& row){note(row.c_str());});
         bool connected=core&&core->connected();
-        notices->tick(now,poseAvailable&&!inEvent,connected,partnerName,connected&&(cache.remote.state.flags&ds::PrivateRoom));
+        // Away: he reports an event or private room, or no pose of his has arrived (his game is at the title screen or
+        // loading: without this a join was told at once, then "away" and "back" while he loaded).
+        notices->tick(now,poseAvailable&&!inEvent,connected,partnerName,connected&&((cache.remote.state.flags&ds::PrivateRoom)||!cache.remote.visible));
     }
     // --- A name over the partner (nametag.h): one of the game's hologram-name records above the partner body.
     // On with config partner_tag; `puppet.ride` "tag on" / "tag off" test it. The name is the partner's nickname.
