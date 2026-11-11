@@ -4448,7 +4448,7 @@ The update positions/restarts an instance through `0x1e0b020` and `0x1bc1e30` at
 
 Changed files: none. Ten pinned instruction assertions passed; executable hash remained unchanged; Git remained clean at the supplied start commit. No orchestrator refinements appeared in the inbox. No live checks, builds or test suite ran.
 
-**Status (2026-11-09):** nothing of this is wired. Crouching already reaches the partner body (`Crouch_Rate` from the presence crouch flag); the struggle and death poses, alert levels and voidouts stay parked (a gameplay crater must not be driven by partner events).
+**Status (2026-11-12):** the read-only detection is wired (`mod/vitals.h`: the dead bit, `Is_Dead`, `Is_Drag`, `Int_Is_GazerCatch`, and `Is_Crouch` as a check). Live: the control bytes are at the porter entity the mod already uses (`Is_Crouch` followed the stance key), and an alive porter read not dead and not caught; a real death or catch has not been observed. Earlier status (2026-11-09): nothing of this is wired. Crouching already reaches the partner body (`Crouch_Rate` from the presence crouch flag); the struggle and death poses, alert levels and voidouts stay parked (a gameplay crater must not be driven by partner events).
 
 ## Info log: the message feed, and a custom line in it (2026-11-10)
 

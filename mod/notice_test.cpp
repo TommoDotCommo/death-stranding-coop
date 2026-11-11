@@ -24,6 +24,18 @@ int main(){
         CHECK(h.shown.size()==2);                                                               // never "alone" after a partner
         CHECK(h.log.size()==2&&h.log[0]=="NOTICE shown: joined\n"&&h.log[1]=="NOTICE shown: left\n");
     }
+    {   // The partner goes down and gets up; BTs catch him and he gets free; caught and then down is not "got free".
+        Hud h;auto n=h.make();uint64_t t=1000;auto run=[&](bool connected,bool down,bool caught,int ticks=80){for(int i=0;i<ticks;++i){n.status(t,connected,down,caught);n.tick(t+=50,true,connected,"Higgs");}};
+        run(true,false,false);CHECK(h.shown.size()==1);                                              // joined
+        run(true,true,false);CHECK(h.shown.size()==2&&h.shown[1]==u"Higgs is down.");
+        run(true,true,false,200);CHECK(h.shown.size()==2);                                           // told once
+        run(true,false,false);CHECK(h.shown.size()==3&&h.shown[2]==u"Higgs is back on his feet.");
+        run(true,false,true);CHECK(h.shown.size()==4&&h.shown[3]==u"Higgs has been caught by BTs.");
+        run(true,false,false);CHECK(h.shown.size()==5&&h.shown[4]==u"Higgs got free.");
+        run(true,false,true);run(true,true,false);CHECK(h.shown.size()==7&&h.shown[6]==u"Higgs is down.");   // caught, then down
+        run(false,true,false);CHECK(h.shown.size()==8&&h.shown[7]==u"Higgs left the session.");       // leaves while down: just leaves
+        run(true,false,false);CHECK(h.shown.size()==9&&h.shown[8]==u"Higgs joined your session.");    // and no "back on his feet" on return
+    }
     {   // No name ever: told after the wait, as "Your partner".
         Hud h;auto n=h.make();uint64_t t=1000;n.tick(t,true,true,"");
         for(;t<1000+Notifier::NameMs-50;t+=50)n.tick(t,true,true,"");

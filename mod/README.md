@@ -1033,3 +1033,15 @@ The mod then does three things in the game (`online.h`; addresses in `game_offse
 The log says `ONLINE server …`, `ONLINE sign-in asked` and each change of the login task, with `(signed in)` at the
 end. Game-free tests: the address rules and the asking logic, five mutants (`online_test.cpp`).
 
+## The partner is down or caught (`vitals.h`, with `notices`)
+
+Every tenth of a second the mod reads, read-only, whether its porter is dead (the entity's dead bit or the animation
+control `Is_Dead`) or held by BTs (`Is_Drag`, `Int_Is_GazerCatch`), with the game's own predicate for a control byte
+(`game_offsets.md`, "Death, BTs and voidouts for the partner"). A state that lasts 0.4 s sets the presence flag Down
+or Caught (dead wins); it is dropped a second after the state ends. A porter that cannot be read is unknown, never
+dead. With `notices` the partner's info log tells it once when it starts and once when it is over ("is down", "is
+back on his feet", "has been caught by BTs", "got free"). The log line `VITALS known= dead= caught= crouch=` appears
+on every change. The stand-in partner reports the states with `--down ON OFF` and `--caught ON OFF`.
+Game-free: `vitals_test.cpp` (three mutants), the notices in `notice_test.cpp` (two more mutants), the flags in the
+core's tests.
+

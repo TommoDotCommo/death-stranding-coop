@@ -26,7 +26,7 @@ namespace {
 bool valid(const State& s) {
     for(double x:s.position) if(!std::isfinite(x)||std::abs(x)>100000) return false;
     for(double x:s.velocity) if(!std::isfinite(x)||std::abs(x)>100) return false;
-    return std::isfinite(s.yaw)&&std::abs(s.yaw)<=Pi+1e-9 && std::isfinite(s.phase)&&s.phase>=0&&s.phase<=1 && s.action<=31 && !(s.flags&~uint16_t(127)) && speed(s)<=100.02;
+    return std::isfinite(s.yaw)&&std::abs(s.yaw)<=Pi+1e-9 && std::isfinite(s.phase)&&s.phase>=0&&s.phase<=1 && s.action<=31 && !(s.flags&~FlagMask) && speed(s)<=100.02;
 }
 Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
     if(!b || (p.length && n!=WireSize)) return Error::Length;
@@ -135,7 +135,7 @@ bool sanitiseImpl(State& s,const Protection& p) {
     for(double& x:s.position) x=std::clamp(x,-100000.,100000.);
     for(double& x:s.velocity) x=std::clamp(x,-100.,100.);
     double v=speed(s); if(v>100) for(double& x:s.velocity) x*=100/v;
-    s.yaw=std::remainder(s.yaw,2*Pi); s.phase=std::clamp(s.phase,0.,1.); s.flags&=127; s.action=std::min<uint8_t>(s.action,31);
+    s.yaw=std::remainder(s.yaw,2*Pi); s.phase=std::clamp(s.phase,0.,1.); s.flags&=FlagMask; s.action=std::min<uint8_t>(s.action,31);
     bool riding=s.vehicle>0&&s.vehicle<=VehicleKindMax;
     for(double x:s.vehicleOffset) if(!std::isfinite(x)) riding=false;
     for(double x:s.vehicleAngles) if(!std::isfinite(x)) riding=false;

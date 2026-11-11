@@ -34,6 +34,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "cargo_stack.h"
 #include "likes.h"
 #include "online.h"
+#include "vitals.h"
 #include "nametag.h"
 #include "notice.h"
 #include "weather.h"
@@ -447,6 +448,7 @@ struct Runtime final:ds::Transport {
     // soon as the image is checked, and the game is asked to sign in while its login task is idle.
     std::optional<mod::online::Api> onlineApi;bool onlineTried=false,onlinePointed=false;Background<mod::online::Api> onlineJob;
     mod::online::Requester onlineAsk;mod::online::State onlineSeen;
+    mod::vitals::Reporter vitalsReport;mod::vitals::State vitalsSeen;uint64_t vitalsAt=0;uint16_t vitalsFlags=0;
     void tickOnline(uint64_t now) {
         if(config.onlineServer.empty())return;
 #ifndef MOD_FAKE_NETWORK
@@ -486,6 +488,7 @@ struct Runtime final:ds::Transport {
         bool connected=core&&core->connected();
         // Away: he reports an event or private room, or no pose of his has arrived (his game is at the title screen or
         // loading: without this a join was told at once, then "away" and "back" while he loaded).
+        notices->status(now,connected,connected&&(cache.remote.state.flags&ds::Down),connected&&(cache.remote.state.flags&ds::Caught));
         notices->tick(now,poseAvailable&&!inEvent,connected,partnerName,connected&&((cache.remote.state.flags&ds::PrivateRoom)||!cache.remote.visible));
     }
     // --- A name over the partner (nametag.h): one of the game's hologram-name records above the partner body.
@@ -1236,6 +1239,11 @@ struct Runtime final:ds::Transport {
                 // In the private room the game uses this porter's own double: tell the partner, whose core then hides us.
                 // Same for a game event or cutscene: the partner hides us instead of showing a porter in a cutscene pose.
                 if(anchor.entity&&twin&&(doubleBusy(anchor.entity)||inEvent))cache.local.flags|=ds::PrivateRoom;
+                // Down or caught by BTs (vitals.h), read ten times a second; the partner is told in his info log.
+                if(now>=vitalsAt){
+                    vitalsAt=now+100;auto v=mod::vitals::read(*sampler,anchor.entity);vitalsFlags=vitalsReport.flags(now,v);
+                    if(!(v==vitalsSeen)){vitalsSeen=v;note(("VITALS known="+std::to_string(v.known)+" dead="+std::to_string(v.dead)+" caught="+std::to_string(v.caught)+" crouch="+std::to_string(v.crouch)+"\n").c_str());}}
+                cache.local.flags|=vitalsFlags;
                 stages.enter("start",mod::nowUs());
             }
             if(cache.available) {

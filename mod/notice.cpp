@@ -21,6 +21,10 @@ std::u16string text(Kind kind,const std::string& partnerName){
     case Kind::Away:return name+u" is away (cutscene or private room).";
     case Kind::Back:return name+u" is back.";
     case Kind::Liked:return name+u" sent you a like.";
+    case Kind::Down:return name+u" is down.";
+    case Kind::Up:return name+u" is back on his feet.";
+    case Kind::Caught:return name+u" has been caught by BTs.";
+    case Kind::Free:return name+u" got free.";
     }
     return {};
 }
@@ -35,6 +39,24 @@ void Notifier::add(Kind kind,const std::string& name,uint64_t now){
     while(pending_.size()>=MaxPending)pending_.pop_front();
 #endif
     Entry e;e.kind=kind;e.name=name;e.since=now;e.nextTry=now;e.named=kind!=Kind::Joined||!name.empty();pending_.push_back(std::move(e));
+}
+void Notifier::status(uint64_t now,bool connected,bool down,bool caught){
+    if(!connected){down_=caught_=false;return;}
+#ifndef MUTANT_NOTICE_DOWN_ONCE
+    if(down!=down_){down_=down;add(down?Kind::Down:Kind::Up,lastName_,now);}
+#else
+    if(down){down_=true;add(Kind::Down,lastName_,now);}else if(down_){down_=false;add(Kind::Up,lastName_,now);}
+#endif
+    // Caught and then down is one story: "got free" is only told when he is not down.
+    if(caught!=caught_){
+        caught_=caught;
+        if(caught)add(Kind::Caught,lastName_,now);
+#ifndef MUTANT_NOTICE_FREE_DOWN
+        else if(!down)add(Kind::Free,lastName_,now);
+#else
+        else add(Kind::Free,lastName_,now);
+#endif
+    }
 }
 void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& partnerName,bool partnerAway){
     if(!partnerName.empty())lastName_=partnerName;
@@ -98,7 +120,7 @@ void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& 
 #endif
     if(api_.show&&api_.show(text(e.kind,e.name),icon(e.kind))){
         ++shown_;lastShown_=now;if(e.kind==Kind::Joined)joining_=false;
-        static const char* const names[]={"joined","left","alone","away","back","liked"};
+        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free"};
         log_(std::string("NOTICE shown: ")+names[unsigned(e.kind)]+"\n");
         pending_.pop_front();return;
     }
