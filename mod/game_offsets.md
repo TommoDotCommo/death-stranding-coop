@@ -4772,7 +4772,9 @@ Observed:
   `NetBridge30m` construction record at the builder's position to the decimetre; both were still there 30 s later and
   the builder's game was not given its own bridge back. Both records (the builder's and the net copy) were in
   construction state 0, as heavy structures made through `CreateConstruction` are until the next load ("Structures");
-  the bridge was not looked at on screen. Resting outdoors for six minutes and getting up produced no cairn upload.
+  on screen neither copy drew the bridge with its porter standing next to it (screenshots in both): a structure in
+  state 0 is not drawn. The pause menu's System page has a "Log In" item, greyed out while signed in: the title
+  menu's `OnLogin` is not the only place the game offers a sign-in. Resting outdoors for six minutes and getting up produced no cairn upload.
 - Likes. `OTGCGetLikeHistoryOneResponse` (missed by the first dump): `t` int64, `oid`, `lp`, `lp2` int, `uid` (from),
   `sc` int32 (summarised count), `lt` (like type). The game asks `getLikeHistory` once, about a minute after signing
   in, with `{"uid":"","since":0}`. Live: after another player's `sendLike` for a ladder this game had uploaded in an
