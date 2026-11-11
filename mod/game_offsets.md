@@ -4740,8 +4740,21 @@ Observed:
 - All five arrays of the answer (`oa`, `ob`, `od`, `oe`, `op`) are read; an object in any of them is kept. After the
   objects arrive the game sends `lookup` with their creators' ids.
 
-Unknown: why the game removes the created structure again (candidates: the creator lookup's answer, whose key names
-are not in the reflection data; missing material or level data; a rule about the area's existing structures); the
-letters of the remaining kinds; what distinguishes the five arrays; the grid `m`; and what makes the game upload a
-structure (no object upload has been seen yet).
+- The short-lived shelter record, watched every 50 ms: created, flag bytes `+0x92` 0x20 to 0x60 and `+0x93` 4 to 5,
+  `+0x97` 4 to 0 about a second later, gone after about two seconds; the same with material data (`mt`) supplied.
+  Positions far from every existing structure gave AlwaysFail and no record.
+- Five cairns (`t` `e`, `si` `{"r":1}`, the same positions): two went to the first list as Activated (state 2) and
+  stayed; three went to Fail. Then the same through `world/`: two cairns another player had built on `coop-world`
+  were Activated in the game and stayed, and one built for another area id never appeared.
+- Letters, from the 150 online objects the save holds (id letter against the element's type): `p` Post, `c` Charger,
+  `s` SafetyHouse, `w` WatchTower, `b` Bridge, `n` RainShelter, `r` FieldRope, `l` Ladder, `v` VehicleBike,
+  `e` PileStone (cairn), `o` Road (23-character ids), `x` Mushroom, `g` ChiralBridge, `j` JumpStand. Ids starting
+  with a capital (`B`, `L`) are in the second list.
+
+Derived: a served object does persist; the rain shelters were taken down by the game after it had made them, at
+positions chosen without knowing the ground, so its own placement rules are the likely cause (not shown).
+
+Unknown: the exact rule that removed the shelters; the letters of the remaining kinds (zipline, catapult, truck,
+signboard, highway); what distinguishes the five arrays and the second list; the grid `m`; the key names of the
+`lookup` answer; and what makes the game upload a structure (no object upload has been seen yet).
 

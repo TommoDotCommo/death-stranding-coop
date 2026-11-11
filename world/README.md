@@ -5,7 +5,8 @@ a small server of our own for that layer, so a co-op group shares one world of i
 publisher's service and holds none of its keys; modded copies stay refused there (network policy `enforce`).
 
 Status (2026-11-11): the game signs in and stays signed in, two copies are two players, and built objects are stored
-and handed to the other players of an area. What the game does with them is not verified yet (see "Not done").
+and handed to the other players of an area. Live: cairns one player built on the server were activated in another
+player's game and stayed. The game uploading its own buildings has not been seen yet (see "Not done").
 
 ## Run
 
@@ -54,7 +55,9 @@ prefix and the bearer token.
 
 ## Not done
 
-- Whether the game shows a served object: the first trial built a ladder through the mod's test command, which the
-  game does not upload. A build through the game's own menus is the next test.
+- Uploads: a ladder made through the mod's test command is not uploaded by the game; a build through the game's own
+  menus has not been driven yet, so `createObject` has only been called by tests.
+- Positions are `px, py, pz` divided by 10 to the power `exp` (2 when missing: centimetres), in the game's x, y, z.
+  The server stores and returns what the builder sent.
 - Roads, highway resources, missions (lost cargo and shared lockers), wasted cargo, rankings, profiles, relationships.
 - Running inside the launcher, and the launcher writing `online_server` for both players.
