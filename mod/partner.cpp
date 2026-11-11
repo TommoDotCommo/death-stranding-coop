@@ -17,6 +17,8 @@
 // presence carries the vehicle block (origin at the stand-in's feet, level, facing its way). --seat F R U (metres,
 // vehicle frame: forward, right, up) reports the stand-in at that seat above the vehicle origin, as a real rider is
 // (a truck driver measured live: 0.8 0.44 left, 1.95 up -> --seat 0.8 -0.44 1.95).
+// --flag BITS ON OFF: the partner also sets these presence flag bits (ds::Flag, e.g. 2 = crouch) from ON to OFF seconds
+// after connecting: for looking at how the body shows a state.
 // --down ON OFF, --caught ON OFF: from ON to OFF seconds after connecting the partner reports that he is down / caught
 // by BTs (presence flags Down, Caught).
 // --away ON OFF: from ON to OFF seconds after connecting the partner reports a game event or private room (presence
@@ -61,13 +63,14 @@ struct Shell final:ds::StateProvider,ds::Transport {
     ds::Progress readProgress() const override {return progress;}
     Follower follower;std::optional<Replay> replay;std::optional<ds::State> porter,mine;
     uint64_t started=0,last=0;double replayLoop=0;bool stickyTeleport=false;std::array<double,3> replayOrigin{};bool replayPlaced=false,whereRecorded=false;
-    uint8_t rideKind=0;bool riding=false,away=false,down=false,caught=false;std::array<double,3> seat{};
+    uint8_t rideKind=0;bool riding=false,away=false,down=false,caught=false,extra=false;uint16_t extraFlags=0;std::array<double,3> seat{};
     bool readLocal(ds::State& s) override {
         if(!mine)return false;
         s=*mine;if(stickyTeleport)s.flags|=ds::Teleport;
         if(away)s.flags|=ds::PrivateRoom;
         if(down)s.flags|=ds::Down;
         if(caught)s.flags|=ds::Caught;
+        if(extra)s.flags|=extraFlags;
         if(riding&&rideKind){
             // Game forward (sin yaw, cos yaw), right (cos yaw, -sin yaw), z up; adapter axes are (x, up, game y).
             double sy=std::sin(s.yaw),cy=std::cos(s.yaw),gx=seat[0]*sy+seat[1]*cy,gy=seat[0]*cy-seat[1]*sy;
@@ -107,7 +110,7 @@ struct CarryPrint final:mod::carry::Sink {
 int main(int argc,char** argv){
     unsigned slot=1,peerSlot=0;ds::Role role=ds::Role::Client;uint64_t session=0;double seconds=3600,dropAfter=-1,takeAfter=-1,takeOwnAfter=-1,buildAfter=-1,unbuildAfter=-1;uint32_t dropItem=0,buildType=0;
     std::string replayFile,stopFile;Shell shell;ds::ProgressPolicy progressPolicy=ds::ProgressPolicy::Warn;std::optional<mod::carry::Summary> carrySpec;double carryDropAfter=-1;
-    std::optional<ds::Environment> fixedEnvironment;double rideOn=-1,rideOff=-1,awayOn=-1,awayOff=-1,downOn=-1,downOff=-1,caughtOn=-1,caughtOff=-1;std::optional<float> fixedRain;
+    std::optional<ds::Environment> fixedEnvironment;double rideOn=-1,rideOff=-1,awayOn=-1,awayOff=-1,downOn=-1,downOff=-1,caughtOn=-1,caughtOff=-1,flagOn=-1,flagOff=-1;std::optional<float> fixedRain;
     for(int i=1;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc)usage(("missing value after "+a).c_str());return std::string(argv[++i]);};
         if(a=="--slot")slot=unsigned(std::stoul(next()));else if(a=="--peer-slot")peerSlot=unsigned(std::stoul(next()));
@@ -132,6 +135,8 @@ int main(int argc,char** argv){
         else if(a=="--seat"){for(auto& x:shell.seat)x=std::stod(next());}
         else if(a=="--away"){awayOn=std::stod(next());awayOff=std::stod(next());if(!(awayOn>=0&&awayOff>awayOn))usage("away needs ON < OFF seconds");}
         else if(a=="--down"){downOn=std::stod(next());downOff=std::stod(next());if(!(downOn>=0&&downOff>downOn))usage("down needs ON < OFF seconds");}
+        else if(a=="--flag"){auto bits=std::stoul(next());if(!bits||(bits&~unsigned(ds::FlagMask))||(bits&(ds::Vehicle|ds::Teleport)))usage("flag takes presence flag bits (not vehicle or teleport)");
+            shell.extraFlags=uint16_t(bits);flagOn=std::stod(next());flagOff=std::stod(next());if(!(flagOn>=0&&flagOff>flagOn))usage("flag needs ON < OFF seconds");}
         else if(a=="--caught"){caughtOn=std::stod(next());caughtOff=std::stod(next());if(!(caughtOn>=0&&caughtOff>caughtOn))usage("caught needs ON < OFF seconds");}
         else if(a=="--vehicle"){auto k=std::stoul(next());if(k<1||k>ds::VehicleKindMax)usage("vehicle kind is 1..3");shell.rideKind=uint8_t(k);rideOn=std::stod(next());rideOff=std::stod(next());}
         else if(a=="--take-after")takeAfter=std::stod(next());else if(a=="--take-own-after")takeOwnAfter=std::stod(next());
@@ -202,6 +207,8 @@ int main(int argc,char** argv){
             if(on!=shell.away){shell.away=on;std::printf("AWAY the partner %s\n",on?"is in a private room":"is back");std::fflush(stdout);}}
         if(downOn>=0){bool on=connectedAt&&now-connectedAt>=downOn*1000&&now-connectedAt<downOff*1000;
             if(on!=shell.down){shell.down=on;std::printf("DOWN the partner %s\n",on?"is down":"is up");std::fflush(stdout);}}
+        if(flagOn>=0){bool on=connectedAt&&now-connectedAt>=flagOn*1000&&now-connectedAt<flagOff*1000;
+            if(on!=shell.extra){shell.extra=on;std::printf("FLAG the partner %s presence flags %u\n",on?"sets":"clears",unsigned(shell.extraFlags));std::fflush(stdout);}}
         if(caughtOn>=0){bool on=connectedAt&&now-connectedAt>=caughtOn*1000&&now-connectedAt<caughtOff*1000;
             if(on!=shell.caught){shell.caught=on;std::printf("CAUGHT the partner %s\n",on?"is caught":"is free");std::fflush(stdout);}}
         if(shell.rideKind){bool on=connectedAt&&now-connectedAt>=rideOn*1000&&now-connectedAt<rideOff*1000;
