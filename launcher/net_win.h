@@ -28,7 +28,7 @@ class Network {
     void closeSocket(){if(sock!=INVALID_SOCKET){closesocket(sock);sock=INVALID_SOCKET;}}
     void send(Kind kind,bool value=false) {
         if(sock==INVALID_SOCKET)return;
-        auto b=packet({kind,session.secret,nonce,session.port,value});
+        auto b=packet({kind,session.secret,nonce,session.port,value,session.sharedWorld});
         sendto(sock,b.data(),int(b.size()),0,reinterpret_cast<sockaddr*>(&partner),sizeof(partner));
     }
 public:
@@ -153,6 +153,7 @@ public:
                 if(p.kind==Kind::leave){occupied=joined=peerReady=false;status="Your friend left. Lobby is open.";}
             } else {
                 if(!sameEndpoint(from,partner)||p.nonce!=nonce||!p.secret||(session.secret&&p.secret!=session.secret))continue;
+                if(p.kind==Kind::accepted||p.kind==Kind::start)session.sharedWorld=sessionWorld(false,session.sharedWorld,p.world);   // the host's choice
                 if(p.kind==Kind::accepted){session.secret=p.secret;joined=true;lastPeer=now;status="Joined "+joinedName+". Choose Ready when you are ready.";}
                 if(p.kind==Kind::start&&joined&&ready){send(Kind::started);if(!startAt)startAt=now;lastPeer=now;status="Host is starting the game...";}
                 if(p.kind==Kind::leave){leave();status="The host closed the lobby.";return;}

@@ -38,7 +38,7 @@ void saveSettings(){
     if(name.find_first_of("\r\n")!=std::string::npos||game.find_first_of("\r\n")!=std::string::npos)return;
     atomicWrite(settingsFile,"[launcher]\nname="+name+"\ngame="+game+"\nchoice="+std::to_string(choice)+"\nport="+std::to_string(port)+"\nlan="+std::to_string(lan)+"\ntailscale="+std::to_string(tailscale)+"\nprivacy="+std::to_string(privacy)+"\nworld="+std::to_string(sharedWorld)+"\n");
 }
-Session chosenSession(){Session s;s.name=utf8(player);s.port=port;return s;}
+Session chosenSession(){Session s;s.name=utf8(player);s.port=port;s.sharedWorld=sharedWorld;return s;}   // a guest's choice is replaced by the host's (net_win.h)
 void render();
 // The report for a bug report (core.h `diagnostics`), saved in the co-op data folder. The header is what only the
 // launcher can tell: its version, the game folder, whether its executable is the supported build, the installed parts.
@@ -170,7 +170,7 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
                 if(id==Copy)copyInvite();
                 if(id==Leave){net->leave();render();}
                 if(id==Ready){net->setReady();render();}
-                if(id==Lan||id==Tailscale||id==Privacy||id==World){auto checked=SendMessageW(child(id),BM_GETCHECK,0,0)==BST_CHECKED;if(id==Lan)lan=checked;if(id==Tailscale)tailscale=checked;if(id==Privacy)privacy=checked;if(id==World){sharedWorld=checked;options.sharedWorld=checked;}saveSettings();}
+                if(id==Lan||id==Tailscale||id==Privacy||id==World){auto checked=SendMessageW(child(id),BM_GETCHECK,0,0)==BST_CHECKED;if(id==Lan)lan=checked;if(id==Tailscale)tailscale=checked;if(id==Privacy)privacy=checked;if(id==World)sharedWorld=checked;saveSettings();}
                 if(id==Protocol){registerHandler(executable);MessageBoxW(h,L"Invite links now open this launcher for your Windows account.",L"Invite links",MB_OK);}
                 if(id==OpenSaves){fs::create_directories(options.data/"redirect-data");ShellExecuteW(h,L"open",(options.data/"redirect-data").c_str(),nullptr,nullptr,SW_SHOWNORMAL);}
                 if(id==BackUp){if(!backupAllowed(net->lobby,gameRunning(gameFolder)))throw std::runtime_error("Leave the lobby and close the game before backing up.");auto dest=options.data/"backups"/std::to_string(std::time(nullptr));backup(options.data,dest);MessageBoxW(h,(L"Co-op saves backed up to:\n"+dest.wstring()).c_str(),L"Backup complete",MB_OK);}
@@ -199,7 +199,7 @@ void buildControls(){
     control(1,OpenSaves,L"BUTTON",L"Open co-op save folder");control(1,BackUp,L"BUTTON",L"Back up co-op saves");
     label(2,220,L"Launcher / game folder (applies next start)\nSteam mode must use the folder registered with Steam.");control(2,GamePath,L"EDIT",gameFolder.c_str(),ES_AUTOHSCROLL);
     label(2,221,L"Network / host UDP port (49000..49014)");control(2,Port,L"EDIT",std::to_wstring(port).c_str(),ES_NUMBER|ES_AUTOHSCROLL);
-    control(2,Lan,L"BUTTON",L"Find games on my network",BS_AUTOCHECKBOX);control(2,Tailscale,L"BUTTON",L"Find friends on Tailscale",BS_AUTOCHECKBOX);control(2,Privacy,L"BUTTON",L"Invite only (host decides)",BS_AUTOCHECKBOX);control(2,World,L"BUTTON",L"Shared world (experimental; both players turn it on): each other's ladders and cairns through the game's own online layer",BS_AUTOCHECKBOX);
+    control(2,Lan,L"BUTTON",L"Find games on my network",BS_AUTOCHECKBOX);control(2,Tailscale,L"BUTTON",L"Find friends on Tailscale",BS_AUTOCHECKBOX);control(2,Privacy,L"BUTTON",L"Invite only (host decides)",BS_AUTOCHECKBOX);control(2,World,L"BUTTON",L"Shared world (experimental; the host decides): each other's ladders and cairns through the game's own online layer",BS_AUTOCHECKBOX);
     SendMessageW(child(Lan),BM_SETCHECK,lan?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Tailscale),BM_SETCHECK,tailscale?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Privacy),BM_SETCHECK,privacy?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(World),BM_SETCHECK,sharedWorld?BST_CHECKED:BST_UNCHECKED,0);
     control(2,Protocol,L"BUTTON",L"Open deathstranding-coop invite links in this launcher");label(2,222,L"Settings are saved on change. Each game uses two adjacent UDP ports.\nCo-op networking is always enforced offline. Other co-op rules, voice, controller navigation and router mapping are not available yet.");
     label(3,230,(L"Death Stranding co-op 0.1.0-dev\nSteam Director's Cut build 13300582\n\nExperimental; not a playable release. Native Windows launcher.\nCo-op mod standard: Play, Saves, Settings, About; DS invites and LAN/Tailscale discovery.\n\nInvite/discovery reference code: coop-mod-kit (MIT).\nNot affiliated with Kojima Productions or the game's publishers.\n\nWire version: "+wtext(wireVersion())).c_str());
@@ -234,7 +234,6 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
             else throw std::runtime_error("Unknown launcher option.");
         }LocalFree(argv);
         if(forceWorld)sharedWorld=true;
-        options.sharedWorld=sharedWorld;
         auto defaultData=known(FOLDERID_LocalAppData)/"DeathStrandingCoop";
         if(!options.direct&&!equalPath(options.data,defaultData))throw std::runtime_error("Custom data folders require --dev-direct.");
         if(devStart&&!options.direct)throw std::runtime_error("--dev-start requires --dev-direct.");

@@ -27,6 +27,15 @@ unsigned worldPort(const Session&);
 std::string worldPrefix(const Session&);
 std::string worldAddress(const Session&);
 std::vector<std::string> worldArguments(const Session&,const std::string& dataFile);
+// The session's shared-world choice is the host's: a guest takes it from the host's lobby packets, whatever its own
+// setting says.
+inline bool sessionWorld(bool host,bool ownSetting,bool hostSaid) {
+#ifdef MUTANT_WORLD_GUEST_DECIDES
+    (void)host;(void)hostSaid;return ownSetting;
+#else
+    return host?ownSetting:hostSaid;
+#endif
+}
 std::string config(const Session&);
 void atomicWrite(const std::filesystem::path&,const std::string&);
 void writeConfig(const std::filesystem::path& data,const Session&);
@@ -49,7 +58,8 @@ std::string redact(const std::string& text);
 std::string diagnostics(const std::filesystem::path& data,const std::string& header);
 // Tiny launcher-only two-player rendezvous; CPQ2/CPS2 remains the standard discovery wire.
 enum class Kind : uint8_t { join=1, accepted, ready, start, started, leave };
-struct Packet { Kind kind=Kind::join;uint32_t secret=0,nonce=0;unsigned port=49000;bool ready=false; };
+struct Packet { Kind kind=Kind::join;uint32_t secret=0,nonce=0;unsigned port=49000;bool ready=false;
+    bool world=false; };   // world: the sender's "Shared world" setting; the host's decides for the session
 std::string packet(const Packet&);
 bool parsePacket(const std::string&,Packet&);
 bool allowJoin(const Packet&,uint32_t secret,bool inviteOnly,bool occupied);

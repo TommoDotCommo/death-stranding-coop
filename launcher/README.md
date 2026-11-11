@@ -60,8 +60,8 @@ tools still work independently of this app.
 
 Settings has "Shared world". With it on, the game's own online layer runs on a server of the group's own
 (`../world/README.md`): the host's launcher starts `coop-world.exe` (beside the launcher) when the session starts, and
-each game gets the server's address as `online_server`. Both players turn it on; nothing tells the guest that the
-host has not.
+each game gets the server's address as `online_server`. The host's setting decides for the session: it travels in
+the lobby packets and replaces the guest's own. Both launchers must be this version (an older one refuses the packets).
 
 - The server listens on TCP port 49100 + the session's slot (49100 for UDP port 49000), on loopback when both games
   are on one PC and on all addresses otherwise. The first path element is `w` and the session secret, so only the

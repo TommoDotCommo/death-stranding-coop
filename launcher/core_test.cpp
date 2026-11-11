@@ -28,6 +28,14 @@ int main(int argc,char** argv) {
         check(mod::parseConfig(launcher::config(lh)).onlineServer=="http://127.0.0.1:49103/w305419896/k/host/auth/ds"&&mod::parseConfig(launcher::config(lg)).onlineServer=="http://127.0.0.1:49103/w305419896/k/guest/auth/ds","two players on one PC");
         check(launcher::worldArguments(lh,"D")[3]=="127.0.0.1","loopback only on one PC");
     }
+    {   // The lobby packets carry the sender's shared-world setting; the host's decides.
+        launcher::Packet p;p.kind=launcher::Kind::accepted;p.secret=7;p.nonce=9;p.port=49002;
+        for(bool ready:{false,true})for(bool world:{false,true}){p.ready=ready;p.world=world;launcher::Packet q;
+            check(launcher::parsePacket(launcher::packet(p),q)&&q.ready==ready&&q.world==world&&q.secret==7&&q.nonce==9&&q.port==49002,"lobby packet round trip");}
+        auto bytes=launcher::packet(p);bytes[5]=4;launcher::Packet q;check(!launcher::parsePacket(bytes,q),"unknown lobby flag refused");
+        check(launcher::sessionWorld(true,true,false)&&!launcher::sessionWorld(true,false,true),"the host's own setting");
+        check(launcher::sessionWorld(false,false,true)&&!launcher::sessionWorld(false,true,false),"a guest follows the host");
+    }
     for(auto peer:{"0.0.0.0","example.com","255.255.255.255","192.168.01.2","224.0.0.1"}) {s.peer=peer;rejects([&]{launcher::config(s);});}s.peer="127.0.0.1";
     for(auto port:{0u,48999u,49015u,65535u}) {s.port=port;rejects([&]{launcher::config(s);});}s.port=49000;
     for(auto name:{"", "x\"", "x\\", "x\n", "012345678901234567890123456789012"}){s.name=name;rejects([&]{launcher::config(s);});}s.name="Porter";

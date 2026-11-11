@@ -64,4 +64,3 @@ prefix and the bearer token.
 - Positions are `px, py, pz` divided by 10 to the power `exp` (2 when missing: centimetres), in the game's x, y, z.
   The server stores and returns what the builder sent.
 - Roads, highway resources, missions (lost cargo and shared lockers), wasted cargo, rankings, profiles, relationships.
-- The guest's launcher is not told whether the host turned the shared world on (both tick the box).

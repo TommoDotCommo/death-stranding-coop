@@ -50,7 +50,7 @@ inline std::string fileHash(const fs::path& path) {
     if(!ok)throw std::runtime_error("Cannot read the game executable. Check the game folder and try again.");
     std::string out;for(auto b:result){out+="0123456789abcdef"[b>>4];out+="0123456789abcdef"[b&15];}return out;
 }
-struct LaunchOptions {fs::path game,data,world;bool direct=false,prepareOnly=false,sharedWorld=false;};   // world: coop-world.exe (beside the launcher)
+struct LaunchOptions {fs::path game,data,world;bool direct=false,prepareOnly=false;};   // world: coop-world.exe (beside the launcher)
 inline release_startup::Values launchValues(const LaunchOptions& o,const Session& s) {
     release_startup::Values v;
     auto put=[&](const char* key,const fs::path& fallback) {auto p=o.direct?environment(release_startup::wide(key).c_str()):fs::path();v[key]=asciiPath(p.empty()?fallback:p);};
@@ -66,7 +66,7 @@ inline release_startup::Values launchValues(const LaunchOptions& o,const Session
     return v;
 }
 inline void launchGame(const LaunchOptions& o,Session s,bool solo=false) {
-    s.solo=solo;s.sharedWorld=o.sharedWorld;
+    s.solo=solo;
     auto exe=o.game/L"ds.exe";
     if(gameRunning(o.game))throw std::runtime_error("This game copy is already running. Close it before starting a new session.");
     if(fileHash(exe)!=mod::discovery::PinnedHash)throw std::runtime_error("This game build is unsupported. Use Steam Director's Cut build 13300582.");

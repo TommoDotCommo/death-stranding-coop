@@ -288,13 +288,17 @@ std::string diagnostics(const std::filesystem::path& data,const std::string& hea
 }
 std::string packet(const Packet& p) {
     if(p.port<49000||p.port>49014||!p.nonce)throw std::runtime_error("Invalid lobby packet.");
-    std::string b="DSL1";b+=char(p.kind);b+=char(p.ready);b+=char(p.port);b+=char(p.port>>8);
+    std::string b="DSL1";b+=char(p.kind);b+=char((p.ready?1:0)|(p.world?2:0));b+=char(p.port);b+=char(p.port>>8);
     for(auto n:{p.secret,p.nonce})for(unsigned k=0;k<4;++k)b+=char(n>>(k*8));
     return b;
 }
 bool parsePacket(const std::string& b,Packet& out) {
-    if(b.size()!=16||b.substr(0,4)!="DSL1"||uint8_t(b[4])<1||uint8_t(b[4])>6||uint8_t(b[5])>1)return false;
-    Packet p;p.kind=Kind(uint8_t(b[4]));p.ready=b[5];p.port=uint8_t(b[6])|(unsigned(uint8_t(b[7]))<<8);
+    if(b.size()!=16||b.substr(0,4)!="DSL1"||uint8_t(b[4])<1||uint8_t(b[4])>6||uint8_t(b[5])>3)return false;
+    Packet p;p.kind=Kind(uint8_t(b[4]));p.ready=b[5]&1;
+#ifndef MUTANT_LOBBY_WORLD_BIT
+    p.world=b[5]&2;
+#endif
+p.port=uint8_t(b[6])|(unsigned(uint8_t(b[7]))<<8);
     p.secret=cd_le32(reinterpret_cast<const uint8_t*>(b.data()+8));p.nonce=cd_le32(reinterpret_cast<const uint8_t*>(b.data()+12));
     if(p.port<49000||p.port>49014||!p.nonce)return false;
     out=p;return true;
