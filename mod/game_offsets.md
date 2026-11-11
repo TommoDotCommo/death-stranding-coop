@@ -4603,3 +4603,85 @@ at a different offset, 695 found no run. Of 90 online, cargo and road classes: 3
 Derived: use the dump for names and structure, and read every offset from this build's own descriptors. The
 run matching is a heuristic (adjacent small classes can share a run), so the counts are approximate.
 
+## Sign-in and the online protocol (2026-11-11)
+
+Pinned build 13300582; all addresses are RVAs. This replaces the open questions of the trial above: the game signs in
+to a server of our own, with no code from other projects.
+
+### Why the game never signed in
+
+Observed (static, then live in one test copy):
+
+- The online manager is the global at `0x7c192f0` (size 0xb0, constructor `0x348c550`). Its bytes `+0x59..+0x5b` start
+  as 1, 1, 0; `+0x98` holds the value of the command-line option `-otgc_s`. `0x4dfa138` points at the global.
+- The login task (`DSNetLoginManager`) is the global at `0x7c16740` (`0x4df8d78` points at it). Its update `0x346f760`
+  runs only while the task state at `+8` is 2 and switches on a step byte at `+0x38` (table `0x346fae0`): 0 start,
+  2 waiting for the Steam ticket, 5 waiting for the sign-in answer, 6 waiting for the version answer, 7 signed in,
+  8 failed.
+- Step 0 (`0x346f440`) gives up before any request when the manager's `+0x5b` is set (error 0xcc4e), when the service
+  map at `0x7c1ea48` has no `net.param` entry (0xea61), or when that entry's byte `+0x20` is 1 (0xcc4d) or 2 (0xcc4e).
+- The task is started by `0x346f690(task, force)`. Its callers are the title menu's message handler `OnLogin`
+  (`0x322f830`, in the handler table at `0x4d55288`) and a lazy path for single online objects (`0x349d860`).
+- Live, with the network policy on `enforce`: `+0x5b` was 0 and `net.param` `+0x20` was 0, but the task state stayed
+  0 through the title screen, Continue (pressed by scripted key) and loading. Nothing asked for a sign-in.
+
+Derived: the refused configuration request is not the gate. The `OnLogin` message does not arrive in a modded copy;
+what sends it in a normal game is unknown.
+
+### What the mod does (`mod/online.h`)
+
+- The sign-in address is the engine string object at `0x4dfa130` (a pointer to the characters; the header in front is
+  reference count, hash or 0xffffffff for "not computed", length, capacity). The request builder `0x348cb10` reads it
+  through the table at `0x4dfa1f0` on every sign-in, so replacing the pointer with a mod-owned string is enough.
+- Every gateway body passes `0x19da0e0` (incoming) and `0x19da6a0` (outgoing): one caller each (`0x19d8d4b`,
+  `0x19d9187`), always mode 2, which is base64 of an authenticated cipher (12-byte nonce, 16-byte tag) under a 32-byte
+  key string at `0x4593388`. Both are replaced by a pass-through that assigns the input string to the output
+  (`0x190adf0`) and returns true.
+- `0x346f690(task, 0)` is called on the game thread while the task is idle.
+
+Observed (live, loopback): with these three, the game sent the sign-in request, accepted the answer, asked the
+gateway for its version and reached step 7.
+
+### The protocol
+
+Observed (live, against a logging server and then `world/`):
+
+1. `GET <address>?provider=steam&display_name=&code=<hex of the Steam session ticket>` with a fixed `Authorization:
+   Basic` header, `x-game-id: ds`, `User-Agent: Guerrilla`. The answer is `OTGCAuthResponse` as JSON: `user`
+   (`provider`, `providerId`, `id`, `entity`, `displayName`, `display_name`) and `session` (`zone`, `token`,
+   `gateway`, `properties`, `roles`).
+2. `GET <gateway>/e/getVersion` with `Authorization: Bearer <token>`. The answer must carry `major` 0 and `minor` 12
+   (compared at `0x346f83a`; anything else fails the login with 0xcb23).
+3. Then `POST <gateway>/e/<name>` calls. With plain bodies the request body is `{"data":"<JSON>"}` with the inner
+   quotes not escaped (the game puts what used to be base64 text between the quotes), and a plain JSON answer is
+   accepted. Seen with an Episode 3 save right after loading: `getRankingSchedules`, `getOrderedMissions`,
+   `getWastedBaggages`, `findMissions`, `lookup`, `findQpidObjects`, `getHighwayResources`, `reverseLookup` (the Steam
+   friends list), `getLikeHistory`.
+4. The ticket's bytes 12..19 are the 64-bit Steam id (little-endian).
+
+The executable names 45 gateway calls (`strings`, prefix `otgc://gateway/`).
+
+### Message layouts from the reflection data
+
+Method: a reflected class has a descriptor whose first qword ends in `ffffffff` with kind 4 in byte 4, the number of
+bases in byte 6 and the number of members in byte 7; the size is the dword at `+0x14`, the name pointer at `+0x40`,
+the bases at `+0x60` and the members at `+0x68` (0x38 bytes each: type, offset, name). A second block that names the
+class points (at name `+8`) to the JSON keys: 0x30-byte records of member name and key. Enum descriptors (kind 3) have
+the value count at `+0xc`, the name at `+0x10` and 0x28-byte value records (value, name) at `+0x18`.
+
+Result: 129 classes named `OTGC…` with 470 members, 23 of them without a JSON key. The ones used so far:
+
+| Class | Members (JSON key: type) |
+|---|---|
+| `OTGCAuthResponseUser` | `provider`, `providerId`: WString; `id`: String; `entity`: map; `displayName`: WString; `display_name`: String |
+| `OTGCAuthResponseSession` | `zone`, `token`, `gateway`: WString; `properties`: map; `roles`: array |
+| `OTGCGetVersionResponse` | `version`: WString; `major`, `minor`: int32 |
+| `OTGCCreateObjectPost` | `x`, `y`, `m`, `px`, `py`, `pz`, `rx`, `ry`, `rz`: int; `t`, `st`: String; `exp`, `q`, `p`, `lp`: int32; `c` comment, `ri` rope, `si` stone, `bi` bridge, `pi` parking, `vi` vehicle, `ei` extra, `ci` customize; `tags`; `mt`, `rmt` materials |
+| `OTGCObjectResponse` | `id`, `c`, `t`, `st`: String; `m`, `l`, `r`: int arrays; `exp`, `lp`, `q`: int32; `ut`: int64; `mt`, `rmt`, `bgs`, `cm`, the same info blocks, `tags` |
+| `OTGCFindQpidObjectsBody` | `q`, `aid`: int32; `u`: strings; `ro` road, `m` missions, `o` (`ct`: map of type to count) |
+| `OTGCFindQpidObjectsResponseSet` | `ro` roads, `m` missions, `oa`, `ob`, `od`, `oe`, `op`: object arrays |
+
+Object types on the wire are the value names of the enum `OTGCCommonObjectType` (`0x4d82c30`), in value order:
+`m z c p a r l s w b t v k n h e u i o x g j d`. Which structure each letter is, what the five object arrays of an
+answer mean, and the units of the positions are unknown: no object upload has been seen yet.
+

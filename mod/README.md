@@ -1016,3 +1016,20 @@ Game-free checks: `make -C mod environment-test` (fake memory, guards/mutants,
 fixed-time parser/CLI refusals), `make -C core environment-test` (protocol fuzz/mutants).
 `make -C mod environment-udp-test` is an additional 33 s two-stand-in wire smoke;
 it requires permission to create/bind local UDP sockets and fails if that is denied.
+
+## A private online server (`online_server`, off by default)
+
+`"online_server": "http://ADDRESS:PORT/path"` (game provider and `game_thread`) connects the game's own online layer to
+a server the players run (`world/README.md`). The address is numeric and either loopback or the partner's (`peer`);
+anything else is refused when the config is read, and the proxy's network policy would refuse the connection anyway.
+The mod then does three things in the game (`online.h`; addresses in `game_offsets.md`, "Sign-in"):
+
+- points the game's sign-in address string at the server;
+- replaces the two functions every gateway body passes through with a pass-through, so bodies are plain JSON instead
+  of being encrypted under a key of the publisher's service;
+- asks the game's login task to sign in while it is idle (at most five times, 30 s apart): the title menu's login
+  message, which makes that call in a normal game, never arrives in a modded copy.
+
+The log says `ONLINE server …`, `ONLINE sign-in asked` and each change of the login task, with `(signed in)` at the
+end. Game-free tests: the address rules and the asking logic, five mutants (`online_test.cpp`).
+

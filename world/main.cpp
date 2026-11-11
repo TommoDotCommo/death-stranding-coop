@@ -1,5 +1,5 @@
 // coop-world: the players' own server for the game's shared world (README.md). One process, one world file.
-//   coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] [--log calls.log]
+//   coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] [--log events.log] [--trace calls.log]
 // Plain HTTP/1.1 with keep-alive, one thread per connection, bounded sizes. It only answers; it never connects out.
 #include "front.h"
 #include <atomic>
@@ -27,7 +27,7 @@ static void closeSocket(sock_t s){close(s);}
 namespace {
 constexpr size_t MaxHeader=16*1024,MaxBody=4*1024*1024;constexpr int MaxConnections=32,IdleSeconds=60;
 std::mutex outLock;std::atomic<int> connections{0};
-std::string dataPath,logPath;
+std::string dataPath,logPath,tracePath;
 void line(const std::string& text){
     std::lock_guard<std::mutex> g(outLock);std::cout<<text<<std::endl;
     if(!logPath.empty()){std::ofstream f(logPath,std::ios::app);f<<text<<'\n';}}
@@ -70,6 +70,11 @@ void serve(sock_t s,world::Front& front,world::World& w){
         try{reply=front.handle(r,nowSeconds());}
         catch(const std::exception& e){reply.status=500;reply.body="{}";line(std::string("error: ")+e.what());}
         save(w);
+        if(!tracePath.empty()){
+            // Research aid: every call with its body. The sign-in ticket is left out; bodies can name other accounts.
+            auto target=r.target;if(auto code=target.find("code=");code!=std::string::npos)target.resize(code+5);
+            std::lock_guard<std::mutex> g(outLock);std::ofstream f(tracePath,std::ios::app);
+            f<<nowSeconds()<<' '<<r.method<<' '<<target<<' '<<r.body.substr(0,4000)<<" -> "<<reply.status<<' '<<reply.body.substr(0,600)<<'\n';}
         std::string out="HTTP/1.1 "+std::to_string(reply.status)+" "+reason(reply.status)+"\r\nContent-Type: application/json\r\nContent-Length: "+std::to_string(reply.body.size())+"\r\n"+(close?"Connection: close\r\n":"")+"\r\n"+reply.body;
         if(!sendAll(s,out)||close)return;}
 }
@@ -79,8 +84,8 @@ int main(int argc,char** argv){
     for(int i=1;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc){std::cerr<<"missing value for "<<a<<"\n";std::exit(2);}return std::string(argv[++i]);};
         if(a=="--port")port=std::atoi(next().c_str());else if(a=="--bind")bind=next();else if(a=="--data")dataPath=next();
-        else if(a=="--prefix")prefix=next();else if(a=="--log")logPath=next();
-        else{std::cerr<<"usage: coop-world --port N [--bind ADDRESS] [--data FILE] [--prefix SECRET] [--log FILE]\n";return 2;}}
+        else if(a=="--prefix")prefix=next();else if(a=="--log")logPath=next();else if(a=="--trace")tracePath=next();
+        else{std::cerr<<"usage: coop-world --port N [--bind ADDRESS] [--data FILE] [--prefix SECRET] [--log FILE] [--trace FILE]\n";return 2;}}
     if(port<1||port>65535){std::cerr<<"--port 1..65535 required\n";return 2;}
     for(char c:prefix)if(!std::isalnum(static_cast<unsigned char>(c))&&c!='-'&&c!='_'){std::cerr<<"--prefix: letters, digits, - and _ only\n";return 2;}
 #ifdef _WIN32
