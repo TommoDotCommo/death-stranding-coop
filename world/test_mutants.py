@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess,sys,tempfile
 from concurrent.futures import ThreadPoolExecutor
 ROOT=Path(__file__).resolve().parent
-families=[('world_test.cpp',['world.cpp'],['WORLD_NO_TOKEN','WORLD_OWNER','WORLD_OWN','WORLD_OBJECT_CAP','WORLD_PLAYER_CAP','WORLD_LIKE_RANGE','WORLD_ID_LETTER']),
+families=[('world_test.cpp',['world.cpp'],['WORLD_NO_TOKEN','WORLD_OWNER','WORLD_OWN','WORLD_OBJECT_CAP','WORLD_PLAYER_CAP','WORLD_LIKE_RANGE','WORLD_ID_LETTER','WORLD_LIKES_MINE','WORLD_LIKES_SINCE']),
           ('front_test.cpp',['front.cpp','world.cpp'],['FRONT_PREFIX','FRONT_BEARER'])]
 with tempfile.TemporaryDirectory() as d:
     def one(job):

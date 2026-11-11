@@ -45,6 +45,13 @@ int main(){
     CHECK(w.call(tb,"sendLike","{\"oid\":\""+id+"\",\"lp\":3,\"lp2\":0}",300).status==200);
     CHECK(w.call(tb,"sendLike","{\"oid\":\""+id+"\",\"lp\":-5}",300).status==400);
     {auto got=json::parse(w.call(tb,"getQpidObjects","{\"ids\":[\""+id+"\"]}",300).body).get("objects");CHECK(got.items().size()==1&&got.items()[0].get("lp").integer()==3);}
+    // Likes: Bob's like reaches Ann's history once (not Bob's, not again after `since`, not for a like of her own).
+    auto history=[&](const std::string& token,const char* body){return json::parse(w.call(token,"getLikeHistory",body,900).body).get("like_histories");};
+    {auto h=history(ta,"{\"uid\":\"\",\"since\":0}");CHECK(h.items().size()==1);
+     if(h.items().size()==1){auto& e=h.items()[0];CHECK(e.get("oid").string()==id&&e.get("uid").string()==playerId("steam-b")&&e.get("lp").integer()==3&&e.get("t").integer()==300&&e.get("sc").integer()==1);}}
+    CHECK(history(tb,"{\"uid\":\"\",\"since\":0}").items().empty());
+    CHECK(history(ta,"{\"uid\":\"\",\"since\":300}").items().empty());
+    CHECK(w.call(ta,"sendLike","{\"oid\":\""+id+"\",\"lp\":1}",350).status==200);CHECK(history(ta,"{\"since\":0}").items().size()==1);
     // A new sign-in ends the old session of that player; the player stays the same.
     auto ta2=tokenOf(w.signIn("steam-a","Ann","g"));CHECK(w.call(ta,"getVersion","",1).status==401);CHECK(w.playerOf(ta2)==playerId("steam-a"));
     // The saved document restores everything, sessions included.

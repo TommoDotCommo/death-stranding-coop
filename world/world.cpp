@@ -143,7 +143,13 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
 #ifndef MUTANT_WORLD_LIKE_RANGE
             if(n<0||n>100000)return refuse(400,"bad-like","like count refused");
 #endif
-            found->second.likes+=n;dirty_=true;}
+            found->second.likes+=n;dirty_=true;
+            // The builder hears of it in his like history (never of his own likes).
+            if(found->second.creator!=me.id&&n>0){
+                Like l;l.to=found->second.creator;l.from=me.id;l.object=found->first;l.type=in.get("lt").string();l.time=now;
+                l.points=in.get("lp").integer();l.autoPoints=in.get("lp2").integer();
+                if(likes_.size()>=MaxLikes)likes_.erase(likes_.begin());
+                likes_.push_back(l);}}
         return ok(Value::object());}
     if(name=="lookup"||name=="reverseLookup"){
         // Who is behind these ids: only the players of this world are known here.
@@ -155,7 +161,18 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
     if(name=="getRankingSchedules"){Value out=Value::object();out.set("rs",Value::array());out.set("ut",now);return ok(out);}
     if(name=="getWastedBaggages"){Value out=Value::object();out.set("ws",Value::array());out.set("ud",now);return ok(out);}
     if(name=="findMissions"||name=="getOrderedMissions"||name=="getMissionsInProgress"){Value out=Value::object();out.set("missions",Value::array());return ok(out);}
-    if(name=="getLikeHistory"){Value out=Value::object();out.set("like_histories",Value::array());return ok(out);}
+    if(name=="getLikeHistory"){
+        // What others gave this player's objects after `since`; nobody reads another player's history.
+        int64_t since=in.get("since").integer();Value list=Value::array();
+        for(auto& l:likes_){
+#ifndef MUTANT_WORLD_LIKES_MINE
+            if(l.to!=me.id)continue;
+#endif
+#ifndef MUTANT_WORLD_LIKES_SINCE
+            if(l.time<=since)continue;
+#endif
+            Value v=Value::object();v.set("t",l.time);v.set("oid",l.object);v.set("lp",l.points);v.set("lp2",l.autoPoints);v.set("uid",l.from);v.set("sc",1);v.set("lt",l.type);list.push(v);}
+        Value out=Value::object();out.set("like_histories",list);return ok(out);}
     if(name=="getRelationships"){Value out=Value::object();out.set("strand",Value::array());out.set("history",Value::array());return ok(out);}
     if(name=="getPlayerProfile"){Value out=Value::object();out.set("profiles",Value::array());return ok(out);}
     note("unhandled "+name);
@@ -170,7 +187,10 @@ json::Value World::snapshot() const {
     Value tokens=Value::object();for(auto& t:tokens_)tokens.set(t.first,t.second);out.set("sessions",tokens);
     Value objects=Value::array();
     for(auto& o:objects_){Value v=Value::object();v.set("id",o.second.id);v.set("creator",o.second.creator);v.set("updated",o.second.updated);v.set("likes",o.second.likes);v.set("post",o.second.post);objects.push(v);}
-    out.set("objects",objects);return out;
+    out.set("objects",objects);
+    Value likes=Value::array();
+    for(auto& l:likes_){Value v=Value::object();v.set("to",l.to);v.set("from",l.from);v.set("object",l.object);v.set("type",l.type);v.set("time",l.time);v.set("points",l.points);v.set("auto",l.autoPoints);likes.push(v);}
+    out.set("likes",likes);return out;
 }
 void World::restore(const json::Value& v){
     std::lock_guard<std::mutex> g(lock_);
@@ -184,6 +204,10 @@ void World::restore(const json::Value& v){
     for(auto& o:v.get("objects").items()){Object ob;ob.id=o.get("id").string();ob.creator=o.get("creator").string();ob.updated=o.get("updated").integer();ob.likes=o.get("likes").integer();ob.post=o.get("post");
         if(ob.id.empty()||!ob.post.isObject())throw std::runtime_error("world file: bad object");
         objects_[ob.id]=ob;}
+    likes_.clear();
+    for(auto& l:v.get("likes").items()){Like k;k.to=l.get("to").string();k.from=l.get("from").string();k.object=l.get("object").string();k.type=l.get("type").string();
+        k.time=l.get("time").integer();k.points=l.get("points").integer();k.autoPoints=l.get("auto").integer();
+        if(likes_.size()<MaxLikes)likes_.push_back(k);}
     dirty_=false;
 }
 }

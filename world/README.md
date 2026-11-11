@@ -43,8 +43,9 @@ loopback, a LAN or a VPN.
 | `…/gate/e/getVersion` | major 0, minor 12 (the game refuses anything else) |
 | `createObject`, `updateObject`, `deleteObject` | stored; the new id is the type letter and 12 characters (the game reads the kind from that letter); only the builder changes or removes an object |
 | `findQpidObjects` | the other players' objects in that area, at most the asked number per type, never the asker's own |
-| `getQpidObjects`, `sendLike`, `lookup`, `reverseLookup` | from the stored objects and players |
-| `getRankingSchedules`, `getWastedBaggages`, `findMissions`, `getOrderedMissions`, `getLikeHistory`, … | empty lists |
+| `getQpidObjects`, `lookup`, `reverseLookup` | from the stored objects and players |
+| `sendLike`, `getLikeHistory` | a like is added to the object and to its builder's history (the last 2000 likes are kept); a player reads only his own history, after the time he names |
+| `getRankingSchedules`, `getWastedBaggages`, `findMissions`, `getOrderedMissions`, … | empty lists |
 | anything else | `{}` and an `unhandled NAME` line in the log |
 
 Limits: 16 players, 4000 objects per player, 4 MiB per body, 32 connections.

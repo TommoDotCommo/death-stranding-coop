@@ -9,9 +9,10 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <vector>
 namespace world {
 constexpr int VersionMajor=0,VersionMinor=12;      // what this game build requires of getVersion
-constexpr size_t MaxObjectsPerPlayer=4000,MaxPlayers=16,MaxNameBytes=64,MaxKeyBytes=96;
+constexpr size_t MaxObjectsPerPlayer=4000,MaxPlayers=16,MaxNameBytes=64,MaxKeyBytes=96,MaxLikes=2000;
 struct Reply { int status=200;std::string body="{}"; };
 // A gateway request body as the game sends it with plain bodies: {"data":"<json, quotes not escaped>"}, or plain JSON.
 std::string unwrap(const std::string& body);
@@ -34,11 +35,13 @@ public:
 private:
     struct Player { std::string id,name,key; };
     struct Object { std::string id,creator;json::Value post;int64_t updated=0;int64_t likes=0; };
+    struct Like { std::string to,from,object,type;int64_t time=0,points=0,autoPoints=0; };   // to: the object's builder
     mutable std::mutex lock_;
     std::function<std::string()> random_;
     std::map<std::string,Player> players_;          // by key
     std::map<std::string,std::string> tokens_;      // token -> player id
     std::map<std::string,Object> objects_;          // by object id
+    std::vector<Like> likes_;                       // oldest first, at most MaxLikes
     uint64_t nextObject_=1;bool dirty_=false;
     json::Value objectResponse(const Object&) const;
     Reply gateway(const Player&,const std::string& name,const json::Value& in,int64_t now);

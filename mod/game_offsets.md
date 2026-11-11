@@ -4766,6 +4766,12 @@ Observed:
   another player received it, made a `NetRainShelter` record at its place and removed it after about three seconds
   (state Removed), like the hand-made ones. The builder's own shelter was in construction state 0.
 
+- Likes. `OTGCGetLikeHistoryOneResponse` (missed by the first dump): `t` int64, `oid`, `lp`, `lp2` int, `uid` (from),
+  `sc` int32 (summarised count), `lt` (like type). The game asks `getLikeHistory` once, about a minute after signing
+  in, with `{"uid":"","since":0}`. Live: after another player's `sendLike` for a ladder this game had uploaded in an
+  earlier run, the next run's request was answered with that entry and the game kept running; whether it showed or
+  counted the like was not observed (that ladder was not in the save the second run loaded).
+
 Derived: a served object does persist, and the game uploads what is built with the flag; ladders and cairns work
 both ways. Rain shelters are taken down by the receiving game after it has made them, with genuine upload data too;
 the cause is unknown (the builder's shelter being unfinished is a candidate).
