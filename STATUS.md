@@ -46,7 +46,10 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
   voidouts, shared orders and deliveries, saves of a shared world, the partner's own controller input.
 - Structures built from the game's own menus: an Episode 3 test save now exists, the test has not run yet.
 - A real two-PC session. The mod accepts any unicast IPv4 peer (LAN or VPN) and binds only the address that routes
-  to it (README, "Two PCs"); it has only run over loopback so far. The launcher (`launcher/`, invite codes, LAN and
+  to it (README, "Two PCs"). On one PC (2026-11-12) two copies ran with the PC's own LAN address as each other's
+  partner, the network policy enforcing with only that address allowed: both bound and addressed the LAN address and
+  showed the partner within 5 mm, visible all the time. Two machines, a router and a firewall between them have not
+  been tried. The launcher (`launcher/`, invite codes, LAN and
   Tailscale discovery, `deathstranding-coop://` links) is built and tested game-free only.
 
 ## QA level
