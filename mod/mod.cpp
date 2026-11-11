@@ -448,7 +448,7 @@ struct Runtime final:ds::Transport {
     // soon as the image is checked, and the game is asked to sign in while its login task is idle.
     std::optional<mod::online::Api> onlineApi;bool onlineTried=false,onlinePointed=false;Background<mod::online::Api> onlineJob;
     mod::online::Requester onlineAsk;mod::online::State onlineSeen;
-    mod::vitals::Reporter vitalsReport;mod::vitals::State vitalsSeen;uint64_t vitalsAt=0;uint16_t vitalsFlags=0;
+    mod::vitals::Reporter vitalsReport;mod::vitals::State vitalsSeen;uint64_t vitalsAt=0;uint16_t vitalsFlags=0;bool partnerLaid=false;
     void tickOnline(uint64_t now) {
         if(config.onlineServer.empty())return;
 #ifndef MOD_FAKE_NETWORK
@@ -1158,6 +1158,10 @@ struct Runtime final:ds::Transport {
         if(partnerMode()&&cache.remote.visible){target=mod::puppet::fromState(cache.remote.state.position,cache.remote.state.yaw);speed=horizontal(cache.remote.state);actions=packed(cache.remote.state);
             // Riding: the body sits on the seat with the vehicle's pitch and roll, in the game's riding pose.
             if(auto kind=cache.remote.state.vehicle){target->rotation=mod::rotationFromAngles(cache.remote.state.vehicleAngles);actions|=uint32_t(kind)<<mod::puppet::VehicleShift;}}
+        // A partner who is down lies on his back where he fell (no locomotion underneath).
+        {bool lay=target&&partnerMode()&&cache.remote.visible&&(cache.remote.state.flags&ds::Down)&&!cache.remote.state.vehicle;
+            if(lay){target=mod::puppet::laidDown(*target);speed=0;actions&=mod::puppet::FlagCrouchBit;}
+            if(lay!=partnerLaid){partnerLaid=lay;note(lay?"BODY laid down: the partner is down\n":"BODY upright again\n");}}
         if(twinMode==TwinMode::Echo&&cache.available) {
             echo.emplace_back(now,cache.local);
             while(echo.size()>1&&now-echo[1].first>=1000)echo.pop_front();

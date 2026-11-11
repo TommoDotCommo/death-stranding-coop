@@ -6,7 +6,7 @@ import mutants
 ROOT=Path(__file__).resolve().parent
 families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNATURE','TARGET'],
            ['game_thread_test.cpp','game_thread.cpp','discovery.cpp']),
-          ('puppet',['PERMISSION','WORLD','ALIAS','LOCAL','READBACK','LIFETIME','ONCE','ARGUMENTS','REMOVE_MODE','RESOURCE'],
+          ('puppet',['LAID_AXES','LAID_LIFT','PERMISSION','WORLD','ALIAS','LOCAL','READBACK','LIFETIME','ONCE','ARGUMENTS','REMOVE_MODE','RESOURCE'],
            ['puppet_test.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
           ('double',['ANCHOR','STILL','NETWORK','ACTION_OWNER','ACTION_MASK','TRANSIENT','EFFECTS','SMOOTH','YIELD_ANCHOR','PRIVATE_ROOM','PERMISSION','PARKED','IDENTITY','YIELD','READBACK','LOCAL','RELEASE','WORLD','FIND_PARENT','FIND_UNIQUE','HOLD','HIDDEN_YIELD'],
            ['double_test.cpp','double.cpp','puppet.cpp','pose.cpp','discovery.cpp']),

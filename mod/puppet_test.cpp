@@ -25,7 +25,16 @@ uint64_t creator(uint64_t resource,const double* p,const Rotation* r,const char*
     CHECK(tag&&!tag->tag&&!tag->pointer);return 0x3000;
 }
 void remover(uint64_t actor,bool immediate){CHECK(actor==0x3000&&!immediate);}
+static void laidTests(){
+    using mod::puppet::Transform;Transform t;t.position={10,20,30};t.rotation={1,0,0, 0,1,0, 0,0,1};   // facing +y, head up
+    auto l=mod::puppet::laidDown(t);
+    CHECK(l.rotation[0]==1&&l.rotation[1]==0&&l.rotation[2]==0);                 // right unchanged
+    CHECK(l.rotation[3]==0&&l.rotation[4]==0&&l.rotation[5]==1);                 // the face to the sky
+    CHECK(l.rotation[6]==0&&l.rotation[7]==-1&&l.rotation[8]==0);                // the head where the back was turned
+    CHECK(l.position[0]==10&&l.position[1]==20&&l.position[2]>30.1&&l.position[2]<30.4);   // on the ground, not in it
+}
 int main(){
+    laidTests();
     Scene scene;auto p=scene.probe();p.tick(0,true);CHECK(scene.resources==0);p.arm();p.tick(0,false);CHECK(scene.creates==0&&scene.resources==0);
     p.tick(10,true);CHECK(scene.creates==1&&scene.resources==1);CHECK(scene.actor.position[1]==23&&scene.anchor.pose.position[1]==20);
     p.tick(100,true);CHECK(scene.places==0);p.tick(1010,true);CHECK(scene.places==1&&scene.actor.position[0]==11);p.tick(2010,true);CHECK(scene.removes==1);

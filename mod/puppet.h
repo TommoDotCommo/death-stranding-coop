@@ -12,6 +12,19 @@ struct Transform {std::array<double,3> position{};std::array<float,9> rotation{}
 struct Rotation {float rows[3][4]{};};
 struct Tagged {uint64_t tag=0,pointer=0;};
 static_assert(offsetof(Transform,rotation)==24&&sizeof(Transform)==64);
+// A standing body's transform laid on its back at the same place (rows are right, forward, up): the head points
+// where the back was turned, the face to the sky, and the body is lifted by `lift` metres so it rests on the ground
+// instead of in it. For a partner who is down: his body takes no death pose from the game (game_offsets.md).
+inline Transform laidDown(const Transform& t,double lift=0.18){
+    Transform o=t;
+#ifndef MUTANT_PUPPET_LAID_AXES
+    for(int i=0;i<3;++i){o.rotation[3+i]=t.rotation[6+i];o.rotation[6+i]=-t.rotation[3+i];}   // forward = old up, up = -old forward
+#endif
+#ifndef MUTANT_PUPPET_LAID_LIFT
+    o.position[2]+=lift;
+#endif
+    return o;
+}
 static_assert(sizeof(Rotation)==48&&sizeof(Tagged)==16);
 using GetResourceFn=uint64_t(*)(uint64_t);
 using CreateFn=uint64_t(*)(uint64_t,const double*,const Rotation*,const char*,bool,uint64_t,uint64_t,const Tagged*);

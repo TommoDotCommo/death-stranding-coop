@@ -1041,7 +1041,7 @@ control `Is_Dead`) or held by BTs (`Is_Drag`, `Int_Is_GazerCatch`), with the gam
 or Caught (dead wins); it is dropped a second after the state ends. A porter that cannot be read is unknown, never
 dead. With `notices` the partner's info log tells it once when it starts and once when it is over ("is down", "is
 back on his feet", "has been caught by BTs", "got free"). The log line `VITALS known= dead= caught= crouch=` appears
-on every change. The stand-in partner reports the states with `--down ON OFF` and `--caught ON OFF`.
+on every change. While the partner is down his body is laid on its back where he fell (`puppet.h` `laidDown`: the body's transform, lifted 18 cm; the game's own death controls do not move the body) and stands again when he is up; the log says `BODY laid down` / `BODY upright again`. The stand-in partner reports the states with `--down ON OFF` and `--caught ON OFF`.
 Game-free: `vitals_test.cpp` (three mutants), the notices in `notice_test.cpp` (two more mutants), the flags in the
 core's tests.
 
