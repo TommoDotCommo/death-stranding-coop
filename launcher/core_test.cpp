@@ -102,7 +102,9 @@ int main(int argc,char** argv) {
         R priv=allowUdp;priv.profiles=Private;check(verdict({priv},Public)==F::NoRule&&verdict({priv},Private|Public)==F::Allowed,"a rule counts only on an active profile");
         R ports=allowUdp;ports.localPorts="80, 49000-49014";check(verdict({ports},Private,49001)==F::Allowed&&verdict({ports},Private,49015)==F::NoRule,"port lists and ranges");
         R named=allowUdp;named.localPorts="RPC";check(verdict({named})==F::NoRule,"named ports match none");
-        R any=allowUdp;any.protocol=256;any.application="";check(verdict({any})==F::Allowed,"an any-program, any-protocol allow rule counts");
+        R any=allowUdp;any.protocol=256;check(verdict({any})==F::Allowed,"an any-protocol allow rule counts");
+        R nobody=allowUdp;nobody.application="";R nobodyBlocks=blockUdp;nobodyBlocks.application="";
+        check(verdict({nobody})==F::NoRule&&verdict({nobodyBlocks,allowUdp})==F::Allowed,"a rule that names no program does not decide (packaged apps, services, one interface)");
         R oldBlock=blockUdp;oldBlock.localPorts="50000";check(verdict({oldBlock,allowUdp})==F::Allowed,"a block rule for another port does not count");
         for(auto f:{F::Unknown,F::Off,F::Allowed,F::Blocked,F::NoRule})check(std::string(launcher::firewallText(f)).size()>20,"a sentence for every verdict");
     }

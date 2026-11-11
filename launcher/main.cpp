@@ -5,6 +5,7 @@
 #include <shellapi.h>
 #include "net_win.h"
 #include "launch_win.h"
+#include "firewall_win.h"
 #include <sstream>
 #include <memory>
 using namespace launcher;
@@ -38,6 +39,9 @@ void saveSettings(){
     if(name.find_first_of("\r\n")!=std::string::npos||game.find_first_of("\r\n")!=std::string::npos)return;
     atomicWrite(settingsFile,"[launcher]\nname="+name+"\ngame="+game+"\nchoice="+std::to_string(choice)+"\nport="+std::to_string(port)+"\nlan="+std::to_string(lan)+"\ntailscale="+std::to_string(tailscale)+"\nprivacy="+std::to_string(privacy)+"\nworld="+std::to_string(sharedWorld)+"\n");
 }
+// Windows Firewall's verdict for the game's two UDP ports, read when the launcher starts and when a lobby opens.
+Firewall firewall=Firewall::Unknown;
+void readFirewallNow(){if(!gameFolder.empty())firewall=readFirewall(fs::path(gameFolder)/"ds.exe",{port,port+1});}
 Session chosenSession(){Session s;s.name=utf8(player);s.port=port;s.sharedWorld=sharedWorld;return s;}   // a guest's choice is replaced by the host's (net_win.h)
 void render();
 // The report for a bug report (core.h `diagnostics`), saved in the co-op data folder. The header is what only the
@@ -49,7 +53,7 @@ fs::path saveDiagnostics(){
     std::string head="launcher: Death Stranding co-op 0.1.0-dev\ngame folder: "+(gameFolder.empty()?std::string("(not set)"):utf8(gameFolder))+"\nds.exe: "+build
         +"\navrt.dll in the game folder: "+(fs::is_regular_file(game/"avrt.dll",ec)?"present":"missing")
         +"\nmod.dll: "+(fs::is_regular_file(options.data/"redirect-data/mod/mod.dll",ec)?"present":"missing")
-        +"\ngame running: "+running+"\nsaved (UTC seconds): "+std::to_string(std::time(nullptr))+"\n";
+        +"\ngame running: "+running+"\nfirewall: "+firewallText(firewall)+"\nsaved (UTC seconds): "+std::to_string(std::time(nullptr))+"\n";
     auto file=options.data/("diagnostics-"+std::to_string(std::time(nullptr))+".txt");
     atomicWrite(file,diagnostics(options.data,head));return file;
 }
@@ -86,7 +90,7 @@ void render(){
         EnableWindow(child(Primary),!net->lobby||(net->joined&&net->peerReady));EnableWindow(child(Name),!net->lobby);
         place(203,30,235,w-60,60);place(Invite,30,310,w-60,64);place(Copy,30,390,(w-75)/2,36);place(Leave,45+(w-75)/2,390,(w-75)/2,36);place(Ready,30,450,w-60,40);
         show(203,net->lobby);show(Invite,net->lobby&&net->hosting);show(Copy,net->lobby&&net->hosting);show(Leave,net->lobby);show(Ready,net->lobby&&!net->hosting);
-        set(203,net->hosting?L"Friends can join by: same network or Tailscale. Allow this launcher and ds.exe through Windows Firewall. Internet needs a VPN.":L"Your host decides when to start. Choose Ready, then keep this launcher open.");
+        set(203,wtext(std::string(net->hosting?"Friends can join by: same network or Tailscale. Internet needs a VPN.\n":"Your host decides when to start. Choose Ready, then keep this launcher open.\n")+firewallText(firewall)));
         EnableWindow(child(Ready),net->joined);set(Ready,net->ready?L"Not ready":L"Ready");
         if(!net->lobby&&choice!=1){set(203,choice==0?L"Open a two-player lobby, copy its invite, then start when your friend is ready.":L"Play by yourself with the separate co-op saves. Your ordinary Steam saves stay separate.");show(203,true);}
         set(Status,wtext(net->status));refreshRows();
@@ -120,6 +124,7 @@ void beginJoin(){
 }
 void primary(){
     if(net->lobby){net->start();return;}
+    if(choice!=2)readFirewallNow();
     if(choice==0){net->openHost(chosenSession(),privacy);set(Invite,wtext(net->invite()));}
     else if(choice==2){auto s=chosenSession();s.secret=random32();options.game=gameFolder;launchGame(options,s,true);net->status=options.prepareOnly?"Configuration prepared; no game started.":"Steam launch requested using separate co-op saves.";}
     else {
@@ -215,7 +220,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         choice=int(GetPrivateProfileIntW(L"launcher",L"choice",0,settingsFile.c_str()));if(choice<0||choice>2)choice=0;
         port=GetPrivateProfileIntW(L"launcher",L"port",49000,settingsFile.c_str());if(port<49000||port>49014)port=49000;
         lan=GetPrivateProfileIntW(L"launcher",L"lan",1,settingsFile.c_str());tailscale=GetPrivateProfileIntW(L"launcher",L"tailscale",1,settingsFile.c_str());privacy=GetPrivateProfileIntW(L"launcher",L"privacy",0,settingsFile.c_str());sharedWorld=GetPrivateProfileIntW(L"launcher",L"world",0,settingsFile.c_str())!=0;
-        bool registerOnly=false,devStart=false,diagnosticsOnly=false,forceWorld=false;std::string devPeer="127.0.0.1";uint32_t devSession=1;
+        bool registerOnly=false,devStart=false,diagnosticsOnly=false,firewallOnly=false,forceWorld=false;std::string devPeer="127.0.0.1";uint32_t devSession=1;
         int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);if(!argv)throw std::runtime_error("Cannot read launcher arguments.");
         for(int i=1;i<argc;++i){std::wstring a=argv[i];auto value=[&](){if(++i>=argc)throw std::runtime_error("Missing launcher option value.");return std::wstring(argv[i]);};
             if(a==L"--dev-direct")options.direct=true;
@@ -225,6 +230,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
             else if(a==L"--shared-world")forceWorld=true;
             else if(a==L"--register-protocol")registerOnly=true;
             else if(a==L"--diagnostics")diagnosticsOnly=true;
+            else if(a==L"--firewall-status")firewallOnly=true;
             else if(a==L"--dev-start")devStart=true;
             else if(a==L"--dev-peer")devPeer=utf8(value());
             else if(a==L"--dev-session"){auto v=utf8(value());if(v.empty()||v.size()>10||v.find_first_not_of("0123456789")!=std::string::npos||std::stoull(v)>UINT32_MAX)throw std::runtime_error("Invalid development session.");devSession=uint32_t(std::stoull(v));}
@@ -241,6 +247,9 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         wchar_t self[32768];GetModuleFileNameW(nullptr,self,32768);executable=self;options.world=executable.parent_path()/L"coop-world.exe";
         if(registerOnly){registerHandler(executable);return 0;}
         // Headless: write the report and exit (no window), for a player who cannot get as far as the About tab.
+        readFirewallNow();
+        // Headless: the firewall sentence to standard output (when redirected) and the exit code (the verdict's number).
+        if(firewallOnly){std::string line=std::string(firewallText(firewall))+"\n";DWORD n=0;HANDLE out=GetStdHandle(STD_OUTPUT_HANDLE);if(out&&out!=INVALID_HANDLE_VALUE)WriteFile(out,line.data(),DWORD(line.size()),&n,nullptr);return int(firewall);}
         if(diagnosticsOnly){options.game=gameFolder;saveDiagnostics();return 0;}
         std::ifstream recents(options.data/"recents.tsv",std::ios::binary);char store[CD_RECENT_BYTES+1];recents.read(store,sizeof(store));auto count=recents.gcount();if(count<=CD_RECENT_BYTES)cd_recents_decode(&net->recents,store,size_t(count));
         settingsFile=options.data/"launcher.ini";

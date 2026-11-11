@@ -46,7 +46,7 @@ void backup(const std::filesystem::path& data,const std::filesystem::path& desti
 // the session secret and invite codes are hidden, other people's addresses keep their first two numbers only, and the
 // Windows user name in paths becomes <user>. At most DiagnosticsMax bytes. Reads only inside `data`.
 // Will Windows Firewall let the game receive the partner's packets? Rules as Windows lists them; the verdict follows
-// Windows: among the enabled inbound rules that apply to the game's executable, UDP (or any protocol), the port and
+// Windows: among the enabled inbound rules that name the game's executable, UDP (or any protocol), the port and
 // an active network profile, a block rule wins over an allow rule; with no such rule Windows asks when the game first
 // listens (and blocks until answered).
 enum class Firewall : uint8_t {Unknown,Off,Allowed,Blocked,NoRule};

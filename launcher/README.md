@@ -84,6 +84,13 @@ last lines of the newest mod, proxy and crash logs. The session code and invites
 this PC's loopback keep only their first two numbers, and the Windows user name in paths becomes `<user>`. The
 report is at most 256 KiB and reads nothing outside the co-op data folder (never a save).
 
+**Windows Firewall, checked.** The launcher reads Windows Firewall's rules (read-only, no administrator rights) when it
+starts and when a lobby opens, and the lobby says in one sentence whether the game can receive the partner's data on
+its two UDP ports: allowed, blocked (with where to change it), no rule yet (Windows will ask when the session starts:
+choose Allow), firewall off, or not readable. Only rules that name the game's `ds.exe` count; a block rule wins. The
+same sentence is in the diagnostics file, and `deathstranding-coop.exe --firewall-status` prints it without a window
+(exit code: 0 unknown, 1 off, 2 allowed, 3 blocked, 4 no rule). The launcher does not change the firewall.
+
 ## Steam and data
 
 Settings selects the game folder registered by Steam for app **1850570**. The
@@ -208,7 +215,7 @@ established by the portable tests or cross-build.
 ## Remaining standard work
 
 This is a launcher foundation, not full A–K compliance. Steam friend/lobby SDK
-integration, UPnP/NAT-PMP, a checked firewall status/fix, chat/voice, controller and
+integration, UPnP/NAT-PMP, a firewall fix (the status is checked), chat/voice, controller and
 Deck navigation, update UI, save metadata/slot management, recent-host
 rename/pin/forget, automatic lobby return after game exit, and in-game discovery
 replies remain unimplemented. The launcher releases its lobby port before the mod

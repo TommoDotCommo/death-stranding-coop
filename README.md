@@ -40,7 +40,8 @@ such as Tailscale's 100.x.y.z; host names are refused), and the proxy's network 
 (`COOP_NETWORK_PEERS=a.b.c.d`), or the copy may not reach it. The mod binds only the local address that routes to
 the peer (or `bind`, if set), never all interfaces, and accepts datagrams only from the peer's address and port.
 Ports: UDP `49000 + slot`, so give the two players different slots (host 0, client 1) and allow that UDP port in the
-firewall. Windows asks once whether `ds.exe` may use the network.
+firewall. Windows asks once whether `ds.exe` may use the network; the launcher's lobby says whether Windows
+Firewall lets the game receive your partner's data.
 
 When a session goes wrong, the launcher's About tab has **Save diagnostics for a bug report** (also
 `deathstranding-coop.exe --diagnostics`): one text file with the versions, the config and the ends of the logs,

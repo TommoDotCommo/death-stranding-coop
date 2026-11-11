@@ -202,7 +202,14 @@ Firewall firewallVerdict(const std::vector<FirewallRule>& rules,const std::strin
     for(auto& r:rules) {
         if(!r.enabled||!r.inbound||!(r.profiles&activeProfiles))continue;
         if(r.protocol!=17&&r.protocol!=256)continue;                      // UDP or any
-        if(!r.application.empty()&&lowerPath(r.application)!=exe)continue;  // another program's rule
+        // Only a rule that names the game decides. A rule without a program is nearly always scoped some other way this
+        // list does not show (a packaged app, a service, one interface such as a VPN's): counting those called every
+        // game "allowed" on a real PC (2026-11-12).
+#ifndef MUTANT_FIREWALL_ANY_PROGRAM
+        if(lowerPath(r.application)!=exe)continue;
+#else
+        if(!r.application.empty()&&lowerPath(r.application)!=exe)continue;
+#endif
         if(!portListed(r.localPorts,port))continue;
 #ifndef MUTANT_FIREWALL_BLOCK_WINS
         if(!r.allow)return Firewall::Blocked;
