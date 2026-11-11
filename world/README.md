@@ -7,7 +7,8 @@ publisher's service and holds none of its keys; modded copies stay refused there
 Status (2026-11-11): the game signs in and stays signed in, two copies are two players, and built objects are stored
 and handed to the other players of an area. Live: cairns one player built on the server were activated in another
 player's game and stayed, and a ladder the game built with its upload flag was uploaded, kept and found by the
-other player on the server (see "Not done" for what is missing).
+other player on the server. Between two copies of the game, a bridge one built stood as a net bridge record in the
+other (see "Not done" for what is missing).
 
 ## Run
 

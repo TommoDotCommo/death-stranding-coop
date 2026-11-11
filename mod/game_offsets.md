@@ -4766,6 +4766,13 @@ Observed:
   another player received it, made a `NetRainShelter` record at its place and removed it after about three seconds
   (state Removed), like the hand-made ones. The builder's own shelter was in construction state 0.
 
+- Two copies (2026-11-12). A `PlayerBridge30m` built with the upload flag was uploaded as
+  `"t":"b","st":"30","bi":{"a":0}` (only `rz` set). A second copy of the same save, signed in as another player,
+  asked for bridges (`b` 2), got it, listed it in its first list as type 6 (Bridge), state 2, and made a
+  `NetBridge30m` construction record at the builder's position to the decimetre; both were still there 30 s later and
+  the builder's game was not given its own bridge back. Both records (the builder's and the net copy) were in
+  construction state 0, as heavy structures made through `CreateConstruction` are until the next load ("Structures");
+  the bridge was not looked at on screen. Resting outdoors for six minutes and getting up produced no cairn upload.
 - Likes. `OTGCGetLikeHistoryOneResponse` (missed by the first dump): `t` int64, `oid`, `lp`, `lp2` int, `uid` (from),
   `sc` int32 (summarised count), `lt` (like type). The game asks `getLikeHistory` once, about a minute after signing
   in, with `{"uid":"","since":0}`. Live: after another player's `sendLike` for a ladder this game had uploaded in an
