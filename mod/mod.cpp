@@ -734,7 +734,8 @@ struct Runtime final:ds::Transport {
     // The partner body's queue of deferred rep calls (game_offsets.md, "Deferred rep calls"): what the mod's own
     // calls put there in a tick is run at the end of that tick with the game's own flush, so no node waits for a
     // rep update the body may not get before the game resets the arena the nodes live in.
-    uint64_t repWatch=0,repEntryEntity=0,repEntryHead=0,repFlushed=0,repWaiting=0,repNoted=0,repNotedAt=0;bool repTried=false;std::function<void(uint64_t)> repFlush;
+    struct RepWatch { uint64_t entity=0,entryEntity=0,entryHead=0,flushed=0,waiting=0; };
+    RepWatch repBody,repSelf;uint64_t repWatch=0,repNoted=0,repNotedAt=0;bool repTried=false;std::function<void(uint64_t)> repFlush;
     uint64_t repQueue(uint64_t entity,uint64_t* repOut=nullptr){
         uint64_t rep=0,head=0;if(!entity||!sampler||!sampler->read(entity+0x60,&rep,8)||!rep||!sampler->read(rep+0x228,&head,8))return 0;
         if(repOut)*repOut=rep;
@@ -753,7 +754,11 @@ struct Runtime final:ds::Transport {
         if(busy()){++cullBusy;auto t0=mod::nowUs();while(busy()){if(mod::nowUs()-t0>4000){++cullGaveUp;break;}std::this_thread::yield();}}
         if(now-cullNotedAt>=60000&&cullBusy){cullNotedAt=now;std::ostringstream o;o<<"CULL a pass was running when the tick began "<<cullBusy<<" of "<<cullTicks<<" times; not over within 4 ms "<<cullGaveUp<<" times\n";note(o.str().c_str());}
     }
-    void repTickStart(){repEntryEntity=repWatch;repEntryHead=repQueue(repWatch);if(repEntryHead)++repWaiting;}
+    void repTickStart(){
+        // The partner body and this porter: the mod calls the game on both from its tick.
+        repBody.entity=repWatch;repSelf.entity=anchorNow().entity;
+        for(auto* w:{&repBody,&repSelf}){w->entryEntity=w->entity;w->entryHead=repQueue(w->entity);if(w->entryHead)++w->waiting;}
+    }
     void repTickEnd(uint64_t now){
         if(!repTried&&sampler){repTried=true;
 #ifdef _WIN32
@@ -761,12 +766,16 @@ struct Runtime final:ds::Transport {
             if(sampler->read(sampler->base+0x237e240,got,17)&&!std::memcmp(got,want,17)){auto f=reinterpret_cast<void(*)(uint64_t)>(sampler->base+0x237e240);repFlush=[f](uint64_t rep){f(rep);};}
 #endif
         }
-        uint64_t rep=0;
-        // Only what was queued during this tick (the queue was empty when the tick began): those nodes are fresh.
-        // (A body first seen in this tick was made in it: its queue holds this tick's nodes only.)
-        if(repFlush&&repWatch&&(repWatch!=repEntryEntity||!repEntryHead)&&repQueue(repWatch,&rep)&&rep){repFlush(rep);++repFlushed;}
-        if(repFlushed+repWaiting!=repNoted&&now-repNotedAt>=30000){repNoted=repFlushed+repWaiting;repNotedAt=now;
-            std::ostringstream o;o<<"BODY deferred rep calls: run at the end of the tick "<<repFlushed<<" times; found waiting when a tick began "<<repWaiting<<" times\n";note(o.str().c_str());}
+        // Only what was queued during this tick (the queue was empty when the tick began, or the entity is new to
+        // this tick): those nodes are fresh.
+        repBody.entity=repWatch;
+        for(auto* w:{&repBody,&repSelf}){
+            uint64_t rep=0;
+            if(repFlush&&w->entity&&(w->entity!=w->entryEntity||!w->entryHead)&&repQueue(w->entity,&rep)&&rep){repFlush(rep);++w->flushed;}
+        }
+        uint64_t sum=repBody.flushed+repBody.waiting+repSelf.flushed+repSelf.waiting;
+        if(sum!=repNoted&&now-repNotedAt>=30000){repNoted=sum;repNotedAt=now;
+            std::ostringstream o;o<<"REP deferred calls queued in the mod's tick were run at its end: body "<<repBody.flushed<<", porter "<<repSelf.flushed<<" times; found waiting when a tick began: body "<<repBody.waiting<<", porter "<<repSelf.waiting<<" times\n";note(o.str().c_str());}
     }
     void tickGuard() {
 #ifdef _WIN32
