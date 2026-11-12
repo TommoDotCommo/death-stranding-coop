@@ -37,8 +37,9 @@ inline bool matches(uint64_t code,uint64_t kind,uint64_t address,uint64_t rip,ui
 inline bool abandonsQueue(uint64_t walkReturn,uint64_t image){return image&&walkReturn==image+0x237e2b0;}
 // The walk itself can fault on such a queue (live: a read of zero at 0x237e2c8, the call through a node's payload
 // vtable, after five bad functions had been answered): any access violation inside the walk's loop
-// (0x237e267..0x237e2d1), or an execute fault at an address outside the game called from its two payload calls
-// (return 0x237e2c6 / 0x237e2ca), leaves the walk the same way. Returns how many bytes to take off the stack
+// (0x237e267..0x237e2d1), or an execute fault at an address outside the game called from the walk itself (the
+// node's dispatcher, return 0x237e2b0: live, a pointer into the rep object; the payload calls, 0x237e2c6 / 0x237e2ca),
+// leaves the walk the same way. Returns how many bytes to take off the stack
 // first (0 or 8), or -1 when the fault is not the walk's.
 inline int walkFault(uint64_t code,uint64_t kind,uint64_t address,uint64_t rip,uint64_t returnAddress,uint64_t image,uint64_t imageEnd){
     if(!image||code!=0xc0000005u)return -1;
@@ -47,7 +48,7 @@ inline int walkFault(uint64_t code,uint64_t kind,uint64_t address,uint64_t rip,u
 #else
     if(kind!=8&&rip>=image+0x237e240&&rip<image+0x237e300)return 0;
 #endif
-    if(kind==8&&rip==address&&!(address>=image&&address<imageEnd)&&(returnAddress==image+0x237e2c6||returnAddress==image+0x237e2ca))return 8;
+    if(kind==8&&rip==address&&!(address>=image&&address<imageEnd)&&(returnAddress==image+0x237e2b0||returnAddress==image+0x237e2c6||returnAddress==image+0x237e2ca))return 8;
     return -1;
 }
 // Returns where to resume, 0 when the fault is not this one.
