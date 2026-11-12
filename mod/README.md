@@ -677,7 +677,7 @@ nothing. The HUD object is found through the UI owner global and checked by its 
 the config. Tests: `notice_test.cpp` (mutants BOUND, LEFT, ALONE_ONCE, NAME_WAIT, WORLD, GAP, AWAY_SETTLE, BACK_PAIRED, LIKE_ICON, JOIN_HOLD). The launcher's play
 setup turns it on.
 
-## Shared MULEs and orders (`share_enemies`, `share_orders`, `share_order_units`; off by default)
+## Shared MULEs, BTs, orders and roads (`share_enemies`, `share_orders`, `share_order_units`, `share_roads`; off by default)
 
 Each game keeps simulating its own world; these settings share the outcome of what a player does in it. They need
 `game_thread` and a partner; the launcher's play setup turns the first two on.
@@ -694,6 +694,11 @@ Each game keeps simulating its own world; these settings share the outcome of wh
   difficulties compare). The mod never takes a boss to zero itself: the game only lets a boss die on a real hit, so
   the player who lands the last hit sees the death and the partner's fight ends with the cleared area. Each game
   still runs its own BTs: where they drift, whom they notice and what the boss does is not shared.
+- `"share_roads": true` (`roads.h`; on in the launcher's setup): what a player delivers to an auto-paver is counted
+  at the partner's paver as delivered by others, through the game's own routine for online contributions, and a road
+  one player completes is completed for the partner, so both see it built. Pavers are matched by the game's own
+  construction id. Only what happens while the two are connected is shared: roads one player's save already has are
+  not copied to the other. The partner's cargo is not touched and the partner gets no likes for it.
 - `"share_orders": true` (`orders.h`): a standard order (the repeatable deliveries and collections) one player takes
   on, completes or gives up does the same in the partner's game, through the game's own mission requests. Main and
   sub orders are never shared. Each game has its own cargo for the order; whoever hands it in completes it for both.

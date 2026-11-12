@@ -16,6 +16,7 @@ struct Config {
     bool partnerVehicle=false; // the partner's vehicle drawn under him while he rides (ride.h)
     bool partnerTag=false;     // the partner's name (their nickname) over the partner body (nametag.h)
     bool shareOrderUnits=false; // with share_orders: a cargo unit one player hands in is delivered for the partner too (a split delivery); not yet run with a real partial hand-in
+    bool shareRoads=false;     // what a player delivers to an auto-paver, and a road it builds, also counts in the partner's game (roads.h)
     bool shareOrders=false;    // a standard order one player takes on, completes or gives up does the same for the partner (orders.h)
     bool shareEnemies=false;   // a MULE one player puts down is down in the partner's game too (enemies.h)
     bool notices=false;        // session notices in the game's info log: partner joined / left / nobody yet (notice.h)

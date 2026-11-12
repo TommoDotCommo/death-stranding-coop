@@ -1071,6 +1071,25 @@ looked at.
   (`+0xa8`, at the territory, radius about 280, shrinking with time; saved). Inside a cleared sphere 0 does nothing
   and the weather map there reads clear, so rain placed there brings no BTs.
 
+### Roads: auto-pavers (2026-11-13, static; reads, delivery and completion confirmed live)
+
+- An auto-paver is a construction (type byte `+0x34` = 36) in the construction manager `*(image+0x7bf4960)`: object
+  list `+0x56a258` (count) / `+0x56a260` (pointers). Per paver: `+0x30` construction id (the same in every game: 52
+  pavers, ids 252 and 2031..2511), `+0x40` position, `+0x84` level (1 = no road, 2 = road built), `+0x520` road hash,
+  six i32 per material set (0 chiral crystals, 2 metals, 3 ceramics used; 1, 4, 5 unused by roads): `+0x210`
+  delivered by this player, `+0x248` delivered by others, `+0x524` online materials not yet counted.
+- `0x2c59770(paver, i32 need[6], i32 have[6])` returns 1 while the next level is not supplied and fills `need` with
+  the whole requirement of that level (live: unchanged by a partial delivery), 0 when supplied.
+- The terminal's delivery ends in `0x2c41540(paver, i32 mats[6])` (adds to `+0x210`) and, when supplied,
+  `0x2c69170(manager, paver)` (queues the level-up, which plays the build and then tells the road system).
+- Materials from other players: `0x2c321a0(paver, u64 *(paver+0x458), i32 mats[6], u8 1, null)` adds to `+0x248`
+  and recomputes the level at once; with the requirement met the paver goes to level 2 without the cinematic and the
+  road is printed. This is what the mod calls for the partner's deliveries (roads.cpp).
+- The global at `image+0x7c173b0` is the online ledger of highway resources (upload queue, totals, contributors),
+  not the road state; the drawn road belongs to the road system `*(image+0x7bfa148)`, keyed by the road hash.
+- All pavers exist as objects whatever area is loaded (live: the Episode 1 map lists the same 52), and while a save
+  loads they read as empty: a reader must not take the jump after a load for deliveries.
+
 ### Catcher life (2026-11-13, static; read and write confirmed live)
 
 - Each catcher of a fight has a record (manager `+0x88` count / `+0x90`, stride 0x110: `+0x0` weak entity (entity =

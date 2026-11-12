@@ -36,6 +36,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "online.h"
 #include "vitals.h"
 #include "bts.h"
+#include "roads.h"
 #include "enemies.h"
 #include "orders.h"
 #include "guard_win.h"
@@ -259,7 +260,8 @@ struct Runtime final:ds::Transport {
             if(e.type==mod::carry::WireType){if(config.carryVisual)carry.incoming(e,carrySink);continue;}   // ds3: tickCarry
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(e.type==mod::enemies::WireType){enemyIn.push_back(e);continue;}
-            if(e.type==mod::bts::WireType){btIn.push_back(e);continue;}                // BT news (tickBts)   // a MULE went down (tickEnemies)
+            if(e.type==mod::bts::WireType){btIn.push_back(e);continue;}
+            if(e.type==mod::roads::WireType){roadIn.push_back(e);continue;}             // road news (tickRoads)                // BT news (tickBts)   // a MULE went down (tickEnemies)
             if(e.type==mod::orders::WireType){orderIn.push_back(e);continue;}    // an order changed (tickOrders)
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
             if(e.type==mod::likes::WireType){likeIn.push_back(e);continue;}   // a like (tickLikes, likes.h)
@@ -747,6 +749,36 @@ struct Runtime final:ds::Transport {
             ds::CargoEvent e;e.type=mod::orders::WireType;e.item=c.what;e.ref=c.id;core->queueCargo(e);++orderSent;
             std::ostringstream o;o<<"ORDER "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<" here -> partner\n";note(o.str().c_str());
         }
+    }
+    // Shared roads (roads.h): opt-in share_roads. What this player delivers to a paver goes to the partner's paver
+    // as delivered by others; a road built here is completed there.
+    mod::roads::Sync roadSync;std::vector<ds::CargoEvent> roadIn;mod::roads::Api roadApi;uint64_t roadReadAt=0,roadSent=0,roadApplied=0,roadPorter=0,roadSettled=0;bool roadTried=false;
+    void tickRoads(uint64_t now) {
+        if(!core||!sampler||!config.shareRoads){roadIn.clear();return;}
+        if(!roadTried){roadTried=true;try{roadApi=mod::roads::nativeApi(*sampler);}catch(const std::exception& e){note((std::string("ROAD unavailable: ")+e.what()+"\n").c_str());}}
+        // Another world (a save loaded): the pavers' numbers jump; learn them again once it has settled.
+        auto anchor=anchorNow();
+        if(anchor.entity!=roadPorter){roadPorter=anchor.entity;roadSync.forget();roadSettled=now+8000;}
+        if(!roadApi.give||!roadPorter||now<roadSettled||now-roadReadAt<1000)return;
+        roadReadAt=now;
+        auto pavers=mod::roads::readPavers(*sampler,sampler->base);
+        // First what this game saw (so a delivery here is never mistaken for the partner's), then the partner's news.
+        for(auto& n:roadSync.observe(pavers)){
+            if(!core->connected()||!partnerMode())continue;
+            ds::CargoEvent e;e.type=mod::roads::WireType;e.item=n.item;e.ref=n.id;e.position={double(n.amount),0,0};core->queueCargo(e);++roadSent;
+            std::ostringstream o;if(n.item==mod::roads::Built)o<<"ROAD built at paver "<<n.id<<" here -> partner\n";else o<<"ROAD "<<n.amount<<" of material "<<n.item-mod::roads::Material<<" delivered to paver "<<n.id<<" here -> partner\n";
+            note(o.str().c_str());
+        }
+        for(auto& e:roadIn){
+            mod::roads::News n{uint32_t(e.ref),e.item,int32_t(e.position[0])};
+            auto* p=mod::roads::Sync::wanted(pavers,n);if(!p)continue;
+            std::ostringstream o;
+            if(n.item==mod::roads::Built){roadSync.applied(n.id);roadApi.complete(p->address);o<<"ROAD partner's road at paver "<<n.id<<" is built: completed here\n";}
+            else{mod::roads::Set s{};s[n.item-mod::roads::Material]=n.amount;if(p->level<2)roadSync.applied(n.id);roadApi.give(p->address,s);
+                o<<"ROAD partner delivered "<<n.amount<<" of material "<<n.item-mod::roads::Material<<" to paver "<<n.id<<": counted here\n";}
+            ++roadApplied;note(o.str().c_str());
+        }
+        roadIn.clear();
     }
     // Shared BTs (bts.h), with share_enemies: gazers destroyed, a catcher fight started, its area cleared.
     mod::bts::GazerSync gazerSync;mod::bts::FightSync fightSync;mod::bts::HealthSync healthSync;std::function<void(const mod::bts::Catcher&,float)> btHurt;std::vector<ds::CargoEvent> btIn;
@@ -1562,6 +1594,7 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickStructures(now);
             if(twin&&gameContext)tickEnemies(now);
             if(twin&&gameContext)tickBts(now);
+            if(twin&&gameContext)tickRoads(now);
             if(twin&&gameContext)tickOrders(now);
             tickGuard();
             stage="markers";stages.enter("markers",mod::nowUs());
@@ -1620,6 +1653,25 @@ struct Runtime final:ds::Transport {
                         }
                     }
 #endif
+                }
+                else if(auto pv=mod::puppet::parseCargoCommand(text,mod::runStamp(),"paver");pv) {
+                    // Test: "paver 0" lists the auto-pavers; "paver ID*10+K" delivers 100 of material K to paver ID as
+                    // this player would at its terminal; "paver 1000000+ID" delivers everything it still needs.
+                    try{
+                        auto api=mod::roads::nativeApi(*sampler);auto all=mod::roads::readPavers(*sampler,sampler->base);
+                        uint32_t id=*pv>=1000000?*pv-1000000:*pv/10;std::ostringstream o;
+                        if(!*pv){
+                            o<<"ROAD test: "<<all.size()<<" pavers\n";
+                            for(auto& p:all){auto need=api.missing(p.address);double at[3]{};sampler->read(p.address+0x40,at,24);
+                                o<<"ROAD paver "<<p.id<<" level "<<p.level<<" at "<<int(at[0])<<","<<int(at[1])<<" own";for(auto v:p.own)o<<" "<<v;o<<" net";for(auto v:p.net)o<<" "<<v;o<<" needs";for(auto v:need)o<<" "<<v;o<<"\n";}
+                        }else{
+                            bool found=false;
+                            for(auto& p:all)if(p.id==id){found=true;mod::roads::Set s{};if(*pv>=1000000)s=api.missing(p.address);else s[*pv%10%mod::roads::Kinds]=100;
+                                api.deliver(p.address,s);o<<"ROAD test: delivered to paver "<<id<<":";for(auto v:s)o<<" "<<v;o<<"\n";}
+                            if(!found)o<<"ROAD test: no paver "<<id<<"\n";
+                        }
+                        note(o.str().c_str());
+                    }catch(const std::exception& e){note((std::string("ROAD test unavailable: ")+e.what()+"\n").c_str());}
                 }
                 else if(auto gz=mod::puppet::parseCargoCommand(text,mod::runStamp(),"gazer");gz&&anchor.pose.available) {
                     // Test: "gazer 1" destroys the nearest living gazer the way a partner's kill does ("gazer 2": the nearest with a body).
