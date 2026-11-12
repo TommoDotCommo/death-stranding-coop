@@ -192,6 +192,17 @@ std::function<void(uint64_t,const puppet::Transform&)> nativeTeleport(const disc
         alignas(16) puppet::Transform copy=t;teleport(player,&copy,2,0);
     };
 }
+std::function<void(uint64_t,const puppet::Transform&)> nativeTeleportExact(const discovery::Sampler& s) {
+    auto why=verifyMoveCode(s);if(!why.empty())throw std::runtime_error("join move: "+why);
+    // Mode 0: the same call without ground placement, so the porter is put exactly where asked (indoors too). Tests only.
+    using TeleportFn=void(*)(uint64_t,const puppet::Transform*,int,int);
+    auto teleport=reinterpret_cast<TeleportFn>(s.base+MoveSites{}.playerTeleport);
+    return [&s,teleport](uint64_t player,const puppet::Transform& t){
+        uint64_t entity=0;
+        if(!slot(s,player+0x70,entity)||!movableIdentity(s,player,entity))throw std::runtime_error("join move: player identity changed");
+        alignas(16) puppet::Transform copy=t;teleport(player,&copy,0,0);
+    };
+}
 #endif
 namespace {
 using UUID=std::array<unsigned char,16>;

@@ -78,6 +78,8 @@ bool movableIdentity(const discovery::Sampler&,uint64_t player,uint64_t entity,c
 #ifdef _WIN32
 // Calls verifyMoveCode first and throws on a mismatch. The returned call checks identity again before every use.
 std::function<void(uint64_t,const puppet::Transform&)> nativeTeleport(const discovery::Sampler&);
+// The same without ground placement (tests: an exact spot and heading, indoors too).
+std::function<void(uint64_t,const puppet::Transform&)> nativeTeleportExact(const discovery::Sampler&);
 #endif
 
 // Read-only progress discovery for the pinned build. These sites describe statically reviewed code/data;

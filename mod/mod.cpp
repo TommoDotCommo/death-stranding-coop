@@ -360,6 +360,19 @@ struct Runtime final:ds::Transport {
                     auto now=stackLayout.value_or(mod::stack::Layout{});now.across=l.across;now.columns=cols;stackLayout=now;if(cargoStack)cargoStack->layout=now;}
                 else if(std::sscanf(text.c_str()+6,"%d",&n)==1&&n>=0&&n<=int(mod::stack::Stack::MaxCases))stackTest=n;
                 else {note("RIDE stack refused\n");return;}}
+            else if(text.rfind("place ",0)==0&&text.size()>stamp.size()&&text.compare(text.size()-stamp.size(),stamp.size(),stamp)==0){
+                // Lab test: put this porter exactly at X Y Z (game axes) facing HEADING degrees (0 = +x, 90 = +y), no ground placement.
+#ifdef _WIN32
+                double x=0,y=0,z=0,h=0;auto porter=mod::join::readPorter(*sampler);
+                try{
+                    if(std::sscanf(text.c_str()+6,"%lf %lf %lf %lf",&x,&y,&z,&h)==4&&std::isfinite(x)&&std::isfinite(y)&&std::isfinite(z)&&std::isfinite(h)&&porter.readable&&!inEvent){
+                        auto exact=mod::join::nativeTeleportExact(*sampler);double r=h*3.14159265358979323846/180.0;float c=float(std::cos(r)),sn=float(std::sin(r));
+                        mod::puppet::Transform t;t.position={x,y,z};t.rotation={sn,-c,0, c,sn,0, 0,0,1};   // rows: right, forward, up
+                        exact(porter.player,t);note("RIDE place done\n");}
+                    else note("RIDE place refused\n");
+                }catch(const std::exception& e){note((std::string("RIDE place unavailable: ")+e.what()+"\n").c_str());}
+#endif
+                return;}
             else if(text.rfind("goto ",0)==0&&text.size()>stamp.size()&&text.compare(text.size()-stamp.size(),stamp.size(),stamp)==0){
                 // Lab test: move this porter with the game's own player teleport (join.h), once, in normal gameplay.
                 double x=0,y=0,z=0;auto porter=mod::join::readPorter(*sampler);
