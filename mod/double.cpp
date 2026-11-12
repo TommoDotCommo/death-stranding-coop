@@ -772,7 +772,19 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
     auto sleep=reinterpret_cast<SleepFn>(s.base+entries[0].rva);auto visible=reinterpret_cast<VisibleFn>(s.base+entries[1].rva);
     auto place=reinterpret_cast<PlaceFn>(s.base+entries[2].rva);
     auto initBool=reinterpret_cast<InitFn>(s.base+entries[3].rva);auto initFloat=reinterpret_cast<InitFn>(s.base+entries[4].rva);
-    auto setFloat=reinterpret_cast<SetFloatFn>(s.base+entries[5].rva);auto setBool=reinterpret_cast<SetBoolFn>(s.base+entries[6].rva);
+    auto rawSetFloat=reinterpret_cast<SetFloatFn>(s.base+entries[5].rva);auto rawSetBool=reinterpret_cast<SetBoolFn>(s.base+entries[6].rva);
+    // The game's setters look the control up in the manager's running network (manager+0xa0 -> +0x40 -> +8, 40-byte
+    // entries, object at +0x10) and use it unchecked. When the game takes the body back for an event of its own (seen
+    // live after a long teleport) the network is another one and a handle bound before can name an empty entry: the
+    // game then read through a null pointer. A control is set only while its entry is there.
+    auto live=[&s](uint64_t manager,int handle)->bool{
+        uint64_t slots=0,network=0,holder=0,table=0,object=0;int32_t id=-1;
+        if(!manager||handle<0||!s.read(manager+0x58,&slots,8)||!slots||!s.read(slots+uint64_t(handle)*48+8,&id,4))return false;
+        if(id==-1)return true;   // the setter stores the value and sends nothing
+        if(!s.read(manager+0xa0,&network,8)||!network||!s.read(network+0x40,&holder,8)||!holder||!s.read(holder+8,&table,8)||!table)return false;
+        return s.read(table+uint64_t(uint16_t(id))*40+0x10,&object,8)&&object!=0;};
+    auto setFloat=[rawSetFloat,live](uint64_t manager,int handle,float value){if(live(manager,handle))rawSetFloat(manager,handle,value);};
+    auto setBool=[rawSetBool,live](uint64_t manager,int handle,bool value){if(live(manager,handle))rawSetBool(manager,handle,value);};
     const uint64_t animator=s.base+0x3d09910;   // MorphemeAnimationManager
     // Handles are per manager; the double's network (sam/references/akukan) has these locomotion controls.
     struct Handles{uint64_t manager=0;int speed=-1,move=-1,moveFloat=-1,moveInterp=-1,crouchRate=-1,basic=-1,isVehicle=-1,vehicleType=-1,vehicleSeat=-1,
