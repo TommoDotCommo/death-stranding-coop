@@ -22,13 +22,25 @@ inline bool matches(uint64_t code,uint64_t kind,uint64_t address,uint64_t rip,ui
 namespace mod::guard {
 inline std::atomic<uint64_t> site{0};
 inline std::atomic<unsigned> skipped{0};
+// Evidence for the first hits: the callback's target object (rcx at the fault) and the first word it holds (its
+// vtable, when it is an object of the game), and the two return addresses above the call site.
+struct Seen { uint64_t target=0,vtable=0,caller=0,caller2=0; };
+inline Seen seen[8];
 inline LONG CALLBACK handler(EXCEPTION_POINTERS* e){
     auto* r=e->ExceptionRecord;auto* c=e->ContextRecord;uint64_t s=site.load(std::memory_order_acquire);
     if(!s||r->ExceptionCode!=EXCEPTION_ACCESS_VIOLATION||r->NumberParameters<2||c->Rip!=0)return EXCEPTION_CONTINUE_SEARCH;
     if(IsBadReadPtr(reinterpret_cast<void*>(c->Rsp),8))return EXCEPTION_CONTINUE_SEARCH;
     uint64_t back=*reinterpret_cast<uint64_t*>(c->Rsp);
     if(!matches(r->ExceptionCode,r->ExceptionInformation[0],r->ExceptionInformation[1],c->Rip,back,s))return EXCEPTION_CONTINUE_SEARCH;
-    c->Rip=back;c->Rsp+=8;skipped.fetch_add(1,std::memory_order_relaxed);
+    unsigned n=skipped.fetch_add(1,std::memory_order_relaxed);
+    if(n<8){
+        Seen& e=seen[n];e.target=c->Rcx;
+        if(c->Rcx&&!IsBadReadPtr(reinterpret_cast<void*>(c->Rcx),8))e.vtable=*reinterpret_cast<uint64_t*>(c->Rcx);
+        // 0x22bdee0 keeps 0x28 bytes of frame: its own return address is at rsp+8+0x28, the next one is searched for
+        auto* sp=reinterpret_cast<uint64_t*>(c->Rsp);
+        if(!IsBadReadPtr(sp,0x100)){e.caller=sp[6];for(unsigned i=7;i<32;++i)if(sp[i]>s-0x22bdf1a&&sp[i]<s-0x22bdf1a+0x8000000){e.caller2=sp[i];break;}}
+    }
+    c->Rip=back;c->Rsp+=8;
     return EXCEPTION_CONTINUE_EXECUTION;
 }
 // base: the game image. Installed once, ahead of the other handlers.

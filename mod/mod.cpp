@@ -678,7 +678,13 @@ struct Runtime final:ds::Transport {
     void tickGuard() {
 #ifdef _WIN32
         unsigned n=mod::guard::skipped.load();
-        if(n!=guardNoted){guardNoted=n;note(("GUARD a creation callback with no function was skipped ("+std::to_string(n)+" so far)\n").c_str());}
+        if(n!=guardNoted){
+            for(unsigned i=guardNoted;i<n&&i<8;++i){
+                auto& e=mod::guard::seen[i];uint64_t base=sampler?sampler->base:0;std::ostringstream o;o<<std::hex<<"GUARD hit "<<i<<": target 0x"<<e.target<<" vtable ";
+                if(base&&e.vtable>=base&&e.vtable<base+0x8000000)o<<"ds.exe+0x"<<e.vtable-base;else o<<"0x"<<e.vtable;
+                o<<" callers ds.exe+0x"<<(e.caller>base?e.caller-base:0)<<" ds.exe+0x"<<(e.caller2>base?e.caller2-base:0)<<"\n";note(o.str().c_str());
+            }
+            guardNoted=n;note(("GUARD a creation callback with no function was skipped ("+std::to_string(n)+" so far)\n").c_str());}
 #endif
     }
     void tickOrders(uint64_t now) {
