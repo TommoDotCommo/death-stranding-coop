@@ -1193,6 +1193,12 @@ entity, and 35 with bit 2 (0x10004, 0x1010004) not decoded. No catcher record, n
   function called from the walk, any access violation inside the walk's loop (`0x237e267..0x237e2d1`; live: a read
   of zero at `0x237e2c8`, the call through a node's payload vtable, after five bad functions) or a bad payload
   call resumes at the walk's own end `0x237e2d2` with `rbp = 0`, which empties the queue and returns.
+- Whose queue: live (2026-11-13) the entities whose walks were left were this porter's own entity and three
+  others next to it in memory, never the partner body; the mod's own calls left nothing queued on either at the end
+  of its ticks. So the nodes are the game's own, on this porter, in sessions with a second player-type entity.
+  What strands or corrupts them is not known yet. A queue can also come out as a ring (the walk never ends and
+  nothing faults; the game thread waits for that job): a watchdog on the mod's own thread, after 2 s without a tick
+  of the game thread, looks for a thread that stays in the walk and sends it to the walk's end (guard_win.h).
 
 ### Creation callback with no function (2026-11-12, from two crash dumps)
 
