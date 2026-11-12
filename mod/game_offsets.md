@@ -979,6 +979,31 @@ are in the table about 2.5 s before the save's (73, already in state 1 or 2).
 The tool wheel reads the pointer (`GetCursorPos` through the window's method at `0x1a17f70`), not raw mouse motion;
 releasing the wheel key equips the highlighted item.
 
+## Enemies: the game actor manager (2026-11-12, static, the reads and the defeat call confirmed live)
+
+Enemies are game actors, like vehicles. Manager `M = *(image+0x7bbb8c0)`: `M+0x440` (i32) units, `M+0x448` the array
+of unit pointers. A unit: `+0x30` first index, `+0x40` count, `+0x48` array of actor pointers; its vtable tells the
+kind: MULE 0x3db71b8, MULE camp 0x3dbe8d0, Gazer 0x3da58a8, Catcher 0x3daf530, Catcher jellyfish 0x3da81d8. An actor:
+`+0x18` its locator (the locator's `+0x8` is a 16-byte UUID), `+0x20` live byte, `+0x24` LOD (2 = has an entity),
+`+0x28` world transform (3 doubles, 9 floats), `+0x68` weak entity pointer. Actor id = (unit index << 13) | index.
+`0x22fa980(M, id)` gives the actor, `0x22faa50(M, &id, &uuid)` the id of a locator UUID.
+
+MULE actor: life state `+0xea0` (copy `+0x11c`): 1 and 2 standing, 4 down and present, 3 dead body, 5 removed; flags
+`+0xea4` (copy `+0x120`): when down, bit 19 knocked, 20 fainted (timer `+0x338` from the config), 21 asleep (timer
+`+0x33c`). The game's defeat function `0x2aa8000(actor, kind)`: kind 0 knocked, 1 fainted, 2 asleep, 3 dead; with an
+entity it goes through the damage component (`+0xe90`, `0x2af6930(component, kind+1, 0)`), without one it sets the
+state and the flag bit. Setter of the life state: `0x2acedb0(actor, state)`. MULE camp actor: phase `+0x214` (0
+normal, 1 return, 2 pre-caution, 3 caution, 4 evasion, 5 alert), members `+0x4c0` (count) / `+0x4c8`. MULE manager
+`*(image+0x7bf09d8)`: camp actor ids at `+0xd8` (count) / `+0xe0`. Script functions by camp locator UUID:
+`ForceSetCPPhase` 0x2b649a0 (uuid*, phase), `DisableCPAndAllsMembers` 0x2b64880 (uuid*, bool), `IsExtinctionCP`
+0x2b64f50; not called yet.
+
+Live, Episode 3 save, two copies: 9 camps and 150 MULEs in units 0 to 4, the same ids and locator UUIDs in both, all
+with a locator; 16 to 18 MULEs within range had an entity; all standing in state 1; the camp next to the porters went
+to phase 5 in both copies by itself. `0x2aa8000(actor, 1)` on a MULE with an entity: state 4, flag bit 20, and it lay
+on the ground; called in the partner's game for the same UUID it did the same there. No Gazer or Catcher actor was
+live at that place (units of 256 and 1, none live): BTs are not mapped beyond the unit kinds.
+
 ### The partner's own body, live (2026-11-07)
 
 `EntityResource_ExportedCreateEntity` (0x23806a0; the existing puppet probe's signature-checked call) **does** create

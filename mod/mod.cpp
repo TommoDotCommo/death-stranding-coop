@@ -35,6 +35,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "likes.h"
 #include "online.h"
 #include "vitals.h"
+#include "enemies.h"
 #include "link.h"
 #include "nametag.h"
 #include "notice.h"
@@ -254,6 +255,7 @@ struct Runtime final:ds::Transport {
         for(auto& e:incoming) {
             if(e.type==mod::carry::WireType){if(config.carryVisual)carry.incoming(e,carrySink);continue;}   // ds3: tickCarry
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
+            if(e.type==mod::enemies::WireType){enemyIn.push_back(e);continue;}   // a MULE went down (tickEnemies)
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
             if(e.type==mod::likes::WireType){likeIn.push_back(e);continue;}   // a like (tickLikes, likes.h)
             if(e.type==mod::nametag::WireType){if(auto n=nameRx.feed(e)){partnerName=*n;note(("TAG partner name "+std::to_string(n->size())+" bytes\n").c_str());}continue;}   // nametag.h
@@ -652,6 +654,32 @@ struct Runtime final:ds::Transport {
     }
     mod::structures::NetCopies netCopies;uint64_t structRemoved=0;
     std::vector<ds::CargoEvent> structIn;
+    // Shared MULEs (enemies.h): opt-in share_enemies. Each look sends the MULEs this player's game saw go down and
+    // puts down the ones the partner reports, with the game's own defeat function.
+    mod::enemies::Sync enemySync;std::vector<ds::CargoEvent> enemyIn;std::function<void(uint64_t,uint8_t)> enemyDefeat;
+    uint64_t enemyReadAt=0,enemySent=0,enemyApplied=0;bool enemyTried=false,enemyTimed=false;
+    void tickEnemies(uint64_t now) {
+        if(!core||!sampler||!config.shareEnemies){enemyIn.clear();return;}
+        if(!enemyTried){enemyTried=true;try{enemyDefeat=mod::enemies::nativeDefeat(*sampler);}catch(const std::exception& e){note((std::string("ENEMY unavailable: ")+e.what()+"\n").c_str());}}
+        if(!enemyDefeat||(enemyIn.empty()&&now-enemyReadAt<500))return;
+        enemyReadAt=now;
+        auto t0=mod::nowUs();auto mules=mod::enemies::readMules(*sampler,sampler->base);
+        if(!enemyTimed&&!mules.empty()){enemyTimed=true;std::ostringstream o;o<<"ENEMY "<<mules.size()<<" MULEs read in "<<(mod::nowUs()-t0)/1000.<<" ms\n";note(o.str().c_str());}
+        if(mules.empty())return;
+        for(auto& e:enemyIn){
+            mod::enemies::Down d{e.ref,uint8_t(e.item)};
+            if(auto* m=enemySync.wanted(mules,d)){
+                enemySync.applied(d.key);enemyDefeat(m->address,d.kind);++enemyApplied;
+                std::ostringstream o;o<<"ENEMY partner put a MULE down: id "<<std::hex<<m->id<<std::dec<<" kind "<<int(d.kind)<<" lod "<<m->lod<<"\n";note(o.str().c_str());
+            }
+        }
+        if(!enemyIn.empty()){enemyIn.clear();mules=mod::enemies::readMules(*sampler,sampler->base);}
+        for(auto& d:enemySync.observe(mules)){
+            if(!core->connected()||!partnerMode())continue;
+            ds::CargoEvent e;e.type=mod::enemies::WireType;e.item=d.kind;e.ref=d.key;core->queueCargo(e);++enemySent;
+            std::ostringstream o;o<<"ENEMY a MULE went down here: kind "<<int(d.kind)<<" -> partner\n";note(o.str().c_str());
+        }
+    }
     std::deque<std::pair<uint64_t,ds::State>> echo;
     mod::puppet::ActionCache actionCache;uint64_t animatorVtable=0;
     std::filesystem::path padCommand;bool padRunning=false,posePublished=false,poseLogged=false;
@@ -1363,6 +1391,7 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickCarry(now);
             stage="structures";stages.enter("structures",mod::nowUs());
             if(twin&&gameContext)tickStructures(now);
+            if(twin&&gameContext)tickEnemies(now);
             stage="markers";stages.enter("markers",mod::nowUs());
             if(twin&&gameContext)tickMarkers(now);
             stage="likes";stages.enter("likes",mod::nowUs());
@@ -1385,6 +1414,17 @@ struct Runtime final:ds::Transport {
                     // Research: "part <index*2+on> <stamp>" switches one art part of the own body.
                     bool ok=partToggle(ownEntity,*code/2,*code&1);
                     note(("PART "+std::to_string(*code/2)+(*code&1?" on":" off")+(ok?"\n":" failed\n")).c_str());
+                }
+                else if(auto kind=mod::puppet::parseCargoCommand(text,mod::runStamp(),"mule");kind&&anchor.pose.available) {
+                    // Test: "mule <kind>" puts the standing MULE nearest to the porter down (0 knocked, 1 fainted, 2 asleep, 3 dead).
+                    try{
+                        auto defeat=mod::enemies::nativeDefeat(*sampler);auto mules=mod::enemies::readMules(*sampler,sampler->base);
+                        auto here=mod::puppet::transform(anchor.pose).position;const mod::enemies::Mule* best=nullptr;double bestD=1e18;
+                        for(auto& m:mules){if(mod::enemies::condition(m.state,m.flags)!=mod::enemies::Up||m.state==5)continue;
+                            double dx=m.position[0]-here[0],dy=m.position[1]-here[1],d=dx*dx+dy*dy;if(d<bestD){bestD=d;best=&m;}}
+                        if(!best||*kind>3)note("MULE test: none standing, or kind out of range\n");
+                        else{defeat(best->address,uint8_t(*kind));std::ostringstream o;o<<"MULE test: id "<<std::hex<<best->id<<std::dec<<" kind "<<*kind<<" lod "<<best->lod<<" at "<<best->position[0]<<","<<best->position[1]<<","<<best->position[2]<<" ("<<std::sqrt(bestD)<<" m)\n";note(o.str().c_str());}
+                    }catch(const std::exception& e){note((std::string("MULE test unavailable: ")+e.what()+"\n").c_str());}
                 }
                 else if(auto mask=mod::puppet::parseCargoCommand(text,mod::runStamp(),"unbuild");mask&&unconstruct&&anchor.entity&&anchor.pose.available) {
                     // Removal experiment: "unbuild <mask> <stamp>", a 6 x 6 x 10 m box around the point 4 m in front of the
