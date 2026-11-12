@@ -28,7 +28,7 @@ std::vector<Record> readRecords(const discovery::Sampler& s,uint64_t manager,uin
       for(unsigned k=0;k<n;++k){unsigned i=at+k;const uint8_t* block=chunk.data()+Stride*k;
         uint64_t item=0;std::memcpy(&item,block+0x28,8);if(!item)continue;
         Record r;std::memcpy(&r.slot,block+0x18,4);std::memcpy(&r.state,block+0x20,4);std::memcpy(&r.hash,block+0xc8,4);
-        std::memcpy(r.position.data(),block+0x38,24);std::memcpy(&r.holder,block+0x1c,4);r.index=i;out.push_back(r);
+        std::memcpy(r.position.data(),block+0x38,24);std::memcpy(&r.holder,block+0x1c,4);r.index=i;std::memcpy(&r.mission,block+0xb0,8);r.unit=block[0xdc];out.push_back(r);
       }
     }
     return out;

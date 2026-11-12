@@ -17,7 +17,8 @@
 #include <optional>
 #include <vector>
 namespace mod::cargo {
-struct Record { uint32_t slot=0, state=0, hash=0; std::array<double,3> position{}; uint32_t holder=0, index=0; };   // game axes, z up;
+struct Record { uint32_t slot=0, state=0, hash=0; std::array<double,3> position{}; uint32_t holder=0, index=0; uint64_t mission=0; uint8_t unit=0; };   // mission: +b0, the order it belongs to (0 = none); unit: +dc, which of the order's cargo units it is
+//   // game axes, z up;
 // holder = +1c (candidate); index = position in the manager's array (what DeleteBaggage takes)
 constexpr uint8_t InWorld=1,OnPorter=2;
 inline uint8_t location(const Record& r){return uint8_t(r.state>>8);}

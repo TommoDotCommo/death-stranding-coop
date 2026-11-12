@@ -1015,6 +1015,11 @@ category detail (0 main, 1 sub, 2 standard delivery, 3 standard collection, 8 ra
 dynamic orders (lost cargo; ids with bit 62) and `+0x118` online ones. A cargo record's `+0xb0` is the id of its
 order.
 
+Cargo units: `T = *(S+0x18)`, rows at `T+8`, capacity (u32) at `T+0x14`, 0x38-byte rows: a hash (0 = free) at
+`+0`, the key at `+8` = mission id | unit << 48, the state (u16) at `+0x18`: 1 not delivered, 2 delivered. Live: four
+rows, units 0 to 3, state 1 after order 0x372d7 started. A cargo record's unit is its byte `+0xdc` (also the high
+word of `+0x1c`); its `+0xb0` holds the mission id without the unit.
+
 Requests are queued under the system's lock and run by its own update: start `0x33b80a0(S, id, 0, 0)` (returns 1
 when accepted; the order must be available), success `0x33b82d0(S, id, 0, 0)`, fail `0x33b75e0(S, record)` (reads
 only the record's `+0x38`).

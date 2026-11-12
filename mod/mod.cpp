@@ -658,6 +658,7 @@ struct Runtime final:ds::Transport {
     mod::structures::NetCopies netCopies;uint64_t structRemoved=0;
     std::vector<ds::CargoEvent> structIn;
     // Shared orders (orders.h): opt-in share_orders. Standard orders only.
+    mod::orders::UnitSync unitSync;
     mod::orders::Sync orderSync;std::vector<ds::CargoEvent> orderIn;std::function<bool(uint64_t,uint8_t)> orderRequest;std::map<uint64_t,uint8_t> orderDetails;
     uint64_t orderReadAt=0,orderSent=0,orderApplied=0;bool orderTried=false,orderLinked=false;
     unsigned guardNoted=0;
@@ -678,13 +679,38 @@ struct Runtime final:ds::Transport {
         orderReadAt=now;
         auto orders=mod::orders::readOrders(*sampler,sampler->base,orderDetails);if(orders.empty())return;
         static const char* names[]={"","start","success","fail"};
+        std::vector<mod::orders::Unit> units;if(config.shareOrderUnits)units=mod::orders::readUnits(*sampler,sampler->base);
         for(auto& e:orderIn){
+            if(e.item>=mod::orders::UnitBase&&e.item<mod::orders::UnitBase+64){
+                // The partner handed a unit in: it is delivered here too, and this game's copy of that cargo goes.
+                uint8_t n=uint8_t(e.item-mod::orders::UnitBase);
+                if(!config.shareOrderUnits)continue;
+                auto* u=unitSync.wanted(units,e.ref,n);
+                std::ostringstream o;o<<"ORDER partner handed in unit "<<int(n)<<" of "<<std::hex<<e.ref<<std::dec;
+                if(!u){o<<": not waiting here\n";note(o.str().c_str());continue;}
+                unitSync.applied(e.ref,n);uint16_t seen=0;
+#ifdef _WIN32
+                if(sampler->read(u->stateAt,&seen,2)&&seen==mod::orders::NotDelivered)*reinterpret_cast<uint16_t*>(u->stateAt)=mod::orders::Delivered;
+#endif
+                unsigned removed=0;uint64_t manager=0;
+                if(cargoDelete&&cargoManagerSlot&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
+                    for(auto& r:mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,mod::cargo::MaxRecords))
+                        if(r.mission==e.ref&&r.unit==n&&mod::cargo::location(r)==mod::cargo::InWorld){cargoDelete(r.index);++removed;}
+                o<<": marked delivered, "<<removed<<" cargo record(s) removed\n";note(o.str().c_str());continue;
+            }
             mod::orders::Change c{e.ref,uint8_t(e.item)};if(c.what<1||c.what>3)continue;
             if(!orderSync.wanted(orders,c)){std::ostringstream o;o<<"ORDER partner's "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<" does not apply here\n";note(o.str().c_str());continue;}
             bool ok=orderRequest(c.id,c.what);if(ok){orderSync.applied(c);++orderApplied;}
             std::ostringstream o;o<<"ORDER partner: "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<(ok?" requested":" refused by the game")<<"\n";note(o.str().c_str());
         }
         if(!orderIn.empty()){orderIn.clear();return;}   // the game runs the requests on its next update: look again then
+        if(config.shareOrderUnits){
+            std::vector<uint64_t> under;for(auto& o:orders)if(mod::orders::shareable(o)&&o.state==mod::orders::Progress)under.push_back(o.id);
+            for(auto& u:unitSync.observe(units,under)){
+                ds::CargoEvent e;e.type=mod::orders::WireType;e.item=uint32_t(mod::orders::UnitBase+u.unit);e.ref=u.mission;core->queueCargo(e);++orderSent;
+                std::ostringstream o;o<<"ORDER unit "<<int(u.unit)<<" of "<<std::hex<<u.mission<<std::dec<<" handed in here -> partner\n";note(o.str().c_str());
+            }
+        }
         for(auto& c:orderSync.observe(orders)){
             ds::CargoEvent e;e.type=mod::orders::WireType;e.item=c.what;e.ref=c.id;core->queueCargo(e);++orderSent;
             std::ostringstream o;o<<"ORDER "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<" here -> partner\n";note(o.str().c_str());
@@ -1505,6 +1531,16 @@ struct Runtime final:ds::Transport {
                         }
                     }
 #endif
+                }
+                else if(auto unit=mod::puppet::parseCargoCommand(text,mod::runStamp(),"unit");unit) {
+                    // Test: "unit <mission id * 10 + n>" marks unit n of that order delivered in this game (as a hand-in would).
+                    uint64_t id=*unit/10;uint8_t n=uint8_t(*unit%10);bool done=false;
+                    for(auto& u:mod::orders::readUnits(*sampler,sampler->base))if(u.mission==id&&u.unit==n&&u.state==mod::orders::NotDelivered){
+#ifdef _WIN32
+                        *reinterpret_cast<uint16_t*>(u.stateAt)=mod::orders::Delivered;done=true;
+#endif
+                    }
+                    std::ostringstream o;o<<"ORDER test: unit "<<int(n)<<" of "<<std::hex<<id<<std::dec<<(done?" marked delivered":" not waiting")<<"\n";note(o.str().c_str());
                 }
                 else if(auto order=mod::puppet::parseCargoCommand(text,mod::runStamp(),"order");order) {
                     // Test: "order <mission id>" asks the game to start that order; + 1000000000 to complete it,

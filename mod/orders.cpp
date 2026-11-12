@@ -18,6 +18,41 @@ std::vector<Order> readOrders(const discovery::Sampler& s,uint64_t base,std::map
     }
     return out;
 }
+std::vector<Unit> readUnits(const discovery::Sampler& s,uint64_t base){
+    std::vector<Unit> out;uint64_t system=0,table=0,rows=0;uint32_t capacity=0;
+    if(!s.read(base+0x7c0aff8,&system,8)||!system||!s.read(system+0x18,&table,8)||!table||!s.read(table+8,&rows,8)||!rows||!s.read(table+0x14,&capacity,4)||!capacity||capacity>65536)return out;
+    std::vector<uint8_t> blob(size_t(capacity)*0x38);
+    if(!s.readOnce(rows,blob.data(),blob.size()))return out;
+    for(uint32_t i=0;i<capacity;++i){
+        const uint8_t* r=blob.data()+size_t(i)*0x38;uint32_t hash=0;uint64_t key=0;std::memcpy(&hash,r,4);if(!hash)continue;
+        std::memcpy(&key,r+8,8);Unit u;u.mission=key&0xffc0ffffffffffffull;u.unit=uint8_t(key>>48&0x3f);std::memcpy(&u.state,r+0x18,2);u.stateAt=rows+uint64_t(i)*0x38+0x18;
+        out.push_back(u);
+    }
+    return out;
+}
+std::vector<Unit> UnitSync::observe(const std::vector<Unit>& units,const std::vector<uint64_t>& missions){
+    std::vector<Unit> out;std::map<uint64_t,uint16_t> next;
+    for(auto& u:units){
+        bool shared=false;for(auto m:missions)shared=shared||m==u.mission;
+#ifndef MUTANT_ORDER_UNIT_ANY
+        if(!shared)continue;
+#endif
+        uint64_t k=key(u.mission,u.unit);next[k]=u.state;
+        auto old=seen_.find(k);
+        if(u.state!=Delivered){applied_.erase(k);continue;}
+        if(!primed_||old==seen_.end()||old->second!=NotDelivered)continue;
+#ifndef MUTANT_ORDER_UNIT_ECHO
+        if(applied_.count(k))continue;
+#endif
+        out.push_back(u);
+    }
+    seen_.swap(next);primed_=true;
+    return out;
+}
+const Unit* UnitSync::wanted(const std::vector<Unit>& units,uint64_t mission,uint8_t unit) const {
+    for(auto& u:units)if(u.mission==mission&&u.unit==unit)return u.state==NotDelivered?&u:nullptr;
+    return nullptr;
+}
 std::vector<Change> Sync::observe(const std::vector<Order>& orders){
     std::vector<Change> out;std::map<uint64_t,Order> next;
     for(auto& o:orders){

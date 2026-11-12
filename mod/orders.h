@@ -33,6 +33,25 @@ public:
 private:
     std::map<uint64_t,Order> seen_;std::map<uint64_t,uint8_t> applied_;bool primed_=false;
 };
+// One cargo unit of an order (the game's table at mission system +0x18): state 1 not delivered, 2 delivered.
+// row: where the row's state is, to mark it delivered here.
+struct Unit { uint64_t mission=0; uint8_t unit=0; uint16_t state=0; uint64_t stateAt=0; };
+constexpr uint16_t NotDelivered=1,Delivered=2;
+constexpr uint8_t UnitBase=100;                      // an order change's `what` for "unit N delivered" is UnitBase+N
+std::vector<Unit> readUnits(const discovery::Sampler&,uint64_t base);
+// A split delivery: each unit one player hands in is marked delivered for the partner, so partial hand-ins add up.
+class UnitSync {
+public:
+    // Units of the given (shareable, under way) orders that went from not delivered to delivered since the last
+    // look, except those marked here for the partner. The first look learns.
+    std::vector<Unit> observe(const std::vector<Unit>&,const std::vector<uint64_t>& missions);
+    // The partner handed a unit in: the local row to mark, or null when it is unknown here or not waiting.
+    const Unit* wanted(const std::vector<Unit>&,uint64_t mission,uint8_t unit) const;
+    void applied(uint64_t mission,uint8_t unit){applied_[key(mission,unit)]=true;}
+    static uint64_t key(uint64_t mission,uint8_t unit){return mission|(uint64_t(unit&0x3f)<<48);}
+private:
+    std::map<uint64_t,uint16_t> seen_;std::map<uint64_t,bool> applied_;bool primed_=false;
+};
 // The game's own requests: start (0x33b80a0), success (0x33b82d0), fail (0x33b75e0). Returns whether it was accepted.
 std::function<bool(uint64_t id,uint8_t what)> nativeRequest(discovery::Sampler&);
 }
