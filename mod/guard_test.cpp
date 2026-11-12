@@ -26,6 +26,16 @@ int main(){
       CHECK(!cullResume(0xc0000005u,1,base+0x1d5cb8a,0,3,base));           // a write
       CHECK(!cullResume(0x80000003u,0,base+0x1d5cb8a,0,3,base));           // another exception
       CHECK(!cullResume(0xc0000005u,0,base+0x1d5cb8a,0,3,0)); }            // not installed
+    // Mending the drawable's back-pointers: only when the caller's frame, the tree and the drawable all agree.
+    { CullFacts f;f.object=0x5000;f.stackObject=0x5000;f.slot=0x1c;f.stackSlot=0xc;f.nodes=0x9000;f.nodeCount=10;f.leaf=0x9000+24*3;f.leafCount=0x20;
+      f.itemPointer=0x5008;f.objectLeaf=0;f.objectIndex=0xffffffffu;f.objectFlags=0x5523300;
+      CHECK(cullRepairable(f));
+      auto bad=[&](auto change){CullFacts g=f;change(g);return !cullRepairable(g);};
+      CHECK(bad([](CullFacts& g){g.stackObject=0x6000;}));CHECK(bad([](CullFacts& g){g.stackSlot=1;}));
+      CHECK(bad([](CullFacts& g){g.leaf=0x9000+24*10;}));CHECK(bad([](CullFacts& g){g.leaf=0x9000+25;}));CHECK(bad([](CullFacts& g){g.leaf=0x8000;}));
+      CHECK(bad([](CullFacts& g){g.leafCount=0x1c;}));CHECK(bad([](CullFacts& g){g.itemPointer=0x5000;}));
+      CHECK(bad([](CullFacts& g){g.objectLeaf=0x9000;}));CHECK(bad([](CullFacts& g){g.objectIndex=3;}));
+      CHECK(bad([](CullFacts& g){g.objectFlags&=~(1u<<26);}));CHECK(bad([](CullFacts& g){g.objectFlags&=~(1u<<9);}));CHECK(bad([](CullFacts& g){g.nodes=0;})); }
     if(!failures)std::puts("creation callback guard checks passed");
     return failures?1:0;
 }

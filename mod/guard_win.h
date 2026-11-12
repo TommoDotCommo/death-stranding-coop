@@ -46,6 +46,28 @@ inline uint64_t cullResume(uint64_t code,uint64_t kind,uint64_t rip,uint64_t rax
 #endif
     return 0;
 }
+// The state behind that fault lasts (live: the same object met 300 times a second): the game's bounds update
+// (0x1d5a950 -> 0x19402a0, no lock) worked from a stale leaf and left the drawable with no leaf and no index while its
+// real slot still lists it; only a tree rebuild would mend it, and the game's later removal of the mesh would fault
+// (0x194192b). The slot and leaf the job is walking are in the caller's frame, so the guard can put the two
+// back-pointers right, as the game's own rebuild does (0x19415c0): index, then leaf. Only when everything agrees:
+struct CullFacts {
+    uint64_t object=0,stackObject=0;      // r14, and the caller's copy of it
+    uint32_t slot=0,stackSlot=0;          // the slot being walked, and its low four bits as the caller keeps them
+    uint64_t leaf=0,nodes=0;uint32_t nodeCount=0,leafCount=0;   // the leaf, the tree's node array, counts
+    uint64_t itemPointer=0;               // what the slot lists
+    uint64_t objectLeaf=0;uint32_t objectIndex=0,objectFlags=0; // the drawable's own back-pointers and flags
+};
+inline bool cullRepairable(const CullFacts& f){
+#ifdef MUTANT_GUARD_REPAIR_ANY
+    return f.object!=0;
+#else
+    return f.object&&f.stackObject==f.object&&f.stackSlot==(f.slot&15)
+        &&f.nodes&&f.leaf>=f.nodes&&f.leaf<f.nodes+uint64_t(f.nodeCount)*24&&(f.leaf-f.nodes)%24==0
+        &&f.slot<f.leafCount&&f.itemPointer==f.object+8
+        &&f.objectLeaf==0&&f.objectIndex==0xffffffffu&&(f.objectFlags&(1u<<26))&&(f.objectFlags&(1u<<9));
+#endif
+}
 }
 #ifdef _WIN32
 #include <windows.h>
@@ -61,6 +83,26 @@ inline std::atomic<unsigned> skipped{0};
 // vtable, when it is an object of the game), and the two return addresses above the call site.
 struct Seen { uint64_t target=0,vtable=0,caller=0,caller2=0; };
 inline Seen seen[8];
+inline std::atomic<unsigned> cullRepaired{0};
+// Reads everything through checked pointers; writes only when cullRepairable agrees.
+inline void cullRepair(CONTEXT* c,uint64_t base){
+    auto ok=[](uint64_t at,size_t n){return at&&!IsBadReadPtr(reinterpret_cast<void*>(at),n);};
+    auto q=[](uint64_t at){return *reinterpret_cast<uint64_t*>(at);};auto d=[](uint64_t at){return *reinterpret_cast<uint32_t*>(at);};
+    CullFacts f;f.object=c->R14;uint64_t sp=c->Rsp;
+    if(!ok(sp,0x108)||!ok(f.object,0x30)||!ok(base+0x578c130,8))return;
+    f.slot=d(sp+0x90);f.leaf=q(sp+0x100);f.stackObject=q(sp+0xc0);f.stackSlot=d(sp+0xc8);
+    uint64_t manager=q(base+0x578c130);if(!ok(manager,0x30))return;
+    f.nodes=q(manager+0x28);f.nodeCount=d(manager+0x20);
+    if(!ok(f.leaf,0x18))return;
+    f.leafCount=d(f.leaf+0xc);uint64_t block=(q(f.leaf)&~uint64_t(3))+uint64_t(f.slot>>4)*0x240;
+    if(!ok(block,0x240))return;
+    f.itemPointer=q(block+0x1c0+uint64_t(f.slot&15)*8);
+    f.objectLeaf=q(f.object+8);f.objectIndex=d(f.object+0x10);f.objectFlags=d(f.object+0x28);
+    if(!cullRepairable(f)||IsBadWritePtr(reinterpret_cast<void*>(f.object+8),0x10))return;
+    *reinterpret_cast<volatile uint32_t*>(f.object+0x10)=f.slot;
+    *reinterpret_cast<volatile uint64_t*>(f.object+8)=f.leaf;
+    cullRepaired.fetch_add(1,std::memory_order_relaxed);
+}
 inline std::atomic<uint64_t> cullBase{0};
 inline std::atomic<unsigned> cullSkipped{0};
 // Evidence: the first few distinct drawables met (the cull sub-object r14, its vtable, index and flags), how often.
@@ -81,7 +123,9 @@ inline LONG CALLBACK handler(EXCEPTION_POINTERS* e){
     auto* r=e->ExceptionRecord;auto* c=e->ContextRecord;uint64_t s=site.load(std::memory_order_acquire);
     if(uint64_t b=cullBase.load(std::memory_order_acquire);b&&r->NumberParameters>=2)
         if(uint64_t to=cullResume(r->ExceptionCode,r->ExceptionInformation[0],c->Rip,c->Rax,c->Rcx,b)){
-            cullSkipped.fetch_add(1,std::memory_order_relaxed);cullNote(c->R14);c->Rip=to;return EXCEPTION_CONTINUE_EXECUTION;}
+            cullSkipped.fetch_add(1,std::memory_order_relaxed);cullNote(c->R14);
+            if(c->Rip==b+0x1d5cb8a)cullRepair(c,b);
+            c->Rip=to;return EXCEPTION_CONTINUE_EXECUTION;}
     if(!s||r->ExceptionCode!=EXCEPTION_ACCESS_VIOLATION||r->NumberParameters<2||r->ExceptionInformation[0]!=8)return EXCEPTION_CONTINUE_SEARCH;
     if(IsBadReadPtr(reinterpret_cast<void*>(c->Rsp),8))return EXCEPTION_CONTINUE_SEARCH;
     uint64_t back=*reinterpret_cast<uint64_t*>(c->Rsp),image=s-0x22bdf1a;

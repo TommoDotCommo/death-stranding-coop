@@ -767,7 +767,7 @@ struct Runtime final:ds::Transport {
             guardNoted=n;note(("GUARD a deferred call with a bad function was skipped ("+std::to_string(n)+" so far; "+std::to_string(mod::guard::abandoned.load())+" times the rest of that entity's queue was dropped)\n").c_str());}
         unsigned c=mod::guard::cullSkipped.load();
         if(c!=cullNoted&&(c<16||c-cullNoted>=1000||!cullNoted)){
-            cullNoted=c;std::ostringstream o;o<<"GUARD the culling job met a drawable that had left the tree: skipped ("<<c<<" so far)";
+            cullNoted=c;std::ostringstream o;o<<"GUARD the culling job met a drawable that had left the tree: skipped ("<<c<<" so far, "<<mod::guard::cullRepaired.load()<<" mended)";
             uint64_t base=sampler?sampler->base:0;
             for(auto& s:mod::guard::cullSeen)if(uint64_t at=s.object.load())o<<std::hex<<"; object 0x"<<at<<" vtable ds.exe+0x"<<(s.vtable>base?s.vtable-base:0)<<" index 0x"<<s.index<<" flags 0x"<<s.flags<<std::dec<<" x"<<s.hits.load();
             o<<"\n";note(o.str().c_str());}
