@@ -1,5 +1,6 @@
 #include "gear.h"
 #include <algorithm>
+#include <cstdio>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -212,8 +213,22 @@ void Mirror::tick(uint64_t body,uint64_t world,const std::function<std::vector<P
     if(stopped_)return;
     if(body!=body_&&body_)clear();
     if(!body)return;
+    // A piece is the same piece while it hangs on the same helper. What the partner wears travels as helpers; the
+    // resource is only this porter's own piece on that helper, taken as the model. The game hands this porter's gear
+    // out as other entities, in another order, and for a while as another resource (the cuff link while he uses a
+    // terminal): none of that changes what the partner wears, and a copy must not be made again for it (live: the
+    // cuff's copy replaced right after an order was taken left a drawable behind in the game's culling tree, which
+    // crashed the game one time in four; game_offsets.md, "Culling job and a drawable that left the tree").
+    auto keysOf=[&](const std::vector<Piece>& plan){std::vector<std::pair<std::string,uint64_t>> k;
+#ifndef MUTANT_GEAR_RESOURCE
+        for(auto& p:plan)k.emplace_back(p.helper,0);
+#else
+        for(auto& p:plan)k.emplace_back(p.helper,api_.resource(p.source));
+#endif
+        return k;};
+    auto flat=[](const std::vector<Piece>& plan){for(auto& p:plan)if(p.parent!=-1)return false;return true;};
     auto adopt=[&](std::vector<Piece> plan){
-        pieces_=std::move(plan);next_=0;made_.assign(pieces_.size(),{});candidate_.clear();stable_=0;ticks_=0;
+        pieces_=std::move(plan);keys_=keysOf(pieces_);next_=0;made_.assign(pieces_.size(),{});candidate_.clear();stable_=0;ticks_=0;
         std::string names;for(size_t i=0;i<pieces_.size()&&i<8;++i)names+=(i?",":" (")+pieces_[i].helper;
         if(pieces_.size()>8)names+=",...";
         if(!names.empty())names+=")";
@@ -223,17 +238,38 @@ void Mirror::tick(uint64_t body,uint64_t world,const std::function<std::vector<P
     if(!body_){body_=body;pieces_.clear();made_.clear();next_=0;candidate_.clear();stable_=0;ticks_=CheckEvery-1;}
     else if(next_>=pieces_.size()&&shown&&++ticks_>=CheckEvery){
         ticks_=0;auto now=pieces();
-        if(now==pieces_||now.empty()){candidate_.clear();stable_=0;}
+        bool same=now==pieces_;
+        if(!same&&!now.empty()&&now.size()==pieces_.size()&&flat(now)&&flat(pieces_)){
+            auto a=keysOf(now),b=keys_;std::sort(a.begin(),a.end());std::sort(b.begin(),b.end());same=a==b;
+        }
+        if(same||now.empty()){candidate_.clear();stable_=0;}
         else{
             if(now==candidate_)++stable_;else{candidate_=now;stable_=1;}
 #ifndef MUTANT_GEAR_FLICKER
             if(stable_>=StableChecks)
 #endif
-            {if(!pieces_.empty())log_("GEAR the porter's gear changed\n");removeCopies();adopt(std::move(now));}
+            {
+#ifndef MUTANT_GEAR_REBUILD
+                if(!pieces_.empty()&&flat(now)&&flat(pieces_)&&made_.size()==keys_.size()){
+                    // Only the difference: copies whose piece is still worn stay, the others go, new ones are made.
+                    auto keys=keysOf(now);std::vector<Made> next(now.size());std::vector<bool> used(made_.size(),false);unsigned kept=0,removed=0;
+                    for(size_t i=0;i<now.size();++i)for(size_t j=0;j<made_.size();++j)
+                        if(!used[j]&&made_[j].entity&&keys_[j]==keys[i]&&api_.alive(made_[j].entity)){next[i]=made_[j];used[j]=true;++kept;break;}
+                    std::string gone,fresh;char hex[40];
+                    for(size_t j=0;j<made_.size();++j)if(!used[j]&&made_[j].entity&&api_.alive(made_[j].entity)){
+                        std::snprintf(hex,sizeof hex," (0x%llx)",static_cast<unsigned long long>(made_[j].entity));gone+=" "+keys_[j].first+hex;api_.remove(made_[j].entity);++removed;}
+                    for(size_t i=0;i<now.size();++i)if(!next[i].entity)fresh+=" "+keys[i].first;
+                    log_("GEAR the porter's gear changed: "+std::to_string(kept)+" pieces kept, "+std::to_string(removed)+" removed"+(gone.empty()?"":":"+gone)+(fresh.empty()?"":"; to make:"+fresh)+"\n");
+                    pieces_=std::move(now);keys_=std::move(keys);made_=std::move(next);next_=0;candidate_.clear();stable_=0;ticks_=0;
+                }else
+#endif
+                {if(!pieces_.empty())log_("GEAR the porter's gear changed\n");removeCopies();adopt(std::move(now));}
+            }
         }
     }
     for(unsigned k=0;k<PerTick&&next_<pieces_.size()&&failures_<MaxFailures;++k,++next_){
         auto& p=pieces_[next_];
+        if(made_[next_].entity)continue;   // kept from before the change
         uint64_t parent=p.parent<0?body:made_.at(size_t(p.parent)).entity;
         if(!parent)continue;   // its parent was not made
         uint64_t resource=api_.resource(p.source);

@@ -1135,6 +1135,30 @@ rain made the map wet there, `G+0x238` went to 1, the area was in the active lis
 entity (20 to 45 m away, life 300 to 1500) had flags 0x90a01 or 0xa0a01; the others 0x90200 and 0x10200 without an
 entity, and 35 with bit 2 (0x10004, 0x1010004) not decoded. No catcher record, no cleared sphere, no hunter crowd.
 
+### Culling job and a drawable that left the tree (2026-11-13: crash record, then static)
+
+- The crash that looked like a hang near delivery points: an access violation reading address 0 at `ds.exe+0x1d5cb8a`
+  (`mov rcx,[rax]`, `rax = [r14+8]`) on a worker thread; the game then sits in its own crash handler, so the window
+  stops answering. Stack: `0x1d5898d` < `0x1d5a344` < `0x1d5a3b6` < the job system.
+- The job is the renderer's `CullDrawableObjectsSGTriggeredJob` (execute `0x1d5a3a0`, body `0x1d5a260`): it walks
+  the leaves of the culling KD tree (`0x1d58690` per batch) and for each visible drawable calls `0x1d5ca70`, which
+  reads the drawable's leaf pointer (`+0x8` of the cull sub-object at `GeometryObject+0x60`) and its index in the
+  leaf (`+0x10`) without the null check the game makes at its other users (`0x1d5a96e`, `0x19402d2`, `0x1941829`).
+  The pointer is null exactly while a drawable is not in the tree (new, removed, or being moved between leaves).
+  The job takes neither the culling manager's lock nor the tree's: the engine relies on the tree not changing
+  while it runs. A drawable removed or moved between the job's two reads gives this fault.
+- What the mod did at that moment: a player who takes an order at a terminal has, for a while, another resource as
+  his cuff link; the gear mirror (which models the partner's pieces on this porter's own) took that for a change of
+  gear, removed the cuff's copy on the partner's body and made one from the new resource. One time in four that left
+  a drawable listed in a leaf with its leaf pointer null: not a torn read but a lasting state (with the guard in, the
+  job met it about 300 times a second for as long as the run lasted). Removing and re-making all the copies in a
+  quiet moment does not do it (20 full rebuilds, 160 visibility flashes, a dozen pause menus and terminal visits
+  without an order: no fault). The mirror now knows a piece by its helper alone and leaves the copy alone
+  (gear.cpp), which takes that replacement away entirely.
+- The guard (guard_win.h): that read faulting with the null resumes at the function's epilogue `0x1d5cc09` (no loop
+  in the function; `rbx`, `rsi`, `rdi` and `xmm6` are saved before the read and reloaded there; `rsp` is unchanged
+  since the prologue). The drawable's per-instance update is skipped for a frame, as for one not in the tree.
+
 ### Creation callback with no function (2026-11-12, from two crash dumps)
 
 `0x22bdee0(delegate)`: if `delegate+0x10` (a weak target, object = value - 8) is set it calls the function pointer at

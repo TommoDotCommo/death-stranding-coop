@@ -685,7 +685,8 @@ Each game keeps simulating its own world; these settings share the outcome of wh
 - `"share_enemies": true` (`enemies.h`): a MULE one player puts down (knocked out, fainted, asleep, dead) is put
   down in the partner's game with the game's own defeat function, and a camp that comes to know someone is there is
   alarmed in the partner's game. MULEs are matched by the UUID of their locator, which is the same in every game.
-  Where MULEs are and who they chase is not shared.
+  Where MULEs are and who they chase is not shared. On joining, the MULEs that are down and the BTs that are
+  destroyed in each player's world are applied in the other's too.
   The same setting shares BTs (`bts.h`): a BT area is active for both players through the shared rain
   (`share_environment`); a BT one player destroys is gone in the partner's game; when one player is pulled into a
   boss fight, it starts for a partner within 300 m (and for one who comes near while it runs); and when either

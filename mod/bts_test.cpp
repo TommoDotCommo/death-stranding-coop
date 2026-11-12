@@ -16,6 +16,9 @@ int main(){
     { GazerSync s;std::vector<Gazer> a,b;for(uint8_t i=1;i<=MassDeath+1;++i){a.push_back(gazer(i,300));b.push_back(gazer(i,0));}
       s.observe(a);CHECK(s.observe(b).empty());
       GazerSync t;a.pop_back();b.pop_back();t.observe(a);CHECK(t.observe(b).size()==MassDeath); }
+    // On joining: the gazers destroyed now, not the game's short-lived ones.
+    { auto all=GazerSync::everything({gazer(1,300),gazer(2,0),gazer(3,0,1u<<20),gazer(4,-1)});
+      CHECK(all.size()==2&&all[0]==key(gazer(2,1).uuid)&&all[1]==key(gazer(4,1).uuid)); }
     // The partner's kill applies to a living gazer known here.
     { std::vector<Gazer> v{gazer(1,300),gazer(2,0)};
       auto* g=GazerSync::wanted(v,key(gazer(1,1).uuid));CHECK(g&&g->address==0x1001);

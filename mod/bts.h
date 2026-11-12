@@ -27,6 +27,8 @@ class GazerSync {
 public:
     // Gazers seen alive at the last look and destroyed now (the first look learns).
     std::vector<uint64_t> observe(const std::vector<Gazer>&);
+    // On joining: every gazer of the world that is destroyed now (the game's short-lived ones left out).
+    static std::vector<uint64_t> everything(const std::vector<Gazer>&);
     // The partner destroyed a gazer: the local one, or null when unknown here or already gone.
     static const Gazer* wanted(const std::vector<Gazer>&,uint64_t key);
     void applied(uint64_t key){applied_.insert(key);}

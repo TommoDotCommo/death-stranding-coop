@@ -54,6 +54,16 @@ std::vector<uint64_t> GazerSync::observe(const std::vector<Gazer>& gazers){
 #endif
     return out;
 }
+std::vector<uint64_t> GazerSync::everything(const std::vector<Gazer>& gazers){
+    std::vector<uint64_t> out;
+    for(auto& g:gazers){
+#ifndef MUTANT_BT_ALL_ALIVE
+        if(g.life>0||dynamic(g.flags))continue;
+#endif
+        out.push_back(key(g.uuid));
+    }
+    return out;
+}
 const Gazer* GazerSync::wanted(const std::vector<Gazer>& gazers,uint64_t k){
     for(auto& g:gazers)if(key(g.uuid)==k)return g.life>0?&g:nullptr;
     return nullptr;

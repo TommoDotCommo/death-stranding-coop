@@ -23,6 +23,9 @@ int main(){
       s.applied(a.key);CHECK(s.observe(v).empty());CHECK(s.observe({mule(1,4,1u<<20),mule(2,4,1u<<19)}).empty());
       CHECK(s.observe({mule(1,4,1u<<20),mule(2,4,1u<<19)}).empty());CHECK(s.observe({mule(1,4,1u<<20),mule(2,4,1u<<19)}).empty());
       CHECK(s.observe({mule(1,1),mule(2,4,1u<<19)}).empty());s.observe({mule(1,4,1u<<19),mule(2,4,1u<<19)});auto d=s.observe({mule(1,4,1u<<19),mule(2,4,1u<<19)});CHECK(d.size()==1); }   // later, by this player: news
+    // On joining: the MULEs that are down now, with how.
+    { auto all=Sync::everything({mule(1,1),mule(2,4,1u<<20),mule(3,3),mule(4,5)});
+      CHECK(all.size()==2&&all[0].key==key(mule(2,1).uuid)&&all[0].kind==Fainted&&all[1].kind==Dead); }
     // Camps: one that goes on alert after being seen calm is news, once; the partner's alert applies to a calm camp only.
     { auto camp=[](uint8_t n,uint32_t phase){Camp c;c.address=0x2000+n;c.uuid[1]=n;c.phase=phase;return c;};
       CampSync s;CHECK(s.observe({camp(1,0),camp(2,5)}).empty());

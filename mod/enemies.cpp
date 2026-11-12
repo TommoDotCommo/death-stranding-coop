@@ -116,6 +116,17 @@ std::vector<Down> Sync::observe(const std::vector<Mule>& mules){
     seen_.swap(next);primed_=true;
     return out;
 }
+std::vector<Down> Sync::everything(const std::vector<Mule>& mules){
+    std::vector<Down> out;
+    for(auto& m:mules){
+        uint8_t now=condition(m.state,m.flags);
+#ifndef MUTANT_ENEMY_ALL_UP
+        if(now==Up)continue;
+#endif
+        out.push_back({key(m.uuid),now});
+    }
+    return out;
+}
 const Mule* Sync::wanted(const std::vector<Mule>& mules,const Down& d) const {
     for(auto& m:mules)if(key(m.uuid)==d.key){
 #ifndef MUTANT_ENEMY_TWICE

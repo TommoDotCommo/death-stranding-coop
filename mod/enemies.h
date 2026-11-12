@@ -46,6 +46,8 @@ public:
     // One call per look. The first look only learns. Returns the MULEs that went down since the last look, except
     // those this side put down for the partner (applied()).
     std::vector<Down> observe(const std::vector<Mule>&);
+    // On joining: every MULE that is down in this game now, so the partner's game has them down too.
+    static std::vector<Down> everything(const std::vector<Mule>&);
     // The partner reports a MULE down: the local actor to put down, or null when it is unknown here or already down.
     const Mule* wanted(const std::vector<Mule>&,const Down&) const;
     void applied(uint64_t key){applied_[key]=false;}

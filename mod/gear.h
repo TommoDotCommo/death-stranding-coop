@@ -73,6 +73,8 @@ public:
     void tick(uint64_t body,uint64_t world,const std::function<std::vector<Piece>()>& pieces,const puppet::Transform& at,bool shown);
     // Removes every copy still alive (the body stays). The next tick on a body makes them again.
     void clear();
+    // Test: every copy shown or hidden now (the next tick puts them back as the body is).
+    void flash(bool on){for(auto& m:made_)if(m.entity&&api_.alive(m.entity)){api_.visible(m.entity,on);m.shown=on;}}
     void stop(){clear();stopped_=true;}
     void start(){stopped_=false;}
     size_t made() const;
@@ -84,6 +86,7 @@ public:
 private:
     struct Made {uint64_t entity=0;bool shown=false;};
     Api api_;std::function<void(const std::string&)> log_;
+    std::vector<std::pair<std::string,uint64_t>> keys_;   // each planned piece's helper and resource, as planned
     uint64_t body_=0,world_=0;std::vector<Piece> pieces_;std::vector<Made> made_;size_t next_=0;unsigned failures_=0;bool stopped_=false;
     std::vector<Piece> candidate_;unsigned stable_=0,ticks_=0;
     void removeCopies();

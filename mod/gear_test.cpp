@@ -174,9 +174,18 @@ int main(){
         now=&b;run(Mirror::CheckEvery*(Mirror::StableChecks+2),false);   // hidden: not read
         CHECK(r.creates==2&&r.removes==0);
         run(Mirror::CheckEvery*Mirror::StableChecks+2);
-        CHECK(r.removes==2&&r.creates==5&&r.live()==3&&r.parentOf("HLP_Boot")==body);
+        CHECK(r.removes==0&&r.creates==3&&r.live()==3&&r.parentOf("HLP_Boot")==body);   // only the new piece is made
         run(Mirror::CheckEvery*(Mirror::StableChecks+2));
-        CHECK(r.creates==5);                                  // stable again: nothing more
+        CHECK(r.creates==3);                                  // stable again: nothing more
+        // The same gear in another order, or handed out as other entities of the same resources: nothing is touched.
+        std::vector<Piece> c={b[2],b[0],b[1]};now=&c;run(Mirror::CheckEvery*(Mirror::StableChecks+2));
+        CHECK(r.creates==3&&r.removes==0&&r.live()==3);
+        // This porter's own piece on a helper becomes another resource (the cuff at a terminal): the copy stays.
+        std::vector<Piece> e=c;e[1].source=p.armour;now=&e;run(Mirror::CheckEvery*(Mirror::StableChecks+2));
+        CHECK(r.creates==3&&r.removes==0&&r.live()==3);
+        // One piece taken off: only its copy goes.
+        std::vector<Piece> d={b[1],b[2]};now=&d;run(Mirror::CheckEvery*(Mirror::StableChecks+2));
+        CHECK(r.creates==3&&r.removes==1&&r.live()==2&&!r.byHelper("HLP_Hcuf")&&r.byHelper("HLP_Boot"));
     }
     // The partner's own gear: identities (helper hash, ordinal among same-helper direct children), the plan from the
     // partner's set (pieces this porter hides are copied too; cargo and nested pieces never), and the wire.

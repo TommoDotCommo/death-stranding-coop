@@ -230,6 +230,7 @@ struct Runtime final:ds::Transport {
     std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
     // The porter's visible gear on the partner's own body (gear.h); config partner_gear or puppet.gear "on <stamp>".
     std::filesystem::path gearCommand;std::unique_ptr<mod::gear::Mirror> gear;bool gearOn=false;
+    uint32_t gearChurnMode=0,gearChurnLeft=0;uint64_t gearChurnAt=0;
     // The partner's own gear (gear.h, CARGO type 7): what they show, and what this porter shows sent to them.
     // The partner's outfit (outfit.h, CARGO type 8): their enabled art parts, and this porter's sent to them.
     std::optional<mod::outfit::Parts> partnerParts;mod::outfit::Sender outfitTx;uint64_t outfitAt=0;
@@ -729,7 +730,7 @@ struct Runtime final:ds::Transport {
     mod::orders::UnitSync unitSync;
     mod::orders::Sync orderSync;std::vector<ds::CargoEvent> orderIn;std::function<bool(uint64_t,uint8_t)> orderRequest;std::map<uint64_t,uint8_t> orderDetails;
     uint64_t orderReadAt=0,orderSent=0,orderApplied=0;bool orderTried=false,orderLinked=false;
-    unsigned guardNoted=0;
+    unsigned guardNoted=0,cullNoted=0;
     void tickGuard() {
 #ifdef _WIN32
         unsigned n=mod::guard::skipped.load();
@@ -740,6 +741,12 @@ struct Runtime final:ds::Transport {
                 o<<" callers ds.exe+0x"<<(e.caller>base?e.caller-base:0)<<" ds.exe+0x"<<(e.caller2>base?e.caller2-base:0)<<"\n";note(o.str().c_str());
             }
             guardNoted=n;note(("GUARD a creation callback with no function was skipped ("+std::to_string(n)+" so far)\n").c_str());}
+        unsigned c=mod::guard::cullSkipped.load();
+        if(c!=cullNoted&&(c<16||c-cullNoted>=1000||!cullNoted)){
+            cullNoted=c;std::ostringstream o;o<<"GUARD the culling job met a drawable that had left the tree: skipped ("<<c<<" so far)";
+            uint64_t base=sampler?sampler->base:0;
+            for(auto& s:mod::guard::cullSeen)if(uint64_t at=s.object.load())o<<std::hex<<"; object 0x"<<at<<" vtable ds.exe+0x"<<(s.vtable>base?s.vtable-base:0)<<" index 0x"<<s.index<<" flags 0x"<<s.flags<<std::dec<<" x"<<s.hits.load();
+            o<<"\n";note(o.str().c_str());}
 #endif
     }
     void tickOrders(uint64_t now) {
@@ -849,7 +856,7 @@ struct Runtime final:ds::Transport {
     }
     // Shared BTs (bts.h), with share_enemies: gazers destroyed, a catcher fight started, its area cleared.
     mod::bts::GazerSync gazerSync;mod::bts::FightSync fightSync;mod::bts::HealthSync healthSync;std::function<void(const mod::bts::Catcher&,float)> btHurt;std::vector<ds::CargoEvent> btIn;
-    std::function<void(uint64_t)> btDestroy;std::function<void(uint8_t)> btCatcher;uint64_t btReadAt=0,btSent=0,btApplied=0;bool btTried=false;
+    std::function<void(uint64_t)> btDestroy;std::function<void(uint8_t)> btCatcher;uint64_t btReadAt=0,btSent=0,btApplied=0,btPorter=0,btSettled=0;bool btTried=false,btLinked=false,btTell=false;
     void tickBts(uint64_t now) {
         if(!core||!sampler||!config.shareEnemies){btIn.clear();return;}
         if(!btTried){btTried=true;try{btDestroy=mod::bts::nativeDestroy(*sampler);btHurt=mod::bts::nativeHurt(*sampler);btCatcher=mod::bts::nativeCatcher(*sampler);}catch(const std::exception& e){note((std::string("BT unavailable: ")+e.what()+"\n").c_str());}}
@@ -884,6 +891,15 @@ struct Runtime final:ds::Transport {
             note(e.item==mod::bts::FightOn?"BT partner is in a catcher fight: it starts here too\n":"BT partner's catcher fight is over, area cleared: ended here too\n");
         }
         if(!btIn.empty()){btIn.clear();return;}                          // look again next time, after the game acted
+        // On joining (and after a load, once it has settled): the gazers destroyed in this world go to the partner.
+        if(anchor.entity!=btPorter){btPorter=anchor.entity;btSettled=now+10000;btTell=true;}
+        if(send&&!btLinked)btTell=true;
+        btLinked=send;
+        if(btTell&&send&&btPorter&&now>=btSettled){
+            btTell=false;auto all=mod::bts::GazerSync::everything(gazers);
+            for(auto k:all){ds::CargoEvent e;e.type=mod::bts::WireType;e.item=mod::bts::GazerDead;e.ref=k;core->queueCargo(e);++btSent;}
+            if(!all.empty()){std::ostringstream o;o<<"BT "<<all.size()<<" gazers are destroyed in this world -> partner\n";note(o.str().c_str());}
+        }
         for(auto k:gazerSync.observe(gazers)){
             if(!send)continue;
             ds::CargoEvent e;e.type=mod::bts::WireType;e.item=mod::bts::GazerDead;e.ref=k;core->queueCargo(e);++btSent;note("BT a gazer was destroyed here -> partner\n");
@@ -898,7 +914,7 @@ struct Runtime final:ds::Transport {
     // puts down the ones the partner reports, with the game's own defeat function.
     mod::enemies::Sync enemySync;std::vector<ds::CargoEvent> enemyIn;std::function<void(uint64_t,uint8_t)> enemyDefeat;
     mod::enemies::CampSync campSync;std::function<void(const std::array<uint8_t,16>&)> campAlert;
-    uint64_t enemyReadAt=0,enemySent=0,enemyApplied=0;bool enemyTried=false,enemyTimed=false;std::map<uint64_t,uint64_t> enemyRetry;
+    uint64_t enemyReadAt=0,enemySent=0,enemyApplied=0,enemyPorter=0,enemySettled=0;bool enemyTried=false,enemyTimed=false,enemyLinked=false,enemyTell=false;std::map<uint64_t,uint64_t> enemyRetry;
     void tickEnemies(uint64_t now) {
         if(!core||!sampler||!config.shareEnemies){enemyIn.clear();return;}
         if(!enemyTried){try{campAlert=mod::enemies::nativeAlert(*sampler);}catch(const std::exception&){}}
@@ -930,6 +946,16 @@ struct Runtime final:ds::Transport {
                 enemyDefeat(m.address,mod::enemies::Fainted);note("ENEMY the partner's MULE still stood here: made to faint instead\n");}
             it=enemyRetry.erase(it);
         }
+        // On joining (and after a load, once it has settled): the MULEs that are down here go to the partner.
+        { auto anchor=anchorNow();bool linked=core->connected()&&partnerMode();
+          if(anchor.entity!=enemyPorter){enemyPorter=anchor.entity;enemySettled=now+10000;enemyTell=true;}
+          if(linked&&!enemyLinked)enemyTell=true;
+          enemyLinked=linked;
+          if(enemyTell&&linked&&enemyPorter&&now>=enemySettled){
+              enemyTell=false;auto all=mod::enemies::Sync::everything(mules);
+              for(auto& d:all){ds::CargoEvent e;e.type=mod::enemies::WireType;e.item=d.kind;e.ref=d.key;core->queueCargo(e);++enemySent;}
+              if(!all.empty()){std::ostringstream o;o<<"ENEMY "<<all.size()<<" MULEs are down in this world -> partner\n";note(o.str().c_str());}
+          } }
         for(auto k:campSync.observe(camps)){
             if(!core->connected()||!partnerMode())continue;
             ds::CargoEvent e;e.type=mod::enemies::WireType;e.item=mod::enemies::CampAlert;e.ref=k;core->queueCargo(e);++enemySent;
@@ -1414,6 +1440,11 @@ struct Runtime final:ds::Transport {
             else note("GEAR ignored command for another process\n");
         }
         if(!gearOn||!anchor.entity)return;
+        if(gearChurnLeft&&gear){
+            if(gearChurnMode==1){gear->flash(gearChurnLeft%2==0?false:true);--gearChurnLeft;}
+            else if(now-gearChurnAt>=6000){gearChurnAt=now;gear->clear();--gearChurnLeft;}
+            if(!gearChurnLeft)note(("GEAR test: churn done, culling guard at "+std::to_string(mod::guard::cullSkipped.load())+"\n").c_str());
+        }
         // What this porter shows goes to the partner (read once a second; sent when it holds still, and on every connection).
         // Nothing is read until a load (a game event) has been over for SettleMs: right after one the porter shows gear
         // and parts he hides seconds later (live: 7 pieces sent, then 2).
@@ -1724,6 +1755,12 @@ struct Runtime final:ds::Transport {
                         }
                     }
 #endif
+                }
+                else if(auto churn=mod::puppet::parseCargoCommand(text,mod::runStamp(),"gear");churn&&gear) {
+                    // Test: "gear 1" hides and shows the partner's gear copies 40 times; "gear 2" removes them all
+                    // (the mirror makes them again), 10 times, 6 s apart. To find what upsets the game's culling tree.
+                    gearChurnMode=*churn;gearChurnLeft=*churn==1?80:10;gearChurnAt=0;
+                    note(("GEAR test: churn mode "+std::to_string(*churn)+"\n").c_str());
                 }
                 else if(auto up=mod::puppet::parseCargoCommand(text,mod::runStamp(),"upgrade");up) {
                     // Test: "upgrade 0" lists this porter's and the partner's structures with their levels;
