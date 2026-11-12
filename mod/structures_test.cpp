@@ -46,6 +46,16 @@ int main(){
     // clock) is announced once; the save's structures, the partner's (Net ids) and the game's own never.
     auto at=[](Record r,uint64_t built){r.built=built;return r;};
     auto gone=[](Sync& s,std::vector<Record> v){std::vector<Sync::Removed> r;for(unsigned i=0;i<Sync::RemovedLooks;++i){CHECK(r.empty());s.observe(v);r=s.takeRemoved();}return r;};
+    // Levels: a rise is news once; a first sight, a fall and what was raised here for the partner are not.
+    { LevelSync s;CHECK(s.observe({{1,1},{2,2}}).empty());
+      auto a=s.observe({{1,2},{2,2},{3,3}});CHECK(a.size()==1&&a[0].ref==1&&a[0].level==2);
+      CHECK(s.observe({{1,2},{2,1},{3,3}}).empty());
+      s.applied({3,4});CHECK(s.observe({{1,2},{2,1},{3,4}}).empty());
+      auto b=s.observe({{1,2},{2,1},{3,5}});CHECK(b.size()==1&&b[0].level==5);
+      CHECK(LevelSync::wanted(1,{9,2})&&!LevelSync::wanted(2,{9,2})&&!LevelSync::wanted(0,{9,2})&&!LevelSync::wanted(1,{9,1})&&!LevelSync::wanted(1,{9,LevelSync::MaxLevel+1})); }
+    { NetCopies n;n.built(77,26,{10,20,30});n.built(78,29,{10,20,30});
+      CHECK(n.refAt(26,{10.5,20,30})==77&&n.refAt(29,{10,20,30})==78&&!n.refAt(26,{12,20,30})&&!n.refAt(32,{10,20,30}));
+      auto f=n.find(78);CHECK(f&&f->first==29);CHECK(!n.find(5));n.dismantled(77,5);CHECK(!n.find(77)&&!n.refAt(26,{10,20,30})); }
     // On joining: every standing structure of this porter, the save's included, once; never the partner's or the game's.
     { Sync s(1000);std::vector<Record> v{rec(225,0,1),at(rec(10001,25,2),500),at(rec(10002,28,2,7),2000),at(rec(100001,26,2),2000),at(rec(100002,25,2),2000),at(rec(10003,6,0),3000)};
       auto all=s.everything(v);CHECK(all.size()==2&&all[0].id==10001&&all[1].id==10002);

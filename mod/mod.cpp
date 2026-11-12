@@ -261,7 +261,8 @@ struct Runtime final:ds::Transport {
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(e.type==mod::enemies::WireType){enemyIn.push_back(e);continue;}
             if(e.type==mod::bts::WireType){btIn.push_back(e);continue;}
-            if(e.type==mod::roads::WireType){roadIn.push_back(e);continue;}             // road news (tickRoads)                // BT news (tickBts)   // a MULE went down (tickEnemies)
+            if(e.type==mod::roads::WireType){roadIn.push_back(e);continue;}
+            if(e.type==LevelWire){levelIn.push_back(e);continue;}                      // a structure reached a level (tickStructures)             // road news (tickRoads)                // BT news (tickBts)   // a MULE went down (tickEnemies)
             if(e.type==mod::orders::WireType){orderIn.push_back(e);continue;}    // an order changed (tickOrders)
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
             if(e.type==mod::likes::WireType){likeIn.push_back(e);continue;}   // a like (tickLikes, likes.h)
@@ -620,6 +621,9 @@ struct Runtime final:ds::Transport {
     }
     // --- end ds3 ---
     // Shared structures (structures.h): what this porter builds goes to the partner; theirs appear here as Net structures.
+    // Upgrades (structures.h, LevelSync): event type 15, item = level, ref = the structure's ref.
+    static constexpr uint8_t LevelWire=15;
+    mod::structures::LevelSync levelSync;mod::roads::Levels levelApi;std::vector<ds::CargoEvent> levelIn;std::map<uint64_t,std::pair<uint32_t,uint64_t>> levelWants;bool levelTried=false,levelTell=false;
     mod::structures::Sync structSync{mod::structures::clockNow()};uint64_t structReadAt=0,structSent=0,structMade=0,structIdBase=0,imageSize=0,structPorter=0,structSettled=0;bool structTimed=false,structLinked=false,structTell=false;
     void tickStructures(uint64_t now) {
         if(!core||!sampler)return;   // like tickCargo: watched while the partner is away, sent when it connects
@@ -651,6 +655,7 @@ struct Runtime final:ds::Transport {
             std::ostringstream o;o<<"STRUCT created partner type "<<int(b.type)<<" as "<<int(*net)<<" ref "<<e.ref<<" at "<<b.position[0]<<","<<b.position[1]<<","<<b.position[2]<<"\n";note(o.str().c_str());
         }
         structIn.clear();
+        if(!coop)levelIn.clear();
         if(!coop||now-structReadAt<500)return;
         structReadAt=now;
         if(!structIdBase)structIdBase=(nonce()>>32)<<20;
@@ -662,13 +667,43 @@ struct Runtime final:ds::Transport {
           if(linked&&!structLinked)structTell=true;
           structLinked=linked;
           if(structTell&&linked&&structPorter&&now>=structSettled){
-              structTell=false;
+              structTell=false;levelTell=true;
               if(config.shareSavedStructures){
                   auto all=structSync.everything(records);
                   for(auto& b:all){ds::CargoEvent e;e.type=3;e.item=mod::structures::pack(b);e.ref=structIdBase+b.id;e.yaw=b.yaw;e.position={b.position[0],b.position[2],b.position[1]};core->queueCargo(e);++structSent;}
                   std::ostringstream o;o<<"STRUCT this world's "<<all.size()<<" structures -> partner\n";note(o.str().c_str());
               }
           } }
+        // Upgrades: a structure that rose a level here (this porter's, or the partner's copy) goes to the partner;
+        // what the partner reports is raised here once the structure stands, with the game's own routine for
+        // materials from other players.
+        if(!levelTried){levelTried=true;try{levelApi=mod::roads::nativeLevels(*sampler);}catch(const std::exception& e){note((std::string("STRUCT upgrades unavailable: ")+e.what()+"\n").c_str());}}
+        if(levelApi.raise){
+            std::vector<mod::structures::LevelSync::Level> seen;std::map<uint64_t,const mod::structures::Record*> byRef;
+            for(auto& r:records){
+                if(r.state!=1&&r.state!=2)continue;                       // built (in or out of range)
+                std::optional<uint64_t> ref;
+                if(r.id>=mod::structures::PlayerFirst&&r.id<mod::structures::NetFirst)ref=structIdBase+r.id;
+                else if(r.id>=mod::structures::NetFirst)ref=netCopies.refAt(r.type,r.at.position);
+                if(!ref||r.level<1||r.level>mod::structures::LevelSync::MaxLevel)continue;
+                seen.push_back({*ref,r.level});byRef[*ref]=&r;
+            }
+            auto tell=[&](const mod::structures::LevelSync::Level& l){ds::CargoEvent e;e.type=LevelWire;e.item=l.level;e.ref=l.ref;core->queueCargo(e);++structSent;};
+            for(auto& l:levelSync.observe(seen)){tell(l);std::ostringstream o;o<<"STRUCT ref "<<l.ref<<" reached level "<<l.level<<" here -> partner\n";note(o.str().c_str());}
+            if(levelTell){levelTell=false;for(auto& l:seen)if(l.level>=2)tell(l);}
+            for(auto& e:levelIn)levelWants[e.ref]={e.item,now+60000};
+            for(auto it=levelWants.begin();it!=levelWants.end();){
+                auto f=byRef.find(it->first);
+                if(f==byRef.end()){if(now>it->second.second)it=levelWants.erase(it);else ++it;continue;}   // the copy is still being built
+                mod::structures::LevelSync::Level l{it->first,it->second.first};
+                if(mod::structures::LevelSync::wanted(f->second->level,l)){
+                    levelSync.applied(l);auto did=levelApi.raise(f->second->object,l.level);
+                    std::ostringstream o;o<<"STRUCT partner's structure ref "<<l.ref<<" is level "<<l.level<<", here "<<f->second->level<<": "<<did<<"\n";note(o.str().c_str());
+                }
+                it=levelWants.erase(it);
+            }
+        }
+        levelIn.clear();
         for(auto& b:structSync.observe(records)) {
             ds::CargoEvent e;e.type=3;e.item=mod::structures::pack(b);e.ref=structIdBase+b.id;e.yaw=b.yaw;
             e.position={b.position[0],b.position[2],b.position[1]};   // game -> adapter axes
@@ -1685,6 +1720,20 @@ struct Runtime final:ds::Transport {
                         }
                     }
 #endif
+                }
+                else if(auto up=mod::puppet::parseCargoCommand(text,mod::runStamp(),"upgrade");up) {
+                    // Test: "upgrade 0" lists this porter's and the partner's structures with their levels;
+                    // "upgrade ID" takes structure ID one level up as its menu would (materials delivered, level-up queued).
+                    try{
+                        uint64_t manager=0;sampler->read(sampler->base+0x7bf4960,&manager,8);if(!imageSize)for(auto& sec:sampler->sections)imageSize=std::max(imageSize,sec.address+sec.size-sampler->base);
+                        auto all=mod::structures::readTable(*sampler,manager,sampler->base,imageSize);auto api=mod::roads::nativeLevels(*sampler);std::ostringstream o;
+                        for(auto& r:all){
+                            if(r.id<mod::structures::PlayerFirst)continue;
+                            if(!*up)o<<"STRUCT id "<<r.id<<" type "<<int(r.type)<<" state "<<int(r.state)<<" level "<<r.level<<" at "<<int(r.at.position[0])<<","<<int(r.at.position[1])<<"\n";
+                            else if(r.id==*up){o<<"STRUCT test: upgrade of "<<r.id<<" from level "<<r.level<<": "<<api.upgrade(r.object,r.level+1)<<"\n";}
+                        }
+                        note(o.str().empty()?"STRUCT test: nothing\n":o.str().c_str());
+                    }catch(const std::exception& e){note((std::string("STRUCT test unavailable: ")+e.what()+"\n").c_str());}
                 }
                 else if(auto pv=mod::puppet::parseCargoCommand(text,mod::runStamp(),"paver");pv) {
                     // Test: "paver 0" lists the auto-pavers; "paver ID*10+K" delivers 100 of material K to paver ID as

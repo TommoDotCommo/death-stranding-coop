@@ -10,6 +10,7 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <string>
 #include <vector>
 namespace mod::roads {
 constexpr uint8_t WireType=14;                       // the ordered event stream's type for road news
@@ -47,4 +48,9 @@ struct Api {
     std::function<void(uint64_t paver,const Set&)> deliver;     // test: a delivery by this player, as the terminal does it
 };
 Api nativeApi(discovery::Sampler&);
+// Any construction (structures.h, upgrades): the same routines. raise gives the object, as from other players, what
+// it lacks for `level` (it then goes to that level at once); upgrade delivers that as this player and queues the
+// level-up, as the structure's menu does (test).
+struct Levels { std::function<std::string(uint64_t object,uint32_t level)> raise,upgrade; };   // returns what was done, for the log
+Levels nativeLevels(discovery::Sampler&);
 }

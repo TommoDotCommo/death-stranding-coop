@@ -25,7 +25,7 @@ std::vector<Record> readTable(const discovery::Sampler& s,uint64_t manager,uint6
         if(!(q0>=base&&q0<base+imageSize&&q1==0&&q2==q0+0x10))continue;
         Record r;std::memcpy(&r.id,block.data()+0x18,4);r.type=block[0x1c];r.category=block[0x1d];r.state=block[0x1e];
         std::memcpy(r.at.position.data(),block.data()+0x28,24);std::memcpy(r.at.rotation.data(),block.data()+0x40,36);
-        std::memcpy(&r.built,block.data()+0x388,8);
+        std::memcpy(&r.built,block.data()+0x388,8);std::memcpy(&r.level,block.data()+0x6c,4);r.object=at-0x18;
         if(r.id)out.push_back(r);
     }
     return out;
@@ -118,6 +118,35 @@ bool standing(const std::vector<Record>& records,uint8_t type,const std::array<d
         if(dx*dx+dy*dy+dz*dz<=range*range)return true;
     }
     return false;
+}
+std::optional<std::pair<uint8_t,std::array<double,3>>> NetCopies::find(uint64_t ref) const {
+    auto it=copies_.find(ref);if(it==copies_.end()||it->second.goneAt)return std::nullopt;
+    return std::make_pair(it->second.type,it->second.at);
+}
+std::optional<uint64_t> NetCopies::refAt(uint8_t netType,const std::array<double,3>& p) const {
+    for(auto& [ref,c]:copies_){
+        if(c.type!=netType||c.goneAt||(ref>>63))continue;
+        double dx=c.at[0]-p[0],dy=c.at[1]-p[1],dz=c.at[2]-p[2];if(dx*dx+dy*dy+dz*dz<=1.0)return ref;
+    }
+    return std::nullopt;
+}
+std::vector<LevelSync::Level> LevelSync::observe(const std::vector<Level>& levels){
+    std::vector<Level> out;std::map<uint64_t,uint32_t> next;
+    for(auto& l:levels){
+        next[l.ref]=l.level;auto old=seen_.find(l.ref);
+        if(old==seen_.end())continue;
+#ifndef MUTANT_STRUCTURE_LEVEL_DOWN
+        if(l.level<=old->second||l.level<2||l.level>MaxLevel)continue;
+#else
+        if(l.level==old->second)continue;
+#endif
+#ifndef MUTANT_STRUCTURE_LEVEL_ECHO
+        auto mark=applied_.find(l.ref);if(mark!=applied_.end()&&mark->second>=l.level)continue;
+#endif
+        out.push_back(l);
+    }
+    seen_.swap(next);
+    return out;
 }
 std::vector<std::array<double,3>> NetCopies::due(const std::vector<Record>& records,uint64_t now){
     std::vector<std::array<double,3>> out;

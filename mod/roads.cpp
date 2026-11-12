@@ -120,4 +120,50 @@ Api nativeApi(discovery::Sampler& s){
     (void)s;throw std::runtime_error("native roads need the game");
 #endif
 }
+Levels nativeLevels(discovery::Sampler& s){
+#ifdef _WIN32
+    static const uint8_t want[11]={0x40,0x55,0x56,0x41,0x56,0x41,0x57,0x48,0x83,0xec,0x48};uint8_t got[11]{};
+    if(!s.read(s.base+0x2c5d9d0,got,11)||std::memcmp(got,want,11))throw std::runtime_error("construction level function differs");
+    nativeApi(s);                                                       // checks the routines shared with the pavers
+    auto total=reinterpret_cast<void(*)(uint64_t,uint32_t,int32_t*)>(s.base+0x2c5d9d0);
+    auto give=reinterpret_cast<void(*)(uint64_t,uint64_t,const int32_t*,uint8_t,void*)>(s.base+0x2c321a0);
+    auto own=reinterpret_cast<void(*)(uint64_t,const int32_t*)>(s.base+0x2c41540);
+    auto queue=reinterpret_cast<void(*)(uint64_t,uint64_t)>(s.base+0x2c69170);
+    auto lacking=[&s,total](uint64_t object,uint32_t level,Set& need,std::string& why){
+        Set have{},net{};uint64_t first=0,config=0;uint32_t most=0;bool any=false;
+        if(!object||!s.read(object,&first,8)||first<s.base||!s.read(object+0x90,&config,8)||!config||!s.read(config+0x98,&most,4)){why="unreadable";return false;}
+        if(level>most){why="above the structure's top level "+std::to_string(most);return false;}
+        if(!s.read(object+0x210,have.data(),sizeof have)||!s.read(object+0x248,net.data(),sizeof net)||!sane(have)||!sane(net)){why="materials unreadable";return false;}
+        total(object,level,need.data());
+        why="needs";for(auto v:need)why+=" "+std::to_string(v);why+=", has";for(size_t k=0;k<need.size();++k)why+=" "+std::to_string(have[k]+net[k]);
+        for(size_t k=0;k<need.size();++k){
+            if(need[k]<0||need[k]>Most){why+=" (nonsense)";return false;}
+            int64_t left=int64_t(need[k])-have[k]-net[k];need[k]=left>0?int32_t(left):0;any=any||need[k]>0;
+        }
+        return any;
+    };
+    Levels l;
+    l.raise=[&s,give,own,queue,lacking](uint64_t object,uint32_t level){
+        Set need{};uint64_t t=0;std::string why;if(!lacking(object,level,need,why)||!s.read(object+0x458,&t,8))return why+": nothing given";
+        give(object,t,need.data(),1,nullptr);
+        // A paver takes its level from the materials at once; other constructions go through the manager's
+        // level-up queue, as after a delivery at the structure itself.
+        uint32_t now=0;uint64_t manager=0;s.read(object+0x84,&now,4);
+        if(now>=level)return why+": given, level now "+std::to_string(now);
+        Set have{},net{};s.read(object+0x210,have.data(),sizeof have);s.read(object+0x248,net.data(),sizeof net);
+        why+=", after giving has";for(size_t k=0;k<need.size();++k)why+=" "+std::to_string(have[k]+net[k]);
+        Set still{};std::string unused;
+        if(lacking(object,level,still,unused)){own(object,still.data());why+=" (not counted: delivered as this player)";}
+        if(s.read(s.base+0x7bf4960,&manager,8)&&manager){queue(manager,object);return why+": level-up queued";}
+        return why+": no manager";
+    };
+    l.upgrade=[&s,own,queue,lacking](uint64_t object,uint32_t level){
+        Set need{};uint64_t manager=0;std::string why;if(!lacking(object,level,need,why)||!s.read(s.base+0x7bf4960,&manager,8)||!manager)return why+": nothing delivered";
+        own(object,need.data());queue(manager,object);return why+": delivered, level-up queued";
+    };
+    return l;
+#else
+    (void)s;throw std::runtime_error("native roads need the game");
+#endif
+}
 }

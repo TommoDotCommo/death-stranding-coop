@@ -1071,6 +1071,17 @@ looked at.
   (`+0xa8`, at the territory, radius about 280, shrinking with time; saved). Inside a cleared sphere 0 does nothing
   and the weather map there reads clear, so rain placed there brings no BTs.
 
+### Structure levels (2026-11-13, live)
+
+- The construction object starts 0x18 before the table record described under "Structures" (record `+0x18` id is
+  object `+0x30`). Level: object `+0x84` (record `+0x6c`): 0 for ladders and ropes, 1 for a structure as built
+  (a bridge still waiting for its materials too), 2 and up after upgrades; the top level is `*(object+0x90)+0x98`.
+- `0x2c5d9d0(object, u32 level, i32 out[6])` fills what that level needs in all (the sum of the steps up to it).
+- Materials from other players (`0x2c321a0`, see the pavers) are counted on any construction, but only a paver
+  takes its level from them at once. Other structures level up through the manager's queue
+  (`0x2c69170(manager, object)`, what the structure's own menu calls after a delivery): the level changes when the
+  game's build has run, about 50 s later (live: a generator, in range of the player).
+
 ### Roads: auto-pavers (2026-11-13, static; reads, delivery and completion confirmed live)
 
 - An auto-paver is a construction (type byte `+0x34` = 36) in the construction manager `*(image+0x7bf4960)`: object

@@ -17,7 +17,7 @@
 #include <vector>
 namespace mod::structures {
 struct Transform { std::array<double,3> position{}; std::array<float,9> rotation{}; };   // game axes, rows
-struct Record { uint32_t id=0; uint8_t type=0, category=0, state=0; Transform at; uint64_t built=0; };   // built: the game's clock (clockNow)
+struct Record { uint32_t id=0; uint8_t type=0, category=0, state=0; Transform at; uint64_t built=0; uint32_t level=0; uint64_t object=0; };   // built: the game's clock (clockNow); level: +0x6c (1 as built, 2 and up upgraded); object: the construction object (record - 0x18)
 constexpr uint32_t PlayerFirst=10000,NetFirst=100000;
 constexpr uint64_t TableEnd=0x5699c8+0x710,Stride=0x710;constexpr unsigned MaxRecords=640;
 // Every record in the table window (the image range is [base, base+imageSize)).
@@ -41,6 +41,9 @@ class NetCopies {
 public:
     static constexpr uint64_t GiveUp=30000;
     void built(uint64_t ref,uint8_t netType,const std::array<double,3>& at){copies_[ref]={netType,at,0};}
+    // The copy of that ref (its Net type and place), and the ref of the copy of that type at a place.
+    std::optional<std::pair<uint8_t,std::array<double,3>>> find(uint64_t ref) const;
+    std::optional<uint64_t> refAt(uint8_t netType,const std::array<double,3>& at) const;
     bool known(uint64_t ref) const {return copies_.count(ref)!=0;}
     void dismantled(uint64_t ref,uint64_t now){auto it=copies_.find(ref);if(it!=copies_.end()&&!it->second.goneAt)it->second.goneAt=now?now:1;}
     // A dismantle whose ref is not known here (either mod restarted since it was built): the Net structure of that
@@ -56,6 +59,22 @@ private:
 inline uint64_t clockNow(){
     return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count())+62135596800000000ull;
 }
+// Upgrades: a structure that reaches a higher level in one game (the builder's own, or the partner's copy of it,
+// which either player can upgrade as in the game) is raised to that level in the other. Keyed by the structure's ref.
+class LevelSync {
+public:
+    struct Level { uint64_t ref=0; uint32_t level=0; };
+    // Structures whose level rose since the last look (a ref seen for the first time is learned), except what was
+    // raised here for the partner.
+    std::vector<Level> observe(const std::vector<Level>&);
+    // The partner's structure reached a level: true when the local one (at localLevel) is below it.
+    static bool wanted(uint32_t localLevel,const Level& l){return l.level>=2&&l.level<=MaxLevel&&localLevel>=1&&localLevel<l.level;}
+    void applied(const Level& l){auto& a=applied_[l.ref];if(l.level>a)a=l.level;}
+    void forget(){seen_.clear();}
+    static constexpr uint32_t MaxLevel=8;
+private:
+    std::map<uint64_t,uint32_t> seen_,applied_;
+};
 class Sync {
 public:
     // since: only structures built from then on (Record::built, the game's clock) are announced, so the structures
