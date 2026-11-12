@@ -639,7 +639,9 @@ struct Runtime final:ds::Transport {
             if(!net){note(("STRUCT partner type "+std::to_string(b.type)+" has no Net variant; ignored\n").c_str());continue;}
             netCopies.built(e.ref,*net,b.position);
 #ifndef MOD_MUTANT_STRUCTURE_TWICE
-            if(mod::structures::standing(table(),*net,b.position)){note(("STRUCT partner structure ref "+std::to_string(e.ref)+" already stands here\n").c_str());continue;}
+            // Already here: as the partner's copy from an earlier session, or as this porter's own (two players on
+            // copies of one save both have it).
+            if(mod::structures::standing(table(),*net,b.position)||mod::structures::standing(table(),b.type,b.position)){note(("STRUCT partner structure ref "+std::to_string(e.ref)+" already stands here\n").c_str());continue;}
 #endif
             mod::puppet::Transform t;t.position=b.position;t.rotation=mod::structures::rotation(b.yaw,b.pitch,b.roll);
             // Through the request without the wait for a build effect, so heavy structures stand at once (double.cpp);
