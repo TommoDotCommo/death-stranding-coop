@@ -23,6 +23,8 @@ int main(){
     CHECK(walkFault(0xc0000005u,8,0x40131986450ull,0x40131986450ull,image+0x237e2b0,image,end)==8&&walkFault(0xc0000005u,8,0,0,image+0x237e2b4,image,end)<0&&walkFault(0x80000003u,0,0,image+0x237e2c8,0,image,end)<0&&walkFault(0xc0000005u,0,0,image+0x237e2c8,0,0,0)<0);
     CHECK(inWalk(image+0x237e267,image)&&inWalk(image+0x237e2d1,image)&&!inWalk(image+0x237e2d2,image)&&!inWalk(image+0x237e24a,image)&&!inWalk(image+0x237e267,0));
     CHECK(nearWalk(image+0x22bdef0,image)&&nearWalk(image+0x237e2b0,image)&&!nearWalk(image+0x22bdf30,image)&&!nearWalk(image+0x1000,image));
+    CHECK(holdsEntityLock(image+0x237c47d,0x9000,image)&&holdsEntityLock(image+0x237c469,0x9000,image)&&!holdsEntityLock(image+0x237c47d,0,image)
+          &&!holdsEntityLock(image+0x237c460,0x9000,image)&&!holdsEntityLock(image+0x237c6bc,0x9000,image)&&!holdsEntityLock(image+0x237c47d,0x9000,0));
     // The culling job's read of a drawable that left the tree: only those instructions, only with the null they
     // fault on; resumes at the function's epilogue.
     { const uint64_t base=0x7ff700000000ull,out=base+0x1d5cc09;

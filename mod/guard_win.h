@@ -94,6 +94,9 @@ inline bool inWalk(uint64_t rip,uint64_t image){
     return image&&rip>=image+0x237e267&&rip<image+0x237e2d2;
 #endif
 }
+// The walk's message path (0x237c430..0x237c6e1, for nodes without a dispatcher) holds the entity's lock in r12 from
+// 0x237c469 until its epilogue at 0x237c6bc: a fault below it must give the lock back before the walk is left.
+inline bool holdsEntityLock(uint64_t rip,uint64_t r12,uint64_t image){return image&&r12&&rip>=image+0x237c469&&rip<image+0x237c6bc;}
 // Inside the walk or what it calls for each node of a ring (the dispatcher 0x22bdee0, which returns at once when the
 // node's target is gone): a thread seen here at every look is a candidate.
 inline bool nearWalk(uint64_t rip,uint64_t image){return inWalk(rip,image)||(image&&rip>=image+0x22bdee0&&rip<image+0x22bdf21);}
@@ -141,6 +144,32 @@ inline void cullRepair(CONTEXT* c,uint64_t base){
     *reinterpret_cast<volatile uint64_t*>(f.object+8)=f.leaf;
     cullRepaired.fetch_add(1,std::memory_order_relaxed);
 }
+// Any access violation in something the walk called, however deep (live: a read through a garbage payload vtable in
+// the message path 0x237c47d): the frames are unwound with the game's own unwind data until the walk's frame, the
+// entity lock the message path holds is given back, and the walk is left through its end. False when the walk is
+// not on this stack within a few frames; the context is only changed on success.
+inline std::atomic<unsigned> unwound{0};
+inline bool unwindToWalk(CONTEXT* c,uint64_t image,uint64_t imageEnd){
+    CONTEXT u=*c;uint64_t lock=0;
+    if(!(u.Rip>=image&&u.Rip<imageEnd)){            // a call through a bad pointer: step back to the caller
+        if(IsBadReadPtr(reinterpret_cast<void*>(u.Rsp),8))return false;
+        u.Rip=*reinterpret_cast<uint64_t*>(u.Rsp);u.Rsp+=8;
+    }
+    for(int depth=0;depth<10;++depth){
+        if(inWalk(u.Rip,image)){
+            if(lock)LeaveCriticalSection(reinterpret_cast<LPCRITICAL_SECTION>(lock));
+            *c=u;c->Rbp=0;c->Rip=image+0x237e2d2;return true;
+        }
+        if(!(u.Rip>=image&&u.Rip<imageEnd))return false;
+        if(holdsEntityLock(u.Rip,u.R12,image))lock=u.R12;
+        DWORD64 base=0;auto* fn=RtlLookupFunctionEntry(u.Rip,&base,nullptr);
+        if(!fn)return false;
+        void* handlerData=nullptr;DWORD64 frame=0;
+        RtlVirtualUnwind(UNW_FLAG_NHANDLER,base,u.Rip,fn,&u,&handlerData,&frame,nullptr);
+        if(!u.Rip||IsBadReadPtr(reinterpret_cast<void*>(u.Rsp),8))return false;
+    }
+    return false;
+}
 inline std::atomic<uint64_t> cullBase{0};
 inline std::atomic<unsigned> cullSkipped{0};
 // Evidence: the first few distinct drawables met (the cull sub-object r14, its vtable, index and flags), how often.
@@ -171,6 +200,11 @@ inline LONG CALLBACK handler(EXCEPTION_POINTERS* e){
         if(int pop=walkFault(r->ExceptionCode,r->ExceptionInformation[0],r->ExceptionInformation[1],c->Rip,back,image,image+imageSize.load(std::memory_order_acquire));pop>=0){
             walkLeft.fetch_add(1,std::memory_order_relaxed);noteQueue(c->Rsi);
             c->Rsp+=uint64_t(pop);c->Rbp=0;c->Rip=image+0x237e2d2;return EXCEPTION_CONTINUE_EXECUTION;}
+    // Anything else that faults below the walk.
+    if(walkOk.load(std::memory_order_acquire)&&unwindToWalk(c,image,image+imageSize.load(std::memory_order_acquire))){
+        unwound.fetch_add(1,std::memory_order_relaxed);walkLeft.fetch_add(1,std::memory_order_relaxed);noteQueue(c->Rsi);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
     if(r->ExceptionInformation[0]!=8)return EXCEPTION_CONTINUE_SEARCH;
     if(!matches(r->ExceptionCode,r->ExceptionInformation[0],r->ExceptionInformation[1],c->Rip,back,s,image,image+imageSize.load(std::memory_order_acquire)))return EXCEPTION_CONTINUE_SEARCH;
     unsigned n=skipped.fetch_add(1,std::memory_order_relaxed);

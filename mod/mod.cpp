@@ -842,7 +842,7 @@ struct Runtime final:ds::Transport {
             }
             guardNoted=n;note(("GUARD a deferred call with a bad function was skipped ("+std::to_string(n)+" so far; "+std::to_string(mod::guard::abandoned.load())+" times the rest of that entity's queue was dropped)\n").c_str());}
         unsigned w=mod::guard::walkLeft.load()+mod::guard::abandoned.load();
-        if(w!=walkNoted){walkNoted=w;std::ostringstream o;o<<"GUARD a dangling queue of deferred calls was left "<<w<<" times; entities"<<std::hex;
+        if(w!=walkNoted){walkNoted=w;std::ostringstream o;o<<"GUARD a dangling queue of deferred calls was left "<<w<<" times ("<<mod::guard::unwound.load()<<" from deeper frames); entities"<<std::hex;
             for(auto& q:mod::guard::queueEntity)if(uint64_t e=q.load())o<<" 0x"<<e;
             o<<"\n";note(o.str().c_str());}
         unsigned c=mod::guard::cullSkipped.load();
