@@ -681,16 +681,21 @@ struct Runtime final:ds::Transport {
         static const char* names[]={"","start","success","fail"};
         std::vector<mod::orders::Unit> units;if(config.shareOrderUnits)units=mod::orders::readUnits(*sampler,sampler->base);
         for(auto& e:orderIn){
-            if(e.item>=mod::orders::UnitBase&&e.item<mod::orders::UnitBase+64){
+            if((e.item&0xffff)>=mod::orders::UnitBase&&(e.item&0xffff)<mod::orders::UnitBase+64){
                 // The partner handed a unit in: it is delivered here too, and this game's copy of that cargo goes.
-                uint8_t n=uint8_t(e.item-mod::orders::UnitBase);
+                uint8_t n=uint8_t((e.item&0xffff)-mod::orders::UnitBase);
                 if(!config.shareOrderUnits)continue;
                 auto* u=unitSync.wanted(units,e.ref,n);
                 std::ostringstream o;o<<"ORDER partner handed in unit "<<int(n)<<" of "<<std::hex<<e.ref<<std::dec;
                 if(!u){o<<": not waiting here\n";note(o.str().c_str());continue;}
                 unitSync.applied(e.ref,n);uint16_t seen=0;
 #ifdef _WIN32
-                if(sampler->read(u->stateAt,&seen,2)&&seen==mod::orders::NotDelivered)*reinterpret_cast<uint16_t*>(u->stateAt)=mod::orders::Delivered;
+                if(sampler->read(u->stateAt,&seen,2)&&seen==mod::orders::NotDelivered){
+                    // as the game's own hand-in leaves the row: the packed word and the cargo's two condition values, then the state
+                    uint32_t packed=(uint32_t(e.position[0])&0xffff)|((e.item>>16)<<16);float l0=float(e.position[1]),l1=float(e.position[2]);
+                    std::memcpy(reinterpret_cast<void*>(u->stateAt+4),&packed,4);std::memcpy(reinterpret_cast<void*>(u->stateAt+0x10),&l0,4);std::memcpy(reinterpret_cast<void*>(u->stateAt+0x14),&l1,4);
+                    *reinterpret_cast<uint16_t*>(u->stateAt)=mod::orders::Delivered;
+                }
 #endif
                 unsigned removed=0;uint64_t manager=0;
                 if(cargoDelete&&cargoManagerSlot&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
@@ -707,7 +712,13 @@ struct Runtime final:ds::Transport {
         if(config.shareOrderUnits){
             std::vector<uint64_t> under;for(auto& o:orders)if(mod::orders::shareable(o)&&o.state==mod::orders::Progress)under.push_back(o.id);
             for(auto& u:unitSync.observe(units,under)){
-                ds::CargoEvent e;e.type=mod::orders::WireType;e.item=uint32_t(mod::orders::UnitBase+u.unit);e.ref=u.mission;core->queueCargo(e);++orderSent;
+                ds::CargoEvent e;e.type=mod::orders::WireType;e.item=uint32_t(mod::orders::UnitBase+u.unit);e.ref=u.mission;
+                // The wire keeps positions within 100 km: the packed word travels as its low half there and its high
+                // half in the item's upper bits; the two condition values are small numbers (a float is exact in a double).
+                e.item|=(u.packed>>16)<<16;
+                auto fits=[](float v){return std::isfinite(v)&&std::fabs(v)<=100000.f?double(v):0.0;};
+                e.position={double(u.packed&0xffff),fits(u.life[0]),fits(u.life[1])};
+                core->queueCargo(e);++orderSent;
                 std::ostringstream o;o<<"ORDER unit "<<int(u.unit)<<" of "<<std::hex<<u.mission<<std::dec<<" handed in here -> partner\n";note(o.str().c_str());
             }
         }
@@ -1532,6 +1543,15 @@ struct Runtime final:ds::Transport {
                     }
 #endif
                 }
+                else if(auto lose=mod::puppet::parseCargoCommand(text,mod::runStamp(),"unitlose");lose) {
+                    // Test: "unitlose <mission id * 10 + n>" removes this game's cargo of unit n and leaves the unit undelivered
+                    // (so the player can only make a partial hand-in).
+                    uint64_t id=*lose/10;uint8_t n=uint8_t(*lose%10);unsigned removed=0;uint64_t manager=0;
+                    if(cargoDelete&&cargoManagerSlot&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
+                        for(auto& r:mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,mod::cargo::MaxRecords))
+                            if(r.mission==id&&r.unit==n){cargoDelete(r.index);++removed;}
+                    std::ostringstream o;o<<"ORDER test: cargo of unit "<<int(n)<<" of "<<std::hex<<id<<std::dec<<" removed ("<<removed<<")\n";note(o.str().c_str());
+                }
                 else if(auto unit=mod::puppet::parseCargoCommand(text,mod::runStamp(),"unit");unit) {
                     // Test: "unit <mission id * 10 + n>" marks unit n of that order delivered in this game (as a hand-in would).
                     uint64_t id=*unit/10;uint8_t n=uint8_t(*unit%10);bool done=false;
@@ -1540,7 +1560,12 @@ struct Runtime final:ds::Transport {
                         *reinterpret_cast<uint16_t*>(u.stateAt)=mod::orders::Delivered;done=true;
 #endif
                     }
-                    std::ostringstream o;o<<"ORDER test: unit "<<int(n)<<" of "<<std::hex<<id<<std::dec<<(done?" marked delivered":" not waiting")<<"\n";note(o.str().c_str());
+                    // ... and removes this game's cargo of that unit, wherever it is (as if the partner had handed it in).
+                    unsigned removed=0;uint64_t manager=0;
+                    if(done&&cargoDelete&&cargoManagerSlot&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
+                        for(auto& r:mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,mod::cargo::MaxRecords))
+                            if(r.mission==id&&r.unit==n){cargoDelete(r.index);++removed;}
+                    std::ostringstream o;o<<"ORDER test: unit "<<int(n)<<" of "<<std::hex<<id<<std::dec<<(done?" marked delivered, ":" not waiting, ")<<removed<<" cargo record(s) removed\n";note(o.str().c_str());
                 }
                 else if(auto order=mod::puppet::parseCargoCommand(text,mod::runStamp(),"order");order) {
                     // Test: "order <mission id>" asks the game to start that order; + 1000000000 to complete it,

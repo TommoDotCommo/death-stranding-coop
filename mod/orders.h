@@ -35,7 +35,9 @@ private:
 };
 // One cargo unit of an order (the game's table at mission system +0x18): state 1 not delivered, 2 delivered.
 // row: where the row's state is, to mark it delivered here.
-struct Unit { uint64_t mission=0; uint8_t unit=0; uint16_t state=0; uint64_t stateAt=0; };
+// packed (+4 after the state) and life (+0x10, +0x14: the cargo's two condition values) are what a real hand-in
+// writes beside the state; the game's delivery screen and evaluation read them.
+struct Unit { uint64_t mission=0; uint8_t unit=0; uint16_t state=0; uint64_t stateAt=0; uint32_t packed=0; float life[2]{}; };
 constexpr uint16_t NotDelivered=1,Delivered=2;
 constexpr uint8_t UnitBase=100;                      // an order change's `what` for "unit N delivered" is UnitBase+N
 std::vector<Unit> readUnits(const discovery::Sampler&,uint64_t base);

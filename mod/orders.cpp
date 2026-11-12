@@ -25,7 +25,7 @@ std::vector<Unit> readUnits(const discovery::Sampler& s,uint64_t base){
     if(!s.readOnce(rows,blob.data(),blob.size()))return out;
     for(uint32_t i=0;i<capacity;++i){
         const uint8_t* r=blob.data()+size_t(i)*0x38;uint32_t hash=0;uint64_t key=0;std::memcpy(&hash,r,4);if(!hash)continue;
-        std::memcpy(&key,r+8,8);Unit u;u.mission=key&0xffc0ffffffffffffull;u.unit=uint8_t(key>>48&0x3f);std::memcpy(&u.state,r+0x18,2);u.stateAt=rows+uint64_t(i)*0x38+0x18;
+        std::memcpy(&key,r+8,8);Unit u;u.mission=key&0xffc0ffffffffffffull;u.unit=uint8_t(key>>48&0x3f);std::memcpy(&u.state,r+0x18,2);u.stateAt=rows+uint64_t(i)*0x38+0x18;std::memcpy(&u.packed,r+0x1c,4);std::memcpy(u.life,r+0x28,8);
         out.push_back(u);
     }
     return out;
