@@ -750,7 +750,7 @@ struct Runtime final:ds::Transport {
     // puts down the ones the partner reports, with the game's own defeat function.
     mod::enemies::Sync enemySync;std::vector<ds::CargoEvent> enemyIn;std::function<void(uint64_t,uint8_t)> enemyDefeat;
     mod::enemies::CampSync campSync;std::function<void(const std::array<uint8_t,16>&)> campAlert;
-    uint64_t enemyReadAt=0,enemySent=0,enemyApplied=0;bool enemyTried=false,enemyTimed=false;
+    uint64_t enemyReadAt=0,enemySent=0,enemyApplied=0;bool enemyTried=false,enemyTimed=false;std::map<uint64_t,uint64_t> enemyRetry;
     void tickEnemies(uint64_t now) {
         if(!core||!sampler||!config.shareEnemies){enemyIn.clear();return;}
         if(!enemyTried){try{campAlert=mod::enemies::nativeAlert(*sampler);}catch(const std::exception&){}}
@@ -769,10 +769,19 @@ struct Runtime final:ds::Transport {
             mod::enemies::Down d{e.ref,uint8_t(e.item)};
             if(auto* m=enemySync.wanted(mules,d)){
                 enemySync.applied(d.key);enemyDefeat(m->address,d.kind);++enemyApplied;
+                if(d.kind!=mod::enemies::Fainted&&d.kind!=mod::enemies::Dead)enemyRetry[d.key]=now;   // see below
                 std::ostringstream o;o<<"ENEMY partner put a MULE down: id "<<std::hex<<m->id<<std::dec<<" kind "<<int(d.kind)<<" lod "<<m->lod<<"\n";note(o.str().c_str());
             }
         }
         if(!enemyIn.empty()){enemyIn.clear();mules=mod::enemies::readMules(*sampler,sampler->base);}
+        // The game does not always take a knock-out or a sleep from outside (live: an alerted MULE ignored "asleep");
+        // a MULE the partner reported down that still stands a second later is made to faint, which the game takes.
+        for(auto it=enemyRetry.begin();it!=enemyRetry.end();){
+            if(now-it->second<1000){++it;continue;}
+            for(auto& m:mules)if(mod::enemies::key(m.uuid)==it->first&&mod::enemies::condition(m.state,m.flags)==mod::enemies::Up&&m.state!=5){
+                enemyDefeat(m.address,mod::enemies::Fainted);note("ENEMY the partner's MULE still stood here: made to faint instead\n");}
+            it=enemyRetry.erase(it);
+        }
         for(auto k:campSync.observe(camps)){
             if(!core->connected()||!partnerMode())continue;
             ds::CargoEvent e;e.type=mod::enemies::WireType;e.item=mod::enemies::CampAlert;e.ref=k;core->queueCargo(e);++enemySent;

@@ -134,7 +134,22 @@ std::function<void(uint64_t,uint8_t)> nativeDefeat(discovery::Sampler& s){
     const uint8_t want[16]={0x48,0x89,0x5c,0x24,0x10,0x57,0x48,0x83,0xec,0x70,0x48,0x8b,0x05,0x1f,0x90,0x4b};uint8_t got[16]{};
     if(!s.read(s.base+0x2aa8000,got,16)||std::memcmp(got,want,16))throw std::runtime_error("MULE defeat function differs");
     auto f=reinterpret_cast<void(*)(void*,int)>(s.base+0x2aa8000);
-    return [f](uint64_t actor,uint8_t kind){if(actor&&kind<=Dead)f(reinterpret_cast<void*>(actor),int(kind));};
+    // With a body the game's function queues a damage event on the MULE's damage component (0x2af6930(component,
+    // kind+1, by the player?), then 0x2af97d0) and passes "not by the player"; live, an alerted MULE took no notice of
+    // that. The same two calls are made here with the player as the one who did it; without a body, the game's
+    // function sets the state itself.
+    const uint8_t wantA[12]={0x4c,0x8b,0xdc,0x53,0x48,0x81,0xec,0xf0,0x00,0x00,0x00,0x48};uint8_t gotA[12]{};
+    bool direct=s.read(s.base+0x2af6930,gotA,12)&&!std::memcmp(gotA,wantA,12);
+    auto queue=reinterpret_cast<void(*)(void*,int,uint8_t)>(s.base+0x2af6930);auto flush=reinterpret_cast<void(*)(void*)>(s.base+0x2af97d0);
+    auto* sp=&s;
+    return [f,queue,flush,direct,sp](uint64_t actor,uint8_t kind){
+        if(!actor||kind>Dead)return;
+        uint32_t lod=0;uint64_t component=0;
+#ifndef MUTANT_ENEMY_NOBODY
+        if(direct&&sp->read(actor+0x24,&lod,4)&&lod==2&&sp->read(actor+0xe90,&component,8)&&component){
+            queue(reinterpret_cast<void*>(component),int(kind)+1,1);flush(reinterpret_cast<void*>(component));return;}
+#endif
+        f(reinterpret_cast<void*>(actor),int(kind));};
 #endif
 }
 }
