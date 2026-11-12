@@ -689,7 +689,7 @@ Each game keeps simulating its own world; these settings share the outcome of wh
 - `"share_orders": true` (`orders.h`): a standard order (the repeatable deliveries and collections) one player takes
   on, completes or gives up does the same in the partner's game, through the game's own mission requests. Main and
   sub orders are never shared. Each game has its own cargo for the order; whoever hands it in completes it for both.
-- `"share_order_units": true` (with `share_orders`; not in the launcher's setup yet): a cargo unit one player hands
+- `"share_order_units": true` (with `share_orders`; also on in the launcher's setup): a cargo unit one player hands
   in is delivered in the partner's game too and the partner's copy of that cargo is removed, so two players can
   each carry part of an order.
 
