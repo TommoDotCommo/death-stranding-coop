@@ -1051,6 +1051,15 @@ games ran on, and the receiver's section written out again differed from the sou
 5323..6635 and one bit) where it had differed in 4938 before. What the game shows after that (sky, rain) was not
 looked at.
 
+### Creation callback with no function (2026-11-12, from two crash dumps)
+
+`0x22bdee0(delegate)`: if `delegate+0x10` (a weak target, object = value - 8) is set it calls the function pointer at
+`delegate+0x28` (this-adjust at `+0x30`) with the target, unchecked: `call rax` at `0x22bdf18`. It is reached through
+`call [rax+8]` at `0x237c5c0`, in the completion of an entity creation (`0x237c5xx` <- `0x237e2b0`), on a worker
+thread while the main thread waits (`0x1a0413b` <- `0x2400eb4` <- `0x23f5f98` <- `0x23ff9c5` <- `0x237e4a3` <-
+`0x358b1f5`). Twice, with a partner connected and the porter arriving at a prepper's shelter with an order's cargo,
+the function pointer was null. Which creation and whose callback is unknown.
+
 ### The partner's own body, live (2026-11-07)
 
 `EntityResource_ExportedCreateEntity` (0x23806a0; the existing puppet probe's signature-checked call) **does** create

@@ -37,6 +37,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "vitals.h"
 #include "enemies.h"
 #include "orders.h"
+#include "guard_win.h"
 #include "link.h"
 #include "nametag.h"
 #include "notice.h"
@@ -659,6 +660,13 @@ struct Runtime final:ds::Transport {
     // Shared orders (orders.h): opt-in share_orders. Standard orders only.
     mod::orders::Sync orderSync;std::vector<ds::CargoEvent> orderIn;std::function<bool(uint64_t,uint8_t)> orderRequest;std::map<uint64_t,uint8_t> orderDetails;
     uint64_t orderReadAt=0,orderSent=0,orderApplied=0;bool orderTried=false,orderLinked=false;
+    unsigned guardNoted=0;
+    void tickGuard() {
+#ifdef _WIN32
+        unsigned n=mod::guard::skipped.load();
+        if(n!=guardNoted){guardNoted=n;note(("GUARD a creation callback with no function was skipped ("+std::to_string(n)+" so far)\n").c_str());}
+#endif
+    }
     void tickOrders(uint64_t now) {
         if(!core||!sampler||!config.shareOrders){orderIn.clear();return;}
         if(!orderTried){orderTried=true;try{orderRequest=mod::orders::nativeRequest(*sampler);}catch(const std::exception& e){note((std::string("ORDER unavailable: ")+e.what()+"\n").c_str());}}
@@ -965,6 +973,13 @@ struct Runtime final:ds::Transport {
                 twinApi.effects=[](uint64_t,bool){};
 #else
                 auto twinApi=mod::puppet::nativeDoubleApi(*sampler);
+#ifdef _WIN32
+                {   // the creation-callback guard (guard_win.h), once the call site is known to be the one read
+                    const uint8_t want[8]={0xff,0xd0,0xb0,0x01,0x48,0x83,0xc4,0x28};uint8_t got[8]{};   // call rax; mov al,1; add rsp,0x28
+                    if(sampler->read(sampler->base+0x22bdf18,got,8)&&!std::memcmp(got,want,8)){mod::guard::install(sampler->base);note("GUARD creation callback guard installed\n");}
+                    else note("GUARD not installed: the call site differs\n");
+                }
+#endif
                 cargoCreate=mod::puppet::nativeCargoCreate(*sampler);cargoGive=mod::puppet::nativeCargoGive(*sampler);cargoDelete=mod::puppet::nativeCargoDelete(*sampler);construct=mod::puppet::nativeConstruct(*sampler);try{constructRequest=mod::puppet::nativeConstructRequest(*sampler);}catch(const std::exception& e){note((std::string("CONSTRUCT request unavailable: ")+e.what()+"\n").c_str());}partToggle=mod::puppet::nativePartToggle(*sampler);unconstruct=mod::puppet::nativeRemoveConstructions(*sampler);
                 gameEvent=mod::puppet::nativeGameEvent(*sampler);
                 if(config.autoContinue){continueLastSave=mod::puppet::nativeContinueLastSave(*sampler);autoContinue=mod::AutoContinue(true);}
@@ -1433,6 +1448,7 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickStructures(now);
             if(twin&&gameContext)tickEnemies(now);
             if(twin&&gameContext)tickOrders(now);
+            tickGuard();
             stage="markers";stages.enter("markers",mod::nowUs());
             if(twin&&gameContext)tickMarkers(now);
             stage="likes";stages.enter("likes",mod::nowUs());
