@@ -87,6 +87,64 @@ bool FightSync::wanted(const Fights& f,uint32_t what,double distance){
 #endif
     return false;
 }
+std::vector<Catcher> readCatchers(const discovery::Sampler& s,uint64_t base){
+    std::vector<Catcher> out;uint64_t manager=0,records=0;int32_t n=0;
+    if(!s.read(base+0x7bee060,&manager,8)||!manager||!s.read(manager+0x88,&n,4)||!s.read(manager+0x90,&records,8)||!records||n<=0||n>64)return out;
+    for(int32_t i=0;i<n;++i){
+        uint8_t r[0x110];uint64_t weak=0,list=0;uint32_t id=0;int32_t count=0;
+        if(!s.read(records+0x110*uint64_t(i),r,sizeof r)||r[0xf0])continue;
+        std::memcpy(&weak,r,8);std::memcpy(&id,r+0x20,4);
+        if(weak<0x20||!s.read(weak-0x20+0x90,&count,4)||!s.read(weak-0x20+0x98,&list,8)||!list||count<=0||count>512)continue;
+        std::vector<uint64_t> parts;parts.resize(size_t(count));if(!s.read(list,parts.data(),parts.size()*8))continue;
+        for(auto part:parts){
+            uint64_t vtable=0,entity=0;uint32_t owner=0;float life[2]{};
+            if(!part||!s.read(part,&vtable,8)||vtable!=base+0x3daf340)continue;          // the catcher's base component
+            if(!s.read(part+0x48,&entity,8)||entity!=weak-0x20||!s.read(part+0x58,&owner,4)||owner!=id||!s.read(part+0x138,life,8))break;
+            if(!(life[0]>0)||!(life[1]>=0)||life[1]>life[0])break;
+            Catcher c;c.life=part+0x13c;c.percent=life[1]/life[0]*100.f;c.type=r[0x28];out.push_back(c);break;
+        }
+    }
+    return out;
+}
+std::vector<HealthSync::Hurt> HealthSync::observe(const std::vector<Catcher>& catchers){
+    std::vector<Hurt> out;
+    if(catchers.size()!=last_.size()){last_.clear();for(auto& c:catchers)last_.push_back(c.percent);return out;}   // another fight, or one more catcher: learn
+    for(size_t i=0;i<catchers.size();++i){
+#ifndef MUTANT_BT_HEAL
+        if(catchers[i].percent<last_[i]-Least)out.push_back({uint32_t(i),last_[i]-catchers[i].percent});
+#else
+        if(catchers[i].percent!=last_[i])out.push_back({uint32_t(i),last_[i]-catchers[i].percent});
+#endif
+        last_[i]=catchers[i].percent;
+    }
+    return out;
+}
+std::optional<float> HealthSync::applied(const std::vector<Catcher>& catchers,const Hurt& h){
+    if(h.ordinal>=catchers.size()||catchers.size()!=last_.size()||!(h.percent>0)||h.percent>100)return std::nullopt;
+    float now=catchers[h.ordinal].percent;
+#ifndef MUTANT_BT_KILL
+    if(now<=Floor)return std::nullopt;
+    float next=now-h.percent<Floor?Floor:now-h.percent;
+#else
+    float next=now-h.percent;
+#endif
+#ifndef MUTANT_BT_HURT_ECHO
+    last_[h.ordinal]=next;                                             // taken off for the partner: not news
+#endif
+    return next;
+}
+std::function<void(const Catcher&,float)> nativeHurt(discovery::Sampler& s){
+#ifdef _WIN32
+    return [&s](const Catcher& c,float percent){
+        float life[2]{};uint64_t vtable=0;
+        if(!c.life||!s.read(c.life-0x13c,&vtable,8)||vtable!=s.base+0x3daf340||!s.read(c.life-4,life,8)||!(life[0]>0)||!(life[1]>0))return;
+        float next=life[0]*percent/100.f;if(!(next>0)||next>=life[1])return;
+        *reinterpret_cast<volatile float*>(c.life)=next;
+    };
+#else
+    (void)s;throw std::runtime_error("native BTs need the game");
+#endif
+}
 std::function<void(uint64_t)> nativeDestroy(discovery::Sampler& s){
 #ifdef _WIN32
     return [&s](uint64_t actor){

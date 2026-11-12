@@ -749,17 +749,32 @@ struct Runtime final:ds::Transport {
         }
     }
     // Shared BTs (bts.h), with share_enemies: gazers destroyed, a catcher fight started, its area cleared.
-    mod::bts::GazerSync gazerSync;mod::bts::FightSync fightSync;std::vector<ds::CargoEvent> btIn;
+    mod::bts::GazerSync gazerSync;mod::bts::FightSync fightSync;mod::bts::HealthSync healthSync;std::function<void(const mod::bts::Catcher&,float)> btHurt;std::vector<ds::CargoEvent> btIn;
     std::function<void(uint64_t)> btDestroy;std::function<void(uint8_t)> btCatcher;uint64_t btReadAt=0,btSent=0,btApplied=0;bool btTried=false;
     void tickBts(uint64_t now) {
         if(!core||!sampler||!config.shareEnemies){btIn.clear();return;}
-        if(!btTried){btTried=true;try{btDestroy=mod::bts::nativeDestroy(*sampler);btCatcher=mod::bts::nativeCatcher(*sampler);}catch(const std::exception& e){note((std::string("BT unavailable: ")+e.what()+"\n").c_str());}}
+        if(!btTried){btTried=true;try{btDestroy=mod::bts::nativeDestroy(*sampler);btHurt=mod::bts::nativeHurt(*sampler);btCatcher=mod::bts::nativeCatcher(*sampler);}catch(const std::exception& e){note((std::string("BT unavailable: ")+e.what()+"\n").c_str());}}
         if(!btDestroy||!btCatcher||(btIn.empty()&&now-btReadAt<500))return;
         btReadAt=now;
         auto anchor=anchorNow();std::array<double,3> at{};bool here=anchor.entity&&anchor.pose.available;
         if(here){auto p=mod::puppet::transform(anchor.pose).position;at={double(p[0]),double(p[1]),double(p[2])};}
         auto gazers=mod::bts::readGazers(*sampler,sampler->base);auto fights=mod::bts::readFights(*sampler,sampler->base);
+        bool send=core->connected()&&partnerMode();
+        // One health bar for the two games' catchers: first what this game's lost since the last look goes out, then
+        // what the partner's lost is taken off here.
+        auto catchers=fights.active>0?mod::bts::readCatchers(*sampler,sampler->base):std::vector<mod::bts::Catcher>{};
+        for(auto& h:healthSync.observe(catchers)){
+            if(!send)continue;
+            ds::CargoEvent e;e.type=mod::bts::WireType;e.item=mod::bts::CatcherHurt;e.ref=h.ordinal;e.position={double(h.percent),0,0};core->queueCargo(e);++btSent;
+            std::ostringstream o;o<<"BT catcher "<<h.ordinal<<" lost "<<h.percent<<" % here -> partner\n";note(o.str().c_str());
+        }
         for(auto& e:btIn){
+            if(e.item==mod::bts::CatcherHurt){
+                mod::bts::HealthSync::Hurt h{uint32_t(e.ref),float(e.position[0])};
+                if(auto next=healthSync.applied(catchers,h)){btHurt(catchers[h.ordinal],*next);catchers[h.ordinal].percent=*next;++btApplied;
+                    std::ostringstream o;o<<"BT partner took "<<h.percent<<" % off catcher "<<h.ordinal<<": now "<<*next<<" % here\n";note(o.str().c_str());}
+                continue;
+            }
             if(e.item==mod::bts::GazerDead){
                 if(auto* g=mod::bts::GazerSync::wanted(gazers,e.ref)){gazerSync.applied(e.ref);btDestroy(g->address);++btApplied;std::ostringstream o;o<<"BT partner destroyed a gazer: gone here too (lod "<<g->lod<<")\n";note(o.str().c_str());}
                 continue;
@@ -770,7 +785,6 @@ struct Runtime final:ds::Transport {
             note(e.item==mod::bts::FightOn?"BT partner is in a catcher fight: it starts here too\n":"BT partner's catcher fight is over, area cleared: ended here too\n");
         }
         if(!btIn.empty()){btIn.clear();return;}                          // look again next time, after the game acted
-        bool send=core->connected()&&partnerMode();
         for(auto k:gazerSync.observe(gazers)){
             if(!send)continue;
             ds::CargoEvent e;e.type=mod::bts::WireType;e.item=mod::bts::GazerDead;e.ref=k;core->queueCargo(e);++btSent;note("BT a gazer was destroyed here -> partner\n");
@@ -1621,8 +1635,15 @@ struct Runtime final:ds::Transport {
                     // Research: the game's catcher (boss BT) control command: 0 bring at the player, 1 return, 4 force off.
                     uint8_t got[7]{};static const uint8_t want[7]={0x40,0x55,0x48,0x8d,0x6c,0x24,0xa9};
                     if(sampler->read(sampler->base+0x2a928c0,got,7)&&!std::memcmp(got,want,7)){
+                        if(*catcher>=100){
+                            // "catcher 100+N": takes N percent off this game's first catcher, as a hit here would.
+                            auto all=mod::bts::readCatchers(*sampler,sampler->base);
+                            if(!all.empty()){float next=std::max(all[0].percent-float(*catcher-100),mod::bts::HealthSync::Floor);mod::bts::nativeHurt(*sampler)(all[0],next);}
+                            note(all.empty()?"BT test: no catcher with a body\n":("BT test: catcher at "+std::to_string(all[0].percent)+" % hurt by "+std::to_string(*catcher-100)+"\n").c_str());
+                        }else{
                         reinterpret_cast<void(*)(uint8_t)>(sampler->base+0x2a928c0)(uint8_t(*catcher));
                         note(("BT test: catcher command "+std::to_string(*catcher)+"\n").c_str());
+                        }
                     }else note("BT test: catcher command function differs\n");
                 }
                 else if(auto rain=mod::puppet::parseCargoCommand(text,mod::runStamp(),"rain");rain&&anchor.pose.available) {

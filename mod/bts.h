@@ -14,7 +14,7 @@
 #include <vector>
 namespace mod::bts {
 constexpr uint8_t WireType=13;                       // the ordered event stream's type for BT news
-constexpr uint32_t GazerDead=1,FightOn=2,AreaCleared=3;   // the event's item
+constexpr uint32_t GazerDead=1,FightOn=2,AreaCleared=3,CatcherHurt=4;   // the event's item
 constexpr double FightRange=300;                     // a fight starts for a partner within this many metres
 constexpr size_t MassDeath=12;                       // more gazers than this gone in one look is a reset, not kills
 struct Gazer { uint64_t address=0; std::array<uint8_t,16> uuid{}; float life=0; uint32_t flags=0,lod=0; };
@@ -48,6 +48,25 @@ public:
 private:
     bool primed_=false;int32_t cleared_=0;bool active_=false;int looks_=0;
 };
+// One catcher of the running fight: its life in percent of its full life (the unit the game keeps, so it compares
+// across difficulties) and where that number lives (the catcher component's life, +0x13c).
+struct Catcher { uint64_t life=0; float percent=0; uint8_t type=0; };
+// The running fight's catchers that have a body, in the manager's record order.
+std::vector<Catcher> readCatchers(const discovery::Sampler&,uint64_t base);
+// One health bar for both players' catchers: what a player takes off its own is taken off the partner's.
+class HealthSync {
+public:
+    struct Hurt { uint32_t ordinal=0; float percent=0; };
+    // The life each catcher lost since the last look (the first look of a fight learns).
+    std::vector<Hurt> observe(const std::vector<Catcher>&);
+    // The partner's catcher lost life: the life to write to the local one, or nothing when it is not there or is
+    // already going down. Never zero or less: the game only lets a catcher die on a hit of its own (Floor is left).
+    std::optional<float> applied(const std::vector<Catcher>&,const Hurt&);
+    static constexpr float Floor=0.05f,Least=0.01f;
+private:
+    std::vector<float> last_;
+};
+std::function<void(const Catcher&,float percent)> nativeHurt(discovery::Sampler&);
 // Writes the gazer's life to zero; the game's own actor update does the rest (flag, record, the body's reaction).
 std::function<void(uint64_t actor)> nativeDestroy(discovery::Sampler&);
 // The game's catcher control command (0x2a928c0): 0 brings a catcher to the player, 1 returns it (area cleared).

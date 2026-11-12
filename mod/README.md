@@ -689,8 +689,11 @@ Each game keeps simulating its own world; these settings share the outcome of wh
   The same setting shares BTs (`bts.h`): a BT area is active for both players through the shared rain
   (`share_environment`); a BT one player destroys is gone in the partner's game; when one player is pulled into a
   boss fight, it starts for a partner within 300 m (and for one who comes near while it runs); and when either
-  player's fight ends with the area cleared, the partner's ends the same way. Each game still runs its own BTs: where
-  they drift and whom they notice is not shared, and the two bosses are not the same creature with one health bar.
+  player's fight ends with the area cleared, the partner's ends the same way. The two games' bosses share one health
+  bar: the life a player takes off its own boss is taken off the partner's (in percent of full life, so different
+  difficulties compare). The mod never takes a boss to zero itself: the game only lets a boss die on a real hit, so
+  the player who lands the last hit sees the death and the partner's fight ends with the cleared area. Each game
+  still runs its own BTs: where they drift, whom they notice and what the boss does is not shared.
 - `"share_orders": true` (`orders.h`): a standard order (the repeatable deliveries and collections) one player takes
   on, completes or gives up does the same in the partner's game, through the game's own mission requests. Main and
   sub orders are never shared. Each game has its own cargo for the order; whoever hands it in completes it for both.

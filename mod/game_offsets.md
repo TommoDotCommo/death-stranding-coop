@@ -1071,6 +1071,20 @@ looked at.
   (`+0xa8`, at the territory, radius about 280, shrinking with time; saved). Inside a cleared sphere 0 does nothing
   and the weather map there reads clear, so rain placed there brings no BTs.
 
+### Catcher life (2026-11-13, static; read and write confirmed live)
+
+- Each catcher of a fight has a record (manager `+0x88` count / `+0x90`, stride 0x110: `+0x0` weak entity (entity =
+  value - 0x20), `+0x20` actor id, `+0x28` type (0 octopus, 1 quad, 2 whale, 3 titan, 4 ghost), `+0xf0` 0 = active,
+  `+0xf4` life in percent, written by the component every tick).
+- The life is in the entity's catcher base component (vtable `image+0x3daf340`; found among the entity's components,
+  count `entity+0x90`, pointers `entity+0x98`; `+0x48` entity, `+0x58` actor id): `+0x138` full life (100),
+  `+0x13c` life, `+0x140` the life the bar shows (follows at 10 per second). Hits are converted to percent by the
+  catcher's full life and the difficulty, so percent compares between two games.
+- A written life is honoured by the bar, the record and later hits. Death is not polled: it happens only inside the
+  hit that takes the life to zero, and that handler leaves at once when the life is already zero. So zero must never
+  be written (the catcher would be unkillable); the mod leaves 0.05.
+- A cleared sphere is {x, y, encounter radius, countdown from 300}; it goes when the countdown ends.
+
 ### BTs: the gazer and catcher managers (2026-11-12, static; the reads confirmed live)
 
 Gazer manager `G = *(image+0x7bebec0)`: `+0x238` byte "timefall here" (the weather map at the sampled position
