@@ -8,17 +8,24 @@ uint64_t key(const std::array<uint8_t,16>& uuid){
 std::vector<Gazer> readGazers(const discovery::Sampler& s,uint64_t base){
     std::vector<Gazer> out;uint64_t manager=0,units=0;int32_t count=0;
     if(!s.read(base+0x7bbb8c0,&manager,8)||!manager||!s.read(manager+0x440,&count,4)||!s.read(manager+0x448,&units,8)||!units||count<=0||count>256)return out;
+    // The locators' UUIDs are remembered for a while (they do not change in a world; forgotten every 120 looks).
+    static std::map<uint64_t,std::array<uint8_t,16>> uuids;static uint64_t uuidsFor=0;static unsigned looks=0;
+    if(uuidsFor!=manager||++looks>=120){uuids.clear();uuidsFor=manager;looks=0;}
     for(int32_t i=0;i<count;++i){
         uint64_t unit=0,vtable=0,array=0;uint32_t n=0;
         if(!s.read(units+8*uint64_t(i),&unit,8)||!unit||!s.read(unit,&vtable,8)||vtable!=base+0x3da58a8)continue;   // the gazer unit
         if(!s.read(unit+0x40,&n,4)||!s.read(unit+0x48,&array,8)||!array||n>1024)continue;
         std::vector<uint64_t> actors(n);if(n&&!s.read(array,actors.data(),size_t(n)*8))continue;
+        // One copy per actor and the locator's UUID remembered (as for the MULEs, enemies.cpp).
+        uint8_t block[0x1b8];
         for(uint32_t j=0;j<n;++j){
-            uint8_t head[0x28];uint64_t locator=0;Gazer g;
-            if(!actors[j]||!s.read(actors[j],head,sizeof head)||!head[0x20]||!s.read(actors[j]+0x180,&g.life,4)||!s.read(actors[j]+0x1b4,&g.flags,4))continue;
-            std::memcpy(&g.lod,head+0x24,4);std::memcpy(&locator,head+0x18,8);
-            if(!locator||!s.read(locator+8,g.uuid.data(),16))continue;
-            g.address=actors[j];out.push_back(g);
+            uint64_t locator=0;Gazer g;
+            if(!actors[j]||!s.readOnce(actors[j],block,sizeof block)||!block[0x20])continue;
+            std::memcpy(&g.life,block+0x180,4);std::memcpy(&g.flags,block+0x1b4,4);std::memcpy(&g.lod,block+0x24,4);std::memcpy(&locator,block+0x18,8);
+            if(!locator)continue;
+            auto known=uuids.find(locator);
+            if(known==uuids.end()){std::array<uint8_t,16> u{};if(!s.read(locator+8,u.data(),16))continue;known=uuids.emplace(locator,u).first;}
+            g.uuid=known->second;g.address=actors[j];out.push_back(g);
         }
     }
     return out;

@@ -1659,9 +1659,13 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickCarry(now);
             stage="structures";stages.enter("structures",mod::nowUs());
             if(twin&&gameContext)tickStructures(now);
+            stage="enemies";stages.enter("enemies",mod::nowUs());
             if(twin&&gameContext)tickEnemies(now);
+            stage="bts";stages.enter("bts",mod::nowUs());
             if(twin&&gameContext)tickBts(now);
+            stage="roads";stages.enter("roads",mod::nowUs());
             if(twin&&gameContext)tickRoads(now);
+            stage="orders";stages.enter("orders",mod::nowUs());
             if(twin&&gameContext)tickOrders(now);
             tickGuard();
             stage="markers";stages.enter("markers",mod::nowUs());

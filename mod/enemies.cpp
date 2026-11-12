@@ -1,5 +1,6 @@
 #include "enemies.h"
 #include <cstring>
+#include <map>
 #include <stdexcept>
 namespace mod::enemies {
 uint8_t condition(uint32_t state,uint32_t flags){
@@ -20,18 +21,26 @@ uint64_t key(const std::array<uint8_t,16>& uuid){
 std::vector<Mule> readMules(const discovery::Sampler& s,uint64_t base){
     std::vector<Mule> out;uint64_t manager=0,units=0;int32_t count=0;
     if(!s.read(base+0x7bbb8c0,&manager,8)||!manager||!s.read(manager+0x440,&count,4)||!s.read(manager+0x448,&units,8)||!units||count<=0||count>256)return out;
+    // The locators' UUIDs are remembered for a while (they do not change in a world; forgotten every 120 looks).
+    static std::map<uint64_t,std::array<uint8_t,16>> uuids;static uint64_t uuidsFor=0;static unsigned looks=0;
+    if(uuidsFor!=manager||++looks>=120){uuids.clear();uuidsFor=manager;looks=0;}
     for(int32_t i=0;i<count;++i){
         uint64_t unit=0,vtable=0,array=0;uint32_t first=0,n=0;
         if(!s.read(units+8*uint64_t(i),&unit,8)||!unit||!s.read(unit,&vtable,8)||vtable!=base+0x3db71b8)continue;   // the MULE unit
         if(!s.read(unit+0x30,&first,4)||!s.read(unit+0x40,&n,4)||!s.read(unit+0x48,&array,8)||!array||n>1024)continue;
         std::vector<uint64_t> actors(n);if(n&&!s.read(array,actors.data(),size_t(n)*8))continue;
+        // One copy per actor (head and life state together) and the locator's UUID remembered: 150 MULEs were 450
+        // double-checked reads every look. A state caught mid-change is harmless: a defeat counts at the second look.
+        std::vector<uint8_t> block(0xea8);
         for(uint32_t j=0;j<n;++j){
-            uint8_t head[0x70];uint32_t life[2];uint64_t locator=0;
-            if(!actors[j]||!s.read(actors[j],head,sizeof head)||!head[0x20]||!s.read(actors[j]+0xea0,life,8))continue;
-            Mule m;m.address=actors[j];m.id=(uint32_t(i)<<13)|(first+j);m.state=life[0];m.flags=life[1];
-            std::memcpy(&m.lod,head+0x24,4);std::memcpy(m.position.data(),head+0x28,24);std::memcpy(&locator,head+0x18,8);
-            if(!locator||!s.read(locator+8,m.uuid.data(),16))continue;   // reinforcements have no locator: not shared
-            out.push_back(m);
+            uint64_t locator=0;
+            if(!actors[j]||!s.readOnce(actors[j],block.data(),block.size())||!block[0x20])continue;
+            Mule m;m.address=actors[j];m.id=(uint32_t(i)<<13)|(first+j);std::memcpy(&m.state,block.data()+0xea0,4);std::memcpy(&m.flags,block.data()+0xea4,4);
+            std::memcpy(&m.lod,block.data()+0x24,4);std::memcpy(m.position.data(),block.data()+0x28,24);std::memcpy(&locator,block.data()+0x18,8);
+            if(!locator)continue;                                         // reinforcements have no locator: not shared
+            auto known=uuids.find(locator);
+            if(known==uuids.end()){std::array<uint8_t,16> u{};if(!s.read(locator+8,u.data(),16))continue;known=uuids.emplace(locator,u).first;}
+            m.uuid=known->second;out.push_back(m);
         }
     }
     return out;
