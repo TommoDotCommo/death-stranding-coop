@@ -759,6 +759,31 @@ struct Runtime final:ds::Transport {
         repBody.entity=repWatch;repSelf.entity=anchorNow().entity;
         for(auto* w:{&repBody,&repSelf}){w->entryEntity=w->entity;w->entryHead=repQueue(w->entity);if(w->entryHead)++w->waiting;}
     }
+    // The body is made from the player's resource, so it carries the player's inventory component
+    // (DSPlayerAKukanInventoryComponent, vtable 0x3d7eec8), whose update, while its "active" bit (+0x270 bit 0) is
+    // set, sets shader variables on the entities a global names (this porter and his gear) from the body's own
+    // update job: an unlocked write to another entity's queue of deferred calls from another worker, which is what
+    // corrupted those queues (game_offsets.md, "Deferred rep calls"). The body has no inventory to show: the bit is
+    // kept clear on the body.
+    uint64_t kukanBody=0,kukanComponent=0,kukanCleared=0,kukanNoted=0,kukanNotedAt=0;
+    void quietBodyInventory(uint64_t body,uint64_t now){
+        if(!sampler||!body){kukanBody=0;kukanComponent=0;return;}
+        uint64_t vtable=0;
+        if(body!=kukanBody||!kukanComponent||!sampler->read(kukanComponent,&vtable,8)||vtable!=sampler->base+0x3d7eec8){
+            kukanBody=body;kukanComponent=0;int32_t count=0;uint64_t list=0;
+            if(!sampler->read(body+0x90,&count,4)||!sampler->read(body+0x98,&list,8)||!list||count<=0||count>512)return;
+            std::vector<uint64_t> parts;parts.resize(size_t(count));if(!sampler->read(list,parts.data(),parts.size()*8))return;
+            for(auto part:parts){uint64_t v=0;if(part&&sampler->read(part,&v,8)&&v==sampler->base+0x3d7eec8){kukanComponent=part;break;}}
+            if(!kukanComponent)return;
+        }
+        uint8_t state=0;if(!sampler->read(kukanComponent+0x270,&state,1)||!(state&1))return;
+#ifdef _WIN32
+        *reinterpret_cast<volatile uint8_t*>(kukanComponent+0x270)=uint8_t(state&~1u);
+#endif
+        ++kukanCleared;
+        if(kukanCleared!=kukanNoted&&(kukanNoted<3||now-kukanNotedAt>=30000)){kukanNoted=kukanCleared;kukanNotedAt=now;
+            note(("BODY the body's inventory component had been switched on by the game: switched off ("+std::to_string(kukanCleared)+" times so far)\n").c_str());}
+    }
     // The game thread's last tick, for the watchdog on the mod's own thread (guard_win.h, breakEndlessWalk).
     std::atomic<uint64_t> gameTickUs{0};uint64_t ringTriedUs=0;unsigned ringNoted=0;
     void watchRing(uint64_t clockUs){
@@ -1605,6 +1630,7 @@ struct Runtime final:ds::Transport {
         else{twin->tick(true,goal,speed,actions,hold);if(ownTwin)ownTwin->tick(true,nullptr);}
         stages.enter("gear",mod::nowUs());
         repWatch=useOwn?ownEntity:0;
+        quietBodyInventory(useOwn?ownEntity:0,now);
         tickGear(useOwn?ownEntity:0,anchor,now);
         stages.enter("stack",mod::nowUs());
         tickStack(useOwn?ownEntity:0,anchor);
