@@ -1056,6 +1056,21 @@ games ran on, and the receiver's section written out again differed from the sou
 5323..6635 and one bit) where it had differed in 4938 before. What the game shows after that (sky, rain) was not
 looked at.
 
+### BTs: what destroys a gazer, and the catcher command live (2026-11-12)
+
+- The gazer's state block is at actor `+0xe8` (the game copies it to `+0x218` at the end of each update: the fields
+  noted below as `+0x2e4` / `+0x2b0` are that copy). Live life is the float at `+0x180`, live flags `+0x1b4` (bit 3
+  dead, bit 20 a gazer made for the moment, removed by the game when the rain stops), detection byte `+0x1a8`.
+- There is no kill function: every kill is `life = 0`, and the actor update (`0x2995210`, run for every actor at any
+  LOD) does the rest: flag, the saved record of dead gazers (`0x29a31a0`), the body's reaction. The mod writes the
+  life (bts.cpp). Live: a gazer at LOD 0 written to zero in one game was reported, and destroyed in the partner's.
+- Two copies of one save in the same BT area hold the same 74 gazers with the same locator UUIDs and positions;
+  the actor ids differ. The area becomes active in both through the host's rain.
+- Catcher command `0x2a928c0(u8)` live: 0 with no fight running and outside every cleared sphere starts the fight
+  around the player within seconds (record at manager `+0x88`, tar and ruins); 1 ends it and leaves a cleared sphere
+  (`+0xa8`, at the territory, radius about 280, shrinking with time; saved). Inside a cleared sphere 0 does nothing
+  and the weather map there reads clear, so rain placed there brings no BTs.
+
 ### BTs: the gazer and catcher managers (2026-11-12, static; the reads confirmed live)
 
 Gazer manager `G = *(image+0x7bebec0)`: `+0x238` byte "timefall here" (the weather map at the sampled position

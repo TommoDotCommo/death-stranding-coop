@@ -35,6 +35,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "likes.h"
 #include "online.h"
 #include "vitals.h"
+#include "bts.h"
 #include "enemies.h"
 #include "orders.h"
 #include "guard_win.h"
@@ -257,7 +258,8 @@ struct Runtime final:ds::Transport {
         for(auto& e:incoming) {
             if(e.type==mod::carry::WireType){if(config.carryVisual)carry.incoming(e,carrySink);continue;}   // ds3: tickCarry
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
-            if(e.type==mod::enemies::WireType){enemyIn.push_back(e);continue;}   // a MULE went down (tickEnemies)
+            if(e.type==mod::enemies::WireType){enemyIn.push_back(e);continue;}
+            if(e.type==mod::bts::WireType){btIn.push_back(e);continue;}                // BT news (tickBts)   // a MULE went down (tickEnemies)
             if(e.type==mod::orders::WireType){orderIn.push_back(e);continue;}    // an order changed (tickOrders)
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
             if(e.type==mod::likes::WireType){likeIn.push_back(e);continue;}   // a like (tickLikes, likes.h)
@@ -744,6 +746,39 @@ struct Runtime final:ds::Transport {
         for(auto& c:orderSync.observe(orders)){
             ds::CargoEvent e;e.type=mod::orders::WireType;e.item=c.what;e.ref=c.id;core->queueCargo(e);++orderSent;
             std::ostringstream o;o<<"ORDER "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<" here -> partner\n";note(o.str().c_str());
+        }
+    }
+    // Shared BTs (bts.h), with share_enemies: gazers destroyed, a catcher fight started, its area cleared.
+    mod::bts::GazerSync gazerSync;mod::bts::FightSync fightSync;std::vector<ds::CargoEvent> btIn;
+    std::function<void(uint64_t)> btDestroy;std::function<void(uint8_t)> btCatcher;uint64_t btReadAt=0,btSent=0,btApplied=0;bool btTried=false;
+    void tickBts(uint64_t now) {
+        if(!core||!sampler||!config.shareEnemies){btIn.clear();return;}
+        if(!btTried){btTried=true;try{btDestroy=mod::bts::nativeDestroy(*sampler);btCatcher=mod::bts::nativeCatcher(*sampler);}catch(const std::exception& e){note((std::string("BT unavailable: ")+e.what()+"\n").c_str());}}
+        if(!btDestroy||!btCatcher||(btIn.empty()&&now-btReadAt<500))return;
+        btReadAt=now;
+        auto anchor=anchorNow();std::array<double,3> at{};bool here=anchor.entity&&anchor.pose.available;
+        if(here){auto p=mod::puppet::transform(anchor.pose).position;at={double(p[0]),double(p[1]),double(p[2])};}
+        auto gazers=mod::bts::readGazers(*sampler,sampler->base);auto fights=mod::bts::readFights(*sampler,sampler->base);
+        for(auto& e:btIn){
+            if(e.item==mod::bts::GazerDead){
+                if(auto* g=mod::bts::GazerSync::wanted(gazers,e.ref)){gazerSync.applied(e.ref);btDestroy(g->address);++btApplied;std::ostringstream o;o<<"BT partner destroyed a gazer: gone here too (lod "<<g->lod<<")\n";note(o.str().c_str());}
+                continue;
+            }
+            double d=1e9;if(here)d=std::sqrt((at[0]-e.position[0])*(at[0]-e.position[0])+(at[1]-e.position[1])*(at[1]-e.position[1]));
+            if(!mod::bts::FightSync::wanted(fights,e.item,d))continue;
+            btCatcher(e.item==mod::bts::FightOn?0:1);++btApplied;
+            note(e.item==mod::bts::FightOn?"BT partner is in a catcher fight: it starts here too\n":"BT partner's catcher fight is over, area cleared: ended here too\n");
+        }
+        if(!btIn.empty()){btIn.clear();return;}                          // look again next time, after the game acted
+        bool send=core->connected()&&partnerMode();
+        for(auto k:gazerSync.observe(gazers)){
+            if(!send)continue;
+            ds::CargoEvent e;e.type=mod::bts::WireType;e.item=mod::bts::GazerDead;e.ref=k;core->queueCargo(e);++btSent;note("BT a gazer was destroyed here -> partner\n");
+        }
+        for(auto w:fightSync.observe(fights)){
+            if(!send||!here)continue;
+            ds::CargoEvent e;e.type=mod::bts::WireType;e.item=w;e.position=at;core->queueCargo(e);++btSent;
+            note(w==mod::bts::FightOn?"BT a catcher fight runs here -> partner\n":"BT a catcher fight ended here with the area cleared -> partner\n");
         }
     }
     // Shared MULEs (enemies.h): opt-in share_enemies. Each look sends the MULEs this player's game saw go down and
@@ -1512,6 +1547,7 @@ struct Runtime final:ds::Transport {
             stage="structures";stages.enter("structures",mod::nowUs());
             if(twin&&gameContext)tickStructures(now);
             if(twin&&gameContext)tickEnemies(now);
+            if(twin&&gameContext)tickBts(now);
             if(twin&&gameContext)tickOrders(now);
             tickGuard();
             stage="markers";stages.enter("markers",mod::nowUs());
@@ -1570,6 +1606,33 @@ struct Runtime final:ds::Transport {
                         }
                     }
 #endif
+                }
+                else if(auto gz=mod::puppet::parseCargoCommand(text,mod::runStamp(),"gazer");gz&&anchor.pose.available) {
+                    // Test: "gazer 1" destroys the nearest living gazer the way a partner's kill does.
+                    auto at=mod::puppet::transform(anchor.pose).position;double best=1e18;uint64_t pick=0;uint32_t lod=0;
+                    for(auto& g:mod::bts::readGazers(*sampler,sampler->base)){
+                        double p[3]{};if(!(g.life>0)||mod::bts::dynamic(g.flags)||!sampler->read(g.address+0x28,p,24))continue;
+                        double d=(p[0]-at[0])*(p[0]-at[0])+(p[1]-at[1])*(p[1]-at[1]);if(d<best){best=d;pick=g.address;lod=g.lod;}
+                    }
+                    try{if(pick)mod::bts::nativeDestroy(*sampler)(pick);}catch(const std::exception&){pick=0;}
+                    std::ostringstream o;o<<"BT test: "<<(pick?"destroyed the nearest gazer":"no living gazer")<<" at "<<std::sqrt(best)<<" m lod "<<lod<<"\n";note(o.str().c_str());
+                }
+                else if(auto catcher=mod::puppet::parseCargoCommand(text,mod::runStamp(),"catcher");catcher) {
+                    // Research: the game's catcher (boss BT) control command: 0 bring at the player, 1 return, 4 force off.
+                    uint8_t got[7]{};static const uint8_t want[7]={0x40,0x55,0x48,0x8d,0x6c,0x24,0xa9};
+                    if(sampler->read(sampler->base+0x2a928c0,got,7)&&!std::memcmp(got,want,7)){
+                        reinterpret_cast<void(*)(uint8_t)>(sampler->base+0x2a928c0)(uint8_t(*catcher));
+                        note(("BT test: catcher command "+std::to_string(*catcher)+"\n").c_str());
+                    }else note("BT test: catcher command function differs\n");
+                }
+                else if(auto rain=mod::puppet::parseCargoCommand(text,mod::runStamp(),"rain");rain&&anchor.pose.available) {
+                    // Test: "rain <seconds>" places the game's own timed rain around this porter (the influence the shared
+                    // rain uses), so a host can have timefall on demand.
+                    try{
+                        auto api=mod::weather::nativeApi(*sampler);auto at=mod::puppet::transform(anchor.pose).position;
+                        bool ok=api.influence(mod::weather::Mode::Rain,at,250.f,float(std::min<uint32_t>(*rain,900)));
+                        std::ostringstream o;o<<"WEATHER test: rain for "<<*rain<<" s at "<<at[0]<<","<<at[1]<<","<<at[2]<<(ok?" placed":" refused")<<"\n";note(o.str().c_str());
+                    }catch(const std::exception& e){note((std::string("WEATHER test unavailable: ")+e.what()+"\n").c_str());}
                 }
                 else if(auto lose=mod::puppet::parseCargoCommand(text,mod::runStamp(),"unitlose");lose) {
                     // Test: "unitlose <mission id * 10 + n>" removes this game's cargo of unit n and leaves the unit undelivered
