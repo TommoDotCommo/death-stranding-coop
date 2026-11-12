@@ -35,6 +35,21 @@ inline bool matches(uint64_t code,uint64_t kind,uint64_t address,uint64_t rip,ui
 // walk (the walk's return address 0x30 above), the rest of the queue is abandoned: the walk resumes at its own end,
 // which empties the queue (rbp = 0 is what it writes to head and tail) and returns. `walkReturn` is the stack word.
 inline bool abandonsQueue(uint64_t walkReturn,uint64_t image){return image&&walkReturn==image+0x237e2b0;}
+// The walk itself can fault on such a queue (live: a read of zero at 0x237e2c8, the call through a node's payload
+// vtable, after five bad functions had been answered): any access violation inside the walk's loop
+// (0x237e267..0x237e2d1), or an execute fault at an address outside the game called from its two payload calls
+// (return 0x237e2c6 / 0x237e2ca), leaves the walk the same way. Returns how many bytes to take off the stack
+// first (0 or 8), or -1 when the fault is not the walk's.
+inline int walkFault(uint64_t code,uint64_t kind,uint64_t address,uint64_t rip,uint64_t returnAddress,uint64_t image,uint64_t imageEnd){
+    if(!image||code!=0xc0000005u)return -1;
+#ifndef MUTANT_GUARD_WALK_ANY
+    if(kind!=8&&rip>=image+0x237e267&&rip<image+0x237e2d2)return 0;
+#else
+    if(kind!=8&&rip>=image+0x237e240&&rip<image+0x237e300)return 0;
+#endif
+    if(kind==8&&rip==address&&!(address>=image&&address<imageEnd)&&(returnAddress==image+0x237e2c6||returnAddress==image+0x237e2ca))return 8;
+    return -1;
+}
 // Returns where to resume, 0 when the fault is not this one.
 inline uint64_t cullResume(uint64_t code,uint64_t kind,uint64_t rip,uint64_t rax,uint64_t rcx,uint64_t base){
     if(!base||code!=0xc0000005u||kind!=0)return 0;
@@ -77,7 +92,14 @@ inline bool cullRepairable(const CullFacts& f){
 namespace mod::guard {
 inline std::atomic<uint64_t> site{0},imageSize{0x8200000};
 inline std::atomic<bool> walkOk{false};
-inline std::atomic<unsigned> abandoned{0};
+inline std::atomic<unsigned> abandoned{0},walkLeft{0};
+// Evidence: the entities whose queue was left (the walk keeps the entity rep in rsi; its entity is at +0x80).
+inline std::atomic<uint64_t> queueEntity[4];
+inline void noteQueue(uint64_t rep){
+    if(!rep||IsBadReadPtr(reinterpret_cast<void*>(rep+0x80),8))return;
+    uint64_t entity=*reinterpret_cast<uint64_t*>(rep+0x80);
+    for(auto& q:queueEntity){uint64_t have=q.load();if(have==entity)return;if(!have){uint64_t none=0;if(q.compare_exchange_strong(none,entity)||none==entity)return;}}
+}
 inline std::atomic<unsigned> skipped{0};
 // Evidence for the first hits: the callback's target object (rcx at the fault) and the first word it holds (its
 // vtable, when it is an object of the game), and the two return addresses above the call site.
@@ -126,9 +148,14 @@ inline LONG CALLBACK handler(EXCEPTION_POINTERS* e){
             cullSkipped.fetch_add(1,std::memory_order_relaxed);cullNote(c->R14);
             if(c->Rip==b+0x1d5cb8a)cullRepair(c,b);
             c->Rip=to;return EXCEPTION_CONTINUE_EXECUTION;}
-    if(!s||r->ExceptionCode!=EXCEPTION_ACCESS_VIOLATION||r->NumberParameters<2||r->ExceptionInformation[0]!=8)return EXCEPTION_CONTINUE_SEARCH;
+    if(!s||r->ExceptionCode!=EXCEPTION_ACCESS_VIOLATION||r->NumberParameters<2)return EXCEPTION_CONTINUE_SEARCH;
     if(IsBadReadPtr(reinterpret_cast<void*>(c->Rsp),8))return EXCEPTION_CONTINUE_SEARCH;
     uint64_t back=*reinterpret_cast<uint64_t*>(c->Rsp),image=s-0x22bdf1a;
+    if(walkOk.load(std::memory_order_acquire))
+        if(int pop=walkFault(r->ExceptionCode,r->ExceptionInformation[0],r->ExceptionInformation[1],c->Rip,back,image,image+imageSize.load(std::memory_order_acquire));pop>=0){
+            walkLeft.fetch_add(1,std::memory_order_relaxed);noteQueue(c->Rsi);
+            c->Rsp+=uint64_t(pop);c->Rbp=0;c->Rip=image+0x237e2d2;return EXCEPTION_CONTINUE_EXECUTION;}
+    if(r->ExceptionInformation[0]!=8)return EXCEPTION_CONTINUE_SEARCH;
     if(!matches(r->ExceptionCode,r->ExceptionInformation[0],r->ExceptionInformation[1],c->Rip,back,s,image,image+imageSize.load(std::memory_order_acquire)))return EXCEPTION_CONTINUE_SEARCH;
     unsigned n=skipped.fetch_add(1,std::memory_order_relaxed);
     if(n<8){
@@ -142,7 +169,7 @@ inline LONG CALLBACK handler(EXCEPTION_POINTERS* e){
     // end, which empties the queue. Otherwise (the other dispatcher, 0x23db432) the call is skipped as if it returned.
     auto* sp=reinterpret_cast<uint64_t*>(c->Rsp);
     if(walkOk.load(std::memory_order_acquire)&&!IsBadReadPtr(sp,0x40)&&abandonsQueue(sp[6],image)){
-        abandoned.fetch_add(1,std::memory_order_relaxed);c->Rsp+=0x38;c->Rbp=0;c->Rip=image+0x237e2d2;
+        abandoned.fetch_add(1,std::memory_order_relaxed);noteQueue(c->Rsi);c->Rsp+=0x38;c->Rbp=0;c->Rip=image+0x237e2d2;
         return EXCEPTION_CONTINUE_EXECUTION;
     }
     c->Rip=back;c->Rsp+=8;

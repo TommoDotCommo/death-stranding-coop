@@ -1155,9 +1155,21 @@ entity, and 35 with bit 2 (0x10004, 0x1010004) not decoded. No catcher record, n
   quiet moment does not do it (20 full rebuilds, 160 visibility flashes, a dozen pause menus and terminal visits
   without an order: no fault). The mirror now knows a piece by its helper alone and leaves the copy alone
   (gear.cpp), which takes that replacement away entirely.
+- Why the state lasts (static follow-up): the culling manager is `*(image+0x578c130)` (vtable `0x3c0e780`; `+0x8`
+  cull jobs running, `+0x10` SRW lock, `+0x18` KD tree, `+0x20` node count, `+0x28` nodes of 24 bytes, `+0x3c` pass
+  active). Adding and removing a drawable take the lock; the bounds update (`0x1d5a950` -> `0x19402a0`) takes none
+  and reads the drawable's leaf first: when the leaf it holds is stale (the cull-end swap of a rebuilt tree, a second
+  update, or a remove and add in between) it re-inserts another item and leaves this one with leaf 0 and index -1
+  while its true slot still lists it. Only a tree rebuild rewrites the back-pointers, and the game's later removal
+  of the mesh would fault at `0x194192b`. Live: the object was a `DSMovableSkinnedMeshInstance` (the cull sub-object
+  at `+0x60` has the secondary vtable `0x3d5ea88`), flags `0x5523300`.
 - The guard (guard_win.h): that read faulting with the null resumes at the function's epilogue `0x1d5cc09` (no loop
   in the function; `rbx`, `rsi`, `rdi` and `xmm6` are saved before the read and reloaded there; `rsp` is unchanged
-  since the prologue). The drawable's per-instance update is skipped for a frame, as for one not in the tree.
+  since the prologue). Before that it mends the drawable as the game's rebuild would: the slot being walked is the
+  dword at `rsp+0x90`, its leaf the qword at `rsp+0x100` (cross-checks: `rsp+0xc0` holds `r14`, `rsp+0xc8` the
+  slot's low four bits; the slot's item pointer in the leaf's block, `(leaf[0] & ~3) + (slot >> 4) * 0x240 + 0x1c0
+  + (slot & 15) * 8`, must be `r14 + 8`), and when all agree it writes the index (`r14+0x10`) and the leaf
+  (`r14+0x8`). The mod's tick also waits (at most 4 ms) for a running cull pass to end before it moves anything.
 
 ### Deferred rep calls (2026-11-13, static after a live record): what "the creation callback with no function" is
 
@@ -1176,9 +1188,11 @@ entity, and 35 with bit 2 (0x10004, 0x1010004) not decoded. No catcher record, n
   time, and the in-place art-parts swap announces the messages that lead there. A call made from the mod's tick
   (outside the game's update jobs) takes the queued form.
 - What the mod does about it: at the end of each of its ticks it runs the partner body's queue with the game's own
-  walk when the queue was empty at the start of the tick (so the nodes are that tick's and still good), and the
-  guard, on a bad function called from that walk, leaves the walk through its own end, which empties the queue
-  (`rsp += 0x38`, `rbp = 0`, resume at `0x237e2d2`; guard_win.h).
+  walk when the queue was empty at the start of the tick (so the nodes are that tick's and still good; live this has
+  not been needed: the mod's own calls left nothing queued). The guard (guard_win.h) leaves a dangling queue: a bad
+  function called from the walk, any access violation inside the walk's loop (`0x237e267..0x237e2d1`; live: a read
+  of zero at `0x237e2c8`, the call through a node's payload vtable, after five bad functions) or a bad payload
+  call resumes at the walk's own end `0x237e2d2` with `rbp = 0`, which empties the queue and returns.
 
 ### Creation callback with no function (2026-11-12, from two crash dumps)
 

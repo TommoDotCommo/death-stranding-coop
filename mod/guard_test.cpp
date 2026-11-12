@@ -15,6 +15,12 @@ int main(){
     CHECK(!matches(0x80000003u,8,0,0,site,site,image,end));                // another exception
     CHECK(!matches(0xc0000005u,8,0,0,site,0,image,end));                   // not installed
     CHECK(abandonsQueue(image+0x237e2b0,image)&&!abandonsQueue(image+0x23db434,image)&&!abandonsQueue(image+0x237e2b0,0));
+    CHECK(walkFault(0xc0000005u,0,0,image+0x237e2c8,0x1234,image,end)==0);            // the payload call's read of zero
+    CHECK(walkFault(0xc0000005u,0,0x10,image+0x237e267,0x1234,image,end)==0&&walkFault(0xc0000005u,1,0,image+0x237e2b0,0,image,end)==0);
+    CHECK(walkFault(0xc0000005u,8,0x625bdbbd590ull,0x625bdbbd590ull,image+0x237e2ca,image,end)==8&&walkFault(0xc0000005u,8,0,0,image+0x237e2c6,image,end)==8);
+    CHECK(walkFault(0xc0000005u,0,0,image+0x237e2d2,0,image,end)<0&&walkFault(0xc0000005u,0,0,image+0x237e260,0,image,end)<0);   // outside the loop
+    CHECK(walkFault(0xc0000005u,8,image+0x5000,image+0x5000,image+0x237e2ca,image,end)<0);   // a fault in the game's own code
+    CHECK(walkFault(0xc0000005u,8,0,0,image+0x237e2b0,image,end)<0&&walkFault(0x80000003u,0,0,image+0x237e2c8,0,image,end)<0&&walkFault(0xc0000005u,0,0,image+0x237e2c8,0,0,0)<0);
     // The culling job's read of a drawable that left the tree: only those instructions, only with the null they
     // fault on; resumes at the function's epilogue.
     { const uint64_t base=0x7ff700000000ull,out=base+0x1d5cc09;

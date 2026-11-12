@@ -730,7 +730,7 @@ struct Runtime final:ds::Transport {
     mod::orders::UnitSync unitSync;
     mod::orders::Sync orderSync;std::vector<ds::CargoEvent> orderIn;std::function<bool(uint64_t,uint8_t)> orderRequest;std::map<uint64_t,uint8_t> orderDetails;
     uint64_t orderReadAt=0,orderSent=0,orderApplied=0;bool orderTried=false,orderLinked=false;
-    unsigned guardNoted=0,cullNoted=0;
+    unsigned guardNoted=0,cullNoted=0,walkNoted=0;
     // The partner body's queue of deferred rep calls (game_offsets.md, "Deferred rep calls"): what the mod's own
     // calls put there in a tick is run at the end of that tick with the game's own flush, so no node waits for a
     // rep update the body may not get before the game resets the arena the nodes live in.
@@ -739,6 +739,19 @@ struct Runtime final:ds::Transport {
         uint64_t rep=0,head=0;if(!entity||!sampler||!sampler->read(entity+0x60,&rep,8)||!rep||!sampler->read(rep+0x228,&head,8))return 0;
         if(repOut)*repOut=rep;
         return head;
+    }
+    // The game's culling pass (game_offsets.md, "Culling job and a drawable that left the tree") walks its tree with no
+    // lock, and a drawable moved meanwhile can end up listed with no place. The mod moves and attaches entities in
+    // its tick, so the tick first waits (at most 4 ms) for a pass that is running to end: manager
+    // *(image+0x578c130), +0x8 jobs running, +0x3c pass active.
+    uint64_t cullTicks=0,cullBusy=0,cullGaveUp=0,cullNotedAt=0;
+    void cullQuiet(uint64_t now){
+        uint64_t manager=0,vtable=0;
+        if(!sampler||!sampler->read(sampler->base+0x578c130,&manager,8)||!manager||!sampler->read(manager,&vtable,8)||vtable!=sampler->base+0x3c0e780)return;
+        auto busy=[&]{uint8_t pass=0;uint32_t jobs=0;return sampler->readOnce(manager+0x3c,&pass,1)&&sampler->readOnce(manager+8,&jobs,4)&&(pass||jobs);};
+        ++cullTicks;
+        if(busy()){++cullBusy;auto t0=mod::nowUs();while(busy()){if(mod::nowUs()-t0>4000){++cullGaveUp;break;}std::this_thread::yield();}}
+        if(now-cullNotedAt>=60000&&cullBusy){cullNotedAt=now;std::ostringstream o;o<<"CULL a pass was running when the tick began "<<cullBusy<<" of "<<cullTicks<<" times; not over within 4 ms "<<cullGaveUp<<" times\n";note(o.str().c_str());}
     }
     void repTickStart(){repEntryEntity=repWatch;repEntryHead=repQueue(repWatch);if(repEntryHead)++repWaiting;}
     void repTickEnd(uint64_t now){
@@ -765,6 +778,10 @@ struct Runtime final:ds::Transport {
                 o<<" callers ds.exe+0x"<<(e.caller>base?e.caller-base:0)<<" ds.exe+0x"<<(e.caller2>base?e.caller2-base:0)<<"\n";note(o.str().c_str());
             }
             guardNoted=n;note(("GUARD a deferred call with a bad function was skipped ("+std::to_string(n)+" so far; "+std::to_string(mod::guard::abandoned.load())+" times the rest of that entity's queue was dropped)\n").c_str());}
+        unsigned w=mod::guard::walkLeft.load()+mod::guard::abandoned.load();
+        if(w!=walkNoted){walkNoted=w;std::ostringstream o;o<<"GUARD a dangling queue of deferred calls was left "<<w<<" times; entities"<<std::hex;
+            for(auto& q:mod::guard::queueEntity)if(uint64_t e=q.load())o<<" 0x"<<e;
+            o<<"\n";note(o.str().c_str());}
         unsigned c=mod::guard::cullSkipped.load();
         if(c!=cullNoted&&(c<16||c-cullNoted>=1000||!cullNoted)){
             cullNoted=c;std::ostringstream o;o<<"GUARD the culling job met a drawable that had left the tree: skipped ("<<c<<" so far, "<<mod::guard::cullRepaired.load()<<" mended)";
@@ -1638,6 +1655,8 @@ struct Runtime final:ds::Transport {
             // The delay follows the link (core): say so when it has moved, so a log shows what the link was like.
             if(core->connected()){uint32_t d=core->presentationDelayMs();if(d>notedDelay+30||d+30<notedDelay){
                 std::ostringstream o;o<<"LINK partner shown "<<d<<" ms behind (was "<<notedDelay<<"), round trip "<<std::lround(core->rttMs())<<" ms\n";note(o.str().c_str());notedDelay=d;}}
+            stage="cull wait";stages.enter("cull wait",mod::nowUs());
+            if(twin&&gameContext)cullQuiet(now);
             repTickStart();
             stage="puppet";stages.enter("puppet",mod::nowUs());
             if(puppet&&gameContext) {
