@@ -996,7 +996,8 @@ state and the flag bit. Setter of the life state: `0x2acedb0(actor, state)`. MUL
 normal, 1 return, 2 pre-caution, 3 caution, 4 evasion, 5 alert), members `+0x4c0` (count) / `+0x4c8`. MULE manager
 `*(image+0x7bf09d8)`: camp actor ids at `+0xd8` (count) / `+0xe0`. Script functions by camp locator UUID:
 `ForceSetCPPhase` 0x2b649a0 (uuid*, phase), `DisableCPAndAllsMembers` 0x2b64880 (uuid*, bool), `IsExtinctionCP`
-0x2b64f50; not called yet.
+0x2b64f50. `ForceSetCPPhase(uuid, 5)` live, with the porter far from every camp: eight of nine camps went from phase
+0 to 3 (caution), not 5; the ninth stayed 0. The other two are not called yet.
 
 Live, Episode 3 save, two copies: 9 camps and 150 MULEs in units 0 to 4, the same ids and locator UUIDs in both, all
 with a locator; 16 to 18 MULEs within range had an entity; all standing in state 1; the camp next to the porters went

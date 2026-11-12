@@ -685,16 +685,23 @@ struct Runtime final:ds::Transport {
     // Shared MULEs (enemies.h): opt-in share_enemies. Each look sends the MULEs this player's game saw go down and
     // puts down the ones the partner reports, with the game's own defeat function.
     mod::enemies::Sync enemySync;std::vector<ds::CargoEvent> enemyIn;std::function<void(uint64_t,uint8_t)> enemyDefeat;
+    mod::enemies::CampSync campSync;std::function<void(const std::array<uint8_t,16>&)> campAlert;
     uint64_t enemyReadAt=0,enemySent=0,enemyApplied=0;bool enemyTried=false,enemyTimed=false;
     void tickEnemies(uint64_t now) {
         if(!core||!sampler||!config.shareEnemies){enemyIn.clear();return;}
+        if(!enemyTried){try{campAlert=mod::enemies::nativeAlert(*sampler);}catch(const std::exception&){}}
         if(!enemyTried){enemyTried=true;try{enemyDefeat=mod::enemies::nativeDefeat(*sampler);}catch(const std::exception& e){note((std::string("ENEMY unavailable: ")+e.what()+"\n").c_str());}}
         if(!enemyDefeat||(enemyIn.empty()&&now-enemyReadAt<500))return;
         enemyReadAt=now;
         auto t0=mod::nowUs();auto mules=mod::enemies::readMules(*sampler,sampler->base);
         if(!enemyTimed&&!mules.empty()){enemyTimed=true;std::ostringstream o;o<<"ENEMY "<<mules.size()<<" MULEs read in "<<(mod::nowUs()-t0)/1000.<<" ms\n";note(o.str().c_str());}
         if(mules.empty())return;
+        auto camps=campAlert?mod::enemies::readCamps(*sampler,sampler->base):std::vector<mod::enemies::Camp>{};
         for(auto& e:enemyIn){
+            if(e.item==mod::enemies::CampAlert){
+                if(auto* c=campSync.wanted(camps,e.ref)){campSync.applied(e.ref);campAlert(c->uuid);++enemyApplied;note("ENEMY partner's camp alarm: this game's camp is put on alert\n");}
+                continue;
+            }
             mod::enemies::Down d{e.ref,uint8_t(e.item)};
             if(auto* m=enemySync.wanted(mules,d)){
                 enemySync.applied(d.key);enemyDefeat(m->address,d.kind);++enemyApplied;
@@ -702,6 +709,11 @@ struct Runtime final:ds::Transport {
             }
         }
         if(!enemyIn.empty()){enemyIn.clear();mules=mod::enemies::readMules(*sampler,sampler->base);}
+        for(auto k:campSync.observe(camps)){
+            if(!core->connected()||!partnerMode())continue;
+            ds::CargoEvent e;e.type=mod::enemies::WireType;e.item=mod::enemies::CampAlert;e.ref=k;core->queueCargo(e);++enemySent;
+            note("ENEMY a camp went on alert here -> partner\n");
+        }
         for(auto& d:enemySync.observe(mules)){
             if(!core->connected()||!partnerMode())continue;
             ds::CargoEvent e;e.type=mod::enemies::WireType;e.item=d.kind;e.ref=d.key;core->queueCargo(e);++enemySent;
@@ -1460,7 +1472,14 @@ struct Runtime final:ds::Transport {
                         auto here=mod::puppet::transform(anchor.pose).position;const mod::enemies::Mule* best=nullptr;double bestD=1e18;
                         for(auto& m:mules){if(mod::enemies::condition(m.state,m.flags)!=mod::enemies::Up||m.state==5)continue;
                             double dx=m.position[0]-here[0],dy=m.position[1]-here[1],d=dx*dx+dy*dy;if(d<bestD){bestD=d;best=&m;}}
-                        if(!best||*kind>3)note("MULE test: none standing, or kind out of range\n");
+                        if(*kind==9){
+                            auto alert=mod::enemies::nativeAlert(*sampler);auto camps=mod::enemies::readCamps(*sampler,sampler->base);
+                            std::ostringstream o;o<<"MULE test: "<<camps.size()<<" camps, phases";for(auto& c:camps)o<<" "<<c.phase;
+                            // the camp whose members are nearest is not known here: alert every calm camp (test only)
+                            for(auto& c:camps)if(!mod::enemies::alarmed(c.phase))alert(c.uuid);
+                            o<<"; all put on alert\n";note(o.str().c_str());
+                        }
+                        else if(!best||*kind>3)note("MULE test: none standing, or kind out of range\n");
                         else{defeat(best->address,uint8_t(*kind));std::ostringstream o;o<<"MULE test: id "<<std::hex<<best->id<<std::dec<<" kind "<<*kind<<" lod "<<best->lod<<" at "<<best->position[0]<<","<<best->position[1]<<","<<best->position[2]<<" ("<<std::sqrt(bestD)<<" m)\n";note(o.str().c_str());}
                     }catch(const std::exception& e){note((std::string("MULE test unavailable: ")+e.what()+"\n").c_str());}
                 }

@@ -18,8 +18,19 @@ int main(){
     { Sync s;std::vector<Mule> v{mule(1,1),mule(2,4,1u<<19)};s.observe(v);
       Down a{key(mule(1,1).uuid),Fainted},b{key(mule(2,1).uuid),Fainted},c{key(mule(9,1).uuid),Fainted};
       auto* m=s.wanted(v,a);CHECK(m&&m->address==0x1001);CHECK(!s.wanted(v,b));CHECK(!s.wanted(v,c));
-      s.applied(a.key);CHECK(s.observe({mule(1,4,1u<<20),mule(2,4,1u<<19)}).empty());
+      s.applied(a.key);CHECK(s.observe(v).empty());CHECK(s.observe({mule(1,4,1u<<20),mule(2,4,1u<<19)}).empty());
       CHECK(s.observe({mule(1,1),mule(2,4,1u<<19)}).empty());auto d=s.observe({mule(1,4,1u<<19),mule(2,4,1u<<19)});CHECK(d.size()==1); }   // later, by this player: news
+    // Camps: one that goes on alert after being seen calm is news, once; the partner's alert applies to a calm camp only.
+    { auto camp=[](uint8_t n,uint32_t phase){Camp c;c.address=0x2000+n;c.uuid[1]=n;c.phase=phase;return c;};
+      CampSync s;CHECK(s.observe({camp(1,0),camp(2,5)}).empty());
+      auto a=s.observe({camp(1,5),camp(2,5),camp(3,5)});CHECK(a.size()==1&&a[0]==key(camp(1,0).uuid));
+      CHECK(s.observe({camp(1,5),camp(2,5)}).empty());
+      std::vector<Camp> v{camp(1,5),camp(2,0)};CHECK(!s.wanted(v,key(camp(1,0).uuid)));CHECK(!s.wanted(v,key(camp(7,0).uuid)));
+      auto* w=s.wanted(v,key(camp(2,0).uuid));CHECK(w&&w->address==0x2002);
+      s.observe(v);s.applied(key(camp(2,0).uuid));CHECK(s.observe(v).empty());        // still calm right after the request
+      CHECK(s.observe({camp(1,5),camp(2,3)}).empty());CHECK(s.observe({camp(1,5),camp(2,5)}).empty());
+      s.observe({camp(1,5),camp(2,0)});auto b=s.observe({camp(1,5),camp(2,5)});CHECK(b.size()==1); }   // calm, then alerted by this player: news
+    CHECK(!alarmed(0)&&!alarmed(2)&&alarmed(3)&&alarmed(5)&&!alarmed(6));
     if(!failures)std::puts("enemy condition, key and sync checks passed");
     return failures?1:0;
 }
