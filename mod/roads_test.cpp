@@ -29,6 +29,12 @@ int main(){
       CHECK(Sync::wanted(v,{1,Material+5,10})==&v[0]);CHECK(Sync::wanted(v,{2,Material,10})==&v[1]);
       CHECK(!Sync::wanted(v,{1,Material+6,10}));CHECK(!Sync::wanted(v,{1,Material,0}));CHECK(!Sync::wanted(v,{1,Material,-5}));
       CHECK(!Sync::wanted(v,{1,Material,Most+1}));CHECK(!Sync::wanted(v,{1,7,10})); }
+    // On joining: all a paver holds and the built roads; the other side gives its paver only what it is short of.
+    { std::vector<Paver> v{paver(1,1,{10,0,50,0,0,0},{5,0,0,0,0,0}),paver(2,2),paver(3,1)};
+      auto all=Sync::everything(v);CHECK(all.size()==3&&all[0].item==Total&&all[0].amount==15&&all[1].item==Total+2&&all[1].amount==50&&all[2].id==2&&all[2].item==Built);
+      CHECK(Sync::owed(v[0],{1,Total,40})==25);CHECK(Sync::owed(v[0],{1,Total,15})==0);CHECK(Sync::owed(v[0],{1,Total,3})==0);
+      CHECK(Sync::owed(v[0],{1,Total+3,70})==70);CHECK(Sync::owed(v[0],{1,Material,70})==0);CHECK(Sync::owed(v[0],{1,Total,-1})==0);
+      CHECK(Sync::wanted(v,{1,Total,40})==&v[0]);CHECK(!Sync::wanted(v,{2,Total,40}));CHECK(!Sync::wanted(v,{1,Total+6,40})); }
     if(failures){std::fprintf(stderr,"road oracle: %d failures\n",failures);return 1;}
     std::puts("roads ok");return 0;
 }

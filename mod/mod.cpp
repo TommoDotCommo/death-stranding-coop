@@ -752,16 +752,25 @@ struct Runtime final:ds::Transport {
     }
     // Shared roads (roads.h): opt-in share_roads. What this player delivers to a paver goes to the partner's paver
     // as delivered by others; a road built here is completed there.
-    mod::roads::Sync roadSync;std::vector<ds::CargoEvent> roadIn;mod::roads::Api roadApi;uint64_t roadReadAt=0,roadSent=0,roadApplied=0,roadPorter=0,roadSettled=0;bool roadTried=false;
+    mod::roads::Sync roadSync;std::vector<ds::CargoEvent> roadIn;mod::roads::Api roadApi;uint64_t roadReadAt=0,roadSent=0,roadApplied=0,roadPorter=0,roadSettled=0;bool roadTried=false,roadLinked=false,roadTell=false;
     void tickRoads(uint64_t now) {
         if(!core||!sampler||!config.shareRoads){roadIn.clear();return;}
         if(!roadTried){roadTried=true;try{roadApi=mod::roads::nativeApi(*sampler);}catch(const std::exception& e){note((std::string("ROAD unavailable: ")+e.what()+"\n").c_str());}}
         // Another world (a save loaded): the pavers' numbers jump; learn them again once it has settled.
         auto anchor=anchorNow();
-        if(anchor.entity!=roadPorter){roadPorter=anchor.entity;roadSync.forget();roadSettled=now+8000;}
+        if(anchor.entity!=roadPorter){roadPorter=anchor.entity;roadSync.forget();roadSettled=now+8000;roadTell=true;}
+        bool linked=core->connected()&&partnerMode();if(linked&&!roadLinked)roadTell=true;
+        roadLinked=linked;
         if(!roadApi.give||!roadPorter||now<roadSettled||now-roadReadAt<1000)return;
         roadReadAt=now;
         auto pavers=mod::roads::readPavers(*sampler,sampler->base);
+        // On joining (and after a save was loaded) each side tells the other all its pavers hold: both worlds get
+        // the roads of either.
+        if(roadTell&&linked&&!pavers.empty()){
+            roadTell=false;auto all=mod::roads::Sync::everything(pavers);
+            for(auto& n:all){ds::CargoEvent e;e.type=mod::roads::WireType;e.item=n.item;e.ref=n.id;e.position={double(n.amount),0,0};core->queueCargo(e);++roadSent;}
+            std::ostringstream o;o<<"ROAD this world's pavers -> partner ("<<all.size()<<" entries)\n";note(o.str().c_str());
+        }
         // First what this game saw (so a delivery here is never mistaken for the partner's), then the partner's news.
         for(auto& n:roadSync.observe(pavers)){
             if(!core->connected()||!partnerMode())continue;
@@ -774,6 +783,13 @@ struct Runtime final:ds::Transport {
             auto* p=mod::roads::Sync::wanted(pavers,n);if(!p)continue;
             std::ostringstream o;
             if(n.item==mod::roads::Built){roadSync.applied(n.id);roadApi.complete(p->address);o<<"ROAD partner's road at paver "<<n.id<<" is built: completed here\n";}
+            else if(n.item>=mod::roads::Total){
+                // Read again: an earlier entry of the same batch may have changed this paver.
+                mod::roads::Paver fresh=*p;if(!sampler->read(p->address+0x210,fresh.own.data(),sizeof fresh.own)||!sampler->read(p->address+0x248,fresh.net.data(),sizeof fresh.net))continue;
+                int32_t owed=mod::roads::Sync::owed(fresh,n);if(owed<=0)continue;
+                mod::roads::Set s{};s[n.item-mod::roads::Total]=owed;roadSync.applied(n.id);roadApi.give(p->address,s);
+                o<<"ROAD partner's paver "<<n.id<<" holds "<<n.amount<<" of material "<<n.item-mod::roads::Total<<": "<<owed<<" added here\n";
+            }
             else{mod::roads::Set s{};s[n.item-mod::roads::Material]=n.amount;if(p->level<2)roadSync.applied(n.id);roadApi.give(p->address,s);
                 o<<"ROAD partner delivered "<<n.amount<<" of material "<<n.item-mod::roads::Material<<" to paver "<<n.id<<": counted here\n";}
             ++roadApplied;note(o.str().c_str());

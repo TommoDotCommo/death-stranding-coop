@@ -44,6 +44,23 @@ std::vector<News> Sync::observe(const std::vector<Paver>& pavers){
 #endif
     return out;
 }
+std::vector<News> Sync::everything(const std::vector<Paver>& pavers){
+    std::vector<News> out;
+    for(auto& p:pavers){
+        for(int k=0;k<Kinds;++k){int64_t all=int64_t(p.own[size_t(k)])+p.net[size_t(k)];if(all>0&&all<=Most)out.push_back({p.id,Total+uint32_t(k),int32_t(all)});}
+        if(p.level>=2)out.push_back({p.id,Built,0});
+    }
+    return out;
+}
+int32_t Sync::owed(const Paver& p,const News& n){
+    if(n.item<Total||n.item>=Total+Kinds||n.amount<=0||n.amount>Most)return 0;
+    size_t k=n.item-Total;int64_t have=int64_t(p.own[k])+p.net[k];
+#ifndef MUTANT_ROAD_TOTAL_ADDS
+    return have>=n.amount?0:int32_t(n.amount-have);
+#else
+    (void)have;return n.amount;
+#endif
+}
 const Paver* Sync::wanted(const std::vector<Paver>& pavers,const News& n){
     for(auto& p:pavers)if(p.id==n.id){
         if(n.item==Built){
@@ -58,6 +75,8 @@ const Paver* Sync::wanted(const std::vector<Paver>& pavers,const News& n){
 #else
         if(n.item>=Material&&n.item<Material+Kinds)return &p;
 #endif
+        // A total only matters where the road is not built yet (on a built road materials would count as repair).
+        if(n.item>=Total&&n.item<Total+Kinds&&n.amount>0&&n.amount<=Most)return p.level<2?&p:nullptr;
         return nullptr;
     }
     return nullptr;

@@ -14,7 +14,8 @@
 namespace mod::roads {
 constexpr uint8_t WireType=14;                       // the ordered event stream's type for road news
 constexpr int Kinds=6;                               // the game's paver materials (crystals, resin, metal, ceramic, chemical, alloy)
-constexpr uint32_t Built=1,Material=10;              // the event's item: Built, or Material + kind with the amount
+constexpr uint32_t Built=1,Material=10,Total=20;     // the event's item: Built; Material + kind with an amount just
+                                                     // delivered; Total + kind with all a paver holds of it (on joining)
 constexpr int32_t Most=1000000;                      // more than this in one look is not a delivery
 using Set=std::array<int32_t,Kinds>;
 // Level 1 = paver without road, 2 and up = road built. own = delivered by this player, net = by others.
@@ -29,6 +30,11 @@ public:
     std::vector<News> observe(const std::vector<Paver>&);
     // The partner's news: the local paver it applies to, or null (unknown paver, nonsense, or a road already built).
     static const Paver* wanted(const std::vector<Paver>&,const News&);
+    // On joining, each player tells the other all its pavers hold and which roads are built, so both worlds end up
+    // with the roads of either: the list to send.
+    static std::vector<News> everything(const std::vector<Paver>&);
+    // A Total from the partner: how much of that material the local paver is short of it (0 = nothing to give).
+    static int32_t owed(const Paver&,const News&);
     void applied(uint32_t id){applied_.insert(id);}
     void forget(){seen_.clear();applied_.clear();primed_=false;}        // another world: learn again
 private:
