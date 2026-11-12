@@ -4828,7 +4828,14 @@ Observed:
   `CreateConstruction`) with the built set, the save's extra two and the bytes common to both, for a bridge, a rain
   shelter and a postbox outdoors, all gave records in state 0, not drawn. Ladders reach state 2 at once. Solved
   later the same day: request `+0x645` is the wait ("Structures", "What completes a structure"). The game's own
-  request for a downloaded object sets it too; clearing object `+0xab & 0x40` on such a record is untried.
+  request for a downloaded object does not set it (live: the received Net bridge's flag bytes at object `+0xa8` are
+  `22 c0 20 04 2c 00 01 04 00 00`, no `+0xab & 0x40`, durability 360000, level 1, against `21 c0 10 04 2c 12 00 24 20 00`
+  and level 2 for the save's built Net bridges), so something else holds it in state 0, with the receiver's porter
+  far away and next to it alike. It is not marked for removal (`0x2c8822a`: `+0xaa |= 0x40`, `+0xab |= 1`, what a failed
+  placement check `0x2c3ecb0` does, the likely end of received rain shelters). Candidates: the range test of
+  `0x2c35fb0` for objects without `+0xaa & 0x10` (from `0x2c36121`), the globals at `[0x7bf6e88]+0xf/+0x17`, or the
+  object not being in the pending list. The builder's side is solved: a request with the upload flag and no wait is
+  built at once and uploaded.
 - Likes. `OTGCGetLikeHistoryOneResponse` (missed by the first dump): `t` int64, `oid`, `lp`, `lp2` int, `uid` (from),
   `sc` int32 (summarised count), `lt` (like type). The game asks `getLikeHistory` once, about a minute after signing
   in, with `{"uid":"","since":0}`. Live: after another player's `sendLike` for a ladder this game had uploaded in an

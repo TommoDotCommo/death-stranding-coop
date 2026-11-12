@@ -1399,14 +1399,14 @@ struct Runtime final:ds::Transport {
                     // 4 m in front of the porter, with a set of the request's flag bytes (game_offsets.md): 0 the wait for
                     // the build effect only (as the game's CreateConstruction export), 1 + the bytes both built and
                     // downloaded requests have, 2 + the built ones, 3 + the save's extra two, 4 = 3 + the upload flag,
-                    // 5 no flag at all: built at once.
+                    // 5 no flag at all: built at once, 6 the upload flag only: built at once and uploaded.
                     uint32_t kind=*code%1000,variant=*code/1000;std::vector<uint16_t> flags;
                     if(variant<=4)flags.push_back(0x645);
                     if(variant>=1&&variant<=4)flags.insert(flags.end(),{0x625,0x627,0x631,0x632,0x634,0x63b});
                     if(variant>=2&&variant<=4)flags.insert(flags.end(),{0x641,0x644,0x647});
                     if(variant>=3&&variant<=4)flags.insert(flags.end(),{0x63d,0x63e});
-                    if(variant==4)flags.push_back(0x620);
-                    if(kind>=46||variant>5)note("CONSTRUCT request refused: out of range\n");
+                    if(variant==4||variant==6)flags.push_back(0x620);
+                    if(kind>=46||variant>6)note("CONSTRUCT request refused: out of range\n");
                     else {
                         auto t=mod::puppet::transform(anchor.pose);double fx=t.rotation[3],fy=t.rotation[4],l=std::hypot(fx,fy);
                         if(l>.5){t.position[0]+=4*fx/l;t.position[1]+=4*fy/l;}
