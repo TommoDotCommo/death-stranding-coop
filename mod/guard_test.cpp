@@ -4,14 +4,16 @@ using namespace mod::guard;
 static int failures=0;
 #define CHECK(x) do{if(!(x)){std::fprintf(stderr,"guard oracle: %s (line %d)\n",#x,__LINE__);++failures;}}while(0)
 int main(){
-    const uint64_t site=0x7ff700000000ull+0x22bdf1a;
-    CHECK(matches(0xc0000005u,8,0,0,site,site));                 // execute fault at zero, returning to the call site
-    CHECK(!matches(0xc0000005u,8,0,0,site+1,site));              // another caller
-    CHECK(!matches(0xc0000005u,0,0,0,site,site));                // a read fault
-    CHECK(!matches(0xc0000005u,8,0x10,0,site,site));             // another address
-    CHECK(!matches(0xc0000005u,8,0,0x1234,site,site));           // not at zero
-    CHECK(!matches(0x80000003u,8,0,0,site,site));                // another exception
-    CHECK(!matches(0xc0000005u,8,0,0,site,0));                   // not installed
+    const uint64_t image=0x7ff700000000ull,end=image+0x8200000,site=image+0x22bdf1a;
+    CHECK(matches(0xc0000005u,8,0,0,site,site,image,end));                       // execute fault at zero, returning to the call site
+    CHECK(matches(0xc0000005u,8,0x625bdbbd590ull,0x625bdbbd590ull,site,site,image,end));   // the freed callback's garbage
+    CHECK(!matches(0xc0000005u,8,image+0x1000,image+0x1000,site,site,image,end));          // code of the game: not this
+    CHECK(!matches(0xc0000005u,8,0,0,site+1,site,image,end));              // another caller
+    CHECK(!matches(0xc0000005u,0,0,0,site,site,image,end));                // a read fault
+    CHECK(!matches(0xc0000005u,8,0x10,0,site,site,image,end));             // a fault further in, not at the called address
+    CHECK(!matches(0xc0000005u,8,0,0x1234,site,site,image,end));           // not at the called address
+    CHECK(!matches(0x80000003u,8,0,0,site,site,image,end));                // another exception
+    CHECK(!matches(0xc0000005u,8,0,0,site,0,image,end));                   // not installed
     // The culling job's read of a drawable that left the tree: only those instructions, only with the null they
     // fault on; resumes at the function's epilogue.
     { const uint64_t base=0x7ff700000000ull,out=base+0x1d5cc09;

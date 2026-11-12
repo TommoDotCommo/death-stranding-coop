@@ -1215,7 +1215,8 @@ struct Runtime final:ds::Transport {
 #ifdef _WIN32
                 {   // the creation-callback guard (guard_win.h), once the call site is known to be the one read
                     const uint8_t want[8]={0xff,0xd0,0xb0,0x01,0x48,0x83,0xc4,0x28};uint8_t got[8]{};   // call rax; mov al,1; add rsp,0x28
-                    if(sampler->read(sampler->base+0x22bdf18,got,8)&&!std::memcmp(got,want,8)){mod::guard::install(sampler->base);note("GUARD creation callback guard installed\n");}
+                    if(sampler->read(sampler->base+0x22bdf18,got,8)&&!std::memcmp(got,want,8)){{uint64_t size=0;for(auto& sec:sampler->sections)size=std::max(size,sec.address+sec.size-sampler->base);if(size)mod::guard::imageSize.store(size);}
+                        mod::guard::install(sampler->base);note("GUARD creation callback guard installed\n");}
                     else note("GUARD not installed: the call site differs\n");
                 }
 #endif

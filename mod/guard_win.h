@@ -7,11 +7,19 @@
 // caller, as the missing function would have done. Everything else is left to the game and the crash recorder.
 #include <cstdint>
 namespace mod::guard {
-inline bool matches(uint64_t code,uint64_t kind,uint64_t address,uint64_t rip,uint64_t returnAddress,uint64_t callSite){
+// Live 2026-11-13: the callback belonged to an object that had been freed (an ArtPartsShaderVariableComponentRep of
+// the partner body, after the player moved far at once): its function pointer read as zero at one call and as heap
+// garbage at the next, 1.7 s later, and that second fault is what stopped the game. So the guard answers an execute
+// fault at the very address called from that site whenever the address is not code of the game (image..imageEnd).
+inline bool matches(uint64_t code,uint64_t kind,uint64_t address,uint64_t rip,uint64_t returnAddress,uint64_t callSite,uint64_t image=0,uint64_t imageEnd=0){
 #ifdef MUTANT_GUARD_ANY_FAULT
-    (void)code;(void)kind;(void)address;(void)rip;return returnAddress==callSite||callSite!=0;
+    (void)code;(void)kind;(void)address;(void)rip;(void)image;(void)imageEnd;return returnAddress==callSite||callSite!=0;
 #else
-    return callSite&&code==0xc0000005u&&kind==8&&address==0&&rip==0&&returnAddress==callSite;
+    if(!callSite||code!=0xc0000005u||kind!=8||rip!=address||returnAddress!=callSite)return false;
+#ifndef MUTANT_GUARD_IN_IMAGE
+    if(address>=image&&address<imageEnd)return false;                   // a fault inside the game's own code is not this
+#endif
+    return true;
 #endif
 }
 // A second known fault (game_offsets.md, "Culling job and a drawable that left the tree"): the render culling job
@@ -38,7 +46,7 @@ inline uint64_t cullResume(uint64_t code,uint64_t kind,uint64_t rip,uint64_t rax
 #include <atomic>
 #include <cstdint>
 namespace mod::guard {
-inline std::atomic<uint64_t> site{0};
+inline std::atomic<uint64_t> site{0},imageSize{0x8200000};
 inline std::atomic<unsigned> skipped{0};
 // Evidence for the first hits: the callback's target object (rcx at the fault) and the first word it holds (its
 // vtable, when it is an object of the game), and the two return addresses above the call site.
@@ -65,10 +73,10 @@ inline LONG CALLBACK handler(EXCEPTION_POINTERS* e){
     if(uint64_t b=cullBase.load(std::memory_order_acquire);b&&r->NumberParameters>=2)
         if(uint64_t to=cullResume(r->ExceptionCode,r->ExceptionInformation[0],c->Rip,c->Rax,c->Rcx,b)){
             cullSkipped.fetch_add(1,std::memory_order_relaxed);cullNote(c->R14);c->Rip=to;return EXCEPTION_CONTINUE_EXECUTION;}
-    if(!s||r->ExceptionCode!=EXCEPTION_ACCESS_VIOLATION||r->NumberParameters<2||c->Rip!=0)return EXCEPTION_CONTINUE_SEARCH;
+    if(!s||r->ExceptionCode!=EXCEPTION_ACCESS_VIOLATION||r->NumberParameters<2||r->ExceptionInformation[0]!=8)return EXCEPTION_CONTINUE_SEARCH;
     if(IsBadReadPtr(reinterpret_cast<void*>(c->Rsp),8))return EXCEPTION_CONTINUE_SEARCH;
-    uint64_t back=*reinterpret_cast<uint64_t*>(c->Rsp);
-    if(!matches(r->ExceptionCode,r->ExceptionInformation[0],r->ExceptionInformation[1],c->Rip,back,s))return EXCEPTION_CONTINUE_SEARCH;
+    uint64_t back=*reinterpret_cast<uint64_t*>(c->Rsp),image=s-0x22bdf1a;
+    if(!matches(r->ExceptionCode,r->ExceptionInformation[0],r->ExceptionInformation[1],c->Rip,back,s,image,image+imageSize.load(std::memory_order_acquire)))return EXCEPTION_CONTINUE_SEARCH;
     unsigned n=skipped.fetch_add(1,std::memory_order_relaxed);
     if(n<8){
         Seen& e=seen[n];e.target=c->Rcx;

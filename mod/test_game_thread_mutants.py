@@ -26,7 +26,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('road',['TOTAL_ADDS','LOAD','LESS','ECHO','TWICE','AMOUNT'],['roads_test.cpp','roads.cpp','discovery.cpp']),
           ('bt',['ALL_ALIVE','HEAL','KILL','HURT_ECHO','ECHO','UNSEEN','DYNAMIC','MASS','CLEARED_ANY','FAR','END_IDLE'],['bts_test.cpp','bts.cpp','discovery.cpp']),
           ('order',['STORY','ECHO','ANY_STATE','UNIT_ANY','UNIT_ECHO'],['orders_test.cpp','orders.cpp','discovery.cpp']),
-          ('guard',['ANY_FAULT','CULL_ANY'],['guard_test.cpp']),
+          ('guard',['ANY_FAULT','IN_IMAGE','CULL_ANY'],['guard_test.cpp']),
           ('vitals',['BIT4','UNREADABLE_DEAD','NO_HOLD','CALL_ANY','CALL_HOLD'],['vitals_test.cpp','vitals.cpp','discovery.cpp','../core/core.cpp']),
           ('online',['HOST_ANY','PATH_ANY','ASK_BUSY','ASK_FOREVER','ASK_GAP'],['online_test.cpp','online.cpp','config.cpp','discovery.cpp']),
           ('link',['NO_LOSS','PRESENCE_ONLY','FLAT','ENV_WINS'],['link_test.cpp']),
