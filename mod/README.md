@@ -700,6 +700,10 @@ Each game keeps simulating its own world; these settings share the outcome of wh
   construction id. On joining (and after a save is loaded) each player's game also tells the other all its pavers
   hold and which roads are built, and each paver is topped up to the larger of the two: both worlds end up with the
   roads of either, and they stay in the save. The partner's cargo is not touched and the partner gets no likes.
+- `"share_saved_structures": true` (`structures.h`; on in the launcher's setup): on joining, and after a save is
+  loaded, the structures a player's save already has are built in the partner's world too, as the game's structures
+  of other players; the partner skips those that already stand there. Without it only structures built while the
+  two play together are shared.
 - `"share_orders": true` (`orders.h`): a standard order (the repeatable deliveries and collections) one player takes
   on, completes or gives up does the same in the partner's game, through the game's own mission requests. Main and
   sub orders are never shared. Each game has its own cargo for the order; whoever hands it in completes it for both.

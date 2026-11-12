@@ -63,6 +63,9 @@ public:
     explicit Sync(uint64_t since=0):since_(since){}
     // One call per observation. Returns structures this porter built in this session, each once.
     std::vector<Built> observe(const std::vector<Record>&);
+    // On joining (share_saved_structures): every structure of this porter that stands, those of the save included,
+    // so the partner's world gets them too. They count as announced (observe does not send them again).
+    std::vector<Built> everything(const std::vector<Record>&);
     // Structures this porter built that are gone since (dismantled or destroyed), with type and place: the partner
     // removes its copy, by ref or, when the ref is not known there, by type and place. Includes structures built in
     // an earlier session. A structure counts as gone after RemovedLooks observations without it: the game takes a

@@ -66,6 +66,19 @@ static bool present(uint8_t state){
     return state==2;
 #endif
 }
+std::vector<Built> Sync::everything(const std::vector<Record>& records){
+    std::vector<Built> out;
+    for(auto& r:records){
+#ifndef MUTANT_STRUCTURE_ALL_NET
+        if(r.id<PlayerFirst||r.id>=NetFirst||!present(r.state)||!netVariant(r.type))continue;
+#else
+        if(r.id<PlayerFirst||!present(r.state)||!netVariant(r.type))continue;
+#endif
+        announced_[r.id]=r.built;
+        Built b;b.type=r.type;b.position=r.at.position;angles(r.at.rotation,b.yaw,b.pitch,b.roll);b.id=r.id;out.push_back(b);
+    }
+    return out;
+}
 std::vector<Built> Sync::observe(const std::vector<Record>& records){
     std::vector<Built> out;std::map<uint32_t,uint8_t> next;
     for(auto& r:records){

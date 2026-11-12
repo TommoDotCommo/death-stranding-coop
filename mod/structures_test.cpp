@@ -46,6 +46,10 @@ int main(){
     // clock) is announced once; the save's structures, the partner's (Net ids) and the game's own never.
     auto at=[](Record r,uint64_t built){r.built=built;return r;};
     auto gone=[](Sync& s,std::vector<Record> v){std::vector<Sync::Removed> r;for(unsigned i=0;i<Sync::RemovedLooks;++i){CHECK(r.empty());s.observe(v);r=s.takeRemoved();}return r;};
+    // On joining: every standing structure of this porter, the save's included, once; never the partner's or the game's.
+    { Sync s(1000);std::vector<Record> v{rec(225,0,1),at(rec(10001,25,2),500),at(rec(10002,28,2,7),2000),at(rec(100001,26,2),2000),at(rec(100002,25,2),2000),at(rec(10003,6,0),3000)};
+      auto all=s.everything(v);CHECK(all.size()==2&&all[0].id==10001&&all[1].id==10002);
+      CHECK(s.observe(v).empty()); }
     { Sync s(1000);CHECK(s.observe({rec(225,0,1),at(rec(10001,25,2),500)}).empty());
       auto a=s.observe({rec(225,0,1),at(rec(10001,25,2),500),at(rec(10002,28,2,7),1000),at(rec(100001,26,2),2000),at(rec(300,25,2),2000)});
       CHECK(a.size()==1&&a[0].id==10002&&a[0].type==28&&a[0].position[0]==7&&std::fabs(a[0].yaw-.5)<1e-6);

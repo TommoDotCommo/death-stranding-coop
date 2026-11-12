@@ -620,7 +620,7 @@ struct Runtime final:ds::Transport {
     }
     // --- end ds3 ---
     // Shared structures (structures.h): what this porter builds goes to the partner; theirs appear here as Net structures.
-    mod::structures::Sync structSync{mod::structures::clockNow()};uint64_t structReadAt=0,structSent=0,structMade=0,structIdBase=0,imageSize=0;bool structTimed=false;
+    mod::structures::Sync structSync{mod::structures::clockNow()};uint64_t structReadAt=0,structSent=0,structMade=0,structIdBase=0,imageSize=0,structPorter=0,structSettled=0;bool structTimed=false,structLinked=false,structTell=false;
     void tickStructures(uint64_t now) {
         if(!core||!sampler)return;   // like tickCargo: watched while the partner is away, sent when it connects
         bool coop=partnerMode()&&construct;
@@ -653,6 +653,20 @@ struct Runtime final:ds::Transport {
         structReadAt=now;
         if(!structIdBase)structIdBase=(nonce()>>32)<<20;
         records.clear();if(table().empty())return;
+        // On joining, and after a save was loaded: the structures the save already has go to the partner too
+        // (share_saved_structures); the partner skips those that already stand there.
+        { auto anchor=anchorNow();bool linked=core->connected();
+          if(anchor.entity!=structPorter){structPorter=anchor.entity;structSettled=now+10000;structTell=true;}
+          if(linked&&!structLinked)structTell=true;
+          structLinked=linked;
+          if(structTell&&linked&&structPorter&&now>=structSettled){
+              structTell=false;
+              if(config.shareSavedStructures){
+                  auto all=structSync.everything(records);
+                  for(auto& b:all){ds::CargoEvent e;e.type=3;e.item=mod::structures::pack(b);e.ref=structIdBase+b.id;e.yaw=b.yaw;e.position={b.position[0],b.position[2],b.position[1]};core->queueCargo(e);++structSent;}
+                  std::ostringstream o;o<<"STRUCT this world's "<<all.size()<<" structures -> partner\n";note(o.str().c_str());
+              }
+          } }
         for(auto& b:structSync.observe(records)) {
             ds::CargoEvent e;e.type=3;e.item=mod::structures::pack(b);e.ref=structIdBase+b.id;e.yaw=b.yaw;
             e.position={b.position[0],b.position[2],b.position[1]};   // game -> adapter axes
