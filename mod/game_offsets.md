@@ -1193,12 +1193,26 @@ entity, and 35 with bit 2 (0x10004, 0x1010004) not decoded. No catcher record, n
   function called from the walk, any access violation inside the walk's loop (`0x237e267..0x237e2d1`; live: a read
   of zero at `0x237e2c8`, the call through a node's payload vtable, after five bad functions) or a bad payload
   call resumes at the walk's own end `0x237e2d2` with `rbp = 0`, which empties the queue and returns.
-- Whose queue: live (2026-11-13) the entities whose walks were left were this porter's own entity and three
-  others next to it in memory, never the partner body; the mod's own calls left nothing queued on either at the end
-  of its ticks. So the nodes are the game's own, on this porter, in sessions with a second player-type entity.
-  What strands or corrupts them is not known yet. A queue can also come out as a ring (the walk never ends and
-  nothing faults; the game thread waits for that job): a watchdog on the mod's own thread, after 2 s without a tick
-  of the game thread, looks for a thread that stays in the walk and sends it to the walk's end (guard_win.h).
+- Whose queue, and why (live, then static): the walks that faulted were this porter's own entity's and three
+  entities next to it, never the partner body's, and the mod's own calls left nothing queued. A call on a
+  component's rep made while its entity waits for its update (entity `+0x88` bit 21, set when the entity is
+  collected, cleared by its own job at `0x24027eb`) is appended at once, on the caller's thread, with no lock
+  (`0x237a3f0`): the engine assumes that only the entity's own sequential update group touches it then. The partner
+  body is a second entity of the player's kind in another group: its copy of the player's code reaches this porter's
+  entities through the game's globals (one such writer: the inventory component's update `0x272a070`, through the
+  global at `image+0x7be79b0`; keeping that one switched off on the body did not end the faults, so there are
+  others). Two unlocked appends, or an append against the end of a walk, lose a node; its weak link then dangles
+  once the arena is reset, and later writes through it land in live nodes: a function pointer zeroed, a pointer into
+  a rep object where a `next` was, a payload vtable zeroed, rings.
+- The fix: update groups are the sets of entities joined by update links (table at entity `+0x208`: count `+0x220`,
+  entries of 0x30 bytes at `+0x228`); a parent and its children are joined by `0x23f4040(owner+0x208, other, owner,
+  kind)`, which is all SetParent does for the grouping. The mod makes that call for the body with this porter as
+  owner (kind 0), once per body: the two are then updated in order, never side by side. Live: the scenario that
+  stopped the game about one run in six (5 of 33) ran 14 times in a row without a single guarded fault.
+- Kept as tripwires (guard_win.h): any access violation in or below the walk is unwound to the walk with the game's
+  unwind data, the entity lock its message path holds (`r12` between `0x237c469` and `0x237c6bc`) is given back, and
+  the walk is left; a watchdog on the mod's thread sends a thread that stays in the walk to its end after 2 s
+  without a tick of the game thread. Neither the unwinding nor the watchdog has been seen to act live.
 
 ### Creation callback with no function (2026-11-12, from two crash dumps)
 
