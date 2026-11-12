@@ -84,6 +84,10 @@ int main(){
     { auto a=rec(100009,26,2,10);CHECK(standing({a},26,{10.3,2,3})&&standing({a},26,{10.9,2,3})&&!standing({a},26,{11.5,2,3})&&!standing({a},29,{10,2,3}));   // the game may move what it builds by about 0.6 m
       auto b=rec(100010,26,0,10);CHECK(!standing({b},26,{10,2,3})); }
     // A dismantle that arrives before the Net copy is built waits for it, then clears it once; unknown refs are ignored.
+    // The partner dismantles while this player is out of the copy's range: it is removed when he is back, even much later.
+    { NetCopies n;n.built(8,7,{10,2,3});n.dismantled(8,1000);auto far=rec(100030,7,1,10),near=rec(100030,7,2,10);
+      for(uint64_t t=2000;t<200000;t+=10000)CHECK(n.due({far},t).empty());
+      CHECK(n.due({near},210000).size()==1);CHECK(n.due({near},211000).empty()); }
     { NetCopies n;n.built(7,26,{10,2,3});n.dismantled(7,1000);n.dismantled(99,1000);
       CHECK(n.due({},1500).empty());                                   // not built yet: wait
       auto r=rec(100005,26,0,10);CHECK(n.due({r},2000).empty());       // pending, not built

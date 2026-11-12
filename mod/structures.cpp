@@ -112,12 +112,19 @@ std::vector<std::array<double,3>> NetCopies::due(const std::vector<Record>& reco
         auto& c=it->second;
         if(!c.goneAt){++it;continue;}
 #ifndef MUTANT_STRUCTURE_EARLY
-        bool standing=false;for(auto& r:records)if(r.type==c.type&&r.state==2&&r.id>=NetFirst){
-            double dx=r.at.position[0]-c.at[0],dy=r.at.position[1]-c.at[1];if(dx*dx+dy*dy<=1.5*1.5)standing=true;}
+        // In range (state 2) the copy can be removed now; out of range (it stands, but the game's removal works on
+        // what is near the player) the dismantle waits for the player to come back, however long that takes.
+        bool standing=false,away=false;for(auto& r:records)if(r.type==c.type&&present(r.state)&&r.id>=NetFirst){
+            double dx=r.at.position[0]-c.at[0],dy=r.at.position[1]-c.at[1];if(dx*dx+dy*dy>1.5*1.5)continue;
+            if(r.state==2)standing=true;else away=true;}
+#ifdef MUTANT_STRUCTURE_FORGET
+        away=false;
+#endif
 #else
-        bool standing=true;
+        bool standing=true,away=false;
 #endif
         if(standing){out.push_back(c.at);it=copies_.erase(it);}
+        else if(away){c.goneAt=now?now:1;++it;}
         else if(now-c.goneAt>GiveUp)it=copies_.erase(it);
         else ++it;
     }

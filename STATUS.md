@@ -47,8 +47,7 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
   the game's packing, or the cases on arms, waist and carriers), no cutscene sharing.
 - BTs and MULEs themselves, a death pose for the partner (his body is laid down stiffly) and his capture shown on the body,
   voidouts, shared orders and deliveries, saves of a shared world, the partner's own controller input.
-- Structures: dismantling through the game's own menu, upgrades and materials, the safe house; a Net copy that is
-  out of the player's range when the partner dismantles is only removed if he comes near within 30 s.
+- Structures: dismantling through the game's own menu, upgrades and materials, the safe house.
 - A real two-PC session. The mod accepts any unicast IPv4 peer (LAN or VPN) and binds only the address that routes
   to it (README, "Two PCs"). On one PC (2026-11-12) two copies ran with the PC's own LAN address as each other's
   partner, the network policy enforcing with only that address allowed: both bound and addressed the LAN address and
