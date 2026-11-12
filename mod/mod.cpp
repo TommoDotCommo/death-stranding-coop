@@ -784,10 +784,14 @@ struct Runtime final:ds::Transport {
         if(kukanCleared!=kukanNoted&&(kukanNoted<3||now-kukanNotedAt>=30000)){kukanNoted=kukanCleared;kukanNotedAt=now;
             note(("BODY the body's inventory component had been switched on by the game: switched off ("+std::to_string(kukanCleared)+" times so far)\n").c_str());}
     }
-    // Experiment (body_update_link): the game updates entities joined by update links one after another (a parent
-    // and its children are joined this way) and other entities side by side on its workers. The body joined to this
-    // porter with the game's own link call (0x23f4040(owner+0x208, other, owner, kind 0), what SetParent uses) is
-    // never updated beside him, whatever its code touches.
+    // The game updates entities joined by update links one after another (a parent and its children are joined this
+    // way) and other entities side by side on its workers. The body is a second entity of the player's kind: code it
+    // runs in its own update reaches this porter's entities through the game's globals, and the game's queue of
+    // deferred calls on an entity takes no lock, so side by side the two corrupted this porter's queues (bad
+    // function pointers, then the game thread waiting for good; about one run in six of an order taken at a
+    // terminal; game_offsets.md, "Deferred rep calls"). Joined to this porter with the game's own link call
+    // (0x23f4040(owner+0x208, other, owner, kind 0), what SetParent uses) the body is never updated beside him.
+    // body_update_link=false leaves it out, to compare.
     uint64_t linkedBody=0,linkedPlayer=0;
     void linkBodyUpdate(uint64_t body,uint64_t player){
         if(!config.bodyUpdateLink||!sampler||!body||!player||(body==linkedBody&&player==linkedPlayer))return;

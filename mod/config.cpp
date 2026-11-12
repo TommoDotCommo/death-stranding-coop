@@ -80,7 +80,7 @@ Config parseConfig(const std::string& s) {
     c.shareOrderUnits=boolean("share_order_units",false);
     c.shareRoads=boolean("share_roads",false);
     c.shareSavedStructures=boolean("share_saved_structures",false);
-    c.bodyUpdateLink=boolean("body_update_link",false);
+    c.bodyUpdateLink=boolean("body_update_link",true);
     c.partnerTag=boolean("partner_tag",false);
 #ifndef MUTANT_CONFIG_MARKER
     if(c.partnerMarker&&!c.puppetProbe)throw std::runtime_error("partner_marker requires puppet_probe");
