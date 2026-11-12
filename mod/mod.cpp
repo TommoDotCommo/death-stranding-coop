@@ -784,6 +784,21 @@ struct Runtime final:ds::Transport {
         if(kukanCleared!=kukanNoted&&(kukanNoted<3||now-kukanNotedAt>=30000)){kukanNoted=kukanCleared;kukanNotedAt=now;
             note(("BODY the body's inventory component had been switched on by the game: switched off ("+std::to_string(kukanCleared)+" times so far)\n").c_str());}
     }
+    // Experiment (body_update_link): the game updates entities joined by update links one after another (a parent
+    // and its children are joined this way) and other entities side by side on its workers. The body joined to this
+    // porter with the game's own link call (0x23f4040(owner+0x208, other, owner, kind 0), what SetParent uses) is
+    // never updated beside him, whatever its code touches.
+    uint64_t linkedBody=0,linkedPlayer=0;
+    void linkBodyUpdate(uint64_t body,uint64_t player){
+        if(!config.bodyUpdateLink||!sampler||!body||!player||(body==linkedBody&&player==linkedPlayer))return;
+        linkedBody=body;linkedPlayer=player;
+#ifdef _WIN32
+        static const uint8_t want[16]={0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57};uint8_t got[16]{};
+        if(!sampler->read(sampler->base+0x23f4040,got,16)||std::memcmp(got,want,16)){note("BODY update link unavailable: the link function differs\n");return;}
+        reinterpret_cast<void(*)(uint64_t,uint64_t,uint64_t,uint32_t)>(sampler->base+0x23f4040)(player+0x208,body,player,0);
+        note("BODY joined to this porter's update group\n");
+#endif
+    }
     // The game thread's last tick, for the watchdog on the mod's own thread (guard_win.h, breakEndlessWalk).
     std::atomic<uint64_t> gameTickUs{0};uint64_t ringTriedUs=0;unsigned ringNoted=0;
     void watchRing(uint64_t clockUs){
@@ -1631,6 +1646,7 @@ struct Runtime final:ds::Transport {
         stages.enter("gear",mod::nowUs());
         repWatch=useOwn?ownEntity:0;
         quietBodyInventory(useOwn?ownEntity:0,now);
+        if(useOwn&&ownEntity)linkBodyUpdate(ownEntity,anchor.entity);
         tickGear(useOwn?ownEntity:0,anchor,now);
         stages.enter("stack",mod::nowUs());
         tickStack(useOwn?ownEntity:0,anchor);
