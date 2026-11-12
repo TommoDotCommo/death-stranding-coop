@@ -12,7 +12,7 @@ int main(int argc,char** argv) {
     for(bool host:{false,true}) {s.host=host;launcher::writeConfig(root,s);
         std::ifstream f(root/"redirect-data/mod/mod.json");std::string bytes((std::istreambuf_iterator<char>(f)),{});auto c=mod::parseConfig(bytes);
         check(c.role==(host?"host":"client")&&c.slot==(host?3:4)&&c.peerSlot==(host?4:3),"role and exact ports");
-        check(c.peer==s.peer&&c.session==s.secret&&c.required&&!c.selfTick&&c.gameThread&&c.puppetProbe&&c.partner=="own"&&c.partnerGear&&c.partnerMarker&&c.partnerVehicle&&c.notices&&c.shareEnvironment=="rain"&&!c.autoContinue&&!c.virtualPad,"session and play defaults");}
+        check(c.peer==s.peer&&c.session==s.secret&&c.required&&!c.selfTick&&c.gameThread&&c.puppetProbe&&c.partner=="own"&&c.partnerGear&&c.partnerMarker&&c.partnerVehicle&&c.notices&&c.shareEnvironment=="rain"&&c.shareEnemies&&c.shareOrders&&!c.autoContinue&&!c.virtualPad,"session and play defaults");}
     {auto solo=s;solo.solo=true;check(!mod::parseConfig(launcher::config(solo)).notices&&mod::parseConfig(launcher::config(s)).notices,"no session notices in a solo session");}
     {   // Shared world (opt-in): the host's game signs in on loopback, the guest's at the host; one secret path for both.
         auto h=s;h.host=true;h.sharedWorld=true;auto g=h;g.host=false;
