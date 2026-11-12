@@ -677,6 +677,25 @@ nothing. The HUD object is found through the UI owner global and checked by its 
 the config. Tests: `notice_test.cpp` (mutants BOUND, LEFT, ALONE_ONCE, NAME_WAIT, WORLD, GAP, AWAY_SETTLE, BACK_PAIRED, LIKE_ICON, JOIN_HOLD). The launcher's play
 setup turns it on.
 
+## Shared MULEs and orders (`share_enemies`, `share_orders`, `share_order_units`; off by default)
+
+Each game keeps simulating its own world; these settings share the outcome of what a player does in it. They need
+`game_thread` and a partner; the launcher's play setup turns the first two on.
+
+- `"share_enemies": true` (`enemies.h`): a MULE one player puts down (knocked out, fainted, asleep, dead) is put
+  down in the partner's game with the game's own defeat function, and a camp that comes to know someone is there is
+  alarmed in the partner's game. MULEs are matched by the UUID of their locator, which is the same in every game.
+  Where MULEs are and who they chase is not shared; BTs are not shared.
+- `"share_orders": true` (`orders.h`): a standard order (the repeatable deliveries and collections) one player takes
+  on, completes or gives up does the same in the partner's game, through the game's own mission requests. Main and
+  sub orders are never shared. Each game has its own cargo for the order; whoever hands it in completes it for both.
+- `"share_order_units": true` (with `share_orders`; not in the launcher's setup yet): a cargo unit one player hands
+  in is delivered in the partner's game too and the partner's copy of that cargo is removed, so two players can
+  each carry part of an order.
+
+Log lines: `ENEMY ...`, `ORDER ...`. Test commands in `puppet.cargo` (lab only): `mule <kind>`, `order <id>`,
+`unit <id*10+n>`, `unitlose <id*10+n>`; in `puppet.ride`: `place X Y Z HEADING`.
+
 ## The partner's name over his body (`partner_tag`, off by default)
 
 With `"partner_tag": true` (requires `puppet_probe`) the partner body shows the partner's name (their `nickname`, which
