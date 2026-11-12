@@ -28,6 +28,13 @@ inline bool matches(uint64_t code,uint64_t kind,uint64_t address,uint64_t rip,ui
 // removes and shows entities, the game does too) leaves that pointer null and the read faults; the game then sits in
 // its crash handler. The answer is the game's own for a drawable that is not in the tree: skip it. The function has
 // no loop and has saved every register it changed by then, so execution resumes at its epilogue.
+// What that call site really is (static, 2026-11-13): the dispatcher of an entity's queue of deferred calls on its
+// components' reps (0x237e240 walks it; the queue's nodes live in a per-frame arena). A bad function pointer there
+// means the queue itself dangles: its other fields are as bad, and walking on can fault again or never end (a node
+// that points at itself), with the main thread waiting for the job. So when the faulting call was made from that
+// walk (the walk's return address 0x30 above), the rest of the queue is abandoned: the walk resumes at its own end,
+// which empties the queue (rbp = 0 is what it writes to head and tail) and returns. `walkReturn` is the stack word.
+inline bool abandonsQueue(uint64_t walkReturn,uint64_t image){return image&&walkReturn==image+0x237e2b0;}
 // Returns where to resume, 0 when the fault is not this one.
 inline uint64_t cullResume(uint64_t code,uint64_t kind,uint64_t rip,uint64_t rax,uint64_t rcx,uint64_t base){
     if(!base||code!=0xc0000005u||kind!=0)return 0;
@@ -47,6 +54,8 @@ inline uint64_t cullResume(uint64_t code,uint64_t kind,uint64_t rip,uint64_t rax
 #include <cstdint>
 namespace mod::guard {
 inline std::atomic<uint64_t> site{0},imageSize{0x8200000};
+inline std::atomic<bool> walkOk{false};
+inline std::atomic<unsigned> abandoned{0};
 inline std::atomic<unsigned> skipped{0};
 // Evidence for the first hits: the callback's target object (rcx at the fault) and the first word it holds (its
 // vtable, when it is an object of the game), and the two return addresses above the call site.
@@ -85,6 +94,13 @@ inline LONG CALLBACK handler(EXCEPTION_POINTERS* e){
         auto* sp=reinterpret_cast<uint64_t*>(c->Rsp);
         if(!IsBadReadPtr(sp,0x100)){e.caller=sp[6];for(unsigned i=7;i<32;++i)if(sp[i]>s-0x22bdf1a&&sp[i]<s-0x22bdf1a+0x8000000){e.caller2=sp[i];break;}}
     }
+    // From the queue walk (0x237e240: push rsi, 0x20 of frame; 0x22bdee0: 0x28 of frame): leave the walk through its
+    // end, which empties the queue. Otherwise (the other dispatcher, 0x23db432) the call is skipped as if it returned.
+    auto* sp=reinterpret_cast<uint64_t*>(c->Rsp);
+    if(walkOk.load(std::memory_order_acquire)&&!IsBadReadPtr(sp,0x40)&&abandonsQueue(sp[6],image)){
+        abandoned.fetch_add(1,std::memory_order_relaxed);c->Rsp+=0x38;c->Rbp=0;c->Rip=image+0x237e2d2;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
     c->Rip=back;c->Rsp+=8;
     return EXCEPTION_CONTINUE_EXECUTION;
 }
@@ -96,6 +112,11 @@ inline void install(uint64_t base){
     static const uint8_t leave[9]={0xc5,0xf8,0x28,0xb4,0x24,0x80,0x00,0x00,0x00};
     if(!IsBadReadPtr(reinterpret_cast<void*>(base+0x1d5cb86),0x90)&&!std::memcmp(reinterpret_cast<void*>(base+0x1d5cb86),reads,sizeof reads)
        &&!std::memcmp(reinterpret_cast<void*>(base+0x1d5cc09),leave,sizeof leave))cullBase.store(base,std::memory_order_release);
+    // Leaving the queue walk through its end only where the walk is the code that was read.
+    static const uint8_t call[10]={0x48,0x8d,0x4b,0x20,0xff,0xd0,0x48,0x8b,0x6b,0x08};
+    static const uint8_t tail[35]={0x48,0x8b,0x7c,0x24,0x38,0x48,0x89,0xae,0x30,0x02,0x00,0x00,0x48,0x89,0xae,0x28,0x02,0x00,0x00,0x48,0x8b,0x6c,0x24,0x30,0x48,0x8b,0x5c,0x24,0x40,0x48,0x83,0xc4,0x20,0x5e,0xc3};
+    if(!IsBadReadPtr(reinterpret_cast<void*>(base+0x237e2aa),0x60)&&!std::memcmp(reinterpret_cast<void*>(base+0x237e2aa),call,sizeof call)
+       &&!std::memcmp(reinterpret_cast<void*>(base+0x237e2d2),tail,sizeof tail))walkOk.store(true,std::memory_order_release);
     AddVectoredExceptionHandler(1,handler);
 }
 }

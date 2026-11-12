@@ -14,6 +14,7 @@ int main(){
     CHECK(!matches(0xc0000005u,8,0,0x1234,site,site,image,end));           // not at the called address
     CHECK(!matches(0x80000003u,8,0,0,site,site,image,end));                // another exception
     CHECK(!matches(0xc0000005u,8,0,0,site,0,image,end));                   // not installed
+    CHECK(abandonsQueue(image+0x237e2b0,image)&&!abandonsQueue(image+0x23db434,image)&&!abandonsQueue(image+0x237e2b0,0));
     // The culling job's read of a drawable that left the tree: only those instructions, only with the null they
     // fault on; resumes at the function's epilogue.
     { const uint64_t base=0x7ff700000000ull,out=base+0x1d5cc09;

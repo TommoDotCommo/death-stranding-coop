@@ -1159,6 +1159,27 @@ entity, and 35 with bit 2 (0x10004, 0x1010004) not decoded. No catcher record, n
   in the function; `rbx`, `rsi`, `rdi` and `xmm6` are saved before the read and reloaded there; `rsp` is unchanged
   since the prologue). The drawable's per-instance update is skipped for a frame, as for one not in the tree.
 
+### Deferred rep calls (2026-11-13, static after a live record): what "the creation callback with no function" is
+
+- The call site `0x22bdf18` (in `0x22bdee0`) is not an entity-creation callback. It is the dispatcher of the engine's
+  "call this member function on a component's rep at the entity's next rep update": `component->CallOnRep`
+  (`0x22bcf70`, 70 callers) makes a 0x58-byte node (`+0x00` dispatcher, `+0x08` next, `+0x20` delegate with a weak
+  pointer to the rep at `+0x30`, `+0x48` function) and appends it, without a lock, to the entity rep's queue
+  (`*(entity+0x60)`: head `+0x228`, tail `+0x230`; append `0x237a3f0`). `0x237e240(entity rep)` walks the queue, calls
+  each node, and empties it; the game calls it in the entity's rep update and when an entity leaves the world.
+- The nodes live in a per-frame arena (`*(image+0x7bc7df8)+0xe0`) that the frame job "ProcessEventQueues"
+  (`0x23d4090`) resets every frame, whether or not the queues are empty. A node whose entity gets no rep update
+  before that reset dangles: a later walk reads reused memory (a null or garbage function, a `next` that may point
+  back at the node, which never ends). Live: the function read as zero, 1.7 s later as a heap address; the game
+  stopped with its main thread waiting for that job.
+- The art-part shader-variable setters (`0x22bdcc0`, `0x22bd420`) queue such calls ("mark the rep dirty") all the
+  time, and the in-place art-parts swap announces the messages that lead there. A call made from the mod's tick
+  (outside the game's update jobs) takes the queued form.
+- What the mod does about it: at the end of each of its ticks it runs the partner body's queue with the game's own
+  walk when the queue was empty at the start of the tick (so the nodes are that tick's and still good), and the
+  guard, on a bad function called from that walk, leaves the walk through its own end, which empties the queue
+  (`rsp += 0x38`, `rbp = 0`, resume at `0x237e2d2`; guard_win.h).
+
 ### Creation callback with no function (2026-11-12, from two crash dumps)
 
 `0x22bdee0(delegate)`: if `delegate+0x10` (a weak target, object = value - 8) is set it calls the function pointer at

@@ -731,6 +731,30 @@ struct Runtime final:ds::Transport {
     mod::orders::Sync orderSync;std::vector<ds::CargoEvent> orderIn;std::function<bool(uint64_t,uint8_t)> orderRequest;std::map<uint64_t,uint8_t> orderDetails;
     uint64_t orderReadAt=0,orderSent=0,orderApplied=0;bool orderTried=false,orderLinked=false;
     unsigned guardNoted=0,cullNoted=0;
+    // The partner body's queue of deferred rep calls (game_offsets.md, "Deferred rep calls"): what the mod's own
+    // calls put there in a tick is run at the end of that tick with the game's own flush, so no node waits for a
+    // rep update the body may not get before the game resets the arena the nodes live in.
+    uint64_t repWatch=0,repEntryEntity=0,repEntryHead=0,repFlushed=0,repWaiting=0,repNoted=0,repNotedAt=0;bool repTried=false;std::function<void(uint64_t)> repFlush;
+    uint64_t repQueue(uint64_t entity,uint64_t* repOut=nullptr){
+        uint64_t rep=0,head=0;if(!entity||!sampler||!sampler->read(entity+0x60,&rep,8)||!rep||!sampler->read(rep+0x228,&head,8))return 0;
+        if(repOut)*repOut=rep;
+        return head;
+    }
+    void repTickStart(){repEntryEntity=repWatch;repEntryHead=repQueue(repWatch);if(repEntryHead)++repWaiting;}
+    void repTickEnd(uint64_t now){
+        if(!repTried&&sampler){repTried=true;
+#ifdef _WIN32
+            static const uint8_t want[17]={0x48,0x89,0x5c,0x24,0x18,0x56,0x48,0x83,0xec,0x20,0x48,0x8b,0x99,0x28,0x02,0x00,0x00};uint8_t got[17]{};
+            if(sampler->read(sampler->base+0x237e240,got,17)&&!std::memcmp(got,want,17)){auto f=reinterpret_cast<void(*)(uint64_t)>(sampler->base+0x237e240);repFlush=[f](uint64_t rep){f(rep);};}
+#endif
+        }
+        uint64_t rep=0;
+        // Only what was queued during this tick (the queue was empty when the tick began): those nodes are fresh.
+        // (A body first seen in this tick was made in it: its queue holds this tick's nodes only.)
+        if(repFlush&&repWatch&&(repWatch!=repEntryEntity||!repEntryHead)&&repQueue(repWatch,&rep)&&rep){repFlush(rep);++repFlushed;}
+        if(repFlushed+repWaiting!=repNoted&&now-repNotedAt>=30000){repNoted=repFlushed+repWaiting;repNotedAt=now;
+            std::ostringstream o;o<<"BODY deferred rep calls: run at the end of the tick "<<repFlushed<<" times; found waiting when a tick began "<<repWaiting<<" times\n";note(o.str().c_str());}
+    }
     void tickGuard() {
 #ifdef _WIN32
         unsigned n=mod::guard::skipped.load();
@@ -740,7 +764,7 @@ struct Runtime final:ds::Transport {
                 if(base&&e.vtable>=base&&e.vtable<base+0x8000000)o<<"ds.exe+0x"<<e.vtable-base;else o<<"0x"<<e.vtable;
                 o<<" callers ds.exe+0x"<<(e.caller>base?e.caller-base:0)<<" ds.exe+0x"<<(e.caller2>base?e.caller2-base:0)<<"\n";note(o.str().c_str());
             }
-            guardNoted=n;note(("GUARD a creation callback with no function was skipped ("+std::to_string(n)+" so far)\n").c_str());}
+            guardNoted=n;note(("GUARD a deferred call with a bad function was skipped ("+std::to_string(n)+" so far; "+std::to_string(mod::guard::abandoned.load())+" times the rest of that entity's queue was dropped)\n").c_str());}
         unsigned c=mod::guard::cullSkipped.load();
         if(c!=cullNoted&&(c<16||c-cullNoted>=1000||!cullNoted)){
             cullNoted=c;std::ostringstream o;o<<"GUARD the culling job met a drawable that had left the tree: skipped ("<<c<<" so far)";
@@ -1539,6 +1563,7 @@ struct Runtime final:ds::Transport {
         }
         else{twin->tick(true,goal,speed,actions,hold);if(ownTwin)ownTwin->tick(true,nullptr);}
         stages.enter("gear",mod::nowUs());
+        repWatch=useOwn?ownEntity:0;
         tickGear(useOwn?ownEntity:0,anchor,now);
         stages.enter("stack",mod::nowUs());
         tickStack(useOwn?ownEntity:0,anchor);
@@ -1613,6 +1638,7 @@ struct Runtime final:ds::Transport {
             // The delay follows the link (core): say so when it has moved, so a log shows what the link was like.
             if(core->connected()){uint32_t d=core->presentationDelayMs();if(d>notedDelay+30||d+30<notedDelay){
                 std::ostringstream o;o<<"LINK partner shown "<<d<<" ms behind (was "<<notedDelay<<"), round trip "<<std::lround(core->rttMs())<<" ms\n";note(o.str().c_str());notedDelay=d;}}
+            repTickStart();
             stage="puppet";stages.enter("puppet",mod::nowUs());
             if(puppet&&gameContext) {
                 if(!puppet->armed()&&std::filesystem::exists(puppetCommand)) {
@@ -1954,6 +1980,7 @@ struct Runtime final:ds::Transport {
             if(body&&gameContext)tickBody();
             stage="pad";stages.enter("pad",mod::nowUs());
             tickPad();notePose();
+            repTickEnd(now);
             stage="idle";stages.enter("idle",mod::nowUs());
             if(unappliedReceive) {receiveApply.add(clock-unappliedReceive);unappliedReceive=0;}
             if(gameContext){auto line=stages.report(mod::nowUs());if(!line.empty())note(line.c_str());}
