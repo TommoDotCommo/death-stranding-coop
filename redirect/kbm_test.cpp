@@ -11,6 +11,11 @@ int main(){
     // The foreground answer: only the keyboard update's call, only while the script holds something.
     CHECK(answersForeground(true,ForegroundReturn));CHECK(!answersForeground(false,ForegroundReturn));
     CHECK(!answersForeground(true,ForegroundReturn+1));CHECK(!answersForeground(true,0x1a1871f));CHECK(!answersForeground(false,0));
+    // The pointer answer: only while the script holds something; the middle, pushed a third of the height the way the mouse moves.
+    CHECK(answersCursor(true));CHECK(!answersCursor(false));
+    {Point m;m.x=1000;m.y=500;auto c=cursor(m,900,0,0);CHECK(c.x==1000&&c.y==500);
+     c=cursor(m,900,3000,0);CHECK(c.x==1300&&c.y==500);c=cursor(m,900,0,-50);CHECK(c.x==1000&&c.y==200);
+     c=cursor(m,900,-300,-400);CHECK(c.x==820&&c.y==260);}
     Feed f;Input none;
     f.frame(false,none,1000);CHECK(!f.pending()&&!f.holding());
     Input w;w.keys[0]=0x57;w.keys[1]=0x10;w.keyCount=2;

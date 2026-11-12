@@ -35,6 +35,27 @@ inline bool answersForeground(bool holding,uint64_t callerRva){
 #endif
     return true;
 }
+// The pointer the game is told about (GetCursorPos) while a script holds something: the middle of its window, pushed
+// towards where the scripted mouse is moving by a third of the window's height. The game's selection wheels read the
+// pointer, not raw motion; without this they would follow the desktop's real pointer.
+struct Point {int32_t x=0,y=0;};
+inline bool answersCursor(bool holding){
+#ifdef MUTANT_KBM_CURSOR_ALWAYS
+    (void)holding;return true;
+#else
+    return holding;
+#endif
+}
+inline Point cursor(Point middle,int32_t height,int32_t mouseX,int32_t mouseY){
+    Point p=middle;
+    if(!mouseX&&!mouseY)return p;
+    double x=mouseX,y=mouseY,n=x*x+y*y,r=height/3.0,root=1;
+    for(int i=0;i<40;++i)root=0.5*(root+n/root);                   // sqrt without <cmath> (the proxy has no CRT maths)
+#ifndef MUTANT_KBM_CURSOR_FLAT
+    p.x+=int32_t(x/root*r);p.y+=int32_t(y/root*r);
+#endif
+    return p;
+}
 class Feed {
     bool down_[256]{};uint8_t buttons_=0;double carryX_=0,carryY_=0;uint64_t last_=0;
     Event queue_[QueueSize];unsigned head_=0,count_=0;

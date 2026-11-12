@@ -36,6 +36,7 @@ void keys(const std::string& word,Keys& k,size_t n){
     std::stringstream s(word);std::string b;
     while(std::getline(s,b,'+')){
         unsigned vk=0;
+        if(b=="LMB"||b=="RMB"||b=="MMB"){k.mouseButtons|=b[0]=='L'?1:b[0]=='R'?2:4;continue;}   // held with the keys
         if(b.size()==1&&((b[0]>='A'&&b[0]<='Z')||(b[0]>='0'&&b[0]<='9')))vk=uint8_t(b[0]);
         else if(b.size()>=2&&b.size()<=3&&b[0]=='F'&&b.find_first_not_of("0123456789",1)==std::string::npos){
             auto f=std::stoul(b.substr(1));if(f<1||f>12)fail(n,"unknown key "+b);vk=0x6f+unsigned(f);}
@@ -47,7 +48,7 @@ void keys(const std::string& word,Keys& k,size_t n){
         bool seen=false;for(size_t i=0;i<k.count;++i)seen=seen||k.vk[i]==vk;
         if(!seen)k.vk[k.count++]=uint8_t(vk);
     }
-    if(!k.count)fail(n,"no key");
+    if(!k.count&&!k.mouseButtons)fail(n,"no key");
 }
 int16_t speed(const std::string& word,size_t n){
     if(word.empty()||word.size()>6||word.find_first_not_of("0123456789",word[0]=='-'?1:0)!=std::string::npos||word=="-")fail(n,"mouse speed must be whole counts per second");

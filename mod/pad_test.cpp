@@ -19,6 +19,9 @@ int main(){
         CHECK(refused([&]{parse(bad,"S1");}));
     CHECK(refused([&]{parse("pad S1\n"+std::string(MaxBytes,' '),"S1");}));
     // Keyboard and mouse steps.
+    { auto k=parse("pad S1\nkey 1+LMB 300 mouse -3000 0\nkey RMB+LMB 50\nmouse 0 9 10 RMB\n","S1");
+      CHECK(k.size()==3&&k[0].keys.count==1&&k[0].keys.vk[0]=='1'&&k[0].keys.mouseButtons==1&&k[0].keys.mouseX==-3000);
+      CHECK(k[1].keys.count==0&&k[1].keys.mouseButtons==3);CHECK(k[2].keys.mouseButtons==2&&k[2].keys.mouseY==9); }
     { auto k=parse("pad S1\nkey W+SHIFT 1500\ntap E\nmouse 400 -30 500 W\nclick R 80\nkey x4C 300 mouse -200 0\nkey F5+ESC+W+W 10\n","S1");
       CHECK(k.size()==8);
       CHECK(k[0].keys.count==2&&k[0].keys.vk[0]==0x57&&k[0].keys.vk[1]==0x10&&k[0].ms==1500&&k[0].pad.buttons==0);

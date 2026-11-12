@@ -108,7 +108,7 @@ portable-test: thread-trace-test | build
 	@python3 -B ../mod/mutants.py --sources "pad_test.cpp" PAD_ANY_NAME PAD_ANY_MODULE PAD_ALL_USERS PAD_STATIC_PACKET
 	g++ -std=c++17 -Wall -Wextra -Werror kbm_test.cpp -o build/kbm-test
 	./build/kbm-test
-	@python3 -B ../mod/mutants.py --sources "kbm_test.cpp" KBM_ANY_HANDLE KBM_ALWAYS_FOREGROUND KBM_ANY_CALLER KBM_NO_RELEASE
+	@python3 -B ../mod/mutants.py --sources "kbm_test.cpp" KBM_ANY_HANDLE KBM_ALWAYS_FOREGROUND KBM_ANY_CALLER KBM_NO_RELEASE KBM_CURSOR_ALWAYS KBM_CURSOR_FLAT
 	g++ -std=c++17 -Wall -Wextra -Werror frame_cap_test.cpp -o build/frame-cap-test
 	./build/frame-cap-test
 	@python3 -B ../mod/mutants.py --sources "frame_cap_test.cpp" CAP_FOCUSED CAP_BURST

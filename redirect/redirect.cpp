@@ -307,6 +307,9 @@ using GetRawInputDataFn=UINT(WINAPI*)(HRAWINPUT,UINT,LPVOID,PUINT,UINT);
 using GetForegroundWindowFn=HWND(WINAPI*)();
 GetRawInputDataFn real_rawinput=nullptr;
 GetForegroundWindowFn real_foreground=nullptr;
+using GetCursorPosFn=BOOL(WINAPI*)(LPPOINT);
+GetCursorPosFn real_cursor=nullptr;
+std::atomic<int32_t> kbm_mouse_x{0},kbm_mouse_y{0};
 redirect::kbm::Feed kbm_feed;
 redirect::kbm::Event kbm_current;
 HWND kbm_window=nullptr;
@@ -340,6 +343,7 @@ bool kbm_peek(const redirect::trace::Call& call,LPMSG msg,UINT lo,UINT hi,UINT r
     auto us=uint64_t(now.QuadPart/cap_frequency.QuadPart)*1000000+uint64_t(now.QuadPart%cap_frequency.QuadPart)*1000000/uint64_t(cap_frequency.QuadPart);
     kbm_feed.frame(active,in,us);
     kbm_holding.store(kbm_feed.holding()||kbm_feed.pending(),std::memory_order_release);
+    kbm_mouse_x.store(active?in.mouseX:0,std::memory_order_release);kbm_mouse_y.store(active?in.mouseY:0,std::memory_order_release);
     return false;
 }
 uint8_t* kbm_lifted=nullptr;uint8_t kbm_lifted_value=0;
@@ -380,6 +384,19 @@ __attribute__((noinline)) HWND WINAPI hook_GetForegroundWindow() {
     auto window=kbm_window;
     if(window && caller>=host.hostBase && redirect::kbm::answersForeground(kbm_holding.load(std::memory_order_acquire),caller-host.hostBase))return window;
     return real_foreground();
+}
+
+// The game's selection wheels read the pointer: while a script holds something they get the scripted one (virtual_kbm.h).
+BOOL WINAPI hook_GetCursorPos(LPPOINT point) {
+    auto window=kbm_window;
+    if(!point || !window || !redirect::kbm::answersCursor(kbm_holding.load(std::memory_order_acquire)))return real_cursor(point);
+    RECT r{};POINT middle{};
+    if(!GetClientRect(window,&r))return real_cursor(point);
+    middle.x=(r.right-r.left)/2;middle.y=(r.bottom-r.top)/2;
+    if(!ClientToScreen(window,&middle))return real_cursor(point);
+    redirect::kbm::Point m;m.x=middle.x;m.y=middle.y;
+    auto p=redirect::kbm::cursor(m,r.bottom-r.top,kbm_mouse_x.load(std::memory_order_acquire),kbm_mouse_y.load(std::memory_order_acquire));
+    point->x=p.x;point->y=p.y;return TRUE;
 }
 
 redirect::trace::Call trace_enter(redirect::trace::Api api,void* caller) noexcept {
@@ -451,6 +468,8 @@ size_t patch(HMODULE module) {
                     replace_import(&iat->u1.Function,reinterpret_cast<FARPROC>(hook_GetRawInputData));trace_imports|=4;++count;
                 } else if(real_foreground && iat->u1.Function==reinterpret_cast<ULONG_PTR>(real_foreground)) {
                     replace_import(&iat->u1.Function,reinterpret_cast<FARPROC>(hook_GetForegroundWindow));trace_imports|=8;++count;
+                } else if(real_cursor && iat->u1.Function==reinterpret_cast<ULONG_PTR>(real_cursor)) {
+                    replace_import(&iat->u1.Function,reinterpret_cast<FARPROC>(hook_GetCursorPos));trace_imports|=16;++count;
                 }
             }
             for(auto& e:entries) if(module!=e.skip && iat->u1.Function==(ULONG_PTR)e.original) {
@@ -1099,7 +1118,8 @@ void install_redirect(void* self,bool releaseSession) {
             auto user32=GetModuleHandleW(L"user32.dll");
             real_rawinput=user32?reinterpret_cast<GetRawInputDataFn>(real_gpa(user32,"GetRawInputData")):nullptr;
             real_foreground=user32?reinterpret_cast<GetForegroundWindowFn>(real_gpa(user32,"GetForegroundWindow")):nullptr;
-            if(!real_rawinput||!real_foreground) fatal("redirect: raw input APIs unavailable\n");
+            real_cursor=user32?reinterpret_cast<GetCursorPosFn>(real_gpa(user32,"GetCursorPos")):nullptr;
+            if(!real_rawinput||!real_foreground||!real_cursor) fatal("redirect: raw input APIs unavailable\n");
             if(!cap_frequency.QuadPart)QueryPerformanceFrequency(&cap_frequency);
             note(L"VIRTUAL_KBM",L"enabled",L"scripted raw keyboard and mouse on the game thread");
         }

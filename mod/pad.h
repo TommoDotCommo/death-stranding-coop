@@ -13,7 +13,10 @@
 //   tap E [150]                hold keys for ms (120), then 200 ms released
 //   mouse 400 0 500 [KEYS]     move the mouse at DX,DY counts per second for ms, optionally holding keys
 //   click L [150]              hold a mouse button (L R M) for ms (120), then 200 ms released
-// Keys: A-Z 0-9 F1-F12 SPACE ENTER ESC TAB BACK SHIFT CTRL ALT UP DOWN LEFT RIGHT, or xNN (hex virtual key).
+// Keys: A-Z 0-9 F1-F12 SPACE ENTER ESC TAB BACK SHIFT CTRL ALT UP DOWN LEFT RIGHT, or xNN (hex virtual key);
+// LMB RMB MMB in a key list hold that mouse button with the keys (key 1+LMB 300 mouse -3000 0).
+// While a script holds something the game is told the pointer is in the middle of its window, pushed the way the
+// scripted mouse moves: that is what the game's selection wheels read.
 #include <cstdint>
 #include <string>
 #include <vector>
