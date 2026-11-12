@@ -36,6 +36,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "online.h"
 #include "vitals.h"
 #include "enemies.h"
+#include "orders.h"
 #include "link.h"
 #include "nametag.h"
 #include "notice.h"
@@ -256,6 +257,7 @@ struct Runtime final:ds::Transport {
             if(e.type==mod::carry::WireType){if(config.carryVisual)carry.incoming(e,carrySink);continue;}   // ds3: tickCarry
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(e.type==mod::enemies::WireType){enemyIn.push_back(e);continue;}   // a MULE went down (tickEnemies)
+            if(e.type==mod::orders::WireType){orderIn.push_back(e);continue;}    // an order changed (tickOrders)
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
             if(e.type==mod::likes::WireType){likeIn.push_back(e);continue;}   // a like (tickLikes, likes.h)
             if(e.type==mod::nametag::WireType){if(auto n=nameRx.feed(e)){partnerName=*n;note(("TAG partner name "+std::to_string(n->size())+" bytes\n").c_str());}continue;}   // nametag.h
@@ -654,6 +656,32 @@ struct Runtime final:ds::Transport {
     }
     mod::structures::NetCopies netCopies;uint64_t structRemoved=0;
     std::vector<ds::CargoEvent> structIn;
+    // Shared orders (orders.h): opt-in share_orders. Standard orders only.
+    mod::orders::Sync orderSync;std::vector<ds::CargoEvent> orderIn;std::function<bool(uint64_t,uint8_t)> orderRequest;std::map<uint64_t,uint8_t> orderDetails;
+    uint64_t orderReadAt=0,orderSent=0,orderApplied=0;bool orderTried=false,orderLinked=false;
+    void tickOrders(uint64_t now) {
+        if(!core||!sampler||!config.shareOrders){orderIn.clear();return;}
+        if(!orderTried){orderTried=true;try{orderRequest=mod::orders::nativeRequest(*sampler);}catch(const std::exception& e){note((std::string("ORDER unavailable: ")+e.what()+"\n").c_str());}}
+        bool linked=core->connected()&&partnerMode();
+        if(!linked&&orderLinked)orderSync.reset();   // the next partner is told what is under way
+        orderLinked=linked;
+        if(!orderRequest||!linked){orderIn.clear();return;}
+        if(orderIn.empty()&&now-orderReadAt<1000)return;
+        orderReadAt=now;
+        auto orders=mod::orders::readOrders(*sampler,sampler->base,orderDetails);if(orders.empty())return;
+        static const char* names[]={"","start","success","fail"};
+        for(auto& e:orderIn){
+            mod::orders::Change c{e.ref,uint8_t(e.item)};if(c.what<1||c.what>3)continue;
+            if(!orderSync.wanted(orders,c)){std::ostringstream o;o<<"ORDER partner's "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<" does not apply here\n";note(o.str().c_str());continue;}
+            bool ok=orderRequest(c.id,c.what);if(ok){orderSync.applied(c);++orderApplied;}
+            std::ostringstream o;o<<"ORDER partner: "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<(ok?" requested":" refused by the game")<<"\n";note(o.str().c_str());
+        }
+        if(!orderIn.empty()){orderIn.clear();return;}   // the game runs the requests on its next update: look again then
+        for(auto& c:orderSync.observe(orders)){
+            ds::CargoEvent e;e.type=mod::orders::WireType;e.item=c.what;e.ref=c.id;core->queueCargo(e);++orderSent;
+            std::ostringstream o;o<<"ORDER "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<" here -> partner\n";note(o.str().c_str());
+        }
+    }
     // Shared MULEs (enemies.h): opt-in share_enemies. Each look sends the MULEs this player's game saw go down and
     // puts down the ones the partner reports, with the game's own defeat function.
     mod::enemies::Sync enemySync;std::vector<ds::CargoEvent> enemyIn;std::function<void(uint64_t,uint8_t)> enemyDefeat;
@@ -1392,6 +1420,7 @@ struct Runtime final:ds::Transport {
             stage="structures";stages.enter("structures",mod::nowUs());
             if(twin&&gameContext)tickStructures(now);
             if(twin&&gameContext)tickEnemies(now);
+            if(twin&&gameContext)tickOrders(now);
             stage="markers";stages.enter("markers",mod::nowUs());
             if(twin&&gameContext)tickMarkers(now);
             stage="likes";stages.enter("likes",mod::nowUs());
@@ -1416,18 +1445,13 @@ struct Runtime final:ds::Transport {
                     note(("PART "+std::to_string(*code/2)+(*code&1?" on":" off")+(ok?"\n":" failed\n")).c_str());
                 }
                 else if(auto order=mod::puppet::parseCargoCommand(text,mod::runStamp(),"order");order) {
-#ifdef _WIN32
-                    // Research: "order <mission id>" asks the game's mission system to start that order (its own queued
-                    // request, 0x33b80a0); "order <id + 1000000000>" asks it to complete it (0x33b82d0).
-                    const uint8_t start[16]={0x40,0x53,0x56,0x41,0x56,0x41,0x57,0x48,0x83,0xec,0x48,0x45,0x0f,0xb6,0xf8,0x45},done[16]={0x40,0x53,0x55,0x41,0x54,0x41,0x56,0x41,0x57,0x48,0x83,0xec,0x40,0x45,0x0f,0xb6};
-                    uint8_t a[16]{},b[16]{};uint64_t system=0;bool finish=*order>=1000000000u;uint64_t id=finish?*order-1000000000u:*order;
-                    if(!sampler->read(sampler->base+0x33b80a0,a,16)||std::memcmp(a,start,16)||!sampler->read(sampler->base+0x33b82d0,b,16)||std::memcmp(b,done,16)||!sampler->read(sampler->base+0x7c0aff8,&system,8)||!system)note("ORDER research unavailable\n");
-                    else{
-                        auto f=reinterpret_cast<uint8_t(*)(void*,uint64_t,uint8_t,uint8_t)>(sampler->base+(finish?0x33b82d0:0x33b80a0));
-                        auto r=f(reinterpret_cast<void*>(system),id,0,0);
-                        std::ostringstream o;o<<"ORDER "<<(finish?"success":"start")<<" request id "<<std::hex<<id<<std::dec<<" returned "<<int(r)<<"\n";note(o.str().c_str());
-                    }
-#endif
+                    // Test: "order <mission id>" asks the game to start that order; + 1000000000 to complete it,
+                    // + 2000000000 to give it up (the game's own queued requests, orders.h).
+                    try{
+                        auto request=mod::orders::nativeRequest(*sampler);uint8_t what=uint8_t(1+*order/1000000000u);uint64_t id=*order%1000000000u;
+                        bool ok=what<=3&&request(id,what);
+                        std::ostringstream o;o<<"ORDER test: request "<<int(what)<<" id "<<std::hex<<id<<std::dec<<(ok?" accepted":" refused")<<"\n";note(o.str().c_str());
+                    }catch(const std::exception& e){note((std::string("ORDER test unavailable: ")+e.what()+"\n").c_str());}
                 }
                 else if(auto kind=mod::puppet::parseCargoCommand(text,mod::runStamp(),"mule");kind&&anchor.pose.available) {
                     // Test: "mule <kind>" puts the standing MULE nearest to the porter down (0 knocked, 1 fainted, 2 asleep, 3 dead).

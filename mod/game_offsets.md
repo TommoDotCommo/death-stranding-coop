@@ -1004,6 +1004,25 @@ to phase 5 in both copies by itself. `0x2aa8000(actor, 1)` on a MULE with an ent
 on the ground; called in the partner's game for the same UUID it did the same there. No Gazer or Catcher actor was
 live at that place (units of 256 and 1, none live): BTs are not mapped beyond the unit kinds.
 
+## Orders: the mission system (2026-11-12, static, the reads and the three requests confirmed live)
+
+`DSMissionSystem* S = *(image+0x7c0aff8)`. Static orders: `*(S+0x108)` -> {count (i32), records pointer at +8}, one
+0xa0-byte record per order: `+0x00` its resource, `+0x08` a runtime instance while it is under way, `+0x2a` result
+(1 not started, 2 under way or failed, 4 completed), `+0x2c` state (u16: 1 available, 4 in progress, 8 failed, 16
+success, 64 not available), `+0x38` the mission id. Resource: `+0x40` the order number shown to the player, `+0x46`
+category detail (0 main, 1 sub, 2 standard delivery, 3 standard collection, 8 race, 9 firing range). `+0x110` holds
+dynamic orders (lost cargo; ids with bit 62) and `+0x118` online ones. A cargo record's `+0xb0` is the id of its
+order.
+
+Requests are queued under the system's lock and run by its own update: start `0x33b80a0(S, id, 0, 0)` (returns 1
+when accepted; the order must be available), success `0x33b82d0(S, id, 0, 0)`, fail `0x33b75e0(S, record)` (reads
+only the record's `+0x38`).
+
+Live, Episode 3 save: 1140 records, 723 with an id (485 standard deliveries, 66 collections, 96 main and sub), 53
+completed, none under way. Start of order 0x36330 (no. 414): state 4, an instance, result 2, and the game made two
+cargo records with `+0xb0` = the id. Success: state 16, result 4, no instance. Fail of another: state 8, result 2.
+The same three requests in the partner's game gave the same states there.
+
 ### The partner's own body, live (2026-11-07)
 
 `EntityResource_ExportedCreateEntity` (0x23806a0; the existing puppet probe's signature-checked call) **does** create
