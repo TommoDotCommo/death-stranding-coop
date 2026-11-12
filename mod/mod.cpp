@@ -1415,6 +1415,20 @@ struct Runtime final:ds::Transport {
                     bool ok=partToggle(ownEntity,*code/2,*code&1);
                     note(("PART "+std::to_string(*code/2)+(*code&1?" on":" off")+(ok?"\n":" failed\n")).c_str());
                 }
+                else if(auto order=mod::puppet::parseCargoCommand(text,mod::runStamp(),"order");order) {
+#ifdef _WIN32
+                    // Research: "order <mission id>" asks the game's mission system to start that order (its own queued
+                    // request, 0x33b80a0); "order <id + 1000000000>" asks it to complete it (0x33b82d0).
+                    const uint8_t start[16]={0x40,0x53,0x56,0x41,0x56,0x41,0x57,0x48,0x83,0xec,0x48,0x45,0x0f,0xb6,0xf8,0x45},done[16]={0x40,0x53,0x55,0x41,0x54,0x41,0x56,0x41,0x57,0x48,0x83,0xec,0x40,0x45,0x0f,0xb6};
+                    uint8_t a[16]{},b[16]{};uint64_t system=0;bool finish=*order>=1000000000u;uint64_t id=finish?*order-1000000000u:*order;
+                    if(!sampler->read(sampler->base+0x33b80a0,a,16)||std::memcmp(a,start,16)||!sampler->read(sampler->base+0x33b82d0,b,16)||std::memcmp(b,done,16)||!sampler->read(sampler->base+0x7c0aff8,&system,8)||!system)note("ORDER research unavailable\n");
+                    else{
+                        auto f=reinterpret_cast<uint8_t(*)(void*,uint64_t,uint8_t,uint8_t)>(sampler->base+(finish?0x33b82d0:0x33b80a0));
+                        auto r=f(reinterpret_cast<void*>(system),id,0,0);
+                        std::ostringstream o;o<<"ORDER "<<(finish?"success":"start")<<" request id "<<std::hex<<id<<std::dec<<" returned "<<int(r)<<"\n";note(o.str().c_str());
+                    }
+#endif
+                }
                 else if(auto kind=mod::puppet::parseCargoCommand(text,mod::runStamp(),"mule");kind&&anchor.pose.available) {
                     // Test: "mule <kind>" puts the standing MULE nearest to the porter down (0 knocked, 1 fainted, 2 asleep, 3 dead).
                     try{
