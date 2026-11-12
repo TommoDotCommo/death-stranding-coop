@@ -1024,6 +1024,33 @@ completed, none under way. Start of order 0x36330 (no. 414): state 4, an instanc
 cargo records with `+0xb0` = the id. Success: state 16, result 4, no instance. Fail of another: state 8, result 2.
 The same three requests in the partner's game gave the same states there.
 
+## Save sections: the game's own serialization over a memory buffer (2026-11-12, static; one section run live)
+
+The save is about 45 sections written and read in a fixed order by two straight-line functions (master save
+`0x2e1e190`, master load `0x2e11820`), each section by its subsystem's own pair of functions over an abstract byte
+stream. Each section opens its own tagged scope and writes its version first, so a section can be called alone.
+
+- Memory stream over a plain buffer: `0x18fc750(obj[0x30, zeroed], u8 mode, buf, i32 size)` (mode 1 to write, 0 to
+  read); `+0x18` begin, `+0x20` cursor, `+0x28` end.
+- Writer: `0x1d3d420(writer[reserve 0x1000], stream, 0x40, 0x2000)`, finish `0x1d3e8d0(writer)`; bytes
+  `0x1d42820`, variable-length integer `0x1d42760`.
+- Reader (`LoadState`): `0x1d3d270(reader[0xa8, zeroed], u16 0, stream, u32 size)`; bytes `0x1d41230`, integer
+  `0x1d40c00`, scope `0x26215a0`.
+- Section pairs (object global: load, save): weather forecast `0x7bf83b8`: `0x2e12520`, `0x2e1e990`; constructions
+  `0x7bf4960`: `0x2c9b780`, `0x2ccec10` (per record: write `0x2ca7970(manager, writer, request)`, read
+  `0x2c99c50(manager, reader, request, version)`); cargo `0x7bf4968`: `0x2c9b1d0`, `0x2cce980` (its loader empties
+  the lists first); mission system `0x7c0aff8`: `0x33b4f80`, `0x33c66a0`; MULE manager `0x7bf09d8`: `0x2b11db0`,
+  `0x2b2ba70`; gazer manager `0x7bebec0`: `0x299fc90`, `0x29a6800`; user map markers (getter `0x2f40090`):
+  `0x2f35a70`, `0x2f3eda0`; roads `0x7c173b0`: `0x3472eb0`, `0x3477da0`; vehicles (in `0x7bfecc0`): `0x2f79f10`,
+  `0x2fa6450`. Most loaders assume a world that is being built (they append or clear); only sections that are
+  overwritten in place are candidates for a running game.
+
+Live, the weather forecast (mod research command `stream`): written on the game thread of a running game it is
+21334 bytes; the section of a copy on the Episode 3 save was read into a running copy on the Episode 1 save, both
+games ran on, and the receiver's section written out again differed from the source in 291 bytes (one block at
+5323..6635 and one bit) where it had differed in 4938 before. What the game shows after that (sky, rain) was not
+looked at.
+
 ### The partner's own body, live (2026-11-07)
 
 `EntityResource_ExportedCreateEntity` (0x23806a0; the existing puppet probe's signature-checked call) **does** create

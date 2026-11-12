@@ -1456,6 +1456,40 @@ struct Runtime final:ds::Transport {
                     bool ok=partToggle(ownEntity,*code/2,*code&1);
                     note(("PART "+std::to_string(*code/2)+(*code&1?" on":" off")+(ok?"\n":" failed\n")).c_str());
                 }
+                else if(auto stream=mod::puppet::parseCargoCommand(text,mod::runStamp(),"stream");stream) {
+#ifdef _WIN32
+                    // Research: the game's own save sections over a memory buffer (game_offsets.md, "Save sections").
+                    // "stream 1" writes the weather forecast section to stream-weather.bin beside the command file,
+                    // "stream 2" reads that file into this game's forecast, "stream 3" writes it again as
+                    // stream-weather-after.bin (to compare).
+                    const uint64_t base=sampler->base;uint64_t forecast=0;auto file=rideCommand.parent_path()/(*stream==3?"stream-weather-after.bin":"stream-weather.bin");
+                    if(!sampler->read(base+0x7bf83b8,&forecast,8)||!forecast)note("STREAM no forecast object\n");
+                    else if(*stream==1||*stream==3){
+                        static std::vector<uint8_t> buffer(1<<20);alignas(16) static uint8_t memory[0x30],writer[0x1000];
+                        std::memset(memory,0,sizeof memory);std::memset(writer,0,sizeof writer);
+                        reinterpret_cast<void(*)(void*,uint8_t,void*,int32_t)>(base+0x18fc750)(memory,1,buffer.data(),int32_t(buffer.size()));
+                        reinterpret_cast<void(*)(void*,void*,uint32_t,uint32_t)>(base+0x1d3d420)(writer,memory,0x40,0x2000);
+                        reinterpret_cast<void(*)(void*,void*)>(base+0x2e1e990)(reinterpret_cast<void*>(forecast),writer);
+                        reinterpret_cast<void(*)(void*)>(base+0x1d3e8d0)(writer);
+                        uint64_t begin=0,cursor=0;std::memcpy(&begin,memory+0x18,8);std::memcpy(&cursor,memory+0x20,8);size_t n=size_t(cursor-begin);
+                        if(n>buffer.size())n=0;
+                        std::ofstream(file,std::ios::binary).write(reinterpret_cast<const char*>(buffer.data()),std::streamsize(n));
+                        uint32_t sum=0;for(size_t i=0;i<n;++i)sum=sum*31+buffer[i];
+                        std::ostringstream o;o<<"STREAM wrote weather section: "<<n<<" bytes, sum "<<std::hex<<sum<<std::dec<<"\n";note(o.str().c_str());
+                    }
+                    else if(*stream==2){
+                        std::ifstream in(file,std::ios::binary);static std::vector<uint8_t> buffer;buffer.assign(std::istreambuf_iterator<char>(in),std::istreambuf_iterator<char>());
+                        if(buffer.empty())note("STREAM no file to read\n");
+                        else{
+                            alignas(16) static uint8_t memory[0x30],reader[0x200];std::memset(memory,0,sizeof memory);std::memset(reader,0,sizeof reader);
+                            reinterpret_cast<void(*)(void*,uint8_t,void*,int32_t)>(base+0x18fc750)(memory,0,buffer.data(),int32_t(buffer.size()));
+                            reinterpret_cast<void(*)(void*,uint16_t,void*,uint32_t)>(base+0x1d3d270)(reader,0,memory,uint32_t(buffer.size()));
+                            reinterpret_cast<void(*)(void*,void*)>(base+0x2e12520)(reinterpret_cast<void*>(forecast),reader);
+                            std::ostringstream o;o<<"STREAM read weather section: "<<buffer.size()<<" bytes\n";note(o.str().c_str());
+                        }
+                    }
+#endif
+                }
                 else if(auto order=mod::puppet::parseCargoCommand(text,mod::runStamp(),"order");order) {
                     // Test: "order <mission id>" asks the game to start that order; + 1000000000 to complete it,
                     // + 2000000000 to give it up (the game's own queued requests, orders.h).
