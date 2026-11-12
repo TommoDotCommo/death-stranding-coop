@@ -86,12 +86,23 @@ std::vector<Down> Sync::observe(const std::vector<Mule>& mules){
         uint64_t k=key(m.uuid);uint8_t now=condition(m.state,m.flags);next[k]=now;
         auto old=seen_.find(k);
         auto mark=applied_.find(k);
-        if(now==Up){if(mark!=applied_.end()&&mark->second)applied_.erase(mark);continue;}
+        if(now==Up){pending_.erase(k);if(mark!=applied_.end()&&mark->second)applied_.erase(mark);continue;}
 #ifndef MUTANT_ENEMY_ECHO
         if(mark!=applied_.end()){mark->second=true;continue;}           // put down here for the partner: not news
 #endif
+        // Reported at the second look in a row that shows it down the same way after it was seen standing: the game
+        // passes a MULE through a down state for a moment when it brings its body in.
+        auto wait=pending_.find(k);
+        if(wait!=pending_.end()){
+            if(wait->second==now)out.push_back({k,now});
+            pending_.erase(wait);continue;
+        }
         if(!primed_||old==seen_.end()||old->second!=Up)continue;      // already down, or not seen standing before
+#ifndef MUTANT_ENEMY_HASTY
+        pending_[k]=now;
+#else
         out.push_back({k,now});
+#endif
     }
     seen_.swap(next);primed_=true;
     return out;

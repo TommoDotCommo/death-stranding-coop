@@ -50,7 +50,7 @@ public:
     const Mule* wanted(const std::vector<Mule>&,const Down&) const;
     void applied(uint64_t key){applied_[key]=false;}
 private:
-    std::map<uint64_t,uint8_t> seen_;std::map<uint64_t,bool> applied_;bool primed_=false;
+    std::map<uint64_t,uint8_t> seen_,pending_;std::map<uint64_t,bool> applied_;bool primed_=false;
 };
 // The game's own defeat (0x2aa8000): through the damage component when the MULE has a body, by state otherwise.
 std::function<void(uint64_t actor,uint8_t kind)> nativeDefeat(discovery::Sampler&);
