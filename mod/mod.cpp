@@ -759,7 +759,21 @@ struct Runtime final:ds::Transport {
         repBody.entity=repWatch;repSelf.entity=anchorNow().entity;
         for(auto* w:{&repBody,&repSelf}){w->entryEntity=w->entity;w->entryHead=repQueue(w->entity);if(w->entryHead)++w->waiting;}
     }
+    // The game thread's last tick, for the watchdog on the mod's own thread (guard_win.h, breakEndlessWalk).
+    std::atomic<uint64_t> gameTickUs{0};uint64_t ringTriedUs=0;unsigned ringNoted=0;
+    void watchRing(uint64_t clockUs){
+#ifdef _WIN32
+        uint64_t last=gameTickUs.load(std::memory_order_relaxed);
+        if(!last||clockUs<last||clockUs-last<2000000||clockUs-ringTriedUs<500000)return;
+        ringTriedUs=clockUs;mod::guard::breakEndlessWalk();
+        unsigned n=mod::guard::ringsBroken.load();
+        if(n!=ringNoted){ringNoted=n;try{note(("GUARD the game thread was waiting for a walk of a dangling queue that did not end: the walk was sent to its end ("+std::to_string(n)+" so far)\n").c_str());}catch(...){}}
+#else
+        (void)clockUs;
+#endif
+    }
     void repTickEnd(uint64_t now){
+        gameTickUs.store(mod::nowUs(),std::memory_order_relaxed);
         if(!repTried&&sampler){repTried=true;
 #ifdef _WIN32
             static const uint8_t want[17]={0x48,0x89,0x5c,0x24,0x18,0x56,0x48,0x83,0xec,0x20,0x48,0x8b,0x99,0x28,0x02,0x00,0x00};uint8_t got[17]{};
@@ -1122,6 +1136,7 @@ struct Runtime final:ds::Transport {
                     continue;
                 }
                 auto clock=mod::nowUs();auto now=clock/1000;
+                watchRing(clock);
                 if(lastNetwork)networkTick.add(clock-lastNetwork);
                 lastNetwork=clock;
                 #ifndef MOD_FAKE_NETWORK

@@ -84,9 +84,24 @@ inline bool cullRepairable(const CullFacts& f){
         &&f.objectLeaf==0&&f.objectIndex==0xffffffffu&&(f.objectFlags&(1u<<26))&&(f.objectFlags&(1u<<9));
 #endif
 }
+// A dangling queue can also be a ring (a node whose next is itself): the walk then never ends and never faults,
+// and the main thread waits for that job for good. No fault handler sees that. A watchdog does: when the game thread
+// has been silent, a thread that is found again and again inside the walk's own loop is sent to the walk's end.
+inline bool inWalk(uint64_t rip,uint64_t image){
+#ifdef MUTANT_GUARD_WALK_WIDE
+    return image&&rip>=image+0x237e240&&rip<image+0x237e2f5;
+#else
+    return image&&rip>=image+0x237e267&&rip<image+0x237e2d2;
+#endif
+}
+// Inside the walk or what it calls for each node of a ring (the dispatcher 0x22bdee0, which returns at once when the
+// node's target is gone): a thread seen here at every look is a candidate.
+inline bool nearWalk(uint64_t rip,uint64_t image){return inWalk(rip,image)||(image&&rip>=image+0x22bdee0&&rip<image+0x22bdf21);}
 }
 #ifdef _WIN32
 #include <windows.h>
+#include <tlhelp32.h>
+#include <vector>
 #include <cstring>
 #include <atomic>
 #include <cstdint>
@@ -175,6 +190,43 @@ inline LONG CALLBACK handler(EXCEPTION_POINTERS* e){
     }
     c->Rip=back;c->Rsp+=8;
     return EXCEPTION_CONTINUE_EXECUTION;
+}
+inline std::atomic<unsigned> ringsBroken{0};
+// Called from a thread of the mod while the game thread is silent. Looks at every other thread of the process a few
+// times, 10 ms apart; a thread that was in or next to the walk at every look, and can be stopped inside the walk's
+// own loop, is resumed at the walk's end with rbp = 0 (the queue is emptied). Returns how many were sent there.
+inline unsigned breakEndlessWalk(){
+    uint64_t s=site.load(std::memory_order_acquire);if(!s||!walkOk.load(std::memory_order_acquire))return 0;
+    uint64_t image=s-0x22bdf1a;DWORD pid=GetCurrentProcessId(),self=GetCurrentThreadId();
+    std::vector<DWORD> threads;
+    HANDLE snap=CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD,0);if(snap==INVALID_HANDLE_VALUE)return 0;
+    THREADENTRY32 te{};te.dwSize=sizeof te;
+    if(Thread32First(snap,&te))do{if(te.th32OwnerProcessID==pid&&te.th32ThreadID!=self)threads.push_back(te.th32ThreadID);}while(Thread32Next(snap,&te));
+    CloseHandle(snap);
+    auto where=[](HANDLE h,uint64_t& rip){alignas(16) CONTEXT c{};c.ContextFlags=CONTEXT_CONTROL;if(!GetThreadContext(h,&c))return false;rip=c.Rip;return true;};
+    unsigned sent=0;
+    for(DWORD tid:threads){
+        HANDLE h=OpenThread(THREAD_SUSPEND_RESUME|THREAD_GET_CONTEXT|THREAD_SET_CONTEXT,FALSE,tid);if(!h)continue;
+        bool stuck=true;
+        for(int look=0;look<6&&stuck;++look){
+            if(look)Sleep(10);
+            uint64_t rip=0;if(SuspendThread(h)==DWORD(-1)){stuck=false;break;}
+            stuck=where(h,rip)&&nearWalk(rip,image);ResumeThread(h);
+        }
+        // Stuck: stop it inside the walk's own loop (a few tries: it also spends time in the dispatcher) and send it out.
+        for(int tries=0;stuck&&tries<400;++tries){
+            if(SuspendThread(h)==DWORD(-1))break;
+            alignas(16) CONTEXT c{};c.ContextFlags=CONTEXT_CONTROL|CONTEXT_INTEGER;
+            if(GetThreadContext(h,&c)&&inWalk(c.Rip,image)){
+                c.Rbp=0;c.Rip=image+0x237e2d2;
+                if(SetThreadContext(h,&c)){++sent;ringsBroken.fetch_add(1,std::memory_order_relaxed);}
+                ResumeThread(h);break;
+            }
+            ResumeThread(h);
+        }
+        CloseHandle(h);
+    }
+    return sent;
 }
 // base: the game image. Installed once, ahead of the other handlers.
 inline void install(uint64_t base){
