@@ -1608,10 +1608,10 @@ struct Runtime final:ds::Transport {
 #endif
                 }
                 else if(auto gz=mod::puppet::parseCargoCommand(text,mod::runStamp(),"gazer");gz&&anchor.pose.available) {
-                    // Test: "gazer 1" destroys the nearest living gazer the way a partner's kill does.
+                    // Test: "gazer 1" destroys the nearest living gazer the way a partner's kill does ("gazer 2": the nearest with a body).
                     auto at=mod::puppet::transform(anchor.pose).position;double best=1e18;uint64_t pick=0;uint32_t lod=0;
                     for(auto& g:mod::bts::readGazers(*sampler,sampler->base)){
-                        double p[3]{};if(!(g.life>0)||mod::bts::dynamic(g.flags)||!sampler->read(g.address+0x28,p,24))continue;
+                        double p[3]{};if(!(g.life>0)||mod::bts::dynamic(g.flags)||(*gz==2&&g.lod!=2)||!sampler->read(g.address+0x28,p,24))continue;
                         double d=(p[0]-at[0])*(p[0]-at[0])+(p[1]-at[1])*(p[1]-at[1]);if(d<best){best=d;pick=g.address;lod=g.lod;}
                     }
                     try{if(pick)mod::bts::nativeDestroy(*sampler)(pick);}catch(const std::exception&){pick=0;}
