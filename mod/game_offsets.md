@@ -1056,6 +1056,26 @@ games ran on, and the receiver's section written out again differed from the sou
 5323..6635 and one bit) where it had differed in 4938 before. What the game shows after that (sky, rain) was not
 looked at.
 
+### BTs: the gazer and catcher managers (2026-11-12, static; the reads confirmed live)
+
+Gazer manager `G = *(image+0x7bebec0)`: `+0x238` byte "timefall here" (the weather map at the sampled position
+`+0x118`: on below -0.5, off above -0.3); registered BT areas `+0x320` (count) / `+0x328` (pointers), active ones
+`+0x330` / `+0x338`, rebuilt every frame; live gazer actor ids `+0x78` / `+0x80`. An area object: position `+0x20`
+(3 doubles), radius `+0x22c`, a byte `+0x29b`, its UUID at `+0x98`. A gazer actor (in the unit with vtable
+0x3da58a8, index = id & 0x1fff minus the unit's first): locator `+0x18`, LOD `+0x24`, transform `+0x28`, flags
+`+0x2e4` (bit 0 has an entity, 3 dead, 9 active), life `+0x2b0` (float). Catcher manager `C = *(image+0x7bee060)`:
+streamed territories `+0x308` / `+0x310` (`DSCatcherTerritoryLocator`: UUID `+0x8`, encounter radius `+0x80`,
+annihilation radius `+0x84`), catcher records `+0x88` / `+0x90` (stride 0x110, `+0xf0` byte 0 = active), cleared
+spheres `+0xa8` / `+0xb0` (4 floats each). Hunter manager (inferred) `*(image+0x7becbd0)`, `+0x140` non-zero while
+a hunter crowd is up. `*(image+0x7becbc0)` is the catcher jellyfish manager.
+
+Live, Episode 3 save: 25 areas registered around Lake Knot City, none active in clear weather. In the area at
+668,252 (radius 250): on arrival 74 gazer actors were live (each with a locator UUID) and one territory streamed
+(encounter radius 230, annihilation 75); the byte `+0x29b` of that area was 1, of far ones 0. When the mod's shared
+rain made the map wet there, `G+0x238` went to 1, the area was in the active list, and the ten gazers with an
+entity (20 to 45 m away, life 300 to 1500) had flags 0x90a01 or 0xa0a01; the others 0x90200 and 0x10200 without an
+entity, and 35 with bit 2 (0x10004, 0x1010004) not decoded. No catcher record, no cleared sphere, no hunter crowd.
+
 ### Creation callback with no function (2026-11-12, from two crash dumps)
 
 `0x22bdee0(delegate)`: if `delegate+0x10` (a weak target, object = value - 8) is set it calls the function pointer at
