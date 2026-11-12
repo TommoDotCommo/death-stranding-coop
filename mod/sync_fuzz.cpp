@@ -65,19 +65,20 @@ void cargoRun(unsigned seed){
 void structuresRun(unsigned seed){
     std::mt19937 rng(seed^0x5eed);unsigned step=0;structures::Sync s;
     std::map<uint32_t,structures::Record> world;std::map<uint32_t,bool> standing,announcedOpen;   // built and known; announced and not yet removed
+    auto present=[](uint8_t state){return state==1||state==2||state==4;};   // out of sight (1) and being made (4) still stand
     for(step=0;step<400;++step){
         int a=int(rng()%6);
         if(a<=1){structures::Record r;uint32_t band=rng()%3;r.id=band==0?uint32_t(rng()%5000):band==1?10000+uint32_t(rng()%200):100000+uint32_t(rng()%200);
-            r.type=uint8_t(rng()%46);r.state=uint8_t(rng()%3);r.at.rotation=structures::rotation(0,0,0);world[r.id]=r;}
-        else if(a==2&&!world.empty()){auto it=std::next(world.begin(),long(rng()%world.size()));it->second.state=uint8_t(rng()%3);}
+            r.type=uint8_t(rng()%46);r.state=uint8_t(rng()%5);r.at.rotation=structures::rotation(0,0,0);world[r.id]=r;}
+        else if(a==2&&!world.empty()){auto it=std::next(world.begin(),long(rng()%world.size()));it->second.state=uint8_t(rng()%5);}
         else if(a==3&&!world.empty()){world.erase(std::next(world.begin(),long(rng()%world.size())));}
         std::vector<structures::Record> v;for(auto& [k,r]:world){(void)k;v.push_back(r);}
         for(auto& b:s.observe(v)){
-            CHECK(b.id>=structures::PlayerFirst&&b.id<structures::NetFirst);CHECK(world.count(uint32_t(b.id))&&world[uint32_t(b.id)].state==2);
+            CHECK(b.id>=structures::PlayerFirst&&b.id<structures::NetFirst);CHECK(world.count(uint32_t(b.id))&&present(world[uint32_t(b.id)].state));
             CHECK(structures::netVariant(b.type).has_value());CHECK(!announcedOpen[uint32_t(b.id)]);announcedOpen[uint32_t(b.id)]=true;
         }
         for(auto& rm:s.takeRemoved()){CHECK(standing[rm.id]);standing[rm.id]=false;announcedOpen[rm.id]=false;CHECK(structures::netVariant(rm.type).has_value());}
-        for(auto& r:v)if(r.id>=structures::PlayerFirst&&r.id<structures::NetFirst&&r.state==2&&structures::netVariant(r.type))standing[r.id]=true;
+        for(auto& r:v)if(r.id>=structures::PlayerFirst&&r.id<structures::NetFirst&&present(r.state)&&structures::netVariant(r.type))standing[r.id]=true;
     }
 }
 int main(){

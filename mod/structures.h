@@ -9,6 +9,7 @@
 // from the partner included), lower ids the game's own. Write side: CreateConstruction(type, transform, false)
 // (game_offsets.md, "Structures").
 #include "discovery.h"
+#include <chrono>
 #include <array>
 #include <cstdint>
 #include <map>
@@ -16,7 +17,7 @@
 #include <vector>
 namespace mod::structures {
 struct Transform { std::array<double,3> position{}; std::array<float,9> rotation{}; };   // game axes, rows
-struct Record { uint32_t id=0; uint8_t type=0, category=0, state=0; Transform at; };
+struct Record { uint32_t id=0; uint8_t type=0, category=0, state=0; Transform at; uint64_t built=0; };   // built: the game's clock (clockNow)
 constexpr uint32_t PlayerFirst=10000,NetFirst=100000;
 constexpr uint64_t TableEnd=0x5699c8+0x710,Stride=0x710;constexpr unsigned MaxRecords=640;
 // Every record in the table window (the image range is [base, base+imageSize)).
@@ -51,19 +52,30 @@ private:
     struct Copy{uint8_t type=0;std::array<double,3> at{};uint64_t goneAt=0;};
     std::map<uint64_t,Copy> copies_;uint64_t unknown_=0;
 };
+// The game's clock for a record's build time: microseconds since year 1, UTC.
+inline uint64_t clockNow(){
+    return uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count())+62135596800000000ull;
+}
 class Sync {
 public:
-    // One call per observation. The first call only learns what exists. Returns structures this porter built since.
+    // since: only structures built from then on (Record::built, the game's clock) are announced, so the structures
+    // of the save are not, however late the game brings them in after a load.
+    explicit Sync(uint64_t since=0):since_(since){}
+    // One call per observation. Returns structures this porter built in this session, each once.
     std::vector<Built> observe(const std::vector<Record>&);
     // Structures this porter built that are gone since (dismantled or destroyed), with type and place: the partner
-    // removes its copy, by ref or, when the ref is not known there, by type and place. Includes structures that were
-    // already standing at the first look (built in an earlier session).
+    // removes its copy, by ref or, when the ref is not known there, by type and place. Includes structures built in
+    // an earlier session. A structure counts as gone after RemovedLooks observations without it: the game takes a
+    // record away for a moment when the player comes back into its range.
+    static constexpr unsigned RemovedLooks=6;
     struct Removed { uint32_t id=0; uint8_t type=0; std::array<double,3> position{}; };
     std::vector<Removed> takeRemoved();
     size_t known() const {return seen_.size();}
 private:
-    std::map<uint32_t,uint8_t> seen_; bool primed_=false;
-    struct Known { uint8_t type=0; std::array<double,3> position{}; };
+    uint64_t since_=0;
+    std::map<uint32_t,uint8_t> seen_;
+    std::map<uint32_t,uint64_t> announced_;   // id -> build time announced (an id can come back as another structure after a load)
+    struct Known { uint8_t type=0; std::array<double,3> position{}; unsigned missing=0; };
     std::map<uint32_t,Known> standing_; std::vector<Removed> removed_;
 };
 }

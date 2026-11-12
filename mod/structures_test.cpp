@@ -42,24 +42,43 @@ int main(){
     // Player types map to their Net variant; others have none.
     CHECK(netVariant(25)==uint8_t(26)&&netVariant(28)==uint8_t(29)&&netVariant(6)==uint8_t(7)&&netVariant(31)==uint8_t(32)&&netVariant(34)==uint8_t(35));
     CHECK(!netVariant(26)&&!netVariant(24)&&!netVariant(0)&&!netVariant(36));
-    // Sync: existing structures are learnt; a structure this porter builds is announced once, when built; the
-    // partner's (Net ids) and the game's own never; refused ones not until built.
-    { Sync s;CHECK(s.observe({rec(225,0,1),rec(10001,25,2)}).empty());
-      auto a=s.observe({rec(225,0,1),rec(10001,25,2),rec(10002,28,2,7),rec(100001,26,2),rec(300,25,2)});
+    // Sync: a structure this porter builds in this session (built at or after the session's start on the game's
+    // clock) is announced once; the save's structures, the partner's (Net ids) and the game's own never.
+    auto at=[](Record r,uint64_t built){r.built=built;return r;};
+    auto gone=[](Sync& s,std::vector<Record> v){std::vector<Sync::Removed> r;for(unsigned i=0;i<Sync::RemovedLooks;++i){CHECK(r.empty());s.observe(v);r=s.takeRemoved();}return r;};
+    { Sync s(1000);CHECK(s.observe({rec(225,0,1),at(rec(10001,25,2),500)}).empty());
+      auto a=s.observe({rec(225,0,1),at(rec(10001,25,2),500),at(rec(10002,28,2,7),1000),at(rec(100001,26,2),2000),at(rec(300,25,2),2000)});
       CHECK(a.size()==1&&a[0].id==10002&&a[0].type==28&&a[0].position[0]==7&&std::fabs(a[0].yaw-.5)<1e-6);
-      CHECK(s.observe({rec(10002,28,2,7),rec(100001,26,2)}).empty());
-      CHECK(s.observe({rec(10003,6,0)}).empty());                        // refused or pending
-      auto b=s.observe({rec(10003,6,2)});CHECK(b.size()==1&&b[0].id==10003);
-      CHECK(s.observe({rec(10004,24,2)}).empty()); }                     // no Net variant (a Stage type): not sent
-    // A partner structure recreated here with a Player type still has a Net id: never sent back.
-    { Sync s;s.observe({});CHECK(s.observe({rec(100002,25,2),rec(100003,28,2)}).empty()); }
-    // Dismantled: an announced structure that disappears (or stops being built) is reported once; others never.
-    { Sync s;s.observe({});s.observe({rec(10005,25,2),rec(10006,28,2)});
-      CHECK(s.takeRemoved().empty());
-      s.observe({rec(10006,28,2)});auto r=s.takeRemoved();CHECK(r.size()==1&&r[0].id==10005&&r[0].type==25);
-      s.observe({rec(10006,28,0)});r=s.takeRemoved();CHECK(r.size()==1&&r[0].id==10006);
+      CHECK(s.observe({at(rec(10002,28,2,7),1000),at(rec(100001,26,2),2000)}).empty());
+      CHECK(s.observe({at(rec(10003,6,0),3000)}).empty());               // a request the game has not built
+      auto b=s.observe({at(rec(10003,6,2),3000)});CHECK(b.size()==1&&b[0].id==10003);
+      CHECK(s.observe({at(rec(10004,24,2),3000)}).empty()); }            // no Net variant (a Stage type): not sent
+    // The save's structures arrive after the first look, already built (live: 2.5 s after the game's own): not new.
+    { Sync s(1000);s.observe({rec(225,0,1)});CHECK(s.observe({rec(225,0,1),at(rec(10020,6,1),400),at(rec(10021,25,2),999)}).empty());
+      CHECK(s.observe({rec(225,0,1),at(rec(10020,6,2),400),at(rec(10021,25,2),999)}).empty()); }
+    // What was built in this session before the first look is announced at the first look.
+    { Sync s(1000);auto a=s.observe({at(rec(10030,6,2),1500)});CHECK(a.size()==1&&a[0].id==10030); }
+    // Net ids are never announced.
+    { Sync s;CHECK(s.observe({rec(100002,25,2),rec(100003,28,2)}).empty()); }
+    // Walking away from a structure (state 2 -> 1) and back is neither a dismantle nor a new build; a far one still stands.
+    { Sync s;auto a=s.observe({rec(10011,6,2)});CHECK(a.size()==1);
+      for(int i=0;i<10;++i){CHECK(s.observe({rec(10011,6,1)}).empty());CHECK(s.takeRemoved().empty());}
+      CHECK(s.observe({rec(10011,6,2)}).empty());CHECK(s.takeRemoved().empty());
+      auto b=s.observe({rec(10011,6,2),rec(10012,6,4)});CHECK(b.size()==1&&b[0].id==10012);   // announced once, as soon as the game makes it
+      CHECK(s.observe({rec(10011,6,2),rec(10012,6,2)}).empty());
+      auto far=rec(100011,7,1,10);CHECK(standing({far},7,{10,2,3})); }
+    // An id that comes back as another structure (an older save loaded, then a new build): announced again.
+    { Sync s(1000);CHECK(s.observe({at(rec(10040,6,2),2000)}).size()==1);CHECK(s.observe({at(rec(10040,6,2),2000)}).empty());
+      CHECK(s.observe({at(rec(10040,25,2),5000)}).size()==1); }
+    // Removal: a structure of this porter that is gone for RemovedLooks observations (the game takes a record away for
+    // a moment when the player comes back into range: that is not a dismantle).
+    { Sync s;s.observe({rec(10005,25,2),rec(10006,28,2)});CHECK(s.takeRemoved().empty());
+      for(unsigned i=0;i+1<Sync::RemovedLooks;++i){s.observe({rec(10006,28,2)});CHECK(s.takeRemoved().empty());}
+      s.observe({rec(10005,25,2),rec(10006,28,2)});                      // back in time: the count starts again
+      auto r=gone(s,{rec(10006,28,2)});CHECK(r.size()==1&&r[0].id==10005&&r[0].type==25);
+      r=gone(s,{rec(10006,28,0)});CHECK(r.size()==1&&r[0].id==10006);
       s.observe({});CHECK(s.takeRemoved().empty()); }
-    { Sync s;s.observe({rec(10007,25,2,4)});s.observe({});auto r=s.takeRemoved();CHECK(r.size()==1&&r[0].id==10007&&r[0].type==25&&r[0].position[0]==4); }   // built in an earlier session: still reported, with type and place
+    { Sync s(1000);s.observe({at(rec(10007,25,2,4),10)});auto r=gone(s,{});CHECK(r.size()==1&&r[0].id==10007&&r[0].type==25&&r[0].position[0]==4); }   // built in an earlier session: still reported, with type and place
     { NetCopies n;n.dismantledAt(26,{10,2,3},1000);auto a=rec(100009,26,2,10);CHECK(n.due({a},1500).size()==1);CHECK(n.due({a},2000).empty()); }   // unknown ref: by type and place
     // A partner structure already standing here (saved from an earlier session) is not built twice.
     { auto a=rec(100009,26,2,10);CHECK(standing({a},26,{10.3,2,3})&&standing({a},26,{10.9,2,3})&&!standing({a},26,{11.5,2,3})&&!standing({a},29,{10,2,3}));   // the game may move what it builds by about 0.6 m

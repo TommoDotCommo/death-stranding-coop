@@ -568,7 +568,9 @@ std::function<uint32_t(uint8_t,const Transform&,const std::vector<uint16_t>&)> n
         uint16_t word=reinterpret_cast<uint16_t(*)(void*)>(base+0x262a860)(*reinterpret_cast<void**>(base+0x7be6318));std::memcpy(request+2,&word,2);
         uint8_t kind=reinterpret_cast<uint8_t(*)(uint8_t)>(base+0x2ccf1d0)(type);
         uint32_t id=reinterpret_cast<uint32_t(*)(void*,uint8_t)>(base+0x2c5bd80)(reinterpret_cast<void*>(manager),kind);std::memcpy(request+0x48,&id,4);
-        request[0x645]=1;
+        // Request +0x645 is the game's "wait for the build effect": its own build menu sets it and then plays the effect;
+        // a request with it set and no effect leaves a post, tower, shelter, zipline or bridge unbuilt until the next
+        // load (ladders and ropes ignore it). It is set here only when asked for (flags).
         for(auto f:flags)if(f>=0x600&&f<0x680)request[f]=1;
         auto* lock=reinterpret_cast<CRITICAL_SECTION*>(manager+0x56a5b8);EnterCriticalSection(lock);
         reinterpret_cast<void(*)(void*,void*)>(base+0x2c2acf0)(reinterpret_cast<void*>(manager+0x56a278),request);

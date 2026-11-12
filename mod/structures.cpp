@@ -16,7 +16,7 @@ std::vector<Record> readTable(const discovery::Sampler& s,uint64_t manager,uint6
     // to stand, so a record caught mid-change is harmless. Falls back to record by record if the copy fails.
     std::vector<uint8_t> table(size_t(MaxRecords)*Stride);
     bool whole=s.readOnce(manager+TableEnd-uint64_t(MaxRecords)*Stride,table.data(),table.size());
-    std::vector<uint8_t> block(0x68);
+    std::vector<uint8_t> block(0x390);
     for(unsigned i=1;i<=MaxRecords;++i){
         uint64_t at=manager+TableEnd-i*Stride;
         if(whole)std::memcpy(block.data(),table.data()+size_t(MaxRecords-i)*Stride,block.size());
@@ -25,6 +25,7 @@ std::vector<Record> readTable(const discovery::Sampler& s,uint64_t manager,uint6
         if(!(q0>=base&&q0<base+imageSize&&q1==0&&q2==q0+0x10))continue;
         Record r;std::memcpy(&r.id,block.data()+0x18,4);r.type=block[0x1c];r.category=block[0x1d];r.state=block[0x1e];
         std::memcpy(r.at.position.data(),block.data()+0x28,24);std::memcpy(r.at.rotation.data(),block.data()+0x40,36);
+        std::memcpy(&r.built,block.data()+0x388,8);
         if(r.id)out.push_back(r);
     }
     return out;
@@ -56,6 +57,15 @@ uint32_t pack(const Built& b){
 Built unpack(uint32_t item,const std::array<double,3>& position,double yaw){
     Built b;b.type=uint8_t(item&0xff);b.pitch=dequantize(item>>8);b.roll=dequantize(item>>20);b.position=position;b.yaw=yaw;return b;
 }
+// A structure's record is in state 2 while the player is near it and falls back to 1 when he walks away (4 while
+// its object is being made); 0 is a request the game has not built. A structure out of sight still stands.
+static bool present(uint8_t state){
+#ifndef MUTANT_STRUCTURE_FAR
+    return state==1||state==2||state==4;
+#else
+    return state==2;
+#endif
+}
 std::vector<Built> Sync::observe(const std::vector<Record>& records){
     std::vector<Built> out;std::map<uint32_t,uint8_t> next;
     for(auto& r:records){
@@ -65,24 +75,32 @@ std::vector<Built> Sync::observe(const std::vector<Record>& records){
 #else
         bool mine=r.id>=PlayerFirst;   // would send the partner's structures back to them
 #endif
-        auto old=seen_.find(r.id);bool newlyBuilt=r.state==2&&(old==seen_.end()||old->second!=2);
-        if(mine&&r.state==2&&netVariant(r.type))standing_[r.id]={r.type,r.at.position};   // known even from the first look
-        if(primed_&&mine&&newlyBuilt&&netVariant(r.type)){
-            Built b;b.type=r.type;b.position=r.at.position;angles(r.at.rotation,b.yaw,b.pitch,b.roll);b.id=r.id;out.push_back(b);
-        }
+        if(!mine||!present(r.state)||!netVariant(r.type))continue;
+        standing_[r.id]={r.type,r.at.position,0};
+#ifndef MUTANT_STRUCTURE_OLD
+        if(r.built<since_)continue;   // of the save: the game brings those in late after a load, already built
+#endif
+        auto told=announced_.find(r.id);
+        if(told!=announced_.end()&&told->second==r.built)continue;
+        announced_[r.id]=r.built;
+        Built b;b.type=r.type;b.position=r.at.position;angles(r.at.rotation,b.yaw,b.pitch,b.roll);b.id=r.id;out.push_back(b);
     }
 #ifndef MUTANT_STRUCTURE_REMOVED
     for(auto it=standing_.begin();it!=standing_.end();){
         auto now=next.find(it->first);
-        if(now==next.end()||now->second!=2){removed_.push_back({it->first,it->second.type,it->second.position});it=standing_.erase(it);}else ++it;
+        if(now!=next.end()&&present(now->second)){++it;continue;}
+#ifndef MUTANT_STRUCTURE_HASTY
+        if(++it->second.missing<RemovedLooks){++it;continue;}
+#endif
+        removed_.push_back({it->first,it->second.type,it->second.position});it=standing_.erase(it);
     }
 #endif
-    seen_.swap(next);primed_=true;
+    seen_.swap(next);
     return out;
 }
 std::vector<Sync::Removed> Sync::takeRemoved(){std::vector<Removed> out;out.swap(removed_);return out;}
 bool standing(const std::vector<Record>& records,uint8_t type,const std::array<double,3>& p,double range){
-    for(auto& r:records)if(r.type==type&&r.state==2){
+    for(auto& r:records)if(r.type==type&&present(r.state)){
         double dx=r.at.position[0]-p[0],dy=r.at.position[1]-p[1],dz=r.at.position[2]-p[2];
         if(dx*dx+dy*dy+dz*dz<=range*range)return true;
     }

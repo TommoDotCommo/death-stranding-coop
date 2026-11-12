@@ -598,7 +598,7 @@ struct Runtime final:ds::Transport {
     }
     // --- end ds3 ---
     // Shared structures (structures.h): what this porter builds goes to the partner; theirs appear here as Net structures.
-    mod::structures::Sync structSync;uint64_t structReadAt=0,structSent=0,structMade=0,structIdBase=0,imageSize=0;bool structTimed=false;
+    mod::structures::Sync structSync{mod::structures::clockNow()};uint64_t structReadAt=0,structSent=0,structMade=0,structIdBase=0,imageSize=0;bool structTimed=false;
     void tickStructures(uint64_t now) {
         if(!core||!sampler)return;   // like tickCargo: watched while the partner is away, sent when it connects
         bool coop=partnerMode()&&construct;
@@ -620,7 +620,10 @@ struct Runtime final:ds::Transport {
             if(mod::structures::standing(table(),*net,b.position)){note(("STRUCT partner structure ref "+std::to_string(e.ref)+" already stands here\n").c_str());continue;}
 #endif
             mod::puppet::Transform t;t.position=b.position;t.rotation=mod::structures::rotation(b.yaw,b.pitch,b.roll);
-            construct(*net,t,false);++structMade;
+            // Through the request without the wait for a build effect, so heavy structures stand at once (double.cpp);
+            // the export (which sets that wait) only where the request functions were not recognised.
+            if(constructRequest)constructRequest(*net,t,{});else construct(*net,t,false);
+            ++structMade;
             std::ostringstream o;o<<"STRUCT created partner type "<<int(b.type)<<" as "<<int(*net)<<" ref "<<e.ref<<" at "<<b.position[0]<<","<<b.position[1]<<","<<b.position[2]<<"\n";note(o.str().c_str());
         }
         structIn.clear();
@@ -1393,15 +1396,17 @@ struct Runtime final:ds::Transport {
                 }
                 else if(auto code=mod::puppet::parseCargoCommand(text,mod::runStamp(),"request");code&&constructRequest&&anchor.entity&&anchor.pose.available) {
                     // Research: "request <type + 1000*variant> <stamp>" queues a construction request built by the mod,
-                    // 4 m in front of the porter, with a set of the request's flag bytes (game_offsets.md):
-                    // 0 none, 1 the bytes both built and downloaded requests have, 2 + the built ones, 3 + the save's
-                    // extra two, 4 = 3 + the upload flag.
+                    // 4 m in front of the porter, with a set of the request's flag bytes (game_offsets.md): 0 the wait for
+                    // the build effect only (as the game's CreateConstruction export), 1 + the bytes both built and
+                    // downloaded requests have, 2 + the built ones, 3 + the save's extra two, 4 = 3 + the upload flag,
+                    // 5 no flag at all: built at once.
                     uint32_t kind=*code%1000,variant=*code/1000;std::vector<uint16_t> flags;
-                    if(variant>=1)flags.insert(flags.end(),{0x625,0x627,0x631,0x632,0x634,0x63b});
-                    if(variant>=2)flags.insert(flags.end(),{0x641,0x644,0x647});
-                    if(variant>=3)flags.insert(flags.end(),{0x63d,0x63e});
-                    if(variant>=4)flags.push_back(0x620);
-                    if(kind>=46||variant>4)note("CONSTRUCT request refused: out of range\n");
+                    if(variant<=4)flags.push_back(0x645);
+                    if(variant>=1&&variant<=4)flags.insert(flags.end(),{0x625,0x627,0x631,0x632,0x634,0x63b});
+                    if(variant>=2&&variant<=4)flags.insert(flags.end(),{0x641,0x644,0x647});
+                    if(variant>=3&&variant<=4)flags.insert(flags.end(),{0x63d,0x63e});
+                    if(variant==4)flags.push_back(0x620);
+                    if(kind>=46||variant>5)note("CONSTRUCT request refused: out of range\n");
                     else {
                         auto t=mod::puppet::transform(anchor.pose);double fx=t.rotation[3],fy=t.rotation[4],l=std::hypot(fx,fy);
                         if(l>.5){t.position[0]+=4*fx/l;t.position[1]+=4*fy/l;}

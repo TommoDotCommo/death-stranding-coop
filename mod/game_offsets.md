@@ -951,6 +951,34 @@ removed a Net ladder and the first removed a ladder built by this porter, so **o
 2 = Net, 0 = the game's own**. A ladder saved from an earlier session came back after loading (its record
 reached state 2 only after the mod's first look), so a receiver checks for an existing built copy before building.
 
+### What completes a structure (2026-11-12, live with a write watch on the state byte, and static)
+
+The record is the construction point object from its `+0x18` on (object = record - 0x18; the flag bytes at object
+`+0xa8..+0xb1` are record `+0x90..`). States (record `+0x1e`): 0 a request the game has not built, 1 built and out of
+the player's range, 4 being made, 2 built and in range. A structure the player walks away from goes 2 -> 1 and comes
+back to 2; for a moment on the way back its record is not in the table at all. The game's own build (the
+construction device's menu) takes a record 0 -> 1 -> 4 -> 2 within a frame or two: created by the queue processor
+(`0x2c85ce0`, which the save loader `0x2c9b780` also calls right after its own pushes), then `0x2c87f20` walks the
+pending list (manager `+0x56a0d0`, count `+0x56a0c8`) and, for each object that passes `0x2c35fb0`, calls
+`0x2c6acf0` (state 1); `0x2c7fd90` sets 4 and `0x2c9d76a` sets 2.
+
+`0x2c35fb0` refuses an object whose flag `+0xab & 0x40` is set. That bit is copied from request `+0x645` when the
+record is made (`0x2c32d70`; categories 10 and 11, ladder and rope, skip it), and the game clears it (`0x2cb4ee0`)
+when the build effect object at `+0x360` has come within reach of the structure (`0x2cb9cd6`). The menu makes that
+effect; `CreateConstruction` sets `+0x645` and makes none, which is why its posts, towers, shelters, ziplines and
+bridges stayed in state 0 until a load. **A request with `+0x645` clear is built at once**: live, Player post and Net
+post, watchtower, generator, rain shelter, zipline and 30 m bridge all reached state 2 within seconds and were drawn;
+a Net safe house got no record. The other request bytes are defaults of the request constructor (`0x277fde0`); the
+game's own build request differs from the export's only in `+0x623`, `+0x50` (1), a float at `+0x80` and a second
+copy of the placement at `+0x680`, none of which matters for this (each tried).
+
+Record `+0x388` is the build time, microseconds since year 1 UTC (request `+0x608`); the save keeps it, so the
+structures of a 2022 save carry 2022 times. After a load the game's own records (147 in the Episode 3 test save)
+are in the table about 2.5 s before the save's (73, already in state 1 or 2).
+
+The tool wheel reads the pointer (`GetCursorPos` through the window's method at `0x1a17f70`), not raw mouse motion;
+releasing the wheel key equips the highlighted item.
+
 ### The partner's own body, live (2026-11-07)
 
 `EntityResource_ExportedCreateEntity` (0x23806a0; the existing puppet probe's signature-checked call) **does** create
@@ -4798,8 +4826,9 @@ Observed:
   the "+640" and "+665" of the Structures section above are stack offsets of that function.)
 - The flags are not the cause: requests built by the mod (the research command `request`, same steps as
   `CreateConstruction`) with the built set, the save's extra two and the bytes common to both, for a bridge, a rain
-  shelter and a postbox outdoors, all gave records in state 0, not drawn. Ladders reach state 2 at once. What
-  completes a heavy structure outside a load is unknown.
+  shelter and a postbox outdoors, all gave records in state 0, not drawn. Ladders reach state 2 at once. Solved
+  later the same day: request `+0x645` is the wait ("Structures", "What completes a structure"). The game's own
+  request for a downloaded object sets it too; clearing object `+0xab & 0x40` on such a record is untried.
 - Likes. `OTGCGetLikeHistoryOneResponse` (missed by the first dump): `t` int64, `oid`, `lp`, `lp2` int, `uid` (from),
   `sc` int32 (summarised count), `lt` (like type). The game asks `getLikeHistory` once, about a minute after signing
   in, with `{"uid":"","since":0}`. Live: after another player's `sendLike` for a ladder this game had uploaded in an
