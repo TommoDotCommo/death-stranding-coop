@@ -144,7 +144,15 @@ Levels nativeLevels(discovery::Sampler& s){
     };
     Levels l;
     l.raise=[&s,give,own,queue,lacking](uint64_t object,uint32_t level){
-        Set need{};uint64_t t=0;std::string why;if(!lacking(object,level,need,why)||!s.read(object+0x458,&t,8))return why+": nothing given";
+        Set need{};uint64_t t=0;std::string why;
+        if(!lacking(object,level,need,why)){
+            // Nothing lacking (the partner's deliveries arrived first): only the level-up is still to come.
+            uint32_t now=0;uint64_t manager=0;
+            if(why.rfind("needs",0)==0&&why.find("nonsense")==std::string::npos&&s.read(object+0x84,&now,4)&&now<level&&s.read(s.base+0x7bf4960,&manager,8)&&manager){
+                queue(manager,object);return why+": already supplied, level-up queued";}
+            return why+": nothing given";
+        }
+        if(!s.read(object+0x458,&t,8))return why+": nothing given";
         give(object,t,need.data(),1,nullptr);
         // A paver takes its level from the materials at once; other constructions go through the manager's
         // level-up queue, as after a delivery at the structure itself.
