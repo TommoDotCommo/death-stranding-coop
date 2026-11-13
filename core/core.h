@@ -20,8 +20,9 @@ enum Flag : uint16_t { Sprint=1, Crouch=2, Cargo=4, Vehicle=8, PrivateRoom=16, T
     Down=128,     // the porter is dead or collapsed (mod/vitals.h)
     Caught=256,   // the porter is being dragged or held by BTs
     Call=512,     // the porter is calling out (the shout key)
-    Passenger=1024 };   // the porter rides along on the partner's truck (mod/passenger.h)
-constexpr uint16_t FlagMask=2047;
+    Passenger=1024,     // the porter rides along on the partner's truck (mod/passenger.h)
+    Rest=2048 };        // the porter sits down to rest (his own Is_TakeABreak)
+constexpr uint16_t FlagMask=4095;
 struct State {
     std::array<double,3> position{}, velocity{}; // metres, metres/second; Y is up in this adapter convention
     double yaw=0, phase=0; // radians [-pi,pi], normalised [0,1]

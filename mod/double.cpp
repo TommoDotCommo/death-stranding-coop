@@ -789,7 +789,8 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
     // Handles are per manager; the double's network (sam/references/akukan) has these locomotion controls.
     struct Handles{uint64_t manager=0;int speed=-1,move=-1,moveFloat=-1,moveInterp=-1,crouchRate=-1,basic=-1,isVehicle=-1,vehicleType=-1,vehicleSeat=-1,
         rewind=-1,rewindNoInter=-1,upperReset=-1,turnHeading=-1;bool riding=false;int action[7]={-1,-1,-1,-1,-1,-1,-1};
-        int isDead=-1,isDrag=-1,tb0=-1,tb1=-1,tb2=-1,tf0=-1,rewindLong=-1;uint32_t pose=0;uint64_t poseAt=0;};auto handles=std::make_shared<Handles>();
+        int isDead=-1,isDrag=-1,tb0=-1,tb1=-1,tb2=-1,tf0=-1,rewindLong=-1;uint32_t pose=0;uint64_t poseAt=0;
+        int isRest=-1,restState=-1,restType=-1,restLoopEnd=-1,tf2=-1,tf8=-1,tb5=-1;};auto handles=std::make_shared<Handles>();
     using TriggerFn=void(*)(uint64_t,int,float);auto trigger=reinterpret_cast<TriggerFn>(s.base+entries[8].rva);
     // The borrowed instance is kept after release and swapped back in on the next borrow of the same manager,
     // so repeated borrows build one instance per double, not one per borrow.
@@ -856,6 +857,9 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
                 handles->isDead=initBool(manager,"Is_Dead");handles->isDrag=initBool(manager,"Is_Drag");
                 handles->tb0=initBool(manager,"Temporary_Bool0");handles->tb1=initBool(manager,"Temporary_Bool1");handles->tb2=initBool(manager,"Temporary_Bool2");
                 handles->tf0=initFloat(manager,"Temporary_Float0");handles->rewindLong=initBool(manager,"Action_Rewind_Long");
+                handles->isRest=initBool(manager,"Is_TakeABreak");handles->restState=initFloat(manager,"TakeABreak_State");
+                handles->restType=initFloat(manager,"TakeABreak_Type");handles->restLoopEnd=initBool(manager,"Is_TakeABreak_LoopEnd");
+                handles->tf2=initFloat(manager,"Temporary_Float2");handles->tf8=initFloat(manager,"Temporary_Float8");handles->tb5=initBool(manager,"Temporary_Bool5");
                 if(swapped)std::memcpy(reinterpret_cast<void*>(res+0xd8),&resDef,8);}
             // Riding: the porter network's own vehicle controls (enum 0x19 / 0x1b, set by the game's mount at 0x2772ee9 and
             // 0x2774469); locomotion stays at rest underneath.
@@ -871,7 +875,7 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
             if(riding){speed=0;flags=(flags&VehicleMask)|ActionsBit|LandedBit;}
             // A pose of the game's own player states (DeadPoseBit, DragPoseBit): the gate open, the state's own writes,
             // the rewind pulses once on entry; for the death, the lying loop a few seconds after the fall.
-            uint32_t pose=riding?0:(flags&(DeadPoseBit|DragPoseBit));
+            uint32_t pose=riding?0:(flags&(DeadPoseBit|DragPoseBit|RestPoseBit));
             {auto ms=uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
              if(pose!=handles->pose){handles->pose=pose;handles->poseAt=ms;
                  if(handles->isDead>=0)setBool(manager,handles->isDead,pose&DeadPoseBit);
@@ -881,10 +885,19 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
                  for(int h:{handles->tb1,handles->tb2})if(h>=0)setBool(manager,h,false);
                  if(handles->tb0>=0)setBool(manager,handles->tb0,(pose&DeadPoseBit)!=0);
                  if(handles->tf0>=0)setFloat(manager,handles->tf0,(pose&DragPoseBit)?90.f:0.f);
+                 // Rest (state 22's entry, research-pose): the sitting loop; leaving, the loop's end first.
+                 bool rest=pose&RestPoseBit;
+                 if(handles->restLoopEnd>=0)setBool(manager,handles->restLoopEnd,!rest&&handles->isRest>=0);
+                 if(handles->isRest>=0)setBool(manager,handles->isRest,rest);
+                 if(handles->restState>=0)setFloat(manager,handles->restState,rest?1.f:0.f);
+                 if(handles->restType>=0)setFloat(manager,handles->restType,0.f);
+                 if(handles->tf2>=0)setFloat(manager,handles->tf2,0.f);
+                 if(handles->tf8>=0)setFloat(manager,handles->tf8,rest?1.f:0.f);
+                 if(handles->tb5>=0)setBool(manager,handles->tb5,rest);
                  if(pose){if(handles->rewind>=0)trigger(manager,handles->rewind,0.1f);
-                     if((pose&DragPoseBit)&&handles->rewindLong>=0)trigger(manager,handles->rewindLong,0.1f);}}
+                     if((pose&(DragPoseBit|RestPoseBit))&&handles->rewindLong>=0)trigger(manager,handles->rewindLong,0.1f);}}
              (void)ms;}
-            if(pose){speed=0;flags=ActionsBit|LandedBit;}
+            if(pose){speed=0;flags=ActionsBit|LandedBit|((pose&RestPoseBit)?FlagCrouchBit:0);}
             bool moving=speed>MovingSpeed;
             if(handles->speed>=0)setFloat(manager,handles->speed,float(speed));
             if(handles->move>=0)setBool(manager,handles->move,moving);

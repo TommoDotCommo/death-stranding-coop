@@ -63,7 +63,7 @@ void vehicleTests(const Bytes& onFoot) {
     // The down and caught flags travel; bits beyond the known flags are cut locally and refused from the wire.
     {State f; f.flags=0xffff; check(sanitise(f)&&f.flags==(FlagMask&~Vehicle)&&(f.flags&Down)&&(f.flags&Caught),"flags_sanitise");
      auto fb=onFoot; patch(fb,60,uint64_t(Down|Caught|Call),2); check(parse(fb)==Error::None&&(q.state.flags&Down)&&(q.state.flags&Caught)&&(q.state.flags&Call),"flags_roundtrip");
-     patch(fb,60,uint64_t(2048),2); check(parse(fb)==Error::Range,"flags_unknown_bit");}
+     patch(fb,60,uint64_t(4096),2); check(parse(fb)==Error::Range,"flags_unknown_bit");}
     s=State{}; s.vehicle=Motorbike; s.vehicleOffset={100,0,std::nan("")}; check(sanitise(s)&&s.vehicle==0&&!(s.flags&Vehicle),"vehicle_sanitise");
     s=State{}; s.vehicle=Motorbike; s.vehicleOffset={100,0,0}; s.vehicleAngles={7,0,0}; check(sanitise(s)&&s.vehicle==Motorbike&&(s.flags&Vehicle)&&s.vehicleOffset[0]==VehicleOffsetMax&&std::abs(s.vehicleAngles[0]-(7-2*3.141592653589793))<1e-9,"vehicle_sanitise");
 }
@@ -91,7 +91,7 @@ void parserTests() {
     vehicleTests(b);
     for(size_t at:{size_t(72),size_t(76),size_t(80)}) { bad=b; patch(bad,at,10000001,4); check(parse(bad)==Error::Range,"range"); }
     for(size_t at:{size_t(84),size_t(86),size_t(88)}) { bad=b; patch(bad,at,32767,2); check(parse(bad)==Error::Range,"range"); }
-    for(auto field:std::vector<std::pair<size_t,uint64_t>>{{90,32768},{60,2048},{62,32},{94,4}}) { bad=b; patch(bad,field.first,field.second,field.first==90||field.first==60?2:1); check(parse(bad)==Error::Range,"range"); }
+    for(auto field:std::vector<std::pair<size_t,uint64_t>>{{90,32768},{60,4096},{62,32},{94,4}}) { bad=b; patch(bad,field.first,field.second,field.first==90||field.first==60?2:1); check(parse(bad)==Error::Range,"range"); }
     State s; s.position={-1e20,1e20,0}; s.velocity={1e20,-1e20,1e20}; s.yaw=1000; s.phase=10; s.flags=65535; s.action=255;
     check(sanitiseForTest(s,protection)&&s.position[0]==-100000&&s.position[1]==100000&&s.phase==1&&s.flags==(FlagMask&~Vehicle)&&s.action==31,"clamp");
     check(std::sqrt(s.velocity[0]*s.velocity[0]+s.velocity[1]*s.velocity[1]+s.velocity[2]*s.velocity[2])<=100.00001,"clamp");

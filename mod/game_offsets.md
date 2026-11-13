@@ -1090,6 +1090,12 @@ looked at.
 - `Is_Landed` is a landing pulse the fall code writes, not a contact flag; the body's own class binds 18 controls
   (`Is_AKukan`, `Temporary_*`, guard and upper-body ones) and nothing writes its records but the mod and the
   exported setters, which skip a write of the value already stored (`0x23971f4`).
+- Rest (live): the porter's rest state keeps `Is_TakeABreak` set while sitting or sleeping (also when the game seats
+  an idle porter by itself). It is a bool control: its byte read as a float is a denormal, and the game's DAZ/FTZ mode
+  compares it equal to zero, so the mod compares the raw bits. On the body, `Is_TakeABreak` = 1,
+  `TakeABreak_State` = 1, `TakeABreak_Type` = 0, `Temporary_Float2` = 0, `Temporary_Float8` = 1, `Temporary_Bool5`
+  and the `Action_Rewind`/`Action_Rewind_Long` pulses sit it down in the game's rest pose; `Is_TakeABreak_LoopEnd`
+  stands it up.
 
 ### Voidout craters (2026-11-13, static, then live)
 

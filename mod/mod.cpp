@@ -350,7 +350,7 @@ struct Runtime final:ds::Transport {
     // Riding along on the partner's truck (passenger.h).
     // This porter's own vehicle, as the provider last saw it (game axes): where a partner riding along is held.
     struct LocalVehicle { bool riding=false; uint8_t kind=0; std::array<double,3> position{}; std::array<float,9> rotation{}; uint64_t at=0; };
-    LocalVehicle localVehicle;bool partnerAboard=false;
+    LocalVehicle localVehicle;bool partnerAboard=false;mod::puppet::FloatVariable restVar;bool localResting=false;
     std::function<void(uint64_t,const mod::puppet::Transform&)> keepOut;uint64_t keptOutNoted=0;
     mod::passenger::Rider rider;mod::passenger::Api passengerApi;bool passengerTried=false;mod::marker::KeyEdge passengerEdge;
     void tickPassenger(const mod::puppet::Anchor& anchor,bool connected,uint64_t now){
@@ -1794,7 +1794,8 @@ struct Runtime final:ds::Transport {
         // A partner who is down lies on his back where he fell (no locomotion underneath).
         if(config.partnerPoses&&target&&partnerMode()&&cache.remote.visible&&!cache.remote.state.vehicle){
             if(cache.remote.state.flags&ds::Down){speed=0;actions=mod::puppet::DeadPoseBit;target=mod::puppet::laidDown(*target);}   // the collapse, laid on his back
-            else if(cache.remote.state.flags&ds::Caught){speed=0;actions=mod::puppet::DragPoseBit;}}
+            else if(cache.remote.state.flags&ds::Caught){speed=0;actions=mod::puppet::DragPoseBit;}
+            else if((cache.remote.state.flags&ds::Rest)&&horizontal(cache.remote.state)<0.3){speed=0;actions=mod::puppet::RestPoseBit;}}
         {bool lay=target&&partnerMode()&&cache.remote.visible&&(cache.remote.state.flags&ds::Down)&&!cache.remote.state.vehicle;
             if(lay&&!config.partnerPoses){target=mod::puppet::laidDown(*target);speed=0;actions&=mod::puppet::FlagCrouchBit;}   // with poses: done above
             if(lay!=partnerLaid){partnerLaid=lay;note(lay?(config.partnerPoses?"BODY laid down: the partner is down (the game's collapse)\n":"BODY laid down: the partner is down\n"):"BODY upright again\n");}}
@@ -1861,6 +1862,11 @@ struct Runtime final:ds::Transport {
             // partner's game shows his body from these samples: with no speed it holds still at the truck's side
             // instead of running beside it.
             if(cache.available&&rider.riding()){cache.local.velocity={0,0,0};cache.local.flags|=ds::Passenger;}
+            // Sitting down to rest: the porter's own Is_TakeABreak (his rest state writes it).
+            if(cache.available&&sampler){auto a=anchorNow();if(a.entity){auto v=mod::puppet::readFloatVariable(*sampler,a.entity,sampler->base+0x3d09910,"Is_TakeABreak",restVar);
+                // A bool control's byte read as a float is a denormal, which the game's floating-point mode takes for zero: the bits.
+                uint32_t bits=0;if(v)std::memcpy(&bits,&*v,4);bool resting=(bits&0xff)!=0;if(resting)cache.local.flags|=ds::Rest;
+                if(resting!=localResting){localResting=resting;note(resting?"REST this porter sits down to rest\n":"REST this porter is up again\n");}}}
             stages.enter("start",mod::nowUs());
             // A bounded, read-only observation; never writes story or save state.
             if(game&&cache.available&&sampler&&now>=nextProgressRead){

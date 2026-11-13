@@ -49,8 +49,8 @@ constexpr uint32_t VehicleShift=24,VehicleMask=7u<<VehicleShift;
 // Bits 21, 22: a pose the game's own player states play (research-pose: the death state writes Is_Dead and, once the
 // fall is over, Temporary_Bool0; the BT state writes Is_Drag with Temporary_Float0 a heading), behind the Is_Actions
 // gate. The body has no player state machine, so these are written for it.
-constexpr uint32_t DeadPoseBit=1u<<21,DragPoseBit=1u<<22;
-constexpr uint32_t ReplayedActions=FlagSprintBit|FlagCrouchBit|JumpBit|ActionMoveBit|ActionsBit|FallBit|LandedBit|VehicleMask|DeadPoseBit|DragPoseBit;
+constexpr uint32_t DeadPoseBit=1u<<21,DragPoseBit=1u<<22,RestPoseBit=1u<<23;   // 23: sitting down to rest (the rest state's writes)
+constexpr uint32_t ReplayedActions=FlagSprintBit|FlagCrouchBit|JumpBit|ActionMoveBit|ActionsBit|FallBit|LandedBit|VehicleMask|DeadPoseBit|DragPoseBit|RestPoseBit;
 
 // Vehicle_Type for a wire kind (static, game_offsets.md "Riding"): motorbike 0, truck 1 (doors), speed car 3; -1 = none.
 float vehicleAnimationType(uint32_t kind);
