@@ -71,6 +71,13 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 
 ## QA level
 
+Full live suite (2026-11-13), 24 regressions with two real copies or one copy and the stand-in, all passing on one
+build: input, move2, rejoin, reload, launcher, notice, ride, solo, peer, drive, weather, stack, online, shared, world,
+exchange, lan, link, build, share, bt (with the shared crater), road (with structure materials and the cargo places),
+terminal (an order taken at the real terminal with the partner connected: the scenario that crashed the game one run
+in six before the fixes) and passenger (riding along and the keep-out box). Two mixed 20-minute soaks of two copies
+(walking, menus, orders, jumps to the partner, the terminal) ran clean with no guarded fault.
+
 Live regressions (2026-11-10), all driven without the window focus: both porters walking at the same time in two
 copies (each copy's partner followed the other's own track with a median error of 5 mm and at most 9 cm over 15 to
 18 m, and stood within 6 mm of the other porter at rest); the partner quitting and starting again (the body and name
