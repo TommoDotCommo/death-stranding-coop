@@ -81,6 +81,10 @@ terminal (an order taken at the real terminal with the partner connected: the sc
 in six before the fixes) and passenger (riding along and the keep-out box). Two mixed 20-minute soaks of two copies
 (walking, menus, orders, jumps to the partner, the terminal) ran clean with no guarded fault.
 
+With the animation mirror (2026-11-14): a 25th regression, mirror (two copies; one porter rests and stands up; a
+read-back of both games finds every control set on the porter equal on the partner's body: 17 of 17 resting, 15 of
+15 standing), passes, as do peer, drive, passenger, notice, link and ride on the mirror build.
+
 Live regressions (2026-11-10), all driven without the window focus: both porters walking at the same time in two
 copies (each copy's partner followed the other's own track with a median error of 5 mm and at most 9 cm over 15 to
 18 m, and stood within 6 mm of the other porter at rest); the partner quitting and starting again (the body and name
