@@ -39,6 +39,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "roads.h"
 #include "carry_place.h"
 #include "passenger.h"
+#include "voidout.h"
 #include "enemies.h"
 #include "orders.h"
 #include "guard_win.h"
@@ -268,6 +269,7 @@ struct Runtime final:ds::Transport {
             if(e.type==mod::enemies::WireType){enemyIn.push_back(e);continue;}
             if(e.type==mod::bts::WireType){btIn.push_back(e);continue;}
             if(e.type==mod::roads::WireType){roadIn.push_back(e);continue;}
+            if(e.type==mod::voidout::WireType){voidIn.push_back(e);continue;}            // a voidout crater (tickVoidouts)
             if(e.type==LevelWire){levelIn.push_back(e);continue;}                      // a structure reached a level (tickStructures)             // road news (tickRoads)                // BT news (tickBts)   // a MULE went down (tickEnemies)
             if(e.type==mod::orders::WireType){orderIn.push_back(e);continue;}    // an order changed (tickOrders)
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
@@ -1104,6 +1106,29 @@ struct Runtime final:ds::Transport {
             ++roadApplied;note(o.str().c_str());
         }
         roadIn.clear();
+    }
+    // Shared voidouts (voidout.h), with share_enemies: a crater left in one world is added to the other.
+    mod::voidout::Sync voidSync;std::vector<ds::CargoEvent> voidIn;std::function<uint32_t(const mod::voidout::Crater&)> voidAdd;
+    uint64_t voidReadAt=0,voidPorter=0;bool voidTried=false;
+    void tickVoidouts(uint64_t now){
+        if(!core||!sampler||!config.shareEnemies){voidIn.clear();return;}
+        if(!voidTried){voidTried=true;try{voidAdd=mod::voidout::nativeAdd(*sampler);}catch(const std::exception& e){note((std::string("VOIDOUT unavailable: ")+e.what()+"\n").c_str());}}
+        if(!voidAdd||(voidIn.empty()&&now-voidReadAt<1000))return;
+        voidReadAt=now;
+        auto anchor=anchorNow();if(anchor.entity!=voidPorter){voidPorter=anchor.entity;voidSync.forget();}
+        auto table=mod::voidout::read(*sampler,sampler->base);
+        for(auto& k:voidSync.observe(table)){
+            if(!core->connected()||!partnerMode())continue;
+            core->queueCargo(mod::voidout::encode(k));
+            std::ostringstream o;o<<"VOIDOUT a crater appeared here (radius "<<k.radius<<" m) -> partner\n";note(o.str().c_str());
+        }
+        for(auto& e:voidIn){
+            auto k=mod::voidout::decode(e);if(!k)continue;
+            if(!mod::voidout::Sync::wanted(table,*k)){note("VOIDOUT the partner's crater is here already\n");continue;}
+            if(auto id=voidAdd(*k)){voidSync.applied(id);std::ostringstream o;o<<"VOIDOUT the partner's crater added here (radius "<<k->radius<<" m)\n";note(o.str().c_str());}
+            else note("VOIDOUT the partner's crater was refused (no crater resource yet)\n");
+        }
+        voidIn.clear();
     }
     // Shared BTs (bts.h), with share_enemies: gazers destroyed, a catcher fight started, its area cleared.
     mod::bts::GazerSync gazerSync;mod::bts::FightSync fightSync;mod::bts::HealthSync healthSync;std::function<void(const mod::bts::Catcher&,float)> btHurt;std::vector<ds::CargoEvent> btIn;
@@ -1969,6 +1994,7 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickEnemies(now);
             stage="bts";stages.enter("bts",mod::nowUs());
             if(twin&&gameContext)tickBts(now);
+            if(twin&&gameContext)tickVoidouts(now);
             stage="roads";stages.enter("roads",mod::nowUs());
             if(twin&&gameContext)tickRoads(now);
             stage="orders";stages.enter("orders",mod::nowUs());
@@ -2051,6 +2077,21 @@ struct Runtime final:ds::Transport {
                         }
                         note(o.str().empty()?"STRUCT test: nothing\n":o.str().c_str());
                     }catch(const std::exception& e){note((std::string("STRUCT test unavailable: ")+e.what()+"\n").c_str());}
+                }
+                else if(auto vo=mod::puppet::parseCargoCommand(text,mod::runStamp(),"voidout");vo&&anchor.pose.available) {
+                    // Test: "voidout 0" lists the craters; "voidout N" adds a crater of N metres 70 m ahead of this porter
+                    // (area: the one an existing crater names, or 0), as the partner's crater would be added.
+                    auto table=mod::voidout::read(*sampler,sampler->base);std::ostringstream o;
+                    o<<"VOIDOUT test: "<<(table.readable?"":"(unreadable) ")<<table.craters.size()<<" craters, counter "<<table.counter<<"\n";
+                    for(auto& k:table.craters)o<<"VOIDOUT crater "<<k.id<<" at "<<int(k.position[0])<<","<<int(k.position[1])<<","<<int(k.position[2])<<" r "<<k.radius<<" area "<<k.area<<(k.active?" active":"")<<(k.disabled?" disabled":"")<<"\n";
+                    if(*vo){
+                        try{auto add=mod::voidout::nativeAdd(*sampler);auto t=mod::puppet::transform(anchor.pose);mod::voidout::Crater k;k.radius=float(*vo);
+                            for(int i=0;i<3;++i)k.position[size_t(i)]=t.position[size_t(i)]+70*double(t.rotation[size_t(3+i)]);
+                            k.area=table.craters.empty()?0:table.craters.front().area;k.yaw=0.7f;
+                            auto id=add(k);if(id)voidSync.applied(id);o<<"VOIDOUT test: crater "<<id<<(id?" added":" refused")<<"\n";}
+                        catch(const std::exception& e){o<<"VOIDOUT test unavailable: "<<e.what()<<"\n";}
+                    }
+                    note(o.str().c_str());
                 }
                 else if(auto pv=mod::puppet::parseCargoCommand(text,mod::runStamp(),"paver");pv) {
                     // Test: "paver 0" lists the auto-pavers; "paver ID*10+K" delivers 100 of material K to paver ID as
