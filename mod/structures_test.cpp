@@ -46,6 +46,14 @@ int main(){
     // clock) is announced once; the save's structures, the partner's (Net ids) and the game's own never.
     auto at=[](Record r,uint64_t built){r.built=built;return r;};
     auto gone=[](Sync& s,std::vector<Record> v){std::vector<Sync::Removed> r;for(unsigned i=0;i<Sync::RemovedLooks;++i){CHECK(r.empty());s.observe(v);r=s.takeRemoved();}return r;};
+    // Materials: what was delivered since the last look, per kind; first sights, falls and a loaded save are not.
+    { MaterialSync s;using H=MaterialSync::Have;
+      CHECK(s.observe({H{1,{0,0,50,0,0,0}},H{2,{}}}).empty());
+      auto a=s.observe({H{1,{10,0,170,0,0,0}},H{2,{}},H{3,{9,0,0,0,0,0}}});CHECK(a.size()==2&&a[0].ref==1&&a[0].kind==0&&a[0].amount==10&&a[1].kind==2&&a[1].amount==120);
+      CHECK(s.observe({H{1,{10,0,100,0,0,0}},H{2,{}},H{3,{9,0,0,0,0,0}}}).empty());
+      CHECK(s.observe({H{1,{20,0,100,0,0,0}},H{2,{0,5,0,0,0,0}},H{3,{9,0,0,0,0,0}}}).empty());      // two at once: a load
+      CHECK(s.observe({H{1,{20,0,100,0,0,0}},H{2,{0,9,0,0,0,0}},H{3,{9,0,0,0,0,0}}}).size()==1);
+      CHECK(MaterialSync::wanted({1,5,10})&&!MaterialSync::wanted({1,6,10})&&!MaterialSync::wanted({1,0,0})&&!MaterialSync::wanted({1,0,MaterialSync::Most+1})); }
     // Levels: a rise is news once; a first sight, a fall and what was raised here for the partner are not.
     { LevelSync s;CHECK(s.observe({{1,1},{2,2}}).empty());
       auto a=s.observe({{1,2},{2,2},{3,3}});CHECK(a.size()==1&&a[0].ref==1&&a[0].level==2);

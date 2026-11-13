@@ -17,7 +17,7 @@
 #include <vector>
 namespace mod::structures {
 struct Transform { std::array<double,3> position{}; std::array<float,9> rotation{}; };   // game axes, rows
-struct Record { uint32_t id=0; uint8_t type=0, category=0, state=0; Transform at; uint64_t built=0; uint32_t level=0; uint64_t object=0; };   // built: the game's clock (clockNow); level: +0x6c (1 as built, 2 and up upgraded); object: the construction object (record - 0x18)
+struct Record { uint32_t id=0; uint8_t type=0, category=0, state=0; Transform at; uint64_t built=0; uint32_t level=0; uint64_t object=0; std::array<int32_t,6> own{}; };   // own: materials this player delivered to it (+0x1f8, six kinds)   // built: the game's clock (clockNow); level: +0x6c (1 as built, 2 and up upgraded); object: the construction object (record - 0x18)
 constexpr uint32_t PlayerFirst=10000,NetFirst=100000;
 constexpr uint64_t TableEnd=0x5699c8+0x710,Stride=0x710;constexpr unsigned MaxRecords=640;
 // Every record in the table window (the image range is [base, base+imageSize)).
@@ -74,6 +74,21 @@ public:
     static constexpr uint32_t MaxLevel=8;
 private:
     std::map<uint64_t,uint32_t> seen_,applied_;
+};
+// Materials: what a player delivers to a structure (his own, or the partner's copy, as in the game) is given to the
+// same structure in the partner's game as delivered by others, so both can build and upgrade one structure together.
+class MaterialSync {
+public:
+    struct Have { uint64_t ref=0; std::array<int32_t,6> own{}; };
+    struct Delivered { uint64_t ref=0; uint8_t kind=0; int32_t amount=0; };
+    static constexpr int32_t Most=1000000;
+    // What was delivered here since the last look (a ref seen for the first time is learned; a number going down, or
+    // several structures changing at one look, a loaded save, is not a delivery).
+    std::vector<Delivered> observe(const std::vector<Have>&);
+    static bool wanted(const Delivered& d){return d.kind<6&&d.amount>0&&d.amount<=Most;}
+    void forget(){seen_.clear();}
+private:
+    std::map<uint64_t,std::array<int32_t,6>> seen_;
 };
 class Sync {
 public:

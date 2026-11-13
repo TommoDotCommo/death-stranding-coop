@@ -650,7 +650,7 @@ struct Runtime final:ds::Transport {
     // Shared structures (structures.h): what this porter builds goes to the partner; theirs appear here as Net structures.
     // Upgrades (structures.h, LevelSync): event type 15, item = level, ref = the structure's ref.
     static constexpr uint8_t LevelWire=15;
-    mod::structures::LevelSync levelSync;mod::roads::Levels levelApi;std::vector<ds::CargoEvent> levelIn;std::map<uint64_t,std::pair<uint32_t,uint64_t>> levelWants;bool levelTried=false,levelTell=false;
+    mod::structures::LevelSync levelSync;mod::structures::MaterialSync materialSync;mod::roads::Levels levelApi;std::vector<ds::CargoEvent> levelIn;std::map<uint64_t,std::pair<uint32_t,uint64_t>> levelWants;bool levelTried=false,levelTell=false;
     mod::structures::Sync structSync{mod::structures::clockNow()};uint64_t structReadAt=0,structSent=0,structMade=0,structIdBase=0,imageSize=0,structPorter=0,structSettled=0;bool structTimed=false,structLinked=false,structTell=false;
     void tickStructures(uint64_t now) {
         if(!core||!sampler)return;   // like tickCargo: watched while the partner is away, sent when it connects
@@ -716,6 +716,19 @@ struct Runtime final:ds::Transport {
                 seen.push_back({*ref,r.level});byRef[*ref]=&r;
             }
             auto tell=[&](const mod::structures::LevelSync::Level& l){ds::CargoEvent e;e.type=LevelWire;e.item=l.level;e.ref=l.ref;core->queueCargo(e);++structSent;};
+            // Materials delivered here (item 100 + kind, the amount in the position) go to the same structure there.
+            { std::vector<mod::structures::MaterialSync::Have> have;for(auto& [ref,r]:byRef)have.push_back({ref,r->own});
+              for(auto& d:materialSync.observe(have)){
+                  ds::CargoEvent e;e.type=LevelWire;e.item=100u+d.kind;e.ref=d.ref;e.position={double(d.amount),0,0};core->queueCargo(e);++structSent;
+                  std::ostringstream o;o<<"STRUCT "<<d.amount<<" of material "<<int(d.kind)<<" delivered to ref "<<d.ref<<" here -> partner\n";note(o.str().c_str());}
+              for(auto it=levelIn.begin();it!=levelIn.end();){
+                  if(it->item<100){++it;continue;}
+                  mod::structures::MaterialSync::Delivered d{it->ref,uint8_t(it->item-100),int32_t(it->position[0])};auto f=byRef.find(d.ref);
+                  if(mod::structures::MaterialSync::wanted(d)&&f!=byRef.end()&&levelApi.give){
+                      mod::roads::Set s{};s[d.kind]=d.amount;levelApi.give(f->second->object,s);
+                      std::ostringstream o;o<<"STRUCT partner delivered "<<d.amount<<" of material "<<int(d.kind)<<" to ref "<<d.ref<<": counted here\n";note(o.str().c_str());}
+                  it=levelIn.erase(it);
+              } }
             for(auto& l:levelSync.observe(seen)){tell(l);std::ostringstream o;o<<"STRUCT ref "<<l.ref<<" reached level "<<l.level<<" here -> partner\n";note(o.str().c_str());}
             if(levelTell){levelTell=false;for(auto& l:seen)if(l.level>=2)tell(l);}
             for(auto& e:levelIn)levelWants[e.ref]={e.item,now+60000};
@@ -1917,8 +1930,9 @@ struct Runtime final:ds::Transport {
                         auto all=mod::structures::readTable(*sampler,manager,sampler->base,imageSize);auto api=mod::roads::nativeLevels(*sampler);std::ostringstream o;
                         for(auto& r:all){
                             if(r.id<mod::structures::PlayerFirst)continue;
-                            if(!*up)o<<"STRUCT id "<<r.id<<" type "<<int(r.type)<<" state "<<int(r.state)<<" level "<<r.level<<" at "<<int(r.at.position[0])<<","<<int(r.at.position[1])<<"\n";
+                            if(!*up){o<<"STRUCT id "<<r.id<<" type "<<int(r.type)<<" state "<<int(r.state)<<" level "<<r.level<<" at "<<int(r.at.position[0])<<","<<int(r.at.position[1])<<" own";for(auto v:r.own)o<<" "<<v;o<<"\n";}
                             else if(r.id==*up){o<<"STRUCT test: upgrade of "<<r.id<<" from level "<<r.level<<": "<<api.upgrade(r.object,r.level+1)<<"\n";}
+                            else if(*up>=1000000&&r.id==(*up-1000000)/10){mod::roads::Set s{};s[(*up-1000000)%10%6]=50;api.deliver(r.object,s);o<<"STRUCT test: 50 of material "<<(*up-1000000)%10<<" delivered to "<<r.id<<"\n";}
                         }
                         note(o.str().empty()?"STRUCT test: nothing\n":o.str().c_str());
                     }catch(const std::exception& e){note((std::string("STRUCT test unavailable: ")+e.what()+"\n").c_str());}

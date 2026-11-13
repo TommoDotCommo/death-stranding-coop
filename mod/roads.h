@@ -51,6 +51,7 @@ Api nativeApi(discovery::Sampler&);
 // Any construction (structures.h, upgrades): the same routines. raise gives the object, as from other players, what
 // it lacks for `level` (it then goes to that level at once); upgrade delivers that as this player and queues the
 // level-up, as the structure's menu does (test).
-struct Levels { std::function<std::string(uint64_t object,uint32_t level)> raise,upgrade; };   // returns what was done, for the log
+struct Levels { std::function<std::string(uint64_t object,uint32_t level)> raise,upgrade;   // returns what was done, for the log
+                std::function<void(uint64_t object,const Set&)> give,deliver; };            // materials from the partner; test: a delivery by this player
 Levels nativeLevels(discovery::Sampler&);
 }

@@ -703,7 +703,9 @@ Each game keeps simulating its own world; these settings share the outcome of wh
   roads of either, and they stay in the save. The partner's cargo is not touched and the partner gets no likes.
 - Structure upgrades need no setting (they go with shared structures): a structure that reaches a higher level in one
   game, the builder's own or the partner's copy of it, is raised to that level in the other (`structures.h`,
-  `LevelSync`). The other game needs the game's own build time for the level-up (about a minute).
+  `LevelSync`). The other game needs the game's own build time for the level-up (about a minute). Materials are
+  shared as they are delivered (`MaterialSync`): what one player puts into a structure, his own or the partner's
+  copy, counts in the other game as delivered by others.
 - `"share_saved_structures": true` (`structures.h`; on in the launcher's setup): on joining, and after a save is
   loaded, the structures a player's save already has are built in the partner's world too, as the game's structures
   of other players; the partner skips those that already stand there. Without it only structures built while the

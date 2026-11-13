@@ -157,6 +157,12 @@ Levels nativeLevels(discovery::Sampler& s){
         if(s.read(s.base+0x7bf4960,&manager,8)&&manager){queue(manager,object);return why+": level-up queued";}
         return why+": no manager";
     };
+    auto construction=[&s](uint64_t object){uint64_t first=0,config=0;return object&&s.read(object,&first,8)&&first>=s.base&&s.read(object+0x90,&config,8)&&config;};
+    l.give=[&s,give,construction](uint64_t object,const Set& mats){
+        uint64_t t=0;if(!construction(object)||!sane(mats)||!s.read(object+0x458,&t,8))return;
+        Set copy=mats;give(object,t,copy.data(),1,nullptr);
+    };
+    l.deliver=[own,construction](uint64_t object,const Set& mats){if(!construction(object)||!sane(mats))return;Set copy=mats;own(object,copy.data());};
     l.upgrade=[&s,own,queue,lacking](uint64_t object,uint32_t level){
         Set need{};uint64_t manager=0;std::string why;if(!lacking(object,level,need,why)||!s.read(s.base+0x7bf4960,&manager,8)||!manager)return why+": nothing delivered";
         own(object,need.data());queue(manager,object);return why+": delivered, level-up queued";

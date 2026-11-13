@@ -25,7 +25,7 @@ std::vector<Record> readTable(const discovery::Sampler& s,uint64_t manager,uint6
         if(!(q0>=base&&q0<base+imageSize&&q1==0&&q2==q0+0x10))continue;
         Record r;std::memcpy(&r.id,block.data()+0x18,4);r.type=block[0x1c];r.category=block[0x1d];r.state=block[0x1e];
         std::memcpy(r.at.position.data(),block.data()+0x28,24);std::memcpy(r.at.rotation.data(),block.data()+0x40,36);
-        std::memcpy(&r.built,block.data()+0x388,8);std::memcpy(&r.level,block.data()+0x6c,4);r.object=at-0x18;
+        std::memcpy(&r.built,block.data()+0x388,8);std::memcpy(&r.level,block.data()+0x6c,4);r.object=at-0x18;std::memcpy(r.own.data(),block.data()+0x1f8,24);
         if(r.id)out.push_back(r);
     }
     return out;
@@ -129,6 +129,27 @@ std::optional<uint64_t> NetCopies::refAt(uint8_t netType,const std::array<double
         double dx=c.at[0]-p[0],dy=c.at[1]-p[1],dz=c.at[2]-p[2];if(dx*dx+dy*dy+dz*dz<=1.0)return ref;
     }
     return std::nullopt;
+}
+std::vector<MaterialSync::Delivered> MaterialSync::observe(const std::vector<Have>& have){
+    std::vector<Delivered> out;std::map<uint64_t,std::array<int32_t,6>> next;unsigned changed=0;
+    for(auto& h:have){
+        next[h.ref]=h.own;auto old=seen_.find(h.ref);
+        if(old==seen_.end())continue;
+        if(h.own!=old->second)++changed;
+        for(size_t k=0;k<6;++k){
+            int64_t more=int64_t(h.own[k])-old->second[k];
+#ifndef MUTANT_STRUCTURE_MATERIAL_LESS
+            if(more>0&&more<=Most)out.push_back({h.ref,uint8_t(k),int32_t(more)});
+#else
+            if(more!=0&&more<=Most)out.push_back({h.ref,uint8_t(k),int32_t(more)});
+#endif
+        }
+    }
+    seen_.swap(next);
+#ifndef MUTANT_STRUCTURE_MATERIAL_LOAD
+    if(changed>1)out.clear();
+#endif
+    return out;
 }
 std::vector<LevelSync::Level> LevelSync::observe(const std::vector<Level>& levels){
     std::vector<Level> out;std::map<uint64_t,uint32_t> next;
