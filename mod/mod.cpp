@@ -356,7 +356,7 @@ struct Runtime final:ds::Transport {
     LocalVehicle localVehicle;bool partnerAboard=false;mod::puppet::FloatVariable restVar;bool localResting=false;
     // The porter's own animation controls (controls.h): read every frame, sent beside presence; echo keeps its own.
     mod::controls::Binding controlBinding;mod::controls::Gather controlGather;bool echoOwn=false;
-    mod::carryplace::SlotCache handSlots;
+    mod::carryplace::SlotCache handSlots;uint8_t handsNoted=0;
     std::vector<mod::carryplace::Placed> partnerHands;
     std::vector<mod::wheels::Joint> partnerJoints;uint16_t partnerSkeleton=0;bool wheelsReadNoted=false,wheelsWriteNoted=false;   // the partner's wheels (tickRide)   // the cases in the partner's hands, relative to his root (tickStack)
     std::deque<std::pair<uint64_t,ds::Animation>> echoControls;std::array<uint8_t,ds::AnimationBoolBytes> echoLast{};bool echoHave=false;
@@ -1947,7 +1947,8 @@ struct Runtime final:ds::Transport {
                      if(config.carryVisual&&cargoManagerSlot&&a.pose.available&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
                          if(auto inHands=mod::carryplace::readPlaced(*sampler,a.entity,sampler->base+mod::carry::ComponentVtable,manager,mod::puppet::transform(a.pose),true,&handSlots,now))
                              for(auto& p:*inHands)if(count<hands.size())hands[count++]=mod::carryplace::toHeld(p);
-                     controlGather.hands(hands,count);}
+                     controlGather.hands(hands,count);
+                     if(count!=handsNoted){handsNoted=count;note(("CARRY this porter holds "+std::to_string(count)+" cases in his hands\n").c_str());}}
                     // Driving: the vehicle's wheel joints as the game posed them (wheels.h); the controls stay out of that
                     // sample (the partner does not mirror them on a vehicle, and the datagram must stay under the MTU).
                     auto sample=controlGather.current();
