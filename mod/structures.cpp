@@ -22,7 +22,14 @@ std::vector<Record> readTable(const discovery::Sampler& s,uint64_t manager,uint6
         if(whole)std::memcpy(block.data(),table.data()+size_t(MaxRecords-i)*Stride,block.size());
         else if(!s.read(at,block.data(),block.size()))break;
         uint64_t q0,q1,q2;std::memcpy(&q0,block.data(),8);std::memcpy(&q1,block.data()+8,8);std::memcpy(&q2,block.data()+16,8);
+        // A record starts with two of its class's image pointers (+0, +10 = +0 + 0x10). +8 is usually 0, but a structure
+        // whose menu the player opened keeps a pointer there afterwards (live 2026-11-14): requiring 0 lost the record, and
+        // the sync took the structure for dismantled.
+#ifndef MUTANT_STRUCTURE_MENU
+        (void)q1;if(!(q0>=base&&q0<base+imageSize&&q2==q0+0x10))continue;
+#else
         if(!(q0>=base&&q0<base+imageSize&&q1==0&&q2==q0+0x10))continue;
+#endif
         Record r;std::memcpy(&r.id,block.data()+0x18,4);r.type=block[0x1c];r.category=block[0x1d];r.state=block[0x1e];
         std::memcpy(r.at.position.data(),block.data()+0x28,24);std::memcpy(r.at.rotation.data(),block.data()+0x40,36);
         std::memcpy(&r.built,block.data()+0x388,8);std::memcpy(&r.level,block.data()+0x6c,4);r.object=at-0x18;std::memcpy(r.own.data(),block.data()+0x1f8,24);

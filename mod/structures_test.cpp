@@ -15,15 +15,17 @@ int main(){
         const uint64_t base=0x140000000,image=0x8000000,manager=0x20000000;
         for(bool short_:{false,true}){
             uint64_t lo=manager+TableEnd-uint64_t(MaxRecords)*Stride;std::vector<unsigned char> mem(size_t(MaxRecords)*Stride);
-            auto rec=[&](unsigned i,uint32_t id,uint8_t type){uint64_t at=manager+TableEnd-i*Stride-lo;uint64_t q0=base+0x3000000,z=0,q2=q0+0x10;
+            auto rec=[&](unsigned i,uint32_t id,uint8_t type,uint64_t z=0){uint64_t at=manager+TableEnd-i*Stride-lo;uint64_t q0=base+0x3000000,q2=q0+0x10;
                 std::memcpy(&mem[at],&q0,8);std::memcpy(&mem[at+8],&z,8);std::memcpy(&mem[at+16],&q2,8);std::memcpy(&mem[at+0x18],&id,4);mem[at+0x1c]=type;mem[at+0x1e]=2;
                 double p[3]={1,2,3};std::memcpy(&mem[at+0x28],p,24);};
             rec(1,700,25);rec(5,701,26);
+            // A structure whose menu was opened keeps a pointer at +8 (live 2026-11-14): still a record.
+            rec(9,702,6,0x52c234b4300ull);
             // short_: memory ends 100 records before the table start, so the one copy fails and the loop reads what it can.
             uint64_t from=short_?lo+100ull*Stride:lo;
             mod::discovery::Sampler sm{[&](uint64_t a,void* o,size_t n){if(a<from||a+n>lo+mem.size())return false;std::memcpy(o,&mem[a-lo],n);return true;},base};
             auto t=readTable(sm,manager,base,image);
-            CHECK(t.size()==2&&t[0].id==700&&t[0].type==25&&t[1].id==701&&t[1].at.position[1]==2);
+            CHECK(t.size()==3&&t[0].id==700&&t[0].type==25&&t[1].id==701&&t[1].at.position[1]==2&&t[2].id==702);
         }
     }
     // The porter's matrix (live: rows -0.819,0.574,0 / -0.574,-0.819,0 / 0,0,1) is yaw 145 degrees.

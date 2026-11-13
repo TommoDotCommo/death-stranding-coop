@@ -198,7 +198,8 @@ game's `RemoveConstructionsInArea`, limited to Net structures in a 3 m box; both
 structure that already stands here (saved from an earlier session) is not built twice. Not done: upgrades, and
 structures dismantled through the game's own menus (since 2026-11-14 they are: live, two copies, a post built with the
 construction device and dismantled from its structure menu, hold Tab, went from the partner's game too; part of the build
-regression). Building through them works since 2026-11-12 ("Works": heavy
+regression). Fixed on the way: only opening a structure's menu used to make the partner's copy go (the game leaves a
+pointer in the record afterwards, and the mod's reader required zero there, so the structure looked dismantled). Building through them works since 2026-11-12 ("Works": heavy
 structures stand at once, only the session's builds are sent).
 
 Cargo driven live with keyboard input (2026-11-07, one copy and `coop-partner`): the porter carried the partner's
