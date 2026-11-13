@@ -29,6 +29,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "puppet.h"
 #include "double.h"
 #include "controls.h"
+#include "wheels.h"
 #include "body.h"
 #include "vehicle.h"
 #include "ride.h"
@@ -351,12 +352,13 @@ struct Runtime final:ds::Transport {
     }
     // Riding along on the partner's truck (passenger.h).
     // This porter's own vehicle, as the provider last saw it (game axes): where a partner riding along is held.
-    struct LocalVehicle { bool riding=false; uint8_t kind=0; std::array<double,3> position{}; std::array<float,9> rotation{}; uint64_t at=0; };
+    struct LocalVehicle { bool riding=false; uint8_t kind=0; std::array<double,3> position{}; std::array<float,9> rotation{}; uint64_t at=0; uint64_t entity=0; };
     LocalVehicle localVehicle;bool partnerAboard=false;mod::puppet::FloatVariable restVar;bool localResting=false;
     // The porter's own animation controls (controls.h): read every frame, sent beside presence; echo keeps its own.
     mod::controls::Binding controlBinding;mod::controls::Gather controlGather;bool echoOwn=false;
     mod::carryplace::SlotCache handSlots;
-    std::vector<mod::carryplace::Placed> partnerHands;   // the cases in the partner's hands, relative to his root (tickStack)
+    std::vector<mod::carryplace::Placed> partnerHands;
+    std::vector<mod::wheels::Joint> partnerJoints;uint16_t partnerSkeleton=0;bool wheelsReadNoted=false,wheelsWriteNoted=false;   // the partner's wheels (tickRide)   // the cases in the partner's hands, relative to his root (tickStack)
     std::deque<std::pair<uint64_t,ds::Animation>> echoControls;std::array<uint8_t,ds::AnimationBoolBytes> echoLast{};bool echoHave=false;
     std::function<void(uint64_t,const mod::puppet::Transform&)> keepOut;uint64_t keptOutNoted=0;
     mod::passenger::Rider rider;mod::passenger::Api passengerApi;bool passengerTried=false;mod::marker::KeyEdge passengerEdge;
@@ -525,6 +527,12 @@ struct Runtime final:ds::Transport {
         if(!r.visible||!r.state.vehicle){ride->tick(now,true,0,nullptr);return;}
         auto t=mod::ride::vehicleTransform(r.state.position,r.state.vehicleOffset,r.state.vehicleAngles);
         ride->tick(now,true,r.state.vehicle,&t,{r.state.vehicleVariant,r.state.vehicleLook});
+#ifdef _WIN32
+        // His wheels, as his game posed them (wheels.h): only on the vehicle of his kind.
+        if(ride->entity()&&ride->kind()==r.state.vehicle&&!partnerJoints.empty()){
+            bool done=mod::wheels::write(*sampler,ride->entity(),partnerSkeleton,partnerJoints);
+            if(!wheelsWriteNoted){wheelsWriteNoted=true;note(done?"WHEELS the partner's wheels turn on his vehicle\n":"WHEELS refused: the partner's vehicle has another model or no pose\n");}}
+#endif
     }
     // --- The partner's carried cargo drawn on the partner body (cargo_stack.h): with carry_visual, from the partner's
     // carry summary (backpack slot); `puppet.ride` "stack N" / "stack auto" / "stack off" / "stack at ..." test it.
@@ -1605,7 +1613,7 @@ struct Runtime final:ds::Transport {
                     if(auto t=mod::puppet::readFloatVariable(*raw,o.porter,raw->base+0x3d09910,"Turn_Heading",*steerVar))r.steer=std::clamp(double(*t),-ds::SteerMax,ds::SteerMax);
                     if(o.variant<=ds::VehicleVariantMax){r.variant=uint8_t(o.variant);r.look=o.appearance;}
                 }
-                if(o.available)localVehicle={o.riding,r.kind,o.position,o.rotation,mod::nowMs()};   // an unavailable read keeps the last one
+                if(o.available)localVehicle={o.riding,r.kind,o.position,o.rotation,mod::nowMs(),o.riding?o.vehicle:0};   // an unavailable read keeps the last one
                 if(o.available&&int(r.kind)!=*lastKind){*lastKind=r.kind;
                     std::ostringstream m;m<<"RIDE local kind="<<int(r.kind)<<" vehicle=0x"<<std::hex<<o.vehicle<<"\n";note(m.str().c_str());}
                 return r;});}
@@ -1873,6 +1881,13 @@ struct Runtime final:ds::Transport {
         std::optional<ds::Animation> blended;if(mirrorOn&&controlsShown)blended=mod::controls::blend(*controlsShown);
         const ds::Animation* mirrorSample=blended?&*blended:nullptr;bool mirrorFresh=mirrorSample&&controlsShown->fresh;
         partnerHands.clear();if(blended)for(size_t i=0;i<blended->handCount;++i)partnerHands.push_back(mod::carryplace::fromHeld(blended->hands[i]));
+        // The partner's wheels (wheels.h), blended towards the next sample when it is for the same model.
+        partnerJoints.clear();partnerSkeleton=0;
+        if(controlsShown&&controlsShown->animation.jointCount){const auto& a=controlsShown->animation;partnerSkeleton=a.skeleton;
+            for(size_t i=0;i<a.jointCount;++i)partnerJoints.push_back(mod::wheels::fromWire(a.joints[i]));
+            if(controlsShown->between&&controlsShown->next.jointCount&&controlsShown->next.skeleton==a.skeleton){std::vector<mod::wheels::Joint> next;
+                for(size_t i=0;i<controlsShown->next.jointCount;++i)next.push_back(mod::wheels::fromWire(controlsShown->next.joints[i]));
+                partnerJoints=mod::wheels::blend(partnerJoints,next,controlsShown->fraction);}}
         if(mirrorSample&&!animationNoted){animationNoted=true;note("BODY moves with the partner's own animation controls\n");}
         if(mirrorSample)++animationShown;
         if(useOwn&&ownEntity){
@@ -1933,7 +1948,19 @@ struct Runtime final:ds::Transport {
                          if(auto inHands=mod::carryplace::readPlaced(*sampler,a.entity,sampler->base+mod::carry::ComponentVtable,manager,mod::puppet::transform(a.pose),true,&handSlots,now))
                              for(auto& p:*inHands)if(count<hands.size())hands[count++]=mod::carryplace::toHeld(p);
                      controlGather.hands(hands,count);}
-                    if(core->connected()&&core->sendAnimation(controlGather.current(),now))controlGather.sent();}}
+                    // Driving: the vehicle's wheel joints as the game posed them (wheels.h); the controls stay out of that
+                    // sample (the partner does not mirror them on a vehicle, and the datagram must stay under the MTU).
+                    auto sample=controlGather.current();
+                    if(config.partnerVehicle&&localVehicle.riding&&localVehicle.entity&&localVehicle.at+1500>now){
+                        stages.enter("wheels",mod::nowUs());
+#ifdef _WIN32
+                        if(auto w=mod::wheels::read(*sampler,localVehicle.entity,localVehicle.kind)){
+                            sample.held={};sample.rose={};sample.floats={};sample.skeleton=w->skeleton;sample.jointCount=uint8_t(std::min(w->joints.size(),sample.joints.size()));
+                            for(size_t i=0;i<sample.jointCount;++i)sample.joints[i]=mod::wheels::toWire(w->joints[i]);
+                            if(!wheelsReadNoted){wheelsReadNoted=true;note(("WHEELS this porter's vehicle: "+std::to_string(sample.jointCount)+" joints of "+std::to_string(w->skeleton)+" sent\n").c_str());}}
+#endif
+                    }
+                    if(core->connected()&&core->sendAnimation(sample,now))controlGather.sent();}}
             stages.enter("start",mod::nowUs());
             // A bounded, read-only observation; never writes story or save state.
             if(game&&cache.available&&sampler&&now>=nextProgressRead){

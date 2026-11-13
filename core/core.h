@@ -54,12 +54,20 @@ const char* progressReason(ProgressStatus);
 // frame since the previous sample (a one-frame pulse shows only here); floats are sent sparse (zero is left out).
 // hands: what the porter holds in his hands, each relative to his root (millimetres; rotation packed by the adapter in
 // 48 bits), so that it moves with the mirrored arms.
+// joints: while the porter drives, his vehicle's wheel joints (and their parents) as his game posed them: joint index,
+// local rotation (quaternion, int16 / 32767) and translation (millimetres), for a model of `skeleton` joints.
 // After the 128-byte header: [u8 n][held n][rose n][u8 m][m x (u8 index, f32)][u8 k][k x (u32 item, u8 tag, i16 x3,
-// u48 rotation)], indices increasing.
-constexpr size_t AnimationBoolBytes=32, AnimationFloats=192, AnimationHands=2, AnimationHandBytes=17;
+// u48 rotation)][u8 j][if j: u16 skeleton][j x (u16 joint, i16 x4 rotation, i16 x3 millimetres)], indices increasing.
+// A datagram longer than AnimationWireMax (a 1280-byte path MTU) is refused; the sender leaves the controls out while
+// it sends joints (the receiver does not mirror controls on a vehicle).
+constexpr size_t AnimationBoolBytes=32, AnimationFloats=192, AnimationHands=2, AnimationHandBytes=17, AnimationJoints=24, AnimationJointBytes=16;
 constexpr float AnimationFloatMax=1e6f;
 constexpr int16_t AnimationHandMaxMm=3000;
-constexpr size_t AnimationWireMax=WireSize+1+2*AnimationBoolBytes+1+5*AnimationFloats+1+AnimationHandBytes*AnimationHands;
+constexpr size_t AnimationWireMax=1252;
+struct VehicleJoint {
+    uint16_t index=0; std::array<int16_t,4> rotation{}; std::array<int16_t,3> position{};
+    bool operator==(const VehicleJoint& o) const { return index==o.index&&rotation==o.rotation&&position==o.position; }
+};
 struct HeldCase {
     uint32_t item=0; uint8_t tag=0; std::array<int16_t,3> position{}; uint64_t rotation=0;   // tag: adapter-defined
     bool operator==(const HeldCase& o) const { return item==o.item&&tag==o.tag&&position==o.position&&rotation==o.rotation; }
@@ -67,7 +75,9 @@ struct HeldCase {
 struct Animation {
     std::array<uint8_t,AnimationBoolBytes> held{}, rose{}; std::array<float,AnimationFloats> floats{};
     std::array<HeldCase,AnimationHands> hands{}; uint8_t handCount=0;
-    bool operator==(const Animation& o) const { return held==o.held&&rose==o.rose&&floats==o.floats&&handCount==o.handCount&&hands==o.hands; }
+    std::array<VehicleJoint,AnimationJoints> joints{}; uint8_t jointCount=0; uint16_t skeleton=0;
+    bool operator==(const Animation& o) const { return held==o.held&&rose==o.rose&&floats==o.floats&&handCount==o.handCount&&hands==o.hands
+        &&jointCount==o.jointCount&&skeleton==o.skeleton&&joints==o.joints; }
     bool operator!=(const Animation& o) const { return !(*this==o); }
 };
 // The sample shown now (the presence delay applies), with rose gathered over every sample passed since the last take.

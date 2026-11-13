@@ -1097,6 +1097,26 @@ looked at.
   and the `Action_Rewind`/`Action_Rewind_Long` pulses sit it down in the game's rest pose; `Is_TakeABreak_LoopEnd`
   stands it up.
 
+### Wheels: how the game poses them, and the partner's display vehicle (2026-11-14, static, then live)
+
+- No Morpheme: the vehicle update `0x2f78dc0` (MsgEntityUpdate of VehicleEntity) calls entity virtual `+0x168` (bike
+  `0x2f9d170` -> `0x2fa3370`, truck `0x2f9e750`), which writes the wheel joints (and their suspension arms, the bike's
+  handle, the truck's steering wheel) straight into the model's current pose record from the Havok wheel state
+  (physics `+0x330`, instance `*(+0x28)`, wheels `*(inst+0x88)` stride 0xc0: suspension length +0x50, spin axis +0x70,
+  steering quaternion +0x90, spin angle +0xa8; per-wheel transform `0x215b870`). It sets no dirty flag.
+- The display vehicle has no `+0x330`: the update returns at `0x2f78df7` (and skips the pose for flag `0x08000000` at
+  `0x2f79004`), so nothing ever poses its wheels.
+- Pose record: model `vehicle+0xb8`; current record index model `+0x250` (0/1); record k at model `+0x170 + 0x70*k`
+  (skeleton `+0x20`, joint array `+0x30`); skeleton joint count `+0x20`, joint table `+0x28` (stride 0x10, parent int16
+  at `+8`); a joint is 0x30 bytes (rotation quaternion xyzw, translation, scale).
+- Wheel joint indices, set from the resource on MsgEntityInit (valid without physics): the "motorbike" is the reverse
+  trike, 3 wheels at entity `+0xcb0/+0xcb4/+0xcb8`; the truck has 4 wheels at `+0xc60..+0xc6c`, each under a 3-joint
+  suspension arm.
+- Live: the driver's truck model has 47 joints; its 4 wheels with up to 3 parents each are 16 joints. Sent with the
+  animation sample (core VehicleJoint) and written into the display truck's current record each tick (index and
+  joint-count checks, plain writable memory, then entity `+0x88` bit 0 as the game's transform writer sets it): the
+  write is accepted (same 47-joint model).
+
 ### Mirroring the porter's animation controls (2026-11-13, live)
 
 - The porter's MorphemeAnimationManager (component vtable `0x3d09910`) holds 434 records (+0x50 count, +0x58 array,
