@@ -2143,6 +2143,28 @@ struct Runtime final:ds::Transport {
                 auto erase=mod::puppet::parseCargoCommand(text,mod::runStamp(),"delete");
                 auto list=mod::puppet::parseCargoCommand(text,mod::runStamp(),"list");
                 if(give&&cargoGive){cargoGive(*give);note(("CARGO give id="+std::to_string(*give)+"\n").c_str());}
+                else if(auto hand=mod::puppet::parseCargoCommand(text,mod::runStamp(),"hand");hand&&(*hand==6||*hand==7)&&anchor.entity) {
+                    // Lab: the top case of the porter's back into a hand slot (6 left, 7 right) with the game's own calls,
+                    // as its hand-to-carrier move does (27eb050): remove 2c50150(carrier, record, 0x4f, 1, 0), insert
+                    // 2c7dbd0(carrier, slot, record, 2, 1). The case stays only while the player grips (both mouse buttons).
+#ifdef _WIN32
+                    static const uint8_t removeHead[8]={0x40,0x53,0x48,0x83,0xec,0x30,0x48,0x89},insertHead[8]={0x48,0x89,0x5c,0x24,0x10,0x55,0x56,0x57};
+                    uint8_t got[8]{},got2[8]{};uint64_t comp=0,vt=0,carrier=0,slots=0,record=0;int32_t count=0;
+                    bool ok=sampler->read(sampler->base+0x2c50150,got,8)&&!std::memcmp(got,removeHead,8)&&sampler->read(sampler->base+0x2c7dbd0,got2,8)&&!std::memcmp(got2,insertHead,8)
+                        &&sampler->read(anchor.entity+0x54d0,&comp,8)&&comp&&sampler->read(comp,&vt,8)&&vt==sampler->base+0x3dd9750&&sampler->read(comp+0x50,&carrier,8)&&carrier
+                        &&sampler->read(carrier+0x10,&count,4)&&count>0&&count<64&&sampler->read(carrier+0x18,&slots,8)&&slots;
+                    for(int32_t i=0;ok&&i<count&&!record;++i){uint64_t slot=0;uint8_t type=0;int32_t stacks=0;uint64_t arr=0;
+                        if(!sampler->read(slots+8ull*uint32_t(i),&slot,8)||!slot||!sampler->read(slot+1,&type,1)||type!=1)continue;
+                        if(!sampler->read(slot+0x18,&stacks,4)||stacks<=0||stacks>16||!sampler->read(slot+0x20,&arr,8))break;
+                        uint64_t stack=0;int32_t n=0;uint64_t recs=0;
+                        if(sampler->read(arr+8ull*uint32_t(stacks-1),&stack,8)&&stack&&sampler->read(stack+0x10,&n,4)&&n>0&&n<=32&&sampler->read(stack+0x18,&recs,8))
+                            sampler->read(recs+8ull*uint32_t(n-1),&record,8);}
+                    if(!ok||!record)note("CARGO hand refused: no carrier, no back case or the calls differ\n");
+                    else{reinterpret_cast<void(*)(uint64_t,uint64_t,uint8_t,uint8_t,uint64_t)>(sampler->base+0x2c50150)(carrier,record,0x4f,1,0);
+                        reinterpret_cast<void(*)(uint64_t,uint32_t,uint64_t,int32_t,uint8_t)>(sampler->base+0x2c7dbd0)(carrier,uint32_t(*hand),record,2,1);
+                        std::ostringstream o;o<<"CARGO hand "<<*hand<<": record 0x"<<std::hex<<record<<" moved\n";note(o.str().c_str());}
+#endif
+                }
                 else if(erase&&cargoDelete){cargoDelete(*erase);note(("CARGO delete id="+std::to_string(*erase)+"\n").c_str());}
                 else if(auto code=mod::puppet::parseCargoCommand(text,mod::runStamp(),"part");code&&partToggle&&ownEntity) {
                     // Research: "part <index*2+on> <stamp>" switches one art part of the own body.
