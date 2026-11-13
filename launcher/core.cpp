@@ -58,12 +58,13 @@ std::string config(const Session& s) {
 #else
     bool host=s.host;
 #endif
-    // Play setup: the game-thread hook, the partner drawn as the mod's own Sam wearing the porter's gear and on his vehicle,
+    // Play setup: the game-thread hook, the partner drawn as the mod's own Sam wearing the porter's gear, on his vehicle and
+    // with the floating carriers he tows,
     // session notices in the game's info log, the host's rain and timefall shown in the guest's world, and shared
     // cargo and structures, MULEs put down and camp alarms, and standard orders (mod/README.md). The network-only
     // self_tick setup draws nothing.
 #ifndef MUTANT_CONFIG_PLAY
-    const std::string play="\"game_thread\":true,\"puppet_probe\":true,\"partner\":\"own\",\"partner_gear\":true,\"partner_marker\":true,\"partner_vehicle\":true,\"carry_visual\":true,\"partner_tag\":true,\"notices\":"+std::string(s.solo?"false":"true")+",\"share_environment\":\"rain\",\"share_enemies\":true,\"share_orders\":true,\"share_order_units\":true,\"share_roads\":true,\"share_saved_structures\":true";
+    const std::string play="\"game_thread\":true,\"puppet_probe\":true,\"partner\":\"own\",\"partner_gear\":true,\"partner_marker\":true,\"partner_vehicle\":true,\"partner_cart\":true,\"carry_visual\":true,\"partner_tag\":true,\"notices\":"+std::string(s.solo?"false":"true")+",\"share_environment\":\"rain\",\"share_enemies\":true,\"share_orders\":true,\"share_order_units\":true,\"share_roads\":true,\"share_saved_structures\":true";
 #else
     const std::string play="\"self_tick\":true";
 #endif

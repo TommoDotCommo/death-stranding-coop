@@ -49,7 +49,8 @@ config uses the pinned game hash, `required:true`, and the play setup: the guard
 game-thread callback (`game_thread`, `puppet_probe`), the partner drawn as the mod's
 own Sam (`partner:"own"`, the game's resident double until it exists) wearing the
 porter's visible gear (`partner_gear`), the partner's map pin (`partner_marker`, no
-ping key), his vehicle while he rides (`partner_vehicle`), the cargo he carries as cases on his back
+ping key), his vehicle while he rides (`partner_vehicle`), the floating carriers he tows with their cases
+(`partner_cart`), the cargo he carries as cases on his back
 (`carry_visual`), his name over his head (`partner_tag`), notices in the game's info log when he joins or leaves or
 nobody has arrived yet (`notices`), the host's rain and timefall in the guest's world
 (`share_environment:"rain"`: rain only, never the host's hour), and with them shared cargo and structures.
