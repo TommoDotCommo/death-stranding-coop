@@ -269,6 +269,9 @@ struct Runtime final:ds::Transport {
             if(e.type==mod::carryplace::WireType){                                       // where the partner's cases sit (tickStack)
                 if(config.carryVisual)if(auto list=placeRx.feed(e)){placeShown=std::move(*list);note(("CARRY the partner's "+std::to_string(placeShown->size())+" cases have their places\n").c_str());}
                 continue;}   // ds3: tickCarry
+            if(e.type==mod::carryplace::CartWireType){                                   // the cases on the partner's cart (tickStack)
+                if(config.partnerCart)if(auto list=cartPlaceRx.feed(e)){cartPlaceShown=std::move(*list);note(("CART the partner's cart carries "+std::to_string(cartPlaceShown->size())+" cases\n").c_str());}
+                continue;}
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(e.type==mod::enemies::WireType){enemyIn.push_back(e);continue;}
             if(e.type==mod::bts::WireType){btIn.push_back(e);continue;}
@@ -554,6 +557,7 @@ struct Runtime final:ds::Transport {
     // Where each case sits (carry_place.h): this porter's go out measured from his backpack; the partner's are drawn
     // at the same places on the copy of the backpack the body wears.
     mod::carryplace::Sender placeTx;mod::carryplace::Receiver placeRx;std::optional<std::vector<mod::carryplace::Placed>> placeShown;
+    mod::carryplace::Sender cartPlaceTx{mod::carryplace::CartWireType};mod::carryplace::Receiver cartPlaceRx{mod::carryplace::CartWireType};std::optional<std::vector<mod::carryplace::Placed>> cartPlaceShown;uint64_t cartPlaceReadAt=0;
     uint64_t ownBackpack=0,placeReadAt=0,placeSent=0;
     static std::vector<mod::stack::Item> backpackItems(const std::optional<mod::carry::Summary>& s){
         std::vector<mod::stack::Item> out;if(s)for(auto& e:*s)if(e.slot==1)for(unsigned i=0;i<e.count;++i)out.push_back({e.hash,e.variant});   // 1: BackPack
@@ -577,7 +581,7 @@ struct Runtime final:ds::Transport {
         if(!cargoStack)return;
         if(anchor.entity!=stackPorter){if(stackPorter)cargoStack->forget("world changed");stackPorter=anchor.entity;}
         auto wanted=stackTest>=0?std::vector<mod::stack::Item>(size_t(stackTest)):backpackItems(carrySink.shown);
-        if(!(core&&core->connected())){placeShown.reset();placeRx.reset();}
+        if(!(core&&core->connected())){placeShown.reset();placeRx.reset();cartPlaceShown.reset();cartPlaceRx.reset();}
         uint64_t flags=0;bool shown=body&&sampler->read(body+mod::gear::Flags,&flags,8)&&(flags&mod::gear::FlagVisible);
         bool permitted=shown&&!inEvent&&(stackTest>=0||(partnerMode()&&core&&core->connected()));
         // On the copy of the backpack the body wears when there is one (it moves with the body's back), else the body.
@@ -587,13 +591,20 @@ struct Runtime final:ds::Transport {
         auto t=mod::puppet::transform(pose);
         // With the partner's measured places and a backpack copy to hang them on: every case exactly there. The cases in
         // his hands follow (relative to his root, as his mirrored arms hold them), after the others so the stack stays.
-        if(stackTest<0&&(placeShown||!partnerHands.empty())&&on_){
+        bool cartCases=config.partnerCart&&cartPlaceShown&&!cartPlaceShown->empty()&&cartDisplay.idAt(0);
+        if(stackTest<0&&(placeShown||!partnerHands.empty()||cartCases)&&on_){
             std::vector<mod::stack::Item> items;std::vector<mod::puppet::Transform> places;
             if(placeShown)for(auto& c:*placeShown){items.push_back({c.item,c.variant});places.push_back(c.rel);}
             auto root=mod::puppet::readEntityPose(*sampler,body);
             if(root.available&&root.coherent)for(auto& h:partnerHands){
                 auto world=mod::carryplace::compose(mod::puppet::transform(root),h.rel);
                 items.push_back({h.item,h.variant});places.push_back(mod::carryplace::relative(t,world));}
+            // The cases on his cart, on the cart drawn here for it (carts.h), as many as the stack still draws.
+            if(cartCases)for(auto& c:mod::carts::read(*sampler,sampler->base))if(c.id==cartDisplay.idAt(0)){
+                mod::puppet::Transform cart;cart.position=c.position;cart.rotation=c.rotation;
+                for(auto& p:*cartPlaceShown){if(items.size()>=mod::stack::Stack::MaxPlaced)break;
+                    items.push_back({p.item,p.variant});places.push_back(mod::carryplace::relative(t,mod::carryplace::compose(cart,p.rel)));}
+                break;}
             cargoStack->tick(true,items,&t,&places);return;
         }
         cargoStack->tick(true,wanted,&t);
@@ -782,6 +793,17 @@ struct Runtime final:ds::Transport {
                 for(auto& e:events){core->queueCargo(e);++placeSent;}
                 if(!events.empty())note(("CARRY this porter's "+std::to_string(placed?placed->size():0)+" cases with their places -> partner\n").c_str());
             }
+        }
+        // The cases on the cart he tows (the nearest attached one, as carts.h sends first), relative to that cart.
+        if(config.partnerCart&&now-cartPlaceReadAt>=500&&anchor.entity&&anchor.pose.available&&manager){
+            cartPlaceReadAt=now;auto here=mod::puppet::transform(anchor.pose).position;auto shown=cartDisplay.ids();
+            const mod::carts::Cart* best=nullptr;double bestD=1e18;auto all=mod::carts::read(*sampler,sampler->base);
+            for(auto& c:all){if(!c.attached||shown.count(c.id))continue;double d=0;for(int k=0;k<3;++k)d+=(c.position[k]-here[k])*(c.position[k]-here[k]);if(d<bestD){bestD=d;best=&c;}}
+            std::optional<std::vector<mod::carryplace::Placed>> onCart=std::vector<mod::carryplace::Placed>{};
+            if(best){mod::puppet::Transform t;t.position=best->position;t.rotation=best->rotation;onCart=mod::carryplace::readCarrier(*sampler,best->carrier,manager,t);}
+            auto events=cartPlaceTx.observe(onCart,core->connected()&&partnerMode(),now);
+            for(auto& e:events)core->queueCargo(e);
+            if(!events.empty())note(("CART this porter's cart carries "+std::to_string(onCart?onCart->size():0)+" cases -> partner\n").c_str());
         }
     }
     // --- end ds3 ---
@@ -2185,6 +2207,31 @@ struct Runtime final:ds::Transport {
                     else{reinterpret_cast<void(*)(uint64_t,uint64_t,uint8_t,uint8_t,uint64_t)>(sampler->base+0x2c50150)(carrier,record,0x4f,1,0);
                         reinterpret_cast<void(*)(uint64_t,uint32_t,uint64_t,int32_t,uint8_t)>(sampler->base+0x2c7dbd0)(carrier,uint32_t(*hand),record,2,1);
                         std::ostringstream o;o<<"CARGO hand "<<*hand<<": record 0x"<<std::hex<<record<<" moved\n";note(o.str().c_str());}
+#endif
+                }
+                else if(auto load=mod::puppet::parseCargoCommand(text,mod::runStamp(),"tocart");load&&*load>0&&*load<=12&&anchor.entity&&anchor.pose.available) {
+                    // Lab: the top N cases of the porter's back onto the nearest attached cart (its one slot, type 0) with
+                    // the game's own calls (remove 2c50150 as above, insert 2c7dbd0(cart carrier, 0, record, 2, 1)).
+#ifdef _WIN32
+                    static const uint8_t removeHead[8]={0x40,0x53,0x48,0x83,0xec,0x30,0x48,0x89},insertHead[8]={0x48,0x89,0x5c,0x24,0x10,0x55,0x56,0x57};
+                    uint8_t got[8]{},got2[8]{};uint64_t comp=0,vt=0,carrier=0,slots=0;int32_t count=0;
+                    bool ok=sampler->read(sampler->base+0x2c50150,got,8)&&!std::memcmp(got,removeHead,8)&&sampler->read(sampler->base+0x2c7dbd0,got2,8)&&!std::memcmp(got2,insertHead,8)
+                        &&sampler->read(anchor.entity+0x54d0,&comp,8)&&comp&&sampler->read(comp,&vt,8)&&vt==sampler->base+0x3dd9750&&sampler->read(comp+0x50,&carrier,8)&&carrier
+                        &&sampler->read(carrier+0x10,&count,4)&&count>0&&count<64&&sampler->read(carrier+0x18,&slots,8)&&slots;
+                    uint64_t cart=0;double best=1e18;auto here=mod::puppet::transform(anchor.pose).position;
+                    for(auto& c:mod::carts::read(*sampler,sampler->base))if(c.attached){double d=0;for(int k=0;k<3;++k)d+=(c.position[k]-here[k])*(c.position[k]-here[k]);if(d<best){best=d;cart=c.carrier;}}
+                    unsigned moved=0;
+                    for(uint32_t n=0;ok&&cart&&n<*load;++n){uint64_t record=0;
+                        for(int32_t i=0;i<count&&!record;++i){uint64_t slot=0;uint8_t type=0;int32_t stacks=0;uint64_t arr=0;
+                            if(!sampler->read(slots+8ull*uint32_t(i),&slot,8)||!slot||!sampler->read(slot+1,&type,1)||type!=1)continue;
+                            if(!sampler->read(slot+0x18,&stacks,4)||stacks<=0||stacks>16||!sampler->read(slot+0x20,&arr,8))break;
+                            uint64_t stack=0;int32_t k=0;uint64_t recs=0;
+                            if(sampler->read(arr+8ull*uint32_t(stacks-1),&stack,8)&&stack&&sampler->read(stack+0x10,&k,4)&&k>0&&k<=32&&sampler->read(stack+0x18,&recs,8))
+                                sampler->read(recs+8ull*uint32_t(k-1),&record,8);}
+                        if(!record)break;
+                        reinterpret_cast<void(*)(uint64_t,uint64_t,uint8_t,uint8_t,uint64_t)>(sampler->base+0x2c50150)(carrier,record,0x4f,1,0);
+                        reinterpret_cast<void(*)(uint64_t,uint32_t,uint64_t,int32_t,uint8_t)>(sampler->base+0x2c7dbd0)(cart,0,record,2,1);++moved;}
+                    note(("CARGO tocart: "+std::to_string(moved)+" cases moved"+(cart?"\n":" (no attached cart)\n")).c_str());
 #endif
                 }
                 else if(erase&&cargoDelete){cargoDelete(*erase);note(("CARGO delete id="+std::to_string(*erase)+"\n").c_str());}

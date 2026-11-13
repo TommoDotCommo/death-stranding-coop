@@ -24,7 +24,7 @@ constexpr uint64_t CarrierId=0x38, CarrierFlags=0x88, CarrierEntity=0x20, Entity
 constexpr uint32_t CarrierCart=2, CartUnit=9, Attached=1;
 constexpr unsigned MaxCarriers=4096;
 inline bool cartId(uint32_t id){return ((id>>13)&0xff)==CartUnit;}
-struct Cart { uint32_t id=0; uint64_t entity=0; bool attached=false; std::array<double,3> position{}; std::array<float,9> rotation{}; };
+struct Cart { uint32_t id=0; uint64_t carrier=0,entity=0; bool attached=false; std::array<double,3> position{}; std::array<float,9> rotation{}; };
 // Every cart of this world with a sane transform.
 std::vector<Cart> read(const discovery::Sampler&,uint64_t base);
 // The carts this porter tows (attached, not one of `shown`, the partner's carts drawn here), nearest first, at most
@@ -46,6 +46,7 @@ public:
     void show(const std::vector<Place>&,Api&,uint64_t now);
     void clear(Api&);
     std::set<uint32_t> ids() const;
+    uint32_t idAt(size_t i) const {return i<carts_.size()&&carts_[i].seen?carts_[i].id:0;}   // the one shown for the partner's cart i
     size_t count() const {return carts_.size();}
 private:
     struct Shown { uint32_t id=0; uint64_t asked=0; bool seen=false; };

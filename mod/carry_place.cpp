@@ -50,34 +50,28 @@ static bool pointers(const discovery::Sampler& s,uint64_t array,int32_t count,si
     out.clear();if(count<0||size_t(count)>most)return false;if(!count)return true;if(!array)return false;
     out.resize(size_t(count));return s.read(array,out.data(),out.size()*8);
 }
-std::optional<std::vector<Placed>> readPlaced(const discovery::Sampler& s,uint64_t entity,uint64_t vtable,uint64_t manager,const Transform& anchor,bool hands,SlotCache* cache,uint64_t now){
+namespace {
+// Every drawn case on `slots` of `carrier` whose slot type `keep` accepts, relative to `anchor`, within `reach` m.
+bool collect(const discovery::Sampler& s,uint64_t carrier,const std::vector<uint64_t>& slots,uint64_t manager,const Transform& anchor,
+             bool(*keep)(uint8_t),double reach,std::vector<Placed>& out,std::vector<uint64_t>* kept){
     using namespace mod::carry;
-    uint64_t component=0,v=0,carrier=0;
-    if(!entity||!load(s,entity+PorterCarrier,component)||!component||!load(s,component,v)||v!=vtable||!load(s,component+CarrierObject,carrier)||!carrier)return std::nullopt;
-    int32_t slotCount=0;uint64_t slotArray=0;std::vector<uint64_t> slots;
-    if(!load(s,carrier+Slots,slotCount)||!load(s,carrier+SlotArray,slotArray))return std::nullopt;
-    bool cached=hands&&cache&&cache->carrier==carrier&&cache->array==slotArray&&now>=cache->at&&now-cache->at<2000;
-    if(cached)slots=cache->slots;
-    else if(!pointers(s,slotArray,slotCount,MaxSlots,slots))return std::nullopt;
-    std::vector<uint64_t> handSlots;
-    std::vector<Placed> out;
     for(auto slot:slots){
         // The slot's header in one read (type +1, stack count +18, stack array +20, carrier +28): every read is guarded.
         uint8_t head[0x30];std::vector<uint64_t> stacks;
-        if(!slot||!s.read(slot,head,sizeof head))return std::nullopt;
+        if(!slot||!s.read(slot,head,sizeof head))return false;
         uint8_t type=head[SlotType];int32_t stackCount;uint64_t stackArray,slotCarrier;
         std::memcpy(&stackCount,head+Stacks,4);std::memcpy(&stackArray,head+StackArray,8);std::memcpy(&slotCarrier,head+SlotCarrier,8);
-        if(hands?(type<6||type>7):(type<1||type>5))continue;          // back, arms, hips; or the two hands
-        if(hands)handSlots.push_back(slot);
-        if(!pointers(s,stackArray,stackCount,MaxStacks,stacks))return std::nullopt;
+        if(!keep(type))continue;
+        if(kept)kept->push_back(slot);
+        if(!pointers(s,stackArray,stackCount,MaxStacks,stacks))return false;
         for(auto stack:stacks){
             int32_t n=0;uint64_t itemArray=0;std::vector<uint64_t> records;
-            if(!stack||!load(s,stack+Items,n)||!load(s,stack+ItemArray,itemArray)||!pointers(s,itemArray,n,MaxLevels,records))return std::nullopt;
+            if(!stack||!load(s,stack+Items,n)||!load(s,stack+ItemArray,itemArray)||!pointers(s,itemArray,n,MaxLevels,records))return false;
             for(auto r:records){
                 if(r<manager+RecordBase||(r-manager-RecordBase)%RecordStride||(r-manager-RecordBase)/RecordStride>=RecordCount)continue;
                 // The record from its world transform (+38) to its flags (+204) in one read.
                 uint64_t holder=0,mesh=0;uint32_t flags=0;Placed p;uint8_t block[RecordFlags+4-RecordWorld];
-                if(!s.read(r+RecordWorld,block,sizeof block))return std::nullopt;
+                if(!s.read(r+RecordWorld,block,sizeof block))return false;
                 auto at=[&](uint64_t off){return block+(off-RecordWorld);};
                 std::memcpy(&holder,at(RecordHolder),8);std::memcpy(&p.item,at(RecordHash),4);std::memcpy(&flags,at(RecordFlags),4);std::memcpy(&mesh,at(0x148),8);
                 const uint8_t* raw=block;
@@ -88,13 +82,37 @@ std::optional<std::vector<Placed>> readPlaced(const discovery::Sampler& s,uint64
                 if(!sane)continue;
                 p.variant=(flags&RecordVariant)!=0;p.slot=type;p.rel=relative(anchor,w);
                 double d=std::sqrt(p.rel.position[0]*p.rel.position[0]+p.rel.position[1]*p.rel.position[1]+p.rel.position[2]*p.rel.position[2]);
-                if(d>3.0)continue;
-                if(out.size()>=MaxPlaced)return out;
+                if(d>reach)continue;
+                if(out.size()>=MaxPlaced)return true;
                 out.push_back(p);
             }
         }
     }
+    return true;
+}
+bool bodySlot(uint8_t t){return t>=1&&t<=5;}   // back, arms, hips
+bool handSlot(uint8_t t){return t==6||t==7;}
+bool anySlot(uint8_t){return true;}
+}
+std::optional<std::vector<Placed>> readPlaced(const discovery::Sampler& s,uint64_t entity,uint64_t vtable,uint64_t manager,const Transform& anchor,bool hands,SlotCache* cache,uint64_t now){
+    using namespace mod::carry;
+    uint64_t component=0,v=0,carrier=0;
+    if(!entity||!load(s,entity+PorterCarrier,component)||!component||!load(s,component,v)||v!=vtable||!load(s,component+CarrierObject,carrier)||!carrier)return std::nullopt;
+    int32_t slotCount=0;uint64_t slotArray=0;std::vector<uint64_t> slots;
+    if(!load(s,carrier+Slots,slotCount)||!load(s,carrier+SlotArray,slotArray))return std::nullopt;
+    bool cached=hands&&cache&&cache->carrier==carrier&&cache->array==slotArray&&now>=cache->at&&now-cache->at<2000;
+    if(cached)slots=cache->slots;
+    else if(!pointers(s,slotArray,slotCount,MaxSlots,slots))return std::nullopt;
+    std::vector<uint64_t> handSlots;std::vector<Placed> out;
+    if(!collect(s,carrier,slots,manager,anchor,hands?handSlot:bodySlot,3.0,out,hands?&handSlots:nullptr))return std::nullopt;
     if(hands&&cache&&!cached)*cache={carrier,slotArray,now,handSlots};
+    return out;
+}
+std::optional<std::vector<Placed>> readCarrier(const discovery::Sampler& s,uint64_t carrier,uint64_t manager,const Transform& anchor,double reach){
+    using namespace mod::carry;
+    int32_t slotCount=0;uint64_t slotArray=0;std::vector<uint64_t> slots;std::vector<Placed> out;
+    if(!carrier||!load(s,carrier+Slots,slotCount)||!load(s,carrier+SlotArray,slotArray)||!pointers(s,slotArray,slotCount,MaxSlots,slots))return std::nullopt;
+    if(!collect(s,carrier,slots,manager,anchor,anySlot,reach,out,nullptr))return std::nullopt;
     return out;
 }
 ds::HeldCase toHeld(const Placed& p){
@@ -108,9 +126,9 @@ Placed fromHeld(const ds::HeldCase& h){
     p.rel.rotation=unpackRotation(h.rotation&((1ull<<48)-1));return p;
 }
 static constexpr double YawStep=3.14159265358979323846/32767.;
-std::vector<ds::CargoEvent> encode(const std::vector<Placed>& list,uint8_t generation){
+std::vector<ds::CargoEvent> encode(const std::vector<Placed>& list,uint8_t generation,uint8_t type){
     std::vector<ds::CargoEvent> out;size_t total=std::min<size_t>(list.size(),MaxPlaced);
-    auto head=[&](ds::CargoEvent& e){e.type=WireType;e.yaw=double(total|(size_t(generation)<<5))*YawStep;};
+    auto head=[&](ds::CargoEvent& e){e.type=type;e.yaw=double(total|(size_t(generation)<<5))*YawStep;};
     if(!total){ds::CargoEvent e;head(e);out.push_back(e);return out;}
     for(size_t i=0;i<total;++i){
         ds::CargoEvent e;head(e);e.item=list[i].item;
@@ -121,7 +139,7 @@ std::vector<ds::CargoEvent> encode(const std::vector<Placed>& list,uint8_t gener
     return out;
 }
 std::optional<std::vector<Placed>> Receiver::feed(const ds::CargoEvent& e){
-    if(e.type!=WireType)return std::nullopt;
+    if(e.type!=type_)return std::nullopt;
     long word=std::lround(e.yaw/YawStep);if(word<0||word>0x1fff){reset();return std::nullopt;}
     uint8_t total=uint8_t(word&31),generation=uint8_t(word>>5),index=uint8_t((e.ref>>47)&31);
     if(total>MaxPlaced){reset();return std::nullopt;}
@@ -163,6 +181,6 @@ std::vector<ds::CargoEvent> Sender::observe(const std::optional<std::vector<Plac
     if(haveSent_&&alike(*read,sent_,Moved))return {};
     if(haveSent_&&now-sentAt_<MinGap)return {};
     sent_=*read;haveSent_=true;sentAt_=now;
-    return encode(sent_,++generation_);
+    return encode(sent_,++generation_,type_);
 }
 }

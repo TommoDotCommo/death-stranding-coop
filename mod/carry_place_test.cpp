@@ -50,6 +50,12 @@ int main(){
       CHECK(s.observe(list(0.6),false,9500).empty());CHECK(s.observe(list(0.6),true,12000).size()==1);   // a new connection
       CHECK(s.observe(std::nullopt,true,13000).empty());
       auto none=s.observe({std::vector<Placed>{}},true,20000);CHECK(none.empty());CHECK(s.observe({std::vector<Placed>{}},true,20300).size()==1); }   // put down: an empty list
+    // A cart's cases travel as their own type: the back's receiver leaves them alone, the cart's takes them.
+    { std::vector<Placed> list(2);list[0].item=7;list[1].item=8;list[1].rel=at(0.5,1.2,0.4,0.3);
+      auto ev=encode(list,4,CartWireType);CHECK(ev.size()==2&&ev[0].type==CartWireType&&ev[1].type==CartWireType);
+      Receiver back,cart(CartWireType);CHECK(!back.feed(ev[0])&&!back.feed(ev[1]));
+      CHECK(!cart.feed(ev[0]));auto got=cart.feed(ev[1]);CHECK(got&&got->size()==2&&(*got)[1].item==8&&gap((*got)[1].rel,list[1].rel)<0.002);
+      Sender s(CartWireType);s.observe(list,true,0);auto out=s.observe(list,true,300);CHECK(out.size()==2&&out[0].type==CartWireType); }
     if(failures){std::fprintf(stderr,"place oracle: %d failures\n",failures);return 1;}
     std::puts("carry placement ok");return 0;
 }

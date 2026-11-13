@@ -18,7 +18,7 @@ std::vector<Cart> read(const discovery::Sampler& s,uint64_t base){
         uint32_t type=0,id=0,flags=0;uint64_t inner=0,vt=0;
         if(!c||!s.read(c,&type,4)||type!=CarrierCart||!s.read(c+CarrierId,&id,4)||!cartId(id)||!s.read(c+CarrierFlags,&flags,4)
            ||!s.read(c+CarrierEntity,&inner,8)||inner<0x20)continue;
-        Cart cart;cart.id=id;cart.entity=inner-0x20;cart.attached=(flags&Attached)!=0;
+        Cart cart;cart.id=id;cart.carrier=c;cart.entity=inner-0x20;cart.attached=(flags&Attached)!=0;
 #ifndef MUTANT_CARTS_VTABLE
         if(!s.read(cart.entity,&vt,8)||vt!=base+EntityVtable)continue;
 #endif
