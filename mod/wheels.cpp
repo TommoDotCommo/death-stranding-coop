@@ -69,6 +69,10 @@ std::optional<Read> read(const discovery::Sampler& s,uint64_t vehicle,uint8_t ki
     auto r=record(s,vehicle);if(!r)return std::nullopt;
     unsigned n=kind==ds::Motorbike?BikeWheelCount:TruckWheelCount;std::vector<int32_t> wheels(n);
     if(!s.read(vehicle+(kind==ds::Motorbike?BikeWheels:TruckWheels),wheels.data(),4*n))return std::nullopt;
+    // The handle joint from the resource, when the resource is the one the wheel indices came from.
+    {uint64_t h=0,o=0,res=0;int32_t first=0,handle=-1;
+     if(q(s,vehicle+ResourceHandle,h)&&q(s,h,o)&&q(s,o+ResourceObject,res)&&s.read(res+ResourceFirstWheel,&first,4)&&first==wheels[0]
+        &&s.read(res+(kind==ds::Motorbike?BikeHandle:TruckHandle),&handle,4)&&handle>0)wheels.push_back(handle);}
     std::vector<uint8_t> table(size_t(r->count)*SkeletonStride);
     if(!s.read(r->table,table.data(),table.size()))return std::nullopt;
     std::vector<int16_t> parents(size_t(r->count));

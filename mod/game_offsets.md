@@ -1116,6 +1116,9 @@ looked at.
   animation sample (core VehicleJoint) and written into the display truck's current record each tick (index and
   joint-count checks, plain writable memory, then entity `+0x88` bit 0 as the game's transform writer sets it): the
   write is accepted (same 47-joint model).
+- The vehicle's resource is `*(*(*(entity+0x58))+0x20)` (getter `0x1dde990`, used by the init `0x2f74e90` to copy
+  resource `+0x2e8..` into entity `+0xc60..`); its handle joint is `+0x308` (truck: the cab's steering wheel, joint 31
+  of 47) and `+0x2f4` (bike handlebar). With it all 47 truck joints matched live.
 
 ### Mirroring the porter's animation controls (2026-11-13, live)
 

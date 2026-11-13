@@ -18,6 +18,9 @@ constexpr uint64_t Model=0xb8,RecordIndex=0x250,Records=0x170,RecordStride=0x70,
                    SkeletonCount=0x20,SkeletonTable=0x28,SkeletonStride=0x10,SkeletonParent=0x8,JointStride=0x30;
 // Wheel joint indices the game stores on the entity from the vehicle's resource (int32 each).
 constexpr uint64_t BikeWheels=0xcb0,TruckWheels=0xc60;constexpr unsigned BikeWheelCount=3,TruckWheelCount=4;
+// The vehicle's resource (the getter 0x1dde990 on entity +58: *(*(*(+58))+20)), whose first wheel index (+2e8) the
+// entity copied, and its handle joint: the bike's handlebar (+2f4), the truck's steering wheel in the cab (+308).
+constexpr uint64_t ResourceHandle=0x58,ResourceObject=0x20,ResourceFirstWheel=0x2e8,BikeHandle=0x2f4,TruckHandle=0x308;
 constexpr unsigned MaxJoints=512,Ancestors=3;
 struct Joint {uint16_t index=0;std::array<float,4> rotation{0,0,0,1};std::array<float,3> position{};};
 // The joints to send: each wheel joint and up to `Ancestors` of its parents (never the root, joint 0), increasing,
