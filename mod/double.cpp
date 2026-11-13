@@ -876,11 +876,14 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
              if(pose!=handles->pose){handles->pose=pose;handles->poseAt=ms;
                  if(handles->isDead>=0)setBool(manager,handles->isDead,pose&DeadPoseBit);
                  if(handles->isDrag>=0)setBool(manager,handles->isDrag,pose&DragPoseBit);
-                 for(int h:{handles->tb0,handles->tb1,handles->tb2})if(h>=0)setBool(manager,h,false);
+                 // The death enters the game's "dead" sub-state directly (Temporary_Bool0 = 1 before the pulse, as the game
+                 // does at 0x28fd86b): the collapse in between needs the ragdoll the body does not have.
+                 for(int h:{handles->tb1,handles->tb2})if(h>=0)setBool(manager,h,false);
+                 if(handles->tb0>=0)setBool(manager,handles->tb0,(pose&DeadPoseBit)!=0);
                  if(handles->tf0>=0)setFloat(manager,handles->tf0,(pose&DragPoseBit)?90.f:0.f);
                  if(pose){if(handles->rewind>=0)trigger(manager,handles->rewind,0.1f);
                      if((pose&DragPoseBit)&&handles->rewindLong>=0)trigger(manager,handles->rewindLong,0.1f);}}
-             if((pose&DeadPoseBit)&&handles->tb0>=0&&ms-handles->poseAt>=3000)setBool(manager,handles->tb0,true);}
+             (void)ms;}
             if(pose){speed=0;flags=ActionsBit|LandedBit;}
             bool moving=speed>MovingSpeed;
             if(handles->speed>=0)setFloat(manager,handles->speed,float(speed));

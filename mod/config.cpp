@@ -81,7 +81,7 @@ Config parseConfig(const std::string& s) {
     c.shareRoads=boolean("share_roads",false);
     c.shareSavedStructures=boolean("share_saved_structures",false);
     c.bodyUpdateLink=boolean("body_update_link",true);
-    c.partnerPoses=boolean("partner_poses",false);
+    c.partnerPoses=boolean("partner_poses",true);
     if(values.count("passenger_key")){auto k=number("passenger_key");if(k>0xfe)throw std::runtime_error("passenger_key must be a virtual-key code 0..254 (0: off)");c.passengerKey=unsigned(k);}
     c.partnerTag=boolean("partner_tag",false);
 #ifndef MUTANT_CONFIG_MARKER

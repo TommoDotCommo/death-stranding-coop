@@ -1080,13 +1080,16 @@ looked at.
   `Is_Drag` = 1, `Temporary_Float0` = a heading (plus or minus 90) and pulses `Action_Rewind` and `Action_Rewind_Long`.
   Every frame the game ORs these into `Is_Actions`: the network leaves locomotion only through that gate, which the
   mod had held shut for a downed partner.
-- Live (`partner_poses`, off by default): with the gate open and the death writes, the body played the game's own
-  collapse (thrown backwards, arms out) but stayed held in it for 20 s, upright, instead of reaching the lying loop
-  after `Temporary_Bool0` = 1. Not yet understood (the clip may need the body to fall under its own motion, which the
-  mover's target playback overrides). The default stays the laid-down transform.
-- Read back while held (resident double as the body): `Is_Dead` 1, `Is_Actions` 1, `Is_BasicAction` 0, `Temporary_Bool0` 1,
-  so the writes land; but `Is_Landed` reads 0 although the mod writes 1 every tick: something on the body resets it
-  (I: the fall clip waits for a landing that only the player's controller reports).
+- Live: with the gate open and the death writes the body plays the game's own collapse, then holds its last frame
+  upright: the lying part of the porter's death is physics (the dying sub-state starts the porter's ragdoll and pushes
+  it along the hit for 0.3 s, `0x2858a6e`), and the body has no ragdoll. Entering the "dead" sub-state directly
+  (`Temporary_Bool0` = 1 before the pulse) changes nothing. What works (`partner_poses`, the default): the collapse
+  pose laid on its back with the old transform: a body curled on the ground. The BT drag needs nothing more: the
+  drag writes give the game's own drag (face down, clawing). Both end cleanly when the partner is up again (the
+  controls go back and the body stands).
+- `Is_Landed` is a landing pulse the fall code writes, not a contact flag; the body's own class binds 18 controls
+  (`Is_AKukan`, `Temporary_*`, guard and upper-body ones) and nothing writes its records but the mod and the
+  exported setters, which skip a write of the value already stored (`0x23971f4`).
 
 ### Voidout craters (2026-11-13, static, then live)
 

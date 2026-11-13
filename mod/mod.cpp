@@ -1793,7 +1793,7 @@ struct Runtime final:ds::Transport {
                 note(o.str().c_str());}}
         // A partner who is down lies on his back where he fell (no locomotion underneath).
         if(config.partnerPoses&&target&&partnerMode()&&cache.remote.visible&&!cache.remote.state.vehicle){
-            if(cache.remote.state.flags&ds::Down){speed=0;actions=mod::puppet::DeadPoseBit;}
+            if(cache.remote.state.flags&ds::Down){speed=0;actions=mod::puppet::DeadPoseBit;target=mod::puppet::laidDown(*target);}   // the collapse, laid on his back
             else if(cache.remote.state.flags&ds::Caught){speed=0;actions=mod::puppet::DragPoseBit;}}
         {bool lay=!config.partnerPoses&&target&&partnerMode()&&cache.remote.visible&&(cache.remote.state.flags&ds::Down)&&!cache.remote.state.vehicle;
             if(lay){target=mod::puppet::laidDown(*target);speed=0;actions&=mod::puppet::FlagCrouchBit;}
