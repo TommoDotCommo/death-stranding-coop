@@ -28,6 +28,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "join.h"
 #include "puppet.h"
 #include "double.h"
+#include "controls.h"
 #include "body.h"
 #include "vehicle.h"
 #include "ride.h"
@@ -90,10 +91,11 @@ template<class T> struct Background {
 namespace {
 std::string error;
 std::mutex lifecycle;
-void checksum(ds::Bytes& b) {
-    uint32_t h=2166136261u;for(size_t i=0;i<b.size();++i) {h^=i>=120&&i<124?0:b[i];h*=16777619u;}
+void checksum(uint8_t* b,size_t n) {
+    uint32_t h=2166136261u;for(size_t i=0;i<n;++i) {h^=i>=120&&i<124?0:b[i];h*=16777619u;}
     for(unsigned i=0;i<4;++i)b[120+i]=uint8_t(h>>(8*i));
 }
+void checksum(ds::Bytes& b) {checksum(b.data(),b.size());}
 // No config-specified write paths. All writes are exclusive files beside config.
 void safePath(const std::filesystem::path& p) {
     if(!p.is_absolute()) throw std::runtime_error("absolute config path required");
@@ -351,6 +353,9 @@ struct Runtime final:ds::Transport {
     // This porter's own vehicle, as the provider last saw it (game axes): where a partner riding along is held.
     struct LocalVehicle { bool riding=false; uint8_t kind=0; std::array<double,3> position{}; std::array<float,9> rotation{}; uint64_t at=0; };
     LocalVehicle localVehicle;bool partnerAboard=false;mod::puppet::FloatVariable restVar;bool localResting=false;
+    // The porter's own animation controls (controls.h): read every frame, sent beside presence; echo keeps its own.
+    mod::controls::Binding controlBinding;mod::controls::Gather controlGather;bool echoOwn=false;
+    std::deque<std::pair<uint64_t,ds::Animation>> echoControls;std::array<uint8_t,ds::AnimationBoolBytes> echoLast{};bool echoHave=false;
     std::function<void(uint64_t,const mod::puppet::Transform&)> keepOut;uint64_t keptOutNoted=0;
     mod::passenger::Rider rider;mod::passenger::Api passengerApi;bool passengerTried=false;mod::marker::KeyEdge passengerEdge;
     void tickPassenger(const mod::puppet::Anchor& anchor,bool connected,uint64_t now){
@@ -1269,6 +1274,7 @@ struct Runtime final:ds::Transport {
     }
     Cache cache;std::unique_ptr<ds::StateProvider> provider;std::unique_ptr<ds::Core> core;
     uint64_t sent=0,received=0,dropped=0,wrongAccepted=0,buildRefused=0,versionRefused=0,sessionRefused=0;
+    uint64_t animationSent=0,animationShown=0;bool animationNoted=false;
     bool paired=false,failed=false;std::string failure;uint64_t startedAt=0;std::vector<double> errors;
 #ifdef MOD_FAKE_NETWORK
     std::deque<ds::Bytes> outgoing;
@@ -1278,7 +1284,7 @@ struct Runtime final:ds::Transport {
 #else
     int log=-1,presenceLog=-1;
 #endif
-    struct Pending {uint64_t receivedUs;uint64_t due;ds::Bytes b;size_t size;};std::vector<Pending> pending;mod::link::Profile linkProfile;uint64_t linkLost=0;uint32_t notedDelay=120;
+    struct Pending {uint64_t receivedUs;uint64_t due;std::vector<uint8_t> b;size_t size;};std::vector<Pending> pending;mod::link::Profile linkProfile;uint64_t linkLost=0;uint32_t notedDelay=120;
     void note(const char* s) {
         std::cerr<<"mod: "<<s<<'\n';
 #ifdef _WIN32
@@ -1310,6 +1316,15 @@ struct Runtime final:ds::Transport {
         if(n==static_cast<int>(b.size())) ++sent;else ++dropped;
 #endif
     }
+    // ANIMATION (core.h): the one longer packet, with the same identity rewrite.
+    void sendLong(const std::vector<uint8_t>& input) override {
+        if(input.size()<ds::WireSize)return;
+        auto b=input;std::copy(mod::WireBuild.begin(),mod::WireBuild.end(),b.begin()+16);checksum(b.data(),b.size());
+#ifndef MOD_FAKE_NETWORK
+        auto n=sendto(socket,reinterpret_cast<const char*>(b.data()),int(b.size()),0,reinterpret_cast<sockaddr*>(&peer),sizeof(peer));
+        if(n==static_cast<int>(b.size())) {++sent;++animationSent;} else ++dropped;
+#endif
+    }
     void accept(Pending p,uint64_t now) {
         uint64_t incomingSession=0;for(unsigned i=0;i<8;++i) incomingSession|=uint64_t(p.b[32+i])<<(8*i);
         bool badBuild=!std::equal(mod::WireBuild.begin(),mod::WireBuild.end(),p.b.begin()+16);
@@ -1318,9 +1333,9 @@ struct Runtime final:ds::Transport {
 #endif
         // Validate the full adapter identity first, then translate to the unchanged core pin.
         // Preserve original checksum failures: only rewrite identity on checksum-valid frames.
-        auto check=p.b;checksum(check);
+        auto check=p.b;checksum(check.data(),check.size());
         bool checksumOK=std::equal(check.begin()+120,check.begin()+124,p.b.begin()+120);
-        if(checksumOK) {std::copy(ds::ModBuild.begin(),ds::ModBuild.end(),p.b.begin()+16);checksum(p.b);}
+        if(checksumOK) {std::copy(ds::ModBuild.begin(),ds::ModBuild.end(),p.b.begin()+16);checksum(p.b.data(),p.b.size());}
         auto before=core->accepted();
         auto e=core->receive(p.b.data(),p.size,now);
         if(e==ds::Error::Progress&&!progressRefusalNoted){progressRefusalNoted=true;note("HANDSHAKE refused: story progress mismatch (progress_mismatch=refuse on one peer)\n");}
@@ -1353,7 +1368,7 @@ struct Runtime final:ds::Transport {
                 lastNetwork=clock;
                 #ifndef MOD_FAKE_NETWORK
                 for(unsigned budget=0;budget<64;++budget) {
-                    ds::Bytes b{};sockaddr_in source{};
+                    sockaddr_in source{};
 #ifdef _WIN32
                     int size=sizeof(source);
 #else
@@ -1373,8 +1388,9 @@ struct Runtime final:ds::Transport {
                         throw std::runtime_error("UDP receive failed");
                     }
                     ++received;
-                    if(n!=int(ds::WireSize)||source.sin_addr.s_addr!=peer.sin_addr.s_addr||source.sin_port!=peer.sin_port) {++dropped;continue;}
-                    memcpy(b.data(),raw,b.size());
+                    bool longKind=n>int(ds::WireSize)&&n<=int(ds::AnimationWireMax)&&uint8_t(raw[6])==uint8_t(ds::Kind::Animation);
+                    if((n!=int(ds::WireSize)&&!longKind)||source.sin_addr.s_addr!=peer.sin_addr.s_addr||source.sin_port!=peer.sin_port) {++dropped;continue;}
+                    std::vector<uint8_t> b(raw,raw+n);
                     auto fate=mod::link::fate(linkProfile,config.impairment,received,b[6]==uint8_t(ds::Kind::Presence));
                     if(fate.lost) {if(++linkLost%100==0){std::ostringstream o;o<<"LINK "<<config.link<<" lost "<<linkLost<<" of "<<received<<" received\n";note(o.str().c_str());}continue;}
                     uint64_t delay=fate.delayMs;
@@ -1760,7 +1776,9 @@ struct Runtime final:ds::Transport {
         if(std::filesystem::exists(twinCommand)) {
             auto command=readConfig(twinCommand);auto stamp=" "+mod::runStamp()+"\n";
             if(!std::filesystem::remove(twinCommand))throw std::runtime_error("cannot consume double command");
-            if(command=="echo"+stamp)twinMode=TwinMode::Echo;else if(command=="peer"+stamp)twinMode=TwinMode::Peer;
+            if(command=="echo"+stamp){twinMode=TwinMode::Echo;echoOwn=false;}
+            else if(command=="echoown"+stamp){twinMode=TwinMode::Echo;echoOwn=true;if(ownTwin)ownTwin->enable();}   // echo on the own body (controls test)
+            else if(command=="peer"+stamp)twinMode=TwinMode::Peer;
             else if(auto ownMask=mod::puppet::parseOwnCommand(command,stamp)){
                 // own: the porter's art parts (mask 8: drawn, stable; stretched-polygon artifacts). ownN / ownNN (hex),
                 // research only: 1 cover, 2 cover+animation, 4 facial rig (lazy, empty components: 4 hangs the game),
@@ -1791,11 +1809,17 @@ struct Runtime final:ds::Transport {
                 if(aboard)o<<"BODY the partner rides along on this truck\n";
                 else o<<"BODY the partner is off this truck (target "<<bool(target)<<" visible "<<cache.remote.visible<<" flag "<<bool(cache.remote.state.flags&ds::Passenger)<<" riding "<<localVehicle.riding<<" kind "<<int(localVehicle.kind)<<" read "<<int64_t(now)-int64_t(localVehicle.at)<<" ms ago)\n";
                 note(o.str().c_str());}}
+        // The partner's own animation controls (controls.h), taken every tick so that each pulse is given once. While he is
+        // down, caught or riding the mod's own poses hold the body instead.
+        std::optional<ds::AnimationShown> controlsShown;
+        if(core&&core->connected())controlsShown=core->takeAnimation(now);
+        bool mirrorOn=config.partnerAnimation&&controlsShown&&target&&partnerMode()&&cache.remote.visible&&!cache.remote.state.vehicle&&!partnerAboard
+                      &&!(cache.remote.state.flags&(ds::Down|ds::Caught));
         // A partner who is down lies on his back where he fell (no locomotion underneath).
         if(config.partnerPoses&&target&&partnerMode()&&cache.remote.visible&&!cache.remote.state.vehicle){
             if(cache.remote.state.flags&ds::Down){speed=0;actions=mod::puppet::DeadPoseBit;target=mod::puppet::laidDown(*target);}   // the collapse, laid on his back
             else if(cache.remote.state.flags&ds::Caught){speed=0;actions=mod::puppet::DragPoseBit;}
-            else if((cache.remote.state.flags&ds::Rest)&&horizontal(cache.remote.state)<0.3){speed=0;actions=mod::puppet::RestPoseBit;}}
+            else if((cache.remote.state.flags&ds::Rest)&&!mirrorOn&&horizontal(cache.remote.state)<0.3){speed=0;actions=mod::puppet::RestPoseBit;}}
         {bool lay=target&&partnerMode()&&cache.remote.visible&&(cache.remote.state.flags&ds::Down)&&!cache.remote.state.vehicle;
             if(lay&&!config.partnerPoses){target=mod::puppet::laidDown(*target);speed=0;actions&=mod::puppet::FlagCrouchBit;}   // with poses: done above
             if(lay!=partnerLaid){partnerLaid=lay;note(lay?(config.partnerPoses?"BODY laid down: the partner is down (the game's collapse)\n":"BODY laid down: the partner is down\n"):"BODY upright again\n");}}
@@ -1807,6 +1831,11 @@ struct Runtime final:ds::Transport {
                 // Game right vector (cos, -sin, 0) in adapter axes (x, up, z).
                 s.position[0]+=2*std::cos(y);s.position[2]-=2*std::sin(y);
                 target=mod::puppet::fromState(s.position,y);speed=horizontal(s);actions=packed(s);
+                // The controls of the same moment; pulses of frames passed over go with the next one shown.
+                while(echoControls.size()>1&&now-echoControls[1].first>=1000){auto r=echoControls.front().second.rose;echoControls.pop_front();
+                    for(size_t k=0;k<r.size();++k)echoControls.front().second.rose[k]|=r[k];}
+                if(config.partnerAnimation&&!echoControls.empty()&&now-echoControls.front().first>=1000){
+                    controlsShown=ds::AnimationShown{echoControls.front().second,0,true};echoControls.front().second.rose={};mirrorOn=true;}
             }
         }
         if(twinMode==TwinMode::Lead&&cache.available) {
@@ -1816,6 +1845,7 @@ struct Runtime final:ds::Transport {
             target=mod::puppet::fromState(s.position,y);speed=horizontal(s);actions=packed(s);
         }
         if(twinMode==TwinMode::None)echo.clear();
+        if(twinMode!=TwinMode::Echo){echoControls.clear();echoHave=false;}
         // During a local game event or cutscene the double goes back to the game, so it never appears in one.
         bool event=gameEvent&&gameEvent();
         if(event!=inEvent){inEvent=event;if(!event)eventOverAt=now;note(event?"DOUBLE game event: double handed back\n":"DOUBLE game event over\n");}
@@ -1826,16 +1856,22 @@ struct Runtime final:ds::Transport {
         if(goal&&rideHideRider&&partnerMode()&&cache.remote.state.vehicle&&ride&&ride->entity()&&ride->kind()==cache.remote.state.vehicle)goal=nullptr;
         // Own body: made (once per world) and driven by its own backend; the resident double is released, never
         // dropped while borrowed. Until the body exists, or if the game refuses to make one, the resident double is used.
-        bool useOwn=twinMode==TwinMode::Own&&own&&ownTwin&&!own->exhausted();
+        bool useOwn=(twinMode==TwinMode::Own||(twinMode==TwinMode::Echo&&echoOwn))&&own&&ownTwin&&!own->exhausted();
         auto anchor=anchorNow();
         stages.enter("body make",mod::nowUs());
         if(useOwn)ownEntity=own->tick(anchor);
         stages.enter("body drive",mod::nowUs());
         {double steer=partnerMode()&&cache.remote.visible?cache.remote.state.steer:0;twin->steering(steer);if(ownTwin)ownTwin->steering(steer);}
+        const ds::Animation* mirrorSample=mirrorOn&&controlsShown?&controlsShown->animation:nullptr;bool mirrorFresh=mirrorSample&&controlsShown->fresh;
+        if(mirrorSample&&!animationNoted){animationNoted=true;note("BODY moves with the partner's own animation controls\n");}
+        if(mirrorSample)++animationShown;
         if(useOwn&&ownEntity){
+            twin->mirror(nullptr,false);ownTwin->mirror(mirrorSample,mirrorFresh);
             twin->tick(true,nullptr);ownTwin->tick(true,goal,speed,actions,hold);
         }
-        else{twin->tick(true,goal,speed,actions,hold);if(ownTwin)ownTwin->tick(true,nullptr);}
+        else{twin->mirror(mirrorSample,mirrorFresh);if(ownTwin)ownTwin->mirror(nullptr,false);
+            twin->tick(true,goal,speed,actions,hold);if(ownTwin)ownTwin->tick(true,nullptr);}
+        twin->mirror(nullptr,false);if(ownTwin)ownTwin->mirror(nullptr,false);   // the sample lives only for this tick
         stages.enter("gear",mod::nowUs());
         repWatch=useOwn?ownEntity:0;
         quietBodyInventory(useOwn?ownEntity:0,now);
@@ -1867,6 +1903,19 @@ struct Runtime final:ds::Transport {
                 // A bool control's byte read as a float is a denormal, which the game's floating-point mode takes for zero: the bits.
                 uint32_t bits=0;if(v)std::memcpy(&bits,&*v,4);bool resting=(bits&0xff)!=0;if(resting)cache.local.flags|=ds::Rest;
                 if(resting!=localResting){localResting=resting;note(resting?"REST this porter sits down to rest\n":"REST this porter is up again\n");}}}
+            // The porter's own animation controls (controls.h), every frame: a one-frame pulse is seen only so.
+            if(config.partnerAnimation&&cache.available&&sampler&&core&&(core->connected()||twinMode==TwinMode::Echo)){auto a=anchorNow();
+                std::array<uint8_t,ds::AnimationBoolBytes> held{};std::array<float,ds::AnimationFloats> floats{};
+                if(a.entity&&mod::controls::readPorter(*sampler,a.entity,animatorVtable,controlBinding,held,floats)){
+                    if(controlBinding.rebound){controlBinding.rebound=false;std::ostringstream o;
+                        o<<"CONTROLS the porter's animation manager has "<<controlBinding.count<<" controls; not mirrored ("<<controlBinding.unknown.size()<<"):";
+                        for(auto& n:controlBinding.unknown)o<<" "<<n;
+                        o<<"\n";note(o.str().c_str());}
+                    if(twinMode==TwinMode::Echo){ds::Animation e;e.held=held;e.floats=floats;
+                        if(echoHave)for(size_t k=0;k<held.size();++k)e.rose[k]=uint8_t(held[k]&~echoLast[k]);
+                        echoLast=held;echoHave=true;echoControls.emplace_back(now,e);}
+                    controlGather.add(held,floats);
+                    if(core->connected()&&core->sendAnimation(controlGather.current(),now))controlGather.sent();}}
             stages.enter("start",mod::nowUs());
             // A bounded, read-only observation; never writes story or save state.
             if(game&&cache.available&&sampler&&now>=nextProgressRead){
@@ -2358,7 +2407,7 @@ MOD_API void mod_test_deliver(const unsigned char* bytes) {
     auto fate=mod::link::fate(r.linkProfile,r.config.impairment,r.received,b[6]==uint8_t(ds::Kind::Presence));
     if(fate.lost){++r.linkLost;return;}
     uint64_t delay=fate.delayMs;
-    r.pending.push_back({mod::nowUs(),mod::nowMs()+delay,b,b.size()});
+    r.pending.push_back({mod::nowUs(),mod::nowMs()+delay,std::vector<uint8_t>(b.begin(),b.end()),b.size()});
 }
 #endif
 int mod_pad(mod_pad_state* s) {

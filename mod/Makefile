@@ -3,8 +3,8 @@ CXX ?= g++
 MINGW ?= x86_64-w64-mingw32-g++-posix
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = voidout.cpp passenger.cpp carry_place.cpp roads.cpp bts.cpp enemies.cpp orders.cpp vitals.cpp online.cpp notice.cpp nametag.cpp likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = link.h guard_win.h voidout.h passenger.h carry_place.h roads.h bts.h enemies.h orders.h vitals.h online.h notice.h nametag.h likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = controls.cpp voidout.cpp passenger.cpp carry_place.cpp roads.cpp bts.cpp enemies.cpp orders.cpp vitals.cpp online.cpp notice.cpp nametag.cpp likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = controls.h link.h guard_win.h voidout.h passenger.h carry_place.h roads.h bts.h enemies.h orders.h vitals.h online.h notice.h nametag.h likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -79,7 +79,7 @@ build/game-thread-test: game_thread_test.cpp game_thread.cpp discovery.cpp game_
 	$(CXX) $(FLAGS) game_thread_test.cpp game_thread.cpp discovery.cpp -o $@
 build/puppet-test: puppet_test.cpp puppet.cpp pose.cpp discovery.cpp puppet.h | build
 	$(CXX) $(FLAGS) puppet_test.cpp puppet.cpp pose.cpp discovery.cpp -o $@
-build/double-test: double_test.cpp double.cpp puppet.cpp pose.cpp discovery.cpp double.h puppet.h fake_memory.h | build
+build/double-test: double_test.cpp double.cpp puppet.cpp pose.cpp discovery.cpp double.h controls.h puppet.h fake_memory.h | build
 	$(CXX) $(FLAGS) double_test.cpp double.cpp puppet.cpp pose.cpp discovery.cpp -o $@
 build/structures-fuzz: structures_fuzz.cpp structures.cpp structures.h discovery.cpp | build
 	$(CXX) $(FLAGS) structures_fuzz.cpp structures.cpp discovery.cpp -o $@
@@ -107,6 +107,8 @@ build/notice-test: notice_test.cpp notice.cpp notice.h nametag.cpp nametag.h dis
 	$(CXX) $(FLAGS) notice_test.cpp notice.cpp nametag.cpp discovery.cpp ../core/core.cpp -o $@
 build/link-test: link_test.cpp link.h | build
 	$(CXX) $(FLAGS) link_test.cpp -o $@
+build/controls-test: controls_test.cpp controls.cpp controls.h discovery.cpp | build
+	$(CXX) $(FLAGS) controls_test.cpp controls.cpp discovery.cpp -o $@
 build/voidout-test: voidout_test.cpp voidout.cpp voidout.h discovery.cpp | build
 	$(CXX) $(FLAGS) voidout_test.cpp voidout.cpp discovery.cpp -o $@
 
@@ -158,7 +160,7 @@ build/coop-partner: environment.cpp environment.h partner.cpp partner_logic.cpp 
 	$(CXX) $(FLAGS) partner.cpp partner_logic.cpp environment.cpp structures.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@
 build/coop-partner.exe: environment.cpp environment.h partner.cpp partner_logic.cpp partner.h identity.h structures.cpp structures.h carry_visual.cpp carry_visual.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(MINGW) $(WINFLAGS) partner.cpp partner_logic.cpp environment.cpp structures.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@ -lws2_32 -lbcrypt
-game-thread-test: build/guard-test build/voidout-test build/passenger-test build/place-test build/roads-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test
+game-thread-test: build/guard-test build/controls-test build/voidout-test build/passenger-test build/place-test build/roads-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test
 	./build/game-thread-test
 	./build/puppet-test
 	./build/double-test
@@ -182,6 +184,7 @@ game-thread-test: build/guard-test build/voidout-test build/passenger-test build
 	./build/likes-test
 	./build/online-test
 	./build/vitals-test
+	./build/controls-test
 	./build/voidout-test
 	./build/passenger-test
 	./build/place-test

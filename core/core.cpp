@@ -1,6 +1,7 @@
 #include "core.h"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 
@@ -10,7 +11,7 @@ constexpr double Pi=3.14159265358979323846;
 void put(Bytes& b,size_t at,uint64_t v,size_t n) { for(size_t i=0;i<n;++i) b[at+i]=uint8_t(v>>(8*i)); }
 uint64_t get(const uint8_t* b,size_t at,size_t n) { uint64_t v=0; for(size_t i=0;i<n;++i) v|=uint64_t(b[at+i])<<(8*i); return v; }
 int64_t signedGet(const uint8_t* b,size_t at,size_t n) { uint64_t v=get(b,at,n); return (v & (uint64_t(1)<<(n*8-1))) ? int64_t(v)-int64_t(uint64_t(1)<<(n*8)) : int64_t(v); }
-uint32_t checksum(const uint8_t* b) { uint32_t h=2166136261u; for(size_t i=0;i<WireSize;++i) { h^=(i>=120 && i<124)?0:b[i]; h*=16777619u; } return h; }
+uint32_t checksum(const uint8_t* b,size_t n=WireSize) { uint32_t h=2166136261u; for(size_t i=0;i<n;++i) { h^=(i>=120 && i<124)?0:b[i]; h*=16777619u; } return h; }
 double distance(const State& a,const State& b) { double d=0; for(int i=0;i<3;++i) d+=std::pow(a.position[i]-b.position[i],2); return std::sqrt(d); }
 double speed(const State& a) { double v=0; for(double x:a.velocity) v+=x*x; return std::sqrt(v); }
 }
@@ -29,13 +30,15 @@ bool valid(const State& s) {
     return std::isfinite(s.yaw)&&std::abs(s.yaw)<=Pi+1e-9 && std::isfinite(s.phase)&&s.phase>=0&&s.phase<=1 && s.action<=31 && !(s.flags&~FlagMask) && speed(s)<=100.02;
 }
 Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
-    if(!b || (p.length && n!=WireSize)) return Error::Length;
+    // ANIMATION is the one kind longer than the header (its payload follows it).
+    bool long_=b && n>WireSize && n<=AnimationWireMax && b[6]==uint8_t(Kind::Animation);
+    if(!b || (p.length && n!=WireSize && !long_)) return Error::Length;
     if(p.magic && get(b,0,4)!=0x31505344) return Error::Magic;
     if(p.version && get(b,4,2)!=1) return Error::Version;
-    if(p.length && get(b,8,2)!=WireSize) return Error::Length;
-    if(p.checksum && get(b,120,4)!=checksum(b)) return Error::Checksum;
+    if(p.length && get(b,8,2)!=n) return Error::Length;
+    if(p.checksum && get(b,120,4)!=checksum(b,long_?n:WireSize)) return Error::Checksum;
     if(p.reserved && (get(b,10,2)||b[95]||get(b,124,4))) return Error::Reserved;
-    if(p.kind && (b[6]<1||b[6]>9)) return Error::Kind;
+    if(p.kind && (b[6]<1||b[6]>10)) return Error::Kind;
     if(p.role && (b[7]<1||b[7]>2)) return Error::Role;
     Packet q; q.kind=Kind(b[6]); q.role=Role(b[7]); q.game=uint32_t(get(b,12,4));
     std::copy(b+16,b+32,q.mod.begin());
@@ -56,6 +59,20 @@ Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
         for(int i=0;i<3;++i) { q.state.vehicleOffset[i]=signedGet(b,98+2*i,2)/100.; q.state.vehicleAngles[i]=signedGet(b,104+2*i,2)*Pi/32767.; }
         q.state.steer=signedGet(b,110,2)/100.;
         q.state.vehicleVariant=b[97]; q.state.vehicleLook=uint16_t(get(b,112,2));
+    } else if(q.kind==Kind::Animation) {
+        if(p.reserved && (get(b,96,8)||get(b,104,8)||get(b,112,8))) return Error::Reserved;
+        size_t at=WireSize;
+        if(at+1>n) return Error::Length;
+        size_t bools=b[at++]; if(bools>AnimationBoolBytes||at+2*bools+1>n) return Error::Length;
+        std::copy(b+at,b+at+bools,q.animation.held.begin()); at+=bools;
+        std::copy(b+at,b+at+bools,q.animation.rose.begin()); at+=bools;
+        size_t floats=b[at++]; if(floats>AnimationFloats||at+5*floats!=n) return Error::Length;
+        int last=-1;
+        for(size_t i=0;i<floats;++i,at+=5) {
+            unsigned k=b[at]; uint32_t bits=uint32_t(get(b,at+1,4)); float v; std::memcpy(&v,&bits,4);
+            if(p.animationRange && (int(k)<=last||k>=AnimationFloats||!std::isfinite(v)||std::abs(v)>AnimationFloatMax||v==0)) return Error::Range;
+            last=int(k); if(k<AnimationFloats) q.animation.floats[k]=v;
+        }
     } else { q.t0=get(b,96,8); q.t1=get(b,104,8); q.t2=get(b,112,8); }
     if(p.time && (q.stamp>(1ull<<53)||q.t0>(1ull<<53)||q.t1>(1ull<<53)||q.t2>(1ull<<53))) return Error::Time;
     for(int i=0;i<3;++i) { q.state.position[i]=signedGet(b,72+4*i,4)/100.; q.state.velocity[i]=signedGet(b,84+2*i,2)/100.; }
@@ -172,6 +189,24 @@ Bytes encode(Packet q) {
     } else { put(b,96,q.t0,8); put(b,104,q.t1,8); put(b,112,q.t2,8); }
     put(b,120,checksum(b.data()),4); return b;
 }
+std::vector<uint8_t> encodeAnimation(const Packet& q) {
+    Packet h=q; h.kind=Kind::Animation; h.t0=h.t1=h.t2=0;
+    auto head=encode(h); std::vector<uint8_t> b(head.begin(),head.end());
+    const auto& a=q.animation; size_t bools=0;
+    for(size_t i=0;i<AnimationBoolBytes;++i) if(a.held[i]||a.rose[i]) bools=i+1;
+    b.push_back(uint8_t(bools));
+    b.insert(b.end(),a.held.begin(),a.held.begin()+bools); b.insert(b.end(),a.rose.begin(),a.rose.begin()+bools);
+    size_t count=b.size(); b.push_back(0); uint8_t floats=0;
+    for(size_t k=0;k<AnimationFloats;++k) {
+        float v=a.floats[k]; if(v==0) continue;
+        if(!std::isfinite(v)||std::abs(v)>AnimationFloatMax) throw std::invalid_argument("animation control out of range");
+        uint32_t bits; std::memcpy(&bits,&v,4); b.push_back(uint8_t(k)); for(int i=0;i<4;++i) b.push_back(uint8_t(bits>>(8*i))); ++floats;
+    }
+    b[count]=floats;
+    b[8]=uint8_t(b.size()); b[9]=uint8_t(b.size()>>8);
+    uint32_t c=checksum(b.data(),b.size()); for(int i=0;i<4;++i) b[120+i]=uint8_t(c>>(8*i));
+    return b;
+}
 Error decode(const uint8_t* b,size_t n,Packet& q) { return parse(b,n,q,{}); }
 #ifdef DS_TESTING
 Error decodeForTest(const uint8_t* b,size_t n,Packet& q,Protection p) { return parse(b,n,q,p); }
@@ -205,6 +240,7 @@ void Core::reset(bool rotate) {
     connected_=false; sentHello_=false; peer_=0; snapshots_.clear(); haveSequence_=false; haveTeleport_=false; haveSent_=false; clockValid_=false; pendingPings_.clear(); rtt_=-1; offset_=0; lateness_.clear(); delay_=config_.delayMs; pongs_.clear();
     nextHello_=nextSend_=nextPing_=0; outgoing_=0;
     haveEnvironment_=false;environmentOut_=environmentIn_=0;environmentReceived_=environmentStamp_=0;
+    animations_.clear();haveAnimation_=false;sentAnimationOnce_=false;animationOut_=animationIn_=animationTaken_=0;animationStamp_=0;
     // Send/apply rate limits survive reconnects; changing a nonce cannot accelerate native calls.
     localProgress_={};peerProgress_={};progressStatus_=ProgressStatus::Unknown;
     // A new connection numbers cargo from 1 again on both sides; undelivered events are kept and renumbered.
@@ -274,6 +310,17 @@ Error Core::receive(const uint8_t* b,size_t n,uint64_t now) {
         double mapped=double(q.stamp)-offset_;
         if(protections_.environmentFresh && (!clockValid_||mapped<0||std::abs(mapped-double(now))>2000))return fail(Error::Time);
         environment_={uint32_t(q.t0),(q.t1>>32)!=0,(q.t1>>32)?int16_t(uint16_t(q.t1&0xffffu))/1000.f:0.f};haveEnvironment_=true;environmentIn_=q.sequence;environmentStamp_=q.stamp;environmentReceived_=now;
+        // Optional traffic cannot keep a dead presence connection alive.
+        return fail(Error::None);
+    }
+    if(q.kind==Kind::Animation) {
+        uint32_t advance=q.sequence-animationIn_;
+        if(protections_.animationOrder && (!q.sequence||(haveAnimation_&&(advance==0||advance>=0x80000000u||q.stamp<=animationStamp_))))return fail(Error::Duplicate);
+        double mapped=double(q.stamp)-offset_;
+        if(!clockValid_||mapped<0||std::abs(mapped-double(now))>2000)return fail(Error::Time);
+        uint64_t time=uint64_t(mapped); if(!animations_.empty()) time=std::max(time,animations_.back().time+1);
+        animations_.push_back({q.animation,time,q.sequence}); while(animations_.size()>64) animations_.pop_front();
+        haveAnimation_=true; animationIn_=q.sequence; animationStamp_=q.stamp;
         // Optional traffic cannot keep a dead presence connection alive.
         return fail(Error::None);
     }
@@ -372,5 +419,31 @@ bool Core::sendEnvironment(Environment value,uint64_t now) {
 std::optional<Environment> Core::latestEnvironment(uint64_t now) const {
     if(!connected_||!haveEnvironment_||now<environmentReceived_||now-environmentReceived_>2000)return {};
     return environment_;
+}
+bool Core::sendAnimation(const Animation& a,uint64_t now) {
+    if(!connected_) return false;
+    if(protections_.gate && provider_.isInCutsceneOrLoading()) return false;
+    if(protections_.rate && sentAnimationOnce_ && (now<animationSent_+50 || (a==sentAnimation_ && now<animationSent_+500))) return false;
+    Packet q; q.kind=Kind::Animation; q.role=config_.role; q.session=config_.session; q.nonce=config_.nonce; q.echo=peer_;
+    q.stamp=std::min(provider_.localSampleTime(now),now); q.sequence=++animationOut_; q.animation=a;
+    transport_.sendLong(encodeAnimation(q)); sentAnimation_=a; sentAnimationOnce_=true; animationSent_=now; return true;
+}
+std::optional<AnimationShown> Core::takeAnimation(uint64_t now) {
+    if(!connected_||animations_.empty()) return {};
+    uint32_t delay=protections_.delay?presentationDelayMs():0; uint64_t target=now>delay?now-delay:0;
+    size_t due=animations_.size();
+    for(size_t i=0;i<animations_.size()&&animations_[i].time<=target;++i) due=i;
+    if(due==animations_.size()) return {};
+    AnimationShown r; r.animation=animations_[due].animation; r.sequence=animations_[due].sequence; r.animation.rose={};
+    for(size_t i=0;i<=due;++i) {
+        uint32_t advance=animations_[i].sequence-animationTaken_;
+        if(animationTaken_&&(advance==0||advance>=0x80000000u)) continue;
+        if(protections_.animationRose||i==due) for(size_t k=0;k<AnimationBoolBytes;++k) r.animation.rose[k]|=animations_[i].animation.rose[k];
+        r.fresh=true;
+    }
+    animationTaken_=r.sequence;
+    animations_.erase(animations_.begin(),animations_.begin()+long(due));
+    if(target-animations_.front().time>1000) return {};
+    return r;
 }
 }

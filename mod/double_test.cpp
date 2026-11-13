@@ -1,4 +1,5 @@
 #include "double.h"
+#include "../core/core.h"
 #include "fake_memory.h"
 #include <cmath>
 #include <cstring>
@@ -379,8 +380,24 @@ void hold(){
     Scene c;auto f=c.make();f.enable();f.tick(true,&t);c.frame();f.tick(true,nullptr,0,0,true);n=c.calls.size();
     c.found=0x7100;f.tick(true,&t,0,0,true);CHECK(f.stage()==Double::Stage::Parked&&c.calls.size()==n&&c.last("double_changed"));
 }
+void mirror(){
+    Scene s;std::vector<std::string> order;auto api=s.api();auto animate=api.animate;
+    api.animate=[&](uint64_t e,double v,uint32_t f){order.push_back("animate");animate(e,v,f);};
+    api.mirror=[&](uint64_t e,const ds::Animation* a,bool fresh){CHECK(e==s.twin);order.push_back(a?(fresh?"mirror fresh":"mirror"):"clear");};
+    Double d(api,[&](const std::string& r){s.events.push_back(r);});d.enable();auto t=at(5);ds::Animation a;
+    d.mirror(&a,true);d.tick(true,&t);CHECK((order==Calls{"animate","mirror fresh"}));CHECK(d.mirroring());   // the partner's controls win
+    order.clear();s.frame();d.mirror(&a,false);d.tick(true,&t);CHECK((order==Calls{"animate","mirror"}));
+    // Leaving the mirror: cleared before animate, so a pose animate starts in the same tick stays.
+    order.clear();s.frame();d.mirror(nullptr,false);d.tick(true,&t);CHECK((order==Calls{"clear","animate"}));CHECK(!d.mirroring());
+    order.clear();s.frame();d.tick(true,&t);CHECK((order==Calls{"animate"}));
+    // Released or hidden while mirroring: cleared first.
+    d.mirror(&a,true);s.frame();d.tick(true,&t);order.clear();d.mirror(nullptr,false);s.frame();d.tick(true,nullptr);CHECK(!order.empty()&&order.front()=="clear");
+    Scene h;std::vector<std::string> o2;auto api2=h.api();api2.mirror=[&](uint64_t,const ds::Animation* a,bool){o2.push_back(a?"mirror":"clear");};
+    Double e(api2,[&](const std::string& r){h.events.push_back(r);});e.enable();e.mirror(&a,true);e.tick(true,&t);h.frame();e.mirror(nullptr,false);e.tick(true,nullptr,0,0,true);
+    CHECK(e.stage()==Double::Stage::Hidden&&o2.back()=="clear");
+}
 int main(){
-    lifecycle();mover();animation();network();refusedUpgrade();actions();effects();releasedByGame();cargoCommand();privateRoom();ownBody();ownCommand();modelSwap();inPlaceSwap();bodyReport();
+    lifecycle();mirror();mover();animation();network();refusedUpgrade();actions();effects();releasedByGame();cargoCommand();privateRoom();ownBody();ownCommand();modelSwap();inPlaceSwap();bodyReport();
     try{transient();}catch(const std::exception& e){std::fprintf(stderr,"double oracle: transient threw %s\n",e.what());++failures;}
     hold();busy();yields(true);yields(false);identity();unconfirmed();tree();conversion();
     if(!failures)std::puts("double borrow, yield, release and pointer-path checks passed");

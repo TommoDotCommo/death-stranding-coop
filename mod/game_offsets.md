@@ -1097,6 +1097,25 @@ looked at.
   and the `Action_Rewind`/`Action_Rewind_Long` pulses sit it down in the game's rest pose; `Is_TakeABreak_LoopEnd`
   stands it up.
 
+### Mirroring the porter's animation controls (2026-11-13, live)
+
+- The porter's MorphemeAnimationManager (component vtable `0x3d09910`) holds 434 records (+0x50 count, +0x58 array,
+  48 bytes each: name +0, network id +8 (-1: the network does not use it), value +0x20, a byte for a bool, a float).
+  270 are the player registration (bool and float enums, research-pose). Of the other 164 (the engine's generic
+  humanoid names) 14 are in the porter's network: `Speed`, `Sprint`, `Move_Heading`, `BalanceIK_Weight`, `Aim_Heading`,
+  `Aim_Pitch`, `Parallel_Shift`, `Dash_Ready_Rate`, `Is_Move_Stop_Short`, `Turn`, `Reload` and three
+  `Sequence*Active` flags.
+- `Speed` is not the speed over ground: standing after a walk it reads 1.8 (with `Stop_Speed` and
+  `Action_Move_Speed`); the network takes it with `DSMove` and the move floats.
+- Hazard: the exported Init (`0x23970b0` float, `0x2397050` bool) creates a record for a name the manager lacks and
+  reads the control's current value from the network (`0x2390e70` -> instance virtual +0x90 -> `0x1a4ba70`). For
+  some of those 14 (values the network computes, like `BalanceIK_Weight`) the value slot in the body's instance is
+  unset (-1) and the read faults at `0x1a4ba9f` (live: a game-thread access violation, the mod stalled). The mod
+  binds only the registration's names plus `Sprint` and `Speed`, which it had bound before.
+- Writing every registration control the porter has into the body (changed values only; one-frame pulses through
+  `TriggerBool`) reproduces his animation: the body sat, dozed and walked like the porter, and both games' records
+  matched value for value.
+
 ### Voidout craters (2026-11-13, static, then live)
 
 - Boss BT manager `C = *(image+0x7bee060)`: active craters `+0x280` (count) / `+0x288` (records of 0x60), pending

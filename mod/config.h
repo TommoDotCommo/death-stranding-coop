@@ -17,6 +17,7 @@ struct Config {
     bool partnerTag=false;     // the partner's name (their nickname) over the partner body (nametag.h)
     bool shareOrderUnits=false; // with share_orders: a cargo unit one player hands in is delivered for the partner too (a split delivery); not yet run with a real partial hand-in
     unsigned passengerKey=0x4a;      // with partner_vehicle: next to the partner's truck this key gets on and off (passenger.h); 0: off
+    bool partnerAnimation=true;      // the partner's own animation controls on his body (controls.h, core ANIMATION)
     bool partnerPoses=true;          // a downed or caught partner in the game's own collapse and BT-drag poses (double.h DeadPoseBit); false: laid flat
     bool bodyUpdateLink=true;        // the partner body is joined to this porter's update group (updated in order with him, never beside him: mod.cpp, linkBodyUpdate); false only to compare
     bool shareSavedStructures=false; // on joining, the structures this player's save already has are built in the partner's world too (structures.h)

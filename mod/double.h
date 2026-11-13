@@ -10,6 +10,7 @@
 #include <cmath>
 #include <optional>
 #include <string>
+namespace ds {struct Animation;}
 namespace mod::puppet {
 constexpr uint64_t FlagVisible=1ull<<1,FlagSleeping=1ull<<8;
 // Entity tree links, read by the engine's own transform propagation (0x235bf60).
@@ -32,6 +33,9 @@ struct DoubleApi {
     // hides them; show(true) restores exactly those.
     std::function<void(uint64_t,bool)> effects;
     std::function<void(uint64_t,float)> steer;   // optional: the rider's Turn_Heading (degrees) while the partner rides
+    // Optional: the partner's own animation controls (controls.h) into the body's network, after animate; fresh: a new
+    // sample (its pulses are due). nullptr: every control the mirror set goes back to zero and animate owns them again.
+    std::function<void(uint64_t,const ds::Animation*,bool)> mirror;
 };
 constexpr double MovingSpeed=.3;   // m/s; below this the double plays its standing animation
 constexpr uint64_t MoverOffset=0xb0,MoverOwnerOffset=0x48,MoverTransformOffset=0x58;
@@ -199,6 +203,10 @@ public:
     void enable(){if(stage_==Stage::Off)stage_=Stage::Parked;}
     void walk(bool on){walk_=on;}   // use upgrade/downgrade on the next acquire
     void steering(double degrees){steer_=std::isfinite(degrees)?degrees:0;}   // the partner's Turn_Heading while he rides
+    // The partner's own animation controls for this tick's drive (the caller keeps the sample alive until tick returns);
+    // nullptr: none, and what the mirror set is cleared before animate runs.
+    void mirror(const ds::Animation* sample,bool fresh){mirror_=sample;fresh_=fresh;}
+    bool mirroring() const {return mirrored_;}
     // True when the game itself is using this porter's double (it does so for the private room): the double has been
     // yielded to the game, or it is awake or shown while we are not driving it. Reads only; game thread.
     bool gameUsesDouble(uint64_t porter);
@@ -216,6 +224,9 @@ private:
     Stage stage_=Stage::Off;uint64_t player_=0,double_=0,parkedFlags_=0;
     Transform parked_{},placed_{};
     double speed_=0,steer_=0;uint32_t flags_=0;bool walk_=false,hidEffects_=false;uint64_t original_=0;
+    const ds::Animation* mirror_=nullptr;bool fresh_=false,mirrored_=false;
+    void animateAll();
+    void clearMirror();
     void restoreNetwork();
     void acquire(const Anchor&,const Transform&);
     void drive(const Anchor&,const Transform&);

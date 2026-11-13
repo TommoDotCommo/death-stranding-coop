@@ -81,7 +81,7 @@ void parserTests() {
     bad=b; bad[80]^=4; check(parse(bad)==Error::Checksum,"checksum");
     for(size_t at:{size_t(10),size_t(95),size_t(124)}) { bad=b; patch(bad,at,1,1); check(parse(bad)==Error::Reserved,"reserved"); }
     for(int kind=1;kind<=8;++kind) { bad=b; patch(bad,6,kind,1); check(parse(bad)==Error::None,"every_kind"); }
-    for(int kind:{0,10,255}) { bad=b; patch(bad,6,kind,1); check(parse(bad)==Error::Kind,"kind"); }
+    for(int kind:{0,11,255}) { bad=b; patch(bad,6,kind,1); check(parse(bad)==Error::Kind,"kind"); }
     bad=b; patch(bad,7,0,1); check(parse(bad)==Error::Role,"role");
     for(size_t at:{size_t(12),size_t(16)}) { bad=b; patch(bad,at,0,4); check(parse(bad)==Error::Build,"build"); }
     bad=b; patch(bad,32,0,8); check(parse(bad)==Error::Nonce,"zero_session");

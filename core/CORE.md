@@ -37,7 +37,7 @@ not authentication or proof of a trusted binary.
 
 ## Wire format
 
-All nine packet types are **exactly 128 bytes**, one UDP datagram each. Integers
+All ten packet types have the same 128-byte header and are one UDP datagram each; all but ANIMATION are **exactly 128 bytes**. Integers
 are explicitly little endian; signed values use two's complement. No packed
 structs, float bit patterns, pointer casts or native padding are on the wire.
 Reserved bytes must be zero. Fields unused by a packet type are ignored after
@@ -48,9 +48,9 @@ and stamina 255). Receivers do not require ignored fields to be zero.
 |---|---:|---|
 | 0 | 4 | Magic ASCII `DSP1` (`0x31505344`) |
 | 4 | 2 | Protocol version, exactly 1 |
-| 6 | 1 | Kind: HELLO=1, HELLO_ACK=2, PRESENCE=3, PING=4, PONG=5, BYE=6, CARGO=7, CARGO_ACK=8, ENVIRONMENT=9 (optional) |
+| 6 | 1 | Kind: HELLO=1, HELLO_ACK=2, PRESENCE=3, PING=4, PONG=5, BYE=6, CARGO=7, CARGO_ACK=8, ENVIRONMENT=9 (optional), ANIMATION=10 (optional, longer) |
 | 7 | 1 | Sender role: host=1, client=2; peer must have opposite role |
-| 8 | 2 | Datagram length, exactly 128; actual received length must match |
+| 8 | 2 | Datagram length, exactly 128 (ANIMATION: 128 plus its payload, at most 1154); actual received length must match; the checksum covers the whole datagram |
 | 10 | 2 | Reserved zero |
 | 12 | 4 | Steam game build, exactly **13300582** |
 | 16 | 16 | Exact `ModBuild` source hash in `build_id.h` |
@@ -348,3 +348,31 @@ duplicate/reorder, age, disconnect and rate checks, five named mutants, and 200
 lossy simulated sessions with independent clocks, outage/reconnect and a final
 quiet period. Structured environment payloads exercise the new decoder branch.
 This is game-free wire evidence, not proof of a visible sky change.
+
+## Optional animation samples (kind 10)
+
+`ANIMATION=10` carries the porter's animation controls (the adapter's numbering;
+in this mod `mod/controls.h`) on the presence timeline. It is the one packet longer
+than 128 bytes: the usual header (bytes 96..119 reserved zero), then
+`[u8 n][held: n bytes][rose: n bytes][u8 m][m x (u8 index, f32 little endian)]`.
+`n <= 32` bytes of bool bits; `held` is each bool when sampled, `rose` marks a bool
+that went from off to on at any frame since the previous sample (a one-frame
+pulse shows only there). Floats are sparse: zero is left out, indices strictly
+increase and stay below 192, values are finite with `|v| <= 1e6` and nonzero. The
+length must match exactly; at most 1154 bytes, under a 1280-byte path MTU.
+
+Either side sends while connected and not gated: at most every 50 ms, an unchanged
+sample at most every 500 ms (`sendAnimation` returns whether it went, so the
+caller starts gathering `rose` again). The stamp is the local pose sample time.
+Receivers require the ping clock mapping, a stamp within 2 s of the mapped local
+time, a fresh sequence and an advancing stamp, and keep 64 samples.
+`takeAnimation` returns the sample due at the presence delay, with `rose` gathered
+over every sample passed since the previous take (each pulse is given once), and
+nothing when none is due or the due one is over a second old. Samples never
+refresh connection liveness; disconnect clears them.
+
+`make -C core animation-test` runs roundtrip, full and empty payloads, length,
+oversize, checksum, reserved, range (NaN, infinity, magnitude, zero, index,
+order), sessions (delay, pulse once, rates, ordering, freshness, nonce, reset)
+and 100 lossy simulated sessions, with three named mutants (`animationRange`,
+`animationOrder`, `animationRose`).

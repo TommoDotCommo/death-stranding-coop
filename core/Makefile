@@ -14,7 +14,7 @@ $(BUILD)/net.o: $(FUZZ)/src/net.cpp $(FUZZ)/include/coopfuzz/net.h $(FUZZ)/inclu
 	$(CXX) $(CXXFLAGS) -I$(FUZZ)/include -c $< -o $@
 $(BUILD)/tests: tests/test.cpp core.cpp core.h build_id.h $(BUILD)/net.o | $(BUILD)
 	$(CXX) $(CXXFLAGS) -DDS_TESTING -I$(FUZZ)/include tests/test.cpp core.cpp $(BUILD)/net.o -o $@
-test: check-build $(BUILD)/core.o $(BUILD)/tests environment-test
+test: check-build $(BUILD)/core.o $(BUILD)/tests environment-test animation-test
 	python3 tests/run.py $(BUILD)/tests
 	$(MAKE) -C ../mod test
 $(BUILD)/core-win64.o: core.cpp core.h build_id.h | $(BUILD)
@@ -34,3 +34,9 @@ $(BUILD)/environment-tests: tests/environment.cpp core.cpp core.h build_id.h $(B
 environment-test: $(BUILD)/environment-tests
 	python3 tests/environment_run.py $(BUILD)/environment-tests
 .PHONY: environment-test
+
+$(BUILD)/animation-tests: tests/animation.cpp core.cpp core.h build_id.h $(BUILD)/net.o | $(BUILD)
+	$(CXX) $(CXXFLAGS) -DDS_TESTING -I$(FUZZ)/include tests/animation.cpp core.cpp $(BUILD)/net.o -o $@
+animation-test: $(BUILD)/animation-tests
+	python3 tests/environment_run.py $(BUILD)/animation-tests animationRange animationOrder animationRose
+.PHONY: animation-test

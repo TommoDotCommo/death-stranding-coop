@@ -12,7 +12,7 @@ namespace ds {
 constexpr size_t WireSize = 128;
 constexpr uint32_t GameBuild = 13300582;
 using Bytes = std::array<uint8_t,WireSize>;
-enum class Kind : uint8_t { Hello=1, Ack, Presence, Ping, Pong, Bye, Cargo, CargoAck, Environment=9 };
+enum class Kind : uint8_t { Hello=1, Ack, Presence, Ping, Pong, Bye, Cargo, CargoAck, Environment=9, Animation=10 };
 enum class Role : uint8_t { Host=1, Client=2 };
 enum class Error { None, Length, Magic, Version, Checksum, Reserved, Kind, Role, Build, Session, Nonce, Range, Duplicate, Time, Speed, Teleport, NotConnected, Progress };
 const char* reason(Error);
@@ -49,6 +49,20 @@ enum class ProgressPolicy : uint8_t { Warn=0, Refuse=1 };
 enum class ProgressStatus { Unknown, Equal, Mismatch };
 ProgressStatus compareProgress(Progress,Progress);
 const char* progressReason(ProgressStatus);
+// Optional animation sample (ANIMATION, the only longer packet): the porter's animation controls by the mod's own
+// numbering, on the presence timeline. held = each bool's value when sampled; rose = it went from off to on at some
+// frame since the previous sample (a one-frame pulse shows only here); floats are sent sparse (zero is left out).
+// After the 128-byte header: [u8 n][held n][rose n][u8 m][m x (u8 index, f32)], indices increasing.
+constexpr size_t AnimationBoolBytes=32, AnimationFloats=192;
+constexpr float AnimationFloatMax=1e6f;
+constexpr size_t AnimationWireMax=WireSize+1+2*AnimationBoolBytes+1+5*AnimationFloats;
+struct Animation {
+    std::array<uint8_t,AnimationBoolBytes> held{}, rose{}; std::array<float,AnimationFloats> floats{};
+    bool operator==(const Animation& o) const { return held==o.held&&rose==o.rose&&floats==o.floats; }
+    bool operator!=(const Animation& o) const { return !(*this==o); }
+};
+// The sample shown now (the presence delay applies), with rose gathered over every sample passed since the last take.
+struct AnimationShown { Animation animation; uint32_t sequence=0; bool fresh=false; };
 struct Packet {
     Kind kind=Kind::Hello; Role role=Role::Host;
     uint32_t game=GameBuild; std::array<uint8_t,16> mod=ModBuild;
@@ -56,6 +70,7 @@ struct Packet {
     uint32_t sequence=0; State state{};
     uint8_t byeReason=0;
     Progress progress{}; ProgressPolicy progressPolicy=ProgressPolicy::Warn; // HELLO/ACK only
+    Animation animation{}; // ANIMATION only
 };
 // A shared-world cargo event (adapter axes, like State). Delivered reliably and in order, at most once per connection:
 // the sender repeats the oldest unacknowledged event, the receiver accepts only the next sequence and acknowledges
@@ -84,10 +99,12 @@ struct Protection {
     bool progressReady=true, progress=true, progressUnknown=true, progressFlag=true, progressPolicy=true;
     bool vehicle=true, vehicleLerp=true;
     bool environmentRange=true, environmentRole=true, environmentOrder=true, environmentFresh=true, environmentRate=true;
+    bool animationRange=true, animationOrder=true, animationRose=true;
     bool floor=true, extrapolate=true, stale=true, gate=true, timeout=true, buffer=true, rate=true;
     bool adapt=true, refine=true;
 };
 Bytes encode(Packet); // throws invalid_argument for nonfinite state
+std::vector<uint8_t> encodeAnimation(const Packet&); // throws invalid_argument for a nonfinite or out-of-range control
 Error decode(const uint8_t*, size_t, Packet&);
 #ifdef DS_TESTING
 Error decodeForTest(const uint8_t*, size_t, Packet&, Protection);
@@ -108,7 +125,8 @@ struct StateProvider {
     virtual void applyRemote(const Render&)=0;
 };
 // One configured peer only. Adapter must filter source endpoint before invoking receive.
-struct Transport { virtual ~Transport()=default; virtual void send(const Bytes&)=0; };
+struct Transport { virtual ~Transport()=default; virtual void send(const Bytes&)=0;
+    virtual void sendLong(const std::vector<uint8_t>&) {} }; // ANIMATION; a transport without it sends none
 // Presentation delay that follows the link: the 95th percentile of how late the last DelayWindow presence samples
 // arrived (against their own mapped time) plus DelayMarginMs (two send intervals: one lost packet is bridged by
 // interpolation), never under Config::delayMs, never over DelayMaxMs, moved by at most DelaySlew of elapsed time.
@@ -151,6 +169,11 @@ public:
     size_t cargoPending() const { return cargoOut_.size(); }
     bool sendEnvironment(Environment,uint64_t now); // connected host only, at most once per 30 seconds
     std::optional<Environment> latestEnvironment(uint64_t now) const; // expires after 2 s; cleared on reconnect
+    // Connected only, at most every 50 ms, an unchanged sample at most every 500 ms; true when it was sent (the caller
+    // then starts gathering rose again).
+    bool sendAnimation(const Animation&,uint64_t now);
+    // The sample due now on the presence timeline; nothing when none is due or the one due is over a second old.
+    std::optional<AnimationShown> takeAnimation(uint64_t now);
 private:
     void send(Kind,uint64_t);
     void reset(bool rotateNonce);
@@ -176,6 +199,9 @@ private:
     Environment environment_{}; bool haveEnvironment_=false, sentEnvironment_=false;
     uint32_t environmentOut_=0, environmentIn_=0;
     uint64_t environmentReceived_=0, environmentStamp_=0, environmentSent_=0;
+    struct AnimationSample { Animation animation; uint64_t time=0; uint32_t sequence=0; };
+    std::deque<AnimationSample> animations_; Animation sentAnimation_{}; bool sentAnimationOnce_=false;
+    uint32_t animationOut_=0, animationIn_=0, animationTaken_=0; uint64_t animationSent_=0, animationStamp_=0; bool haveAnimation_=false;
     Error error_=Error::None;
 };
 }

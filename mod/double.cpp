@@ -1,4 +1,5 @@
 #include "double.h"
+#include "controls.h"
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -137,7 +138,25 @@ void Double::restoreNetwork(){
 #endif
     hidEffects_=false;
 }
-void Double::forget(const char* why){note(why,0,{});original_=0;hidEffects_=false;double_=player_=0;stage_=Stage::Parked;}
+void Double::forget(const char* why){note(why,0,{});original_=0;hidEffects_=false;mirrored_=false;double_=player_=0;stage_=Stage::Parked;}
+// The partner's own controls go in after animate (they win); leaving the mirror, its controls are cleared before animate
+// so a pose animate starts in the same tick (death, the drag) is not undone.
+void Double::animateAll(){
+#ifndef MUTANT_DOUBLE_MIRROR_ORDER
+    if(!mirror_)clearMirror();
+#endif
+    api_.animate(double_,speed_,flags_);
+    if(mirror_&&api_.mirror){api_.mirror(double_,mirror_,fresh_);mirrored_=true;fresh_=false;}
+#ifdef MUTANT_DOUBLE_MIRROR_ORDER
+    if(!mirror_)clearMirror();
+#endif
+}
+void Double::clearMirror(){
+#ifndef MUTANT_DOUBLE_MIRROR_CLEAR
+    if(mirrored_&&double_&&api_.mirror)api_.mirror(double_,nullptr,false);
+#endif
+    mirrored_=false;
+}
 void Double::acquire(const Anchor& source,const Transform& target){
     auto d=api_.find(source.entity);if(!d)return;
     auto f=api_.flags(d);
@@ -154,7 +173,7 @@ void Double::acquire(const Anchor& source,const Transform& target){
     api_.place(d,target);api_.visible(d,true);api_.sleep(d,false);
     // Optional: a refused upgrade leaves the double as it was (identity and layout checks run before any write).
     if(walk_&&api_.upgrade){try{original_=api_.upgrade(d,source.entity);}catch(const std::exception&){original_=0;note("walk_unavailable",0,{});}}
-    api_.animate(d,speed_,flags_);
+    animateAll();
     auto after=api_.flags(d);auto p=api_.read(d);checkLocal(source);
 #ifndef MUTANT_DOUBLE_READBACK
     if(!driven(after)||!atTarget(p,target)){note("acquire_unconfirmed",after,p);release(source,true);stage_=Stage::Failed;return;}
@@ -168,7 +187,7 @@ void Double::drive(const Anchor& source,const Transform& target){
     auto f=api_.flags(double_);auto p=api_.read(double_);
 #ifndef MUTANT_DOUBLE_YIELD
     // Anything we did not do means the game is using its double: stop calling, wait until it parks it again.
-    if(!driven(f)||!atTarget(p,placed_)){restoreNetwork();stage_=Stage::Yielded;note("yielded",f,p);return;}
+    if(!driven(f)||!atTarget(p,placed_)){restoreNetwork();mirrored_=false;stage_=Stage::Yielded;note("yielded",f,p);return;}
 #endif
     // Only the mover target changes: the game moves the double on its next frame. SetWorldTransform here would
     // mark it teleported every tick, which restarts its animation (live u4: frozen mid-stride). The next tick's
@@ -179,7 +198,7 @@ void Double::drive(const Anchor& source,const Transform& target){
 #else
     api_.place(double_,target);
 #endif
-    api_.animate(double_,speed_,flags_);
+    animateAll();
     if(api_.steer&&(flags_&VehicleMask))api_.steer(double_,float(steer_));
     if(hidEffects_)api_.effects(double_,false);   // keep them hidden as the show propagates
     checkLocal(source);
@@ -189,6 +208,7 @@ void Double::release(const Anchor& source,bool force){
     auto f=api_.flags(double_);
     // force: our own acquire half-applied, so the flags are ours to put back whatever they show.
     if(!force&&!driven(f)){restoreNetwork();forget("released_by_game");return;}
+    clearMirror();
     restoreNetwork();
 #ifndef MUTANT_DOUBLE_STILL
     api_.animate(double_,0,0);   // back to the standing state the game left it in
@@ -200,7 +220,7 @@ void Double::release(const Anchor& source,bool force){
 }
 // Hidden: still borrowed (network, effects, mover), asleep and invisible where the partner was last seen.
 void Double::hide(const Anchor& source){
-    api_.animate(double_,0,0);api_.visible(double_,false);api_.sleep(double_,true);
+    clearMirror();api_.animate(double_,0,0);api_.visible(double_,false);api_.sleep(double_,true);
     auto after=api_.flags(double_);checkLocal(source);
     if(!parked(after)){note("hide_unconfirmed",after,{});release(source,true);return;}
     stage_=Stage::Hidden;note("hidden",after,{});
@@ -212,13 +232,13 @@ bool Double::stillOurs(const Anchor& source){
 #endif
 #ifndef MUTANT_DOUBLE_HIDDEN_YIELD
     auto f=api_.flags(double_);
-    if(!parked(f)){restoreNetwork();stage_=Stage::Yielded;note("yielded",f,api_.read(double_));return false;}
+    if(!parked(f)){restoreNetwork();mirrored_=false;stage_=Stage::Yielded;note("yielded",f,api_.read(double_));return false;}
 #endif
     return true;
 }
 void Double::reveal(const Anchor& source,const Transform& target){
     placed_=target;api_.anchor(double_,target);api_.place(double_,target);api_.visible(double_,true);api_.sleep(double_,false);
-    api_.animate(double_,speed_,flags_);
+    animateAll();
     if(api_.steer&&(flags_&VehicleMask))api_.steer(double_,float(steer_));
     if(hidEffects_)api_.effects(double_,false);
     auto after=api_.flags(double_);auto p=api_.read(double_);checkLocal(source);
@@ -790,7 +810,8 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
     struct Handles{uint64_t manager=0;int speed=-1,move=-1,moveFloat=-1,moveInterp=-1,crouchRate=-1,basic=-1,isVehicle=-1,vehicleType=-1,vehicleSeat=-1,
         rewind=-1,rewindNoInter=-1,upperReset=-1,turnHeading=-1;bool riding=false;int action[7]={-1,-1,-1,-1,-1,-1,-1};
         int isDead=-1,isDrag=-1,tb0=-1,tb1=-1,tb2=-1,tf0=-1,rewindLong=-1;uint32_t pose=0;uint64_t poseAt=0;
-        int isRest=-1,restState=-1,restType=-1,restLoopEnd=-1,tf2=-1,tf8=-1,tb5=-1;};auto handles=std::make_shared<Handles>();
+        int isRest=-1,restState=-1,restType=-1,restLoopEnd=-1,tf2=-1,tf8=-1,tb5=-1;
+        std::vector<int> mirrorBool,mirrorFloat;std::optional<ds::Animation> applied;bool mirroring=false;};auto handles=std::make_shared<Handles>();
     using TriggerFn=void(*)(uint64_t,int,float);auto trigger=reinterpret_cast<TriggerFn>(s.base+entries[8].rva);
     // The borrowed instance is kept after release and swapped back in on the next borrow of the same manager,
     // so repeated borrows build one instance per double, not one per borrow.
@@ -860,6 +881,10 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
                 handles->isRest=initBool(manager,"Is_TakeABreak");handles->restState=initFloat(manager,"TakeABreak_State");
                 handles->restType=initFloat(manager,"TakeABreak_Type");handles->restLoopEnd=initBool(manager,"Is_TakeABreak_LoopEnd");
                 handles->tf2=initFloat(manager,"Temporary_Float2");handles->tf8=initFloat(manager,"Temporary_Float8");handles->tb5=initBool(manager,"Temporary_Bool5");
+                // Every control the partner's porter sends (controls.h), bound the same way.
+                handles->mirrorBool.assign(controls::BoolCount,-1);handles->mirrorFloat.assign(controls::FloatCount,-1);
+                for(unsigned i=0;i<controls::BoolCount;++i)if(!controls::skipBool(i))handles->mirrorBool[i]=initBool(manager,controls::BoolNames[i]);
+                for(unsigned i=0;i<controls::FloatCount;++i)if(!controls::skipFloat(i))handles->mirrorFloat[i]=initFloat(manager,controls::FloatNames[i]);
                 if(swapped)std::memcpy(reinterpret_cast<void*>(res+0xd8),&resDef,8);}
             // Riding: the porter network's own vehicle controls (enum 0x19 / 0x1b, set by the game's mount at 0x2772ee9 and
             // 0x2774469); locomotion stays at rest underneath.
@@ -898,6 +923,8 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
                      if((pose&(DragPoseBit|RestPoseBit))&&handles->rewindLong>=0)trigger(manager,handles->rewindLong,0.1f);}}
              (void)ms;}
             if(pose){speed=0;flags=ActionsBit|LandedBit|((pose&RestPoseBit)?FlagCrouchBit:0);}
+            // The partner's own controls (mirror, below) say everything, his Speed included.
+            if(handles->mirroring&&!riding&&!pose)return;
             bool moving=speed>MovingSpeed;
             if(handles->speed>=0)setFloat(manager,handles->speed,float(speed));
             if(handles->move>=0)setBool(manager,handles->move,moving);
@@ -960,6 +987,18 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
         }};
     // The rider's steering (Turn_Heading, enum 0x04 in the porter's network; the game writes it from the vehicle's
     // steering at 0x2776680..0x27766c0) while the partner rides.
+    api.mirror=[check,managerOf,handles,setFloat,setBool,trigger](uint64_t e,const ds::Animation* a,bool fresh){
+        check(e);auto manager=managerOf(e);
+        if(!manager||handles->manager!=manager){handles->mirroring=false;handles->applied.reset();return;}
+        std::vector<controls::Write> writes;
+        if(a)writes=controls::plan(handles->applied?&*handles->applied:nullptr,*a,fresh);
+        else if(handles->applied)writes=controls::clear(*handles->applied);
+        for(const auto& w:writes){
+            int h=w.isBool?handles->mirrorBool[w.index]:handles->mirrorFloat[w.index];if(h<0)continue;
+            if(w.trigger)trigger(manager,h,0.1f);else if(w.isBool)setBool(manager,h,w.value!=0);else setFloat(manager,h,w.value);
+        }
+        if(a){handles->applied=*a;handles->mirroring=true;}else{handles->applied.reset();handles->mirroring=false;}
+    };
     api.steer=[check,managerOf,handles,setFloat](uint64_t e,float degrees){
         check(e);auto manager=managerOf(e);
         if(manager&&handles->manager==manager&&handles->turnHeading>=0)setFloat(manager,handles->turnHeading,degrees);};
