@@ -1,6 +1,7 @@
 // coop-partner: a stand-in partner for one game copy (partner.h). It binds the partner slot's loopback port and runs the
 // real protocol core, so the game cannot tell it from a second copy.
-//   coop-partner --slot 1 --peer-slot 0 --role client --session N [--follow | --replay FILE [--where-recorded]]
+//   coop-partner --slot 1 --peer-slot 0 --role client --session N [--follow | --replay FILE [--where-recorded] [--with-animation]]
+//   --with-animation: also replays the animation samples recorded in FILE (mod option record_animation)
 //                [--drop SECONDS ITEM] [--take-after SECONDS] [--take-own-after SECONDS] [--build SECONDS TYPE] [--unbuild-after SECONDS]
 //                [--carry SPEC] [--carry-drop-after SECONDS] [--seconds N] [--stop FILE]
 // --offset X Y Z shifts the follow target (adapter metres, Y up); --episode N|unknown and --progress-id N|unknown
@@ -64,6 +65,7 @@ struct Shell final:ds::StateProvider,ds::Transport {
     Follower follower;std::optional<Replay> replay;std::optional<ds::State> porter,mine;
     uint64_t started=0,last=0;double replayLoop=0;bool stickyTeleport=false;std::array<double,3> replayOrigin{};bool replayPlaced=false,whereRecorded=false;
     uint8_t rideKind=0;bool riding=false,away=false,down=false,caught=false,extra=false;uint16_t extraFlags=0;std::array<double,3> seat{};
+    std::vector<std::pair<double,ds::Animation>> anim;long animAt=-1;double animLoop=-1;   // --with-animation
     bool readLocal(ds::State& s) override {
         if(!mine)return false;
         s=*mine;if(stickyTeleport)s.flags|=ds::Teleport;
@@ -84,6 +86,18 @@ struct Shell final:ds::StateProvider,ds::Transport {
         if(b[60]&ds::Teleport)stickyTeleport=false;   // the jump has been sent
         auto w=b;toWire(w);
         sendto(socket,reinterpret_cast<const char*>(w.data()),int(w.size()),0,reinterpret_cast<const sockaddr*>(&peer),sizeof(peer));
+    }
+    void sendLong(const std::vector<uint8_t>& b) override {
+        auto w=b;toWireLong(w);
+        sendto(socket,reinterpret_cast<const char*>(w.data()),int(w.size()),0,reinterpret_cast<const sockaddr*>(&peer),sizeof(peer));
+    }
+    // The recorded animation sample of this moment of the replay, each sent once (a resent one would repeat its pulses).
+    void animate(ds::Core& core,uint64_t now){
+        if(anim.empty()||!replay||!replayPlaced||!core.connected())return;
+        double span=replay->span(),ms=double(now-started),loop=std::floor(ms/span),t=ms-loop*span;
+        if(loop!=animLoop){animLoop=loop;animAt=-1;}
+        long i=animAt;while(i+1<long(anim.size())&&anim[size_t(i+1)].first<=t)++i;
+        if(i>animAt&&core.sendAnimation(anim[size_t(i)].second,now))animAt=i;
     }
     void step(uint64_t now){
         double dt=last?(now-last)/1000.:0;last=now;
@@ -109,14 +123,14 @@ struct CarryPrint final:mod::carry::Sink {
 }
 int main(int argc,char** argv){
     unsigned slot=1,peerSlot=0;ds::Role role=ds::Role::Client;uint64_t session=0;double seconds=3600,dropAfter=-1,takeAfter=-1,takeOwnAfter=-1,buildAfter=-1,unbuildAfter=-1;uint32_t dropItem=0,buildType=0;
-    std::string replayFile,stopFile;Shell shell;ds::ProgressPolicy progressPolicy=ds::ProgressPolicy::Warn;std::optional<mod::carry::Summary> carrySpec;double carryDropAfter=-1;
+    std::string replayFile,stopFile;bool withAnimation=false;Shell shell;ds::ProgressPolicy progressPolicy=ds::ProgressPolicy::Warn;std::optional<mod::carry::Summary> carrySpec;double carryDropAfter=-1;
     std::optional<ds::Environment> fixedEnvironment;double rideOn=-1,rideOff=-1,awayOn=-1,awayOff=-1,downOn=-1,downOff=-1,caughtOn=-1,caughtOff=-1,flagOn=-1,flagOff=-1;std::optional<float> fixedRain;
     for(int i=1;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc)usage(("missing value after "+a).c_str());return std::string(argv[++i]);};
         if(a=="--slot")slot=unsigned(std::stoul(next()));else if(a=="--peer-slot")peerSlot=unsigned(std::stoul(next()));
         else if(a=="--role"){auto r=next();if(r=="host")role=ds::Role::Host;else if(r=="client"||r=="guest")role=ds::Role::Client;else usage("role is host, guest or client");}
         else if(a=="--session")session=std::stoull(next());else if(a=="--seconds")seconds=std::stod(next());
-        else if(a=="--follow")replayFile.clear();else if(a=="--where-recorded")shell.whereRecorded=true;else if(a=="--replay")replayFile=next();else if(a=="--stop")stopFile=next();
+        else if(a=="--follow")replayFile.clear();else if(a=="--where-recorded")shell.whereRecorded=true;else if(a=="--replay")replayFile=next();else if(a=="--with-animation")withAnimation=true;else if(a=="--stop")stopFile=next();
         else if(a=="--offset"){for(auto& x:shell.offset)x=std::stod(next());offsetTarget({},shell.offset);}
         else if(a=="--episode")shell.progress.episode=progressValue(next());
         else if(a=="--progress-id")shell.progress.id=progressValue(next());
@@ -151,7 +165,10 @@ int main(int argc,char** argv){
         std::stringstream ss;ss<<f.rdbuf();Replay r(parseRecording(ss.str()));
         if(!r.usable()||r.span()<1000)usage("the replay file has no usable walk (need presence rows over at least a second)");
         shell.replay=std::move(r);
+        if(withAnimation){shell.anim=parseAnimations(ss.str());if(shell.anim.empty())usage("--with-animation: the replay file has no animation rows (record_animation)");
+            std::printf("PARTNER replays %zu animation samples\n",shell.anim.size());}
     }
+    else if(withAnimation)usage("--with-animation needs --replay");
 #ifdef _WIN32
     WSADATA wsa;if(WSAStartup(MAKEWORD(2,2),&wsa))usage("winsock unavailable");
 #endif
@@ -183,7 +200,7 @@ int main(int argc,char** argv){
             auto error=core.receive(raw,size_t(n),now);
             if(error==ds::Error::Progress&&!progressRefused){progressRefused=true;std::puts("HANDSHAKE refused: story progress mismatch");}
         }
-        core.frame(now);shell.step(now);core.tick(now);
+        core.frame(now);shell.step(now);core.tick(now);shell.animate(core,now);
         if(fixedEnvironment&&core.sendEnvironment(*fixedEnvironment,now)) {
             if(fixedEnvironment->haveRain)std::printf("ENVIRONMENT sent fixed hour=%.6f rain=%.3f\n",fixedEnvironment->timeOfDayMs/3600000.,fixedEnvironment->rain);
             else std::printf("ENVIRONMENT sent fixed hour=%.6f weather=unknown\n",fixedEnvironment->timeOfDayMs/3600000.);

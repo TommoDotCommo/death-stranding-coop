@@ -29,6 +29,43 @@ bool valid(const State& s) {
     for(double x:s.velocity) if(!std::isfinite(x)||std::abs(x)>100) return false;
     return std::isfinite(s.yaw)&&std::abs(s.yaw)<=Pi+1e-9 && std::isfinite(s.phase)&&s.phase>=0&&s.phase<=1 && s.action<=31 && !(s.flags&~FlagMask) && speed(s)<=100.02;
 }
+Error parseAnimationPayload(const uint8_t* b,size_t from,size_t n,Animation& a,const Protection& p) {
+size_t at=from;
+    if(at+1>n) return Error::Length;
+    size_t bools=b[at++]; if(bools>AnimationBoolBytes||at+2*bools+1>n) return Error::Length;
+    std::copy(b+at,b+at+bools,a.held.begin()); at+=bools;
+    std::copy(b+at,b+at+bools,a.rose.begin()); at+=bools;
+    size_t floats=b[at++]; if(floats>AnimationFloats||at+5*floats+1>n) return Error::Length;
+    int last=-1;
+    for(size_t i=0;i<floats;++i,at+=5) {
+        unsigned k=b[at]; uint32_t bits=uint32_t(get(b,at+1,4)); float v; std::memcpy(&v,&bits,4);
+        if(p.animationRange && (int(k)<=last||k>=AnimationFloats||!std::isfinite(v)||std::abs(v)>AnimationFloatMax||v==0)) return Error::Range;
+        last=int(k); if(k<AnimationFloats) a.floats[k]=v;
+    }
+    size_t hands=b[at++]; if(hands>AnimationHands||at+AnimationHandBytes*hands+1>n) return Error::Length;
+    for(size_t i=0;i<hands;++i,at+=AnimationHandBytes) {
+        HeldCase h; h.item=uint32_t(get(b,at,4)); h.tag=b[at+4];
+        for(int k=0;k<3;++k) h.position[k]=int16_t(uint16_t(get(b,at+5+2*k,2)));
+        h.rotation=get(b,at+11,6);
+        if(p.animationRange && !h.item) return Error::Range;
+        for(auto c:h.position) if(p.animationRange && std::abs(int(c))>AnimationHandMaxMm) return Error::Range;
+        a.hands[i]=h;
+    }
+    a.handCount=uint8_t(hands);
+    size_t joints=b[at++]; if(joints>AnimationJoints||(joints&&at+2>n)) return Error::Length;
+    if(joints) { a.skeleton=uint16_t(get(b,at,2)); at+=2; }
+    if(at+AnimationJointBytes*joints!=n) return Error::Length;
+    int lastJoint=-1;
+    for(size_t i=0;i<joints;++i,at+=AnimationJointBytes) {
+        VehicleJoint j; j.index=uint16_t(get(b,at,2));
+        for(int k=0;k<4;++k) j.rotation[k]=int16_t(uint16_t(get(b,at+2+2*k,2)));
+        for(int k=0;k<3;++k) j.position[k]=int16_t(uint16_t(get(b,at+10+2*k,2)));
+        if(p.animationRange && (int(j.index)<=lastJoint||j.index>=a.skeleton)) return Error::Range;
+        lastJoint=int(j.index); a.joints[i]=j;
+    }
+    a.jointCount=uint8_t(joints);
+    return Error::None;
+}
 Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
     // ANIMATION is the one kind longer than the header (its payload follows it).
     bool long_=b && n>WireSize && n<=AnimationWireMax && b[6]==uint8_t(Kind::Animation);
@@ -61,40 +98,7 @@ Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
         q.state.vehicleVariant=b[97]; q.state.vehicleLook=uint16_t(get(b,112,2));
     } else if(q.kind==Kind::Animation) {
         if(p.reserved && (get(b,96,8)||get(b,104,8)||get(b,112,8))) return Error::Reserved;
-        size_t at=WireSize;
-        if(at+1>n) return Error::Length;
-        size_t bools=b[at++]; if(bools>AnimationBoolBytes||at+2*bools+1>n) return Error::Length;
-        std::copy(b+at,b+at+bools,q.animation.held.begin()); at+=bools;
-        std::copy(b+at,b+at+bools,q.animation.rose.begin()); at+=bools;
-        size_t floats=b[at++]; if(floats>AnimationFloats||at+5*floats+1>n) return Error::Length;
-        int last=-1;
-        for(size_t i=0;i<floats;++i,at+=5) {
-            unsigned k=b[at]; uint32_t bits=uint32_t(get(b,at+1,4)); float v; std::memcpy(&v,&bits,4);
-            if(p.animationRange && (int(k)<=last||k>=AnimationFloats||!std::isfinite(v)||std::abs(v)>AnimationFloatMax||v==0)) return Error::Range;
-            last=int(k); if(k<AnimationFloats) q.animation.floats[k]=v;
-        }
-        size_t hands=b[at++]; if(hands>AnimationHands||at+AnimationHandBytes*hands+1>n) return Error::Length;
-        for(size_t i=0;i<hands;++i,at+=AnimationHandBytes) {
-            HeldCase h; h.item=uint32_t(get(b,at,4)); h.tag=b[at+4];
-            for(int k=0;k<3;++k) h.position[k]=int16_t(uint16_t(get(b,at+5+2*k,2)));
-            h.rotation=get(b,at+11,6);
-            if(p.animationRange && !h.item) return Error::Range;
-            for(auto c:h.position) if(p.animationRange && std::abs(int(c))>AnimationHandMaxMm) return Error::Range;
-            q.animation.hands[i]=h;
-        }
-        q.animation.handCount=uint8_t(hands);
-        size_t joints=b[at++]; if(joints>AnimationJoints||(joints&&at+2>n)) return Error::Length;
-        if(joints) { q.animation.skeleton=uint16_t(get(b,at,2)); at+=2; }
-        if(at+AnimationJointBytes*joints!=n) return Error::Length;
-        int lastJoint=-1;
-        for(size_t i=0;i<joints;++i,at+=AnimationJointBytes) {
-            VehicleJoint j; j.index=uint16_t(get(b,at,2));
-            for(int k=0;k<4;++k) j.rotation[k]=int16_t(uint16_t(get(b,at+2+2*k,2)));
-            for(int k=0;k<3;++k) j.position[k]=int16_t(uint16_t(get(b,at+10+2*k,2)));
-            if(p.animationRange && (int(j.index)<=lastJoint||j.index>=q.animation.skeleton)) return Error::Range;
-            lastJoint=int(j.index); q.animation.joints[i]=j;
-        }
-        q.animation.jointCount=uint8_t(joints);
+        { Error e=parseAnimationPayload(b,WireSize,n,q.animation,p); if(e!=Error::None) return e; }
     } else { q.t0=get(b,96,8); q.t1=get(b,104,8); q.t2=get(b,112,8); }
     if(p.time && (q.stamp>(1ull<<53)||q.t0>(1ull<<53)||q.t1>(1ull<<53)||q.t2>(1ull<<53))) return Error::Time;
     for(int i=0;i<3;++i) { q.state.position[i]=signedGet(b,72+4*i,4)/100.; q.state.velocity[i]=signedGet(b,84+2*i,2)/100.; }
@@ -211,10 +215,8 @@ Bytes encode(Packet q) {
     } else { put(b,96,q.t0,8); put(b,104,q.t1,8); put(b,112,q.t2,8); }
     put(b,120,checksum(b.data()),4); return b;
 }
-std::vector<uint8_t> encodeAnimation(const Packet& q) {
-    Packet h=q; h.kind=Kind::Animation; h.t0=h.t1=h.t2=0;
-    auto head=encode(h); std::vector<uint8_t> b(head.begin(),head.end());
-    const auto& a=q.animation; size_t bools=0;
+void appendAnimationPayload(std::vector<uint8_t>& b,const Animation& a) {
+    size_t bools=0;
     for(size_t i=0;i<AnimationBoolBytes;++i) if(a.held[i]||a.rose[i]) bools=i+1;
     b.push_back(uint8_t(bools));
     b.insert(b.end(),a.held.begin(),a.held.begin()+bools); b.insert(b.end(),a.rose.begin(),a.rose.begin()+bools);
@@ -246,6 +248,13 @@ std::vector<uint8_t> encodeAnimation(const Packet& q) {
         for(auto c:j.rotation) { b.push_back(uint8_t(uint16_t(c))); b.push_back(uint8_t(uint16_t(c)>>8)); }
         for(auto c:j.position) { b.push_back(uint8_t(uint16_t(c))); b.push_back(uint8_t(uint16_t(c)>>8)); }
     }
+}
+std::vector<uint8_t> encodeAnimationPayload(const Animation& a) { std::vector<uint8_t> b; appendAnimationPayload(b,a); return b; }
+bool decodeAnimationPayload(const uint8_t* b,size_t n,Animation& a) { Animation x; if(!b||parseAnimationPayload(b,0,n,x,{})!=Error::None) return false; a=x; return true; }
+std::vector<uint8_t> encodeAnimation(const Packet& q) {
+    Packet h=q; h.kind=Kind::Animation; h.t0=h.t1=h.t2=0;
+    auto head=encode(h); std::vector<uint8_t> b(head.begin(),head.end());
+    appendAnimationPayload(b,q.animation);
     if(b.size()>AnimationWireMax) throw std::invalid_argument("animation sample too long");
     b[8]=uint8_t(b.size()); b[9]=uint8_t(b.size()>>8);
     uint32_t c=checksum(b.data(),b.size()); for(int i=0;i<4;++i) b[120+i]=uint8_t(c>>(8*i));

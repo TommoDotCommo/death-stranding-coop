@@ -8,6 +8,18 @@ unsigned failures=0;
 static double flat(const std::array<double,3>& a,const std::array<double,3>& b){return std::hypot(a[0]-b[0],a[2]-b[2]);}
 static ds::State porterAt(double x,double z,double yaw,double y=140){ds::State s;s.position={x,y,z};s.yaw=yaw;return s;}
 int main(){
+    {   // Recorded animation samples, on the walk's time base (ms from the first available local row).
+        ds::Animation a;a.held[2]=4;a.floats[7]=1.5f;auto pay=ds::encodeAnimationPayload(a);std::string h;
+        for(auto b:pay){char x[3];std::snprintf(x,3,"%02x",b);h+=x;}
+        std::string text="{\"t_us\":500,\"animation\":\""+h+"\"}\n"                      // before any walk: no time base
+            "{\"t_us\":1000000,\"local\":{\"available\":true,\"x\":1,\"y\":2,\"z\":3,\"yaw_deg\":0}}\n"
+            "{\"t_us\":1250000,\"animation\":\""+h+"\"}\n"
+            "{\"t_us\":1300000,\"animation\":\"zz\"}\n"                                       // malformed
+            "{\"t_us\":1400000,\"animation\":\""+h.substr(0,h.size()-2)+"\"}\n";             // cut short
+        auto r=parseAnimations(text);
+        CHECK(r.size()==1&&r[0].first==250&&r[0].second==a);
+        CHECK(parseRecording(text).size()==1);   // the walk parser skips the animation rows
+    }
     {CHECK(progressValue("unknown")==ds::UnknownProgress);CHECK(progressValue("3")==3);CHECK(progressValue("4294967294")==4294967294u);
         for(auto value:{"", "-1", "1.0", "4294967295", "4294967296", "unknowns"}){bool refused=false;try{progressValue(value);}catch(const std::exception&){refused=true;}CHECK(refused);}
         ds::State state;state.position={1,2,3};auto shifted=offsetTarget(state,{600,0,0});CHECK(shifted&&shifted->position==std::array<double,3>({601,2,3}));CHECK(!offsetTarget({},{}));

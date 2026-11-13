@@ -125,6 +125,9 @@ struct Protection {
 };
 Bytes encode(Packet); // throws invalid_argument for nonfinite state
 std::vector<uint8_t> encodeAnimation(const Packet&); // throws invalid_argument for a nonfinite or out-of-range control
+// The payload alone (what follows the header), for recordings: the same bytes and checks.
+std::vector<uint8_t> encodeAnimationPayload(const Animation&);
+bool decodeAnimationPayload(const uint8_t*,size_t,Animation&);
 Error decode(const uint8_t*, size_t, Packet&);
 #ifdef DS_TESTING
 Error decodeForTest(const uint8_t*, size_t, Packet&, Protection);

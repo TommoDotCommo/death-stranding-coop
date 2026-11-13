@@ -57,6 +57,23 @@ std::vector<Sample> parseRecording(const std::string& text){
     }
     return out;
 }
+std::vector<std::pair<double,ds::Animation>> parseAnimations(const std::string& text){
+    std::vector<std::pair<double,ds::Animation>> out;std::istringstream in(text);std::string line;double t0=-1;
+    auto nib=[](char c)->int{return c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:-1;};
+    while(std::getline(in,line)){
+        double t;if(!number(line,"t_us",t))continue;
+        auto l=value(line,"local");
+        if(l!=std::string::npos&&line[l]=='{'){auto end=line.find('}',l);if(end==std::string::npos)continue;
+            auto local=line.substr(l,end-l);auto av=value(local,"available");
+            if(t0<0&&av!=std::string::npos&&!local.compare(av,4,"true"))t0=t;continue;}
+        auto a=value(line,"animation");if(a==std::string::npos||line[a]!='"'||t0<0)continue;
+        auto end=line.find('"',a+1);if(end==std::string::npos||(end-a-1)%2)continue;
+        std::vector<uint8_t> pay;bool ok=true;
+        for(size_t i=a+1;i+1<end;i+=2){int hi=nib(line[i]),lo=nib(line[i+1]);if(hi<0||lo<0){ok=false;break;}pay.push_back(uint8_t(hi*16+lo));}
+        ds::Animation x;if(ok&&ds::decodeAnimationPayload(pay.data(),pay.size(),x))out.push_back({(t-t0)/1000,x});
+    }
+    return out;
+}
 ds::State Replay::at(double ms,const std::array<double,3>& origin) const {
     ds::State s{};if(samples_.empty())return s;
     double span=samples_.back().t;double t=span>0?std::fmod(std::max(ms,0.),span):0;
@@ -78,6 +95,12 @@ void rechecksum(uint8_t* b){
 bool checksumOK(const uint8_t* b){
     ds::Bytes c;std::copy(b,b+ds::WireSize,c.begin());rechecksum(c.data());return std::equal(c.begin()+120,c.begin()+124,b+120);
 }
+}
+void toWireLong(std::vector<uint8_t>& b){
+    if(b.size()<ds::WireSize)return;
+    std::copy(mod::WireBuild.begin(),mod::WireBuild.end(),b.begin()+16);
+    uint32_t h=2166136261u;for(size_t i=0;i<b.size();++i){h^=i>=120&&i<124?0:b[i];h*=16777619u;}
+    for(unsigned i=0;i<4;++i)b[120+i]=uint8_t(h>>(8*i));
 }
 void toWire(ds::Bytes& b){
 #ifndef MUTANT_PARTNER_WIRE

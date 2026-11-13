@@ -75,6 +75,10 @@ void parser() {
         bad=w;bad.pop_back();bad[8]=uint8_t(bad.size());bad[9]=uint8_t(bad.size()>>8);rechecksum(bad);check(decode(bad.data(),bad.size(),q)==Error::Length,"animation_joints_short");
         Packet both=r;for(size_t k=0;k<AnimationFloats;++k)both.animation.floats[k]=1;bool threw=false;try{encodeAnimation(both);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_too_long");
         Packet wrong=r;wrong.animation.joints[3].index=40;threw=false;try{encodeAnimation(wrong);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_encode_joint");}
+    {   // The payload alone, as a recording keeps it: the same bytes after the header, the same checks.
+        auto pay=encodeAnimationPayload(p.animation);check(pay.size()+WireSize==b.size()&&std::equal(pay.begin(),pay.end(),b.begin()+WireSize),"animation_payload_bytes");
+        Animation back;check(decodeAnimationPayload(pay.data(),pay.size(),back)&&back==p.animation,"animation_payload_roundtrip");
+        auto cut=pay;cut.pop_back();check(!decodeAnimationPayload(cut.data(),cut.size(),back),"animation_payload_short");}
     {Packet bad=p;bad.animation.floats[2]=std::numeric_limits<float>::quiet_NaN();bool threw=false;try{encodeAnimation(bad);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_encode_nan");}
     {Packet bad=p;bad.animation.floats[2]=-2e6f;bool threw=false;try{encodeAnimation(bad);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_encode_range");}
 }
