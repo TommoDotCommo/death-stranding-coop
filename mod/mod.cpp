@@ -2291,6 +2291,15 @@ struct Runtime final:ds::Transport {
                         }
                     }else note("BT test: catcher command function differs\n");
                 }
+                else if(auto reason=mod::puppet::parseCargoCommand(text,mod::runStamp(),"catcherend");reason) {
+                    // Research: the game's end-of-fight message to every active catcher (0x2a6cf20(manager, -1, &reason,
+                    // 0, 0)); the reasons it is called with differ in what the fight leaves (a cleared sphere or not).
+                    uint8_t got[8]{};static const uint8_t want[8]={0x4c,0x8b,0xdc,0x55,0x53,0x49,0x8d,0x6b};uint64_t manager=0;
+                    if(sampler->read(sampler->base+0x2a6cf20,got,8)&&!std::memcmp(got,want,8)&&sampler->read(sampler->base+0x7bee060,&manager,8)&&manager){
+                        uint32_t hash=*reason;reinterpret_cast<void(*)(uint64_t,int32_t,const uint32_t*,uint32_t,uint32_t)>(sampler->base+0x2a6cf20)(manager,-1,&hash,0,0);
+                        note(("BT test: catcher end reason "+std::to_string(hash)+"\n").c_str());
+                    }else note("BT test: catcher end function differs\n");
+                }
                 else if(auto rain=mod::puppet::parseCargoCommand(text,mod::runStamp(),"rain");rain&&anchor.pose.available) {
                     // Test: "rain <seconds>" places the game's own timed rain around this porter (the influence the shared
                     // rain uses), so a host can have timefall on demand.

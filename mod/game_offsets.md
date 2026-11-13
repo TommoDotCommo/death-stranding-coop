@@ -1071,6 +1071,25 @@ looked at.
   (`+0xa8`, at the territory, radius about 280, shrinking with time; saved). Inside a cleared sphere 0 does nothing
   and the weather map there reads clear, so rain placed there brings no BTs.
 
+### Real captures and the end-of-fight message (2026-11-14, live)
+
+- A real capture is scriptable: two copies, the shared rain at the BT area by 668,252, and one porter walked with
+  scripted input to the gazers there is caught within about five minutes. The game then starts its own catcher fight,
+  and the caught porter usually dies in it: a real voidout with a 75 m crater. `Is_Drag` / `Int_Is_GazerCatch`
+  (vitals.h) read caught, then the dead bit read dead. Kit regression `capture`.
+- Equipping the Anti-BT handgun on the Episode 3 baseline: wheel `key 1 700`, `key 1 900 mouse 3000 2400`, then
+  `key 1+LMB 250 mouse 3000 2400` (release alone does not equip; the cursor starts on the equipped item). Aim
+  `key RMB`, charge `key RMB+LMB 1200`, fire on release; Q scans and shows the gazers. Gazers 13 m away came to the
+  porter and caught him before a shot hit: a scripted gun kill needs better aim than this.
+- `0x2a6cf20(catcher manager, -1 = every fight, &reason, 0, 0)` sends an end message with a reason hash to every
+  active catcher. Callers pass `0x3dc0213f` (catcher command 1: ends with a cleared sphere), `0x243ae63b`,
+  `0x6c0c039c`, `0x073933db` (wrapper `0x2a93770`), `0x01e6fd55` / `0x1ba871e8` (beside manager `+0x2ad`) and
+  `0x1d19464f` (a timer at `+0x8c` running out). Live with lab command `catcherend HASH`: `0x6c0c039c` and `0x1d19464f`
+  left the fight running. `0x073933db` ended it without a cleared sphere, then the porter voided out. Whether that
+  reason caused the voidout ("the catcher took him") or the fight did is **unknown**. Catcher command 4 (a
+  `0x3d4cf4a9` message) did nothing visible. The mod therefore does not end a partner's fight for him: he leaves it
+  as in the game, by getting out of the tar.
+
 ### The game's death and drag poses on the body (2026-11-13, static, then live)
 
 - The body is a `DSPlayerAKukanEntity` (vtable `0x3d7de48`, 0x7a0 bytes), not a `DSPlayerEntity`: it has no player
