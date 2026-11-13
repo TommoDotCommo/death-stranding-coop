@@ -1080,7 +1080,10 @@ looked at.
 - Equipping the Anti-BT handgun on the Episode 3 baseline: wheel `key 1 700`, `key 1 900 mouse 3000 2400`, then
   `key 1+LMB 250 mouse 3000 2400` (release alone does not equip; the cursor starts on the equipped item). Aim
   `key RMB`, charge `key RMB+LMB 1200`, fire on release; Q scans and shows the gazers. Gazers 13 m away came to the
-  porter and caught him before a shot hit: a scripted gun kill needs better aim than this.
+  porter and caught him before a shot hit. From 20 m, aimed by the scan image (blue BT particles: B > 130, B - R > 70,
+  B - G > 35; the turn while aiming is about 800 mouse counts per screen width), two charged shots killed a gazer:
+  the mod sent it and the partner's game removed the same gazer. The scan also paints terrain edges blue, so picking
+  the target from the image alone is not reliable yet.
 - `0x2a6cf20(catcher manager, -1 = every fight, &reason, 0, 0)` sends an end message with a reason hash to every
   active catcher. Callers pass `0x3dc0213f` (catcher command 1: ends with a cleared sphere), `0x243ae63b`,
   `0x6c0c039c`, `0x073933db` (wrapper `0x2a93770`), `0x01e6fd55` / `0x1ba871e8` (beside manager `+0x2ad`) and
