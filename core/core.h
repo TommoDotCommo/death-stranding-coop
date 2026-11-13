@@ -52,17 +52,27 @@ const char* progressReason(ProgressStatus);
 // Optional animation sample (ANIMATION, the only longer packet): the porter's animation controls by the mod's own
 // numbering, on the presence timeline. held = each bool's value when sampled; rose = it went from off to on at some
 // frame since the previous sample (a one-frame pulse shows only here); floats are sent sparse (zero is left out).
-// After the 128-byte header: [u8 n][held n][rose n][u8 m][m x (u8 index, f32)], indices increasing.
-constexpr size_t AnimationBoolBytes=32, AnimationFloats=192;
+// hands: what the porter holds in his hands, each relative to his root (millimetres; rotation packed by the adapter in
+// 48 bits), so that it moves with the mirrored arms.
+// After the 128-byte header: [u8 n][held n][rose n][u8 m][m x (u8 index, f32)][u8 k][k x (u32 item, u8 tag, i16 x3,
+// u48 rotation)], indices increasing.
+constexpr size_t AnimationBoolBytes=32, AnimationFloats=192, AnimationHands=2, AnimationHandBytes=17;
 constexpr float AnimationFloatMax=1e6f;
-constexpr size_t AnimationWireMax=WireSize+1+2*AnimationBoolBytes+1+5*AnimationFloats;
+constexpr int16_t AnimationHandMaxMm=3000;
+constexpr size_t AnimationWireMax=WireSize+1+2*AnimationBoolBytes+1+5*AnimationFloats+1+AnimationHandBytes*AnimationHands;
+struct HeldCase {
+    uint32_t item=0; uint8_t tag=0; std::array<int16_t,3> position{}; uint64_t rotation=0;   // tag: adapter-defined
+    bool operator==(const HeldCase& o) const { return item==o.item&&tag==o.tag&&position==o.position&&rotation==o.rotation; }
+};
 struct Animation {
     std::array<uint8_t,AnimationBoolBytes> held{}, rose{}; std::array<float,AnimationFloats> floats{};
-    bool operator==(const Animation& o) const { return held==o.held&&rose==o.rose&&floats==o.floats; }
+    std::array<HeldCase,AnimationHands> hands{}; uint8_t handCount=0;
+    bool operator==(const Animation& o) const { return held==o.held&&rose==o.rose&&floats==o.floats&&handCount==o.handCount&&hands==o.hands; }
     bool operator!=(const Animation& o) const { return !(*this==o); }
 };
 // The sample shown now (the presence delay applies), with rose gathered over every sample passed since the last take.
-struct AnimationShown { Animation animation; uint32_t sequence=0; bool fresh=false; };
+// next/fraction: the sample after it and how far the shown time is towards it (0..1), when one has arrived.
+struct AnimationShown { Animation animation; uint32_t sequence=0; bool fresh=false; bool between=false; Animation next{}; float fraction=0; };
 struct Packet {
     Kind kind=Kind::Hello; Role role=Role::Host;
     uint32_t game=GameBuild; std::array<uint8_t,16> mod=ModBuild;

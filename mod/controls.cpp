@@ -1,4 +1,5 @@
 #include "controls.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -120,6 +121,35 @@ std::vector<Write> plan(const ds::Animation* last,const ds::Animation& now,bool 
         if(rose&&!held)out.push_back({true,i,1,true});
 #endif
     }
+    return out;
+}
+bool continuous(unsigned i){
+    if(skipFloat(i))return false;
+    std::string n=FloatNames[i];
+#ifndef MUTANT_CONTROLS_BLEND_KINDS
+    for(const char* step:{"Type","State","Seat","Level","_Ver","Temporary","Config","Part"})if(n.find(step)!=std::string::npos)return false;
+    if(n.rfind("Is_",0)==0)return false;
+#endif
+    return true;
+}
+bool angular(unsigned i){
+    if(skipFloat(i))return false;
+    std::string n=FloatNames[i];return n.find("Heading")!=std::string::npos||n.find("Angle")!=std::string::npos;
+}
+ds::Animation blend(const ds::AnimationShown& s){
+    ds::Animation out=s.animation;if(!s.between)return out;
+    float f=std::clamp(s.fraction,0.f,1.f);
+    for(unsigned i=0;i<FloatCount;++i){if(!continuous(i))continue;
+        float a=out.floats[i],z=s.next.floats[i];
+#ifndef MUTANT_CONTROLS_BLEND_WRAP
+        float d=angular(i)?float(std::remainder(double(z)-double(a),360.)):z-a;
+#else
+        float d=z-a;
+#endif
+        out.floats[i]=a+f*d;}
+    for(size_t h=0;h<out.handCount;++h)for(size_t j=0;j<s.next.handCount;++j){
+        auto& a=out.hands[h];const auto& z=s.next.hands[j];if(a.item!=z.item||a.tag!=z.tag)continue;
+        for(int k=0;k<3;++k)a.position[k]=int16_t(std::lround(a.position[k]+f*(z.position[k]-a.position[k])));}
     return out;
 }
 std::vector<Write> clear(const ds::Animation& last){

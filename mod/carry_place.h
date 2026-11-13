@@ -28,7 +28,12 @@ std::array<float,9> unpackRotation(uint64_t);
 // Every case on the porter's cargo slots (back, arms, hips: slot types 1..5), relative to `anchor` (the porter's
 // backpack). nullopt when the chain is unreadable; cases further than 3 m from the anchor are left out (a record the
 // game has not placed yet).
-std::optional<std::vector<Placed>> readPlaced(const discovery::Sampler&,uint64_t porterEntity,uint64_t componentVtable,uint64_t manager,const Transform& anchor);
+// hands: the cases in his hands instead (slot types 6, 7), for the animation sample (core HeldCase).
+std::optional<std::vector<Placed>> readPlaced(const discovery::Sampler&,uint64_t porterEntity,uint64_t componentVtable,uint64_t manager,const Transform& anchor,bool hands=false);
+// A case in a hand relative to the porter's root, as the animation sample carries it (millimetres, packed rotation;
+// tag = slot type | variant << 7), and back.
+ds::HeldCase toHeld(const Placed&);
+Placed fromHeld(const ds::HeldCase&);
 // Wire: one event per case (none carried: one event with total 0). item = the item id; ref = rotation (47 bits),
 // index (5), variant (1); position = the relative position in units of 0.1 mm... sent times 100 (the wire keeps
 // centimetres); yaw carries total (5 bits) and the list's generation (8) as a whole number of wire steps.

@@ -50,7 +50,7 @@ static bool pointers(const discovery::Sampler& s,uint64_t array,int32_t count,si
     out.clear();if(count<0||size_t(count)>most)return false;if(!count)return true;if(!array)return false;
     out.resize(size_t(count));return s.read(array,out.data(),out.size()*8);
 }
-std::optional<std::vector<Placed>> readPlaced(const discovery::Sampler& s,uint64_t entity,uint64_t vtable,uint64_t manager,const Transform& anchor){
+std::optional<std::vector<Placed>> readPlaced(const discovery::Sampler& s,uint64_t entity,uint64_t vtable,uint64_t manager,const Transform& anchor,bool hands){
     using namespace mod::carry;
     uint64_t component=0,v=0,carrier=0;
     if(!entity||!load(s,entity+PorterCarrier,component)||!component||!load(s,component,v)||v!=vtable||!load(s,component+CarrierObject,carrier)||!carrier)return std::nullopt;
@@ -60,7 +60,7 @@ std::optional<std::vector<Placed>> readPlaced(const discovery::Sampler& s,uint64
     for(auto slot:slots){
         uint8_t type=0;int32_t stackCount=0;uint64_t stackArray=0,slotCarrier=0;std::vector<uint64_t> stacks;
         if(!slot||!load(s,slot+SlotType,type)||!load(s,slot+SlotCarrier,slotCarrier))return std::nullopt;
-        if(type<1||type>5)continue;                                    // back, arms, hips
+        if(hands?(type<6||type>7):(type<1||type>5))continue;          // back, arms, hips; or the two hands
         if(!load(s,slot+Stacks,stackCount)||!load(s,slot+StackArray,stackArray)||!pointers(s,stackArray,stackCount,MaxStacks,stacks))return std::nullopt;
         for(auto stack:stacks){
             int32_t n=0;uint64_t itemArray=0;std::vector<uint64_t> records;
@@ -83,6 +83,16 @@ std::optional<std::vector<Placed>> readPlaced(const discovery::Sampler& s,uint64
         }
     }
     return out;
+}
+ds::HeldCase toHeld(const Placed& p){
+    ds::HeldCase h;h.item=p.item;h.tag=uint8_t((p.slot&0x7f)|(p.variant?0x80:0));
+    for(int k=0;k<3;++k)h.position[k]=int16_t(std::clamp<long>(std::lround(p.rel.position[k]*1000),-ds::AnimationHandMaxMm,ds::AnimationHandMaxMm));
+    h.rotation=packRotation(p.rel.rotation);return h;
+}
+Placed fromHeld(const ds::HeldCase& h){
+    Placed p;p.item=h.item;p.slot=uint8_t(h.tag&0x7f);p.variant=(h.tag&0x80)!=0;
+    for(int k=0;k<3;++k)p.rel.position[k]=h.position[k]/1000.;
+    p.rel.rotation=unpackRotation(h.rotation&((1ull<<48)-1));return p;
 }
 static constexpr double YawStep=3.14159265358979323846/32767.;
 std::vector<ds::CargoEvent> encode(const std::vector<Placed>& list,uint8_t generation){

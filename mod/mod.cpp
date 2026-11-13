@@ -355,6 +355,7 @@ struct Runtime final:ds::Transport {
     LocalVehicle localVehicle;bool partnerAboard=false;mod::puppet::FloatVariable restVar;bool localResting=false;
     // The porter's own animation controls (controls.h): read every frame, sent beside presence; echo keeps its own.
     mod::controls::Binding controlBinding;mod::controls::Gather controlGather;bool echoOwn=false;
+    std::vector<mod::carryplace::Placed> partnerHands;   // the cases in the partner's hands, relative to his root (tickStack)
     std::deque<std::pair<uint64_t,ds::Animation>> echoControls;std::array<uint8_t,ds::AnimationBoolBytes> echoLast{};bool echoHave=false;
     std::function<void(uint64_t,const mod::puppet::Transform&)> keepOut;uint64_t keptOutNoted=0;
     mod::passenger::Rider rider;mod::passenger::Api passengerApi;bool passengerTried=false;mod::marker::KeyEdge passengerEdge;
@@ -562,10 +563,15 @@ struct Runtime final:ds::Transport {
         auto pose=mod::puppet::readEntityPose(*sampler,on_?on_:body);
         if(!permitted||!(pose.available&&pose.coherent)){cargoStack->tick(false,{},nullptr);return;}
         auto t=mod::puppet::transform(pose);
-        // With the partner's measured places and a backpack copy to hang them on: every case exactly there.
-        if(stackTest<0&&placeShown&&on_){
+        // With the partner's measured places and a backpack copy to hang them on: every case exactly there. The cases in
+        // his hands follow (relative to his root, as his mirrored arms hold them), after the others so the stack stays.
+        if(stackTest<0&&(placeShown||!partnerHands.empty())&&on_){
             std::vector<mod::stack::Item> items;std::vector<mod::puppet::Transform> places;
-            for(auto& c:*placeShown){items.push_back({c.item,c.variant});places.push_back(c.rel);}
+            if(placeShown)for(auto& c:*placeShown){items.push_back({c.item,c.variant});places.push_back(c.rel);}
+            auto root=mod::puppet::readEntityPose(*sampler,body);
+            if(root.available&&root.coherent)for(auto& h:partnerHands){
+                auto world=mod::carryplace::compose(mod::puppet::transform(root),h.rel);
+                items.push_back({h.item,h.variant});places.push_back(mod::carryplace::relative(t,world));}
             cargoStack->tick(true,items,&t,&places);return;
         }
         cargoStack->tick(true,wanted,&t);
@@ -1862,7 +1868,10 @@ struct Runtime final:ds::Transport {
         if(useOwn)ownEntity=own->tick(anchor);
         stages.enter("body drive",mod::nowUs());
         {double steer=partnerMode()&&cache.remote.visible?cache.remote.state.steer:0;twin->steering(steer);if(ownTwin)ownTwin->steering(steer);}
-        const ds::Animation* mirrorSample=mirrorOn&&controlsShown?&controlsShown->animation:nullptr;bool mirrorFresh=mirrorSample&&controlsShown->fresh;
+        // Continuous controls blended between the two samples around the shown time (controls.h).
+        std::optional<ds::Animation> blended;if(mirrorOn&&controlsShown)blended=mod::controls::blend(*controlsShown);
+        const ds::Animation* mirrorSample=blended?&*blended:nullptr;bool mirrorFresh=mirrorSample&&controlsShown->fresh;
+        partnerHands.clear();if(blended)for(size_t i=0;i<blended->handCount;++i)partnerHands.push_back(mod::carryplace::fromHeld(blended->hands[i]));
         if(mirrorSample&&!animationNoted){animationNoted=true;note("BODY moves with the partner's own animation controls\n");}
         if(mirrorSample)++animationShown;
         if(useOwn&&ownEntity){
@@ -1915,6 +1924,12 @@ struct Runtime final:ds::Transport {
                         if(echoHave)for(size_t k=0;k<held.size();++k)e.rose[k]=uint8_t(held[k]&~echoLast[k]);
                         echoLast=held;echoHave=true;echoControls.emplace_back(now,e);}
                     controlGather.add(held,floats);
+                    // What he holds in his hands, relative to his root: it moves with the mirrored arms (carry_visual).
+                    {std::array<ds::HeldCase,ds::AnimationHands> hands{};uint8_t count=0;uint64_t manager=0;
+                     if(config.carryVisual&&cargoManagerSlot&&a.pose.available&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
+                         if(auto inHands=mod::carryplace::readPlaced(*sampler,a.entity,sampler->base+mod::carry::ComponentVtable,manager,mod::puppet::transform(a.pose),true))
+                             for(auto& p:*inHands)if(count<hands.size())hands[count++]=mod::carryplace::toHeld(p);
+                     controlGather.hands(hands,count);}
                     if(core->connected()&&core->sendAnimation(controlGather.current(),now))controlGather.sent();}}
             stages.enter("start",mod::nowUs());
             // A bounded, read-only observation; never writes story or save state.

@@ -354,12 +354,14 @@ This is game-free wire evidence, not proof of a visible sky change.
 `ANIMATION=10` carries the porter's animation controls (the adapter's numbering;
 in this mod `mod/controls.h`) on the presence timeline. It is the one packet longer
 than 128 bytes: the usual header (bytes 96..119 reserved zero), then
-`[u8 n][held: n bytes][rose: n bytes][u8 m][m x (u8 index, f32 little endian)]`.
+`[u8 n][held: n bytes][rose: n bytes][u8 m][m x (u8 index, f32 little endian)][u8 k][k x (u32 item, u8 tag,
+3 x i16 millimetres, u48 rotation)]`; `k <= 2` cases held in the hands, relative to the porter's root, item nonzero
+and each coordinate within 3 m (`tag` and the rotation packing belong to the adapter).
 `n <= 32` bytes of bool bits; `held` is each bool when sampled, `rose` marks a bool
 that went from off to on at any frame since the previous sample (a one-frame
 pulse shows only there). Floats are sparse: zero is left out, indices strictly
 increase and stay below 192, values are finite with `|v| <= 1e6` and nonzero. The
-length must match exactly; at most 1154 bytes, under a 1280-byte path MTU.
+length must match exactly; at most 1189 bytes, under a 1280-byte path MTU.
 
 Either side sends while connected and not gated: at most every 50 ms, an unchanged
 sample at most every 500 ms (`sendAnimation` returns whether it went, so the
@@ -368,7 +370,8 @@ Receivers require the ping clock mapping, a stamp within 2 s of the mapped local
 time, a fresh sequence and an advancing stamp, and keep 64 samples.
 `takeAnimation` returns the sample due at the presence delay, with `rose` gathered
 over every sample passed since the previous take (each pulse is given once), and
-nothing when none is due or the due one is over a second old. Samples never
+nothing when none is due or the due one is over a second old. When the sample after it has arrived it comes too
+(`between`, `next`, `fraction` 0..1 towards it), for the adapter to blend continuous values. Samples never
 refresh connection liveness; disconnect clears them.
 
 `make -C core animation-test` runs roundtrip, full and empty payloads, length,

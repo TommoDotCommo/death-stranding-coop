@@ -32,6 +32,7 @@ public:
     void add(const std::array<uint8_t,ds::AnimationBoolBytes>& held,const std::array<float,ds::AnimationFloats>& floats);
     const ds::Animation& current() const {return now_;}
     bool ready() const {return have_;}
+    void hands(const std::array<ds::HeldCase,ds::AnimationHands>& h,uint8_t count){now_.hands=h;now_.handCount=count;}
     void sent(){now_.rose={};}
     void reset(){*this=Gather{};}
 private:
@@ -49,6 +50,13 @@ bool readPorter(const discovery::Sampler&,uint64_t entity,uint64_t animatorVtabl
 // none). fresh: this sample is new since the last call, so its rose bits are pulses still to give.
 struct Write {bool isBool=true;unsigned index=0;float value=0;bool trigger=false;};
 std::vector<Write> plan(const ds::Animation* last,const ds::Animation& now,bool fresh);
+// Between two samples (core AnimationShown::between): continuous floats (rates, weights, headings, look angles) are
+// blended towards the next sample, headings and angles the short way round in degrees; kinds, states, levels and the
+// shared Temporary_* values step as sent; a case held in the same hand in both samples moves between its two places.
+// Without a next sample, the shown one as it is.
+bool continuous(unsigned floatIndex);
+bool angular(unsigned floatIndex);
+ds::Animation blend(const ds::AnimationShown&);
 // Leaving the mirror: every control the mirror set goes back to zero.
 std::vector<Write> clear(const ds::Animation& last);
 }

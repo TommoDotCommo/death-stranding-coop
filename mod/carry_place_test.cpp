@@ -8,6 +8,12 @@ static int failures=0;
 static Transform at(double x,double y,double z,double yaw,double pitch=0,double roll=0){Transform t;t.position={x,y,z};t.rotation=mod::structures::rotation(yaw,pitch,roll);return t;}
 static double gap(const Transform& a,const Transform& b){double d=0;for(int k=0;k<3;++k)d=std::fmax(d,std::fabs(a.position[size_t(k)]-b.position[size_t(k)]));for(int k=0;k<9;++k)d=std::fmax(d,std::fabs(double(a.rotation[size_t(k)]-b.rotation[size_t(k)])));return d;}
 int main(){
+    // A case in a hand as the animation sample carries it: millimetres, the packed rotation, slot and variant in the tag.
+    { Placed p;p.item=0xfeed;p.variant=true;p.slot=7;p.rel=at(0.4567,-0.1234,1.0005,0.7,0.3,-1.1);
+      auto h=toHeld(p);CHECK(h.item==0xfeed&&h.tag==(7|0x80)&&h.position[0]==457&&h.position[1]==-123&&h.position[2]==1001);
+      auto q=fromHeld(h);CHECK(q.item==p.item&&q.variant&&q.slot==7&&gap(q.rel,p.rel)<0.002);
+      p.rel.position={9,-9,0};h=toHeld(p);CHECK(h.position[0]==3000&&h.position[1]==-3000);   // clamped to the wire's reach
+      p.variant=false;p.slot=6;CHECK(fromHeld(toHeld(p)).slot==6&&!fromHeld(toHeld(p)).variant); }
     // Relative and back: exact for any pair; a case keeps its place on a backpack that stands and faces elsewhere.
     { Transform pack=at(1052.3,411.2,144.9,2.9,0.15,-0.05),box=at(1052.5,411.4,145.0,-1.3,1.2,0.4);
       auto rel=relative(pack,box);CHECK(gap(compose(pack,rel),box)<1e-5);

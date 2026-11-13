@@ -1,4 +1,5 @@
 #include "controls.h"
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 using namespace mod::controls;
@@ -49,8 +50,23 @@ void planning(){
     for(auto& x:w)CHECK(x.value==0&&!x.trigger);
 }
 }
+void blending(){
+    unsigned unbalance=floatIndex("Unbalance_Rate"),turn=floatIndex("Turn_Heading"),kind=floatIndex("Damage_Type"),temp=floatIndex("Temporary_Float0"),state=floatIndex("TakeABreak_State");
+    CHECK(continuous(unbalance)&&continuous(turn)&&angular(turn)&&!angular(unbalance)&&!continuous(kind)&&!continuous(temp)&&!continuous(state));
+    ds::AnimationShown s;s.animation.floats[unbalance]=.2f;s.animation.floats[turn]=170;s.animation.floats[kind]=2;s.animation.floats[temp]=90;
+    auto same=blend(s);CHECK(same==s.animation);   // nothing to blend towards
+    s.between=true;s.fraction=.25f;s.next.floats[unbalance]=.6f;s.next.floats[turn]=-170;s.next.floats[kind]=11;s.next.floats[temp]=-90;
+    auto b=blend(s);
+    CHECK(std::abs(b.floats[unbalance]-.3f)<1e-6f);
+    CHECK(std::abs(b.floats[turn]-175.f)<1e-4f);   // the short way across 180, not through 0
+    CHECK(b.floats[kind]==2&&b.floats[temp]==90);    // kinds and the shared Temporary_* step
+    s.fraction=1;b=blend(s);CHECK(std::abs(std::remainder(double(b.floats[turn])+170.,360.))<1e-3);
+    // A case in the same hand moves between its places; another hand's case does not borrow it.
+    s.fraction=.5f;s.animation.handCount=1;s.animation.hands[0]={7,7,{100,0,-200},5};s.next.handCount=2;s.next.hands[0]={8,6,{900,900,900},5};s.next.hands[1]={7,7,{300,40,0},6};
+    b=blend(s);CHECK(b.handCount==1&&b.hands[0].position==(std::array<int16_t,3>{200,20,-100})&&b.hands[0].rotation==5);
+}
 int main(){
-    names();gather();planning();
+    names();gather();planning();blending();
     if(!failures)std::puts("controls gather, plan and clear checks passed");
     return failures?1:0;
 }

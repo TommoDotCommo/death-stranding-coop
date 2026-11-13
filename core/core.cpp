@@ -66,13 +66,23 @@ Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
         size_t bools=b[at++]; if(bools>AnimationBoolBytes||at+2*bools+1>n) return Error::Length;
         std::copy(b+at,b+at+bools,q.animation.held.begin()); at+=bools;
         std::copy(b+at,b+at+bools,q.animation.rose.begin()); at+=bools;
-        size_t floats=b[at++]; if(floats>AnimationFloats||at+5*floats!=n) return Error::Length;
+        size_t floats=b[at++]; if(floats>AnimationFloats||at+5*floats+1>n) return Error::Length;
         int last=-1;
         for(size_t i=0;i<floats;++i,at+=5) {
             unsigned k=b[at]; uint32_t bits=uint32_t(get(b,at+1,4)); float v; std::memcpy(&v,&bits,4);
             if(p.animationRange && (int(k)<=last||k>=AnimationFloats||!std::isfinite(v)||std::abs(v)>AnimationFloatMax||v==0)) return Error::Range;
             last=int(k); if(k<AnimationFloats) q.animation.floats[k]=v;
         }
+        size_t hands=b[at++]; if(hands>AnimationHands||at+AnimationHandBytes*hands!=n) return Error::Length;
+        for(size_t i=0;i<hands;++i,at+=AnimationHandBytes) {
+            HeldCase h; h.item=uint32_t(get(b,at,4)); h.tag=b[at+4];
+            for(int k=0;k<3;++k) h.position[k]=int16_t(uint16_t(get(b,at+5+2*k,2)));
+            h.rotation=get(b,at+11,6);
+            if(p.animationRange && !h.item) return Error::Range;
+            for(auto c:h.position) if(p.animationRange && std::abs(int(c))>AnimationHandMaxMm) return Error::Range;
+            q.animation.hands[i]=h;
+        }
+        q.animation.handCount=uint8_t(hands);
     } else { q.t0=get(b,96,8); q.t1=get(b,104,8); q.t2=get(b,112,8); }
     if(p.time && (q.stamp>(1ull<<53)||q.t0>(1ull<<53)||q.t1>(1ull<<53)||q.t2>(1ull<<53))) return Error::Time;
     for(int i=0;i<3;++i) { q.state.position[i]=signedGet(b,72+4*i,4)/100.; q.state.velocity[i]=signedGet(b,84+2*i,2)/100.; }
@@ -203,6 +213,17 @@ std::vector<uint8_t> encodeAnimation(const Packet& q) {
         uint32_t bits; std::memcpy(&bits,&v,4); b.push_back(uint8_t(k)); for(int i=0;i<4;++i) b.push_back(uint8_t(bits>>(8*i))); ++floats;
     }
     b[count]=floats;
+    if(a.handCount>AnimationHands) throw std::invalid_argument("animation hand count");
+    b.push_back(a.handCount);
+    for(size_t i=0;i<a.handCount;++i) {
+        const auto& h=a.hands[i];
+        if(!h.item||h.rotation>>48) throw std::invalid_argument("animation hand case");
+        for(auto c:h.position) if(std::abs(int(c))>AnimationHandMaxMm) throw std::invalid_argument("animation hand position");
+        for(int k=0;k<4;++k) b.push_back(uint8_t(h.item>>(8*k)));
+        b.push_back(h.tag);
+        for(auto c:h.position) { b.push_back(uint8_t(uint16_t(c))); b.push_back(uint8_t(uint16_t(c)>>8)); }
+        for(int k=0;k<6;++k) b.push_back(uint8_t(h.rotation>>(8*k)));
+    }
     b[8]=uint8_t(b.size()); b[9]=uint8_t(b.size()>>8);
     uint32_t c=checksum(b.data(),b.size()); for(int i=0;i<4;++i) b[120+i]=uint8_t(c>>(8*i));
     return b;
@@ -442,6 +463,10 @@ std::optional<AnimationShown> Core::takeAnimation(uint64_t now) {
         r.fresh=true;
     }
     animationTaken_=r.sequence;
+    if(due+1<animations_.size()&&animations_[due+1].time>animations_[due].time) {
+        r.between=true; r.next=animations_[due+1].animation; r.next.rose={};
+        r.fraction=float(std::clamp(double(target-animations_[due].time)/double(animations_[due+1].time-animations_[due].time),0.,1.));
+    }
     animations_.erase(animations_.begin(),animations_.begin()+long(due));
     if(target-animations_.front().time>1000) return {};
     return r;

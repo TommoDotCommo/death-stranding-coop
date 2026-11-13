@@ -35,14 +35,14 @@ struct Pair {
     Packet sample(uint32_t sequence=1,uint64_t stamp=20){Packet p;p.kind=Kind::Animation;p.role=Role::Host;p.session=42;p.nonce=100;p.echo=200;p.sequence=sequence;p.stamp=stamp;p.animation.held[0]=1;return p;}
 };
 void rechecksum(std::vector<uint8_t>& b){uint32_t h=2166136261u;for(size_t i=0;i<b.size();++i){h^=(i>=120&&i<124)?0:b[i];h*=16777619u;}for(int i=0;i<4;++i)b[120+i]=uint8_t(h>>(8*i));}
-Animation varied(){Animation a;a.held[0]=5;a.held[17]=128;a.rose[3]=1;a.floats[0]=1.5f;a.floats[17]=-90.f;a.floats[AnimationFloats-1]=4.f;return a;}
+Animation varied(){Animation a;a.held[0]=5;a.held[17]=128;a.rose[3]=1;a.floats[0]=1.5f;a.floats[17]=-90.f;a.floats[AnimationFloats-1]=4.f;a.handCount=1;a.hands[0]={0xdeadbeef,7,{-3000,120,2999},0xabcdef012345ull};return a;}
 void parser() {
     Packet p;p.kind=Kind::Animation;p.sequence=1;p.stamp=5;p.animation=varied();Packet q;
-    auto b=encodeAnimation(p);check(b.size()==WireSize+1+2*18+1+3*5,"animation_size");
+    auto b=encodeAnimation(p);check(b.size()==WireSize+1+2*18+1+3*5+1+AnimationHandBytes,"animation_size");
     check(decode(b.data(),b.size(),q)==Error::None&&q.kind==Kind::Animation&&q.animation==p.animation&&q.sequence==1&&q.stamp==5,"animation_roundtrip");
-    {Packet full=p;for(auto& x:full.animation.held)x=0xff;for(auto& x:full.animation.rose)x=0xff;for(size_t k=0;k<AnimationFloats;++k)full.animation.floats[k]=float(k+1)*(k%2?-1.f:1.f);
+    {Packet full=p;for(auto& x:full.animation.held)x=0xff;for(auto& x:full.animation.rose)x=0xff;for(size_t k=0;k<AnimationFloats;++k)full.animation.floats[k]=float(k+1)*(k%2?-1.f:1.f);full.animation.handCount=2;full.animation.hands[1]={1,6,{0,0,0},(1ull<<48)-1};
      auto w=encodeAnimation(full);check(w.size()==AnimationWireMax&&decode(w.data(),w.size(),q)==Error::None&&q.animation==full.animation,"animation_full");}
-    {Packet empty=p;empty.animation={};auto w=encodeAnimation(empty);check(w.size()==WireSize+2&&decode(w.data(),w.size(),q)==Error::None&&q.animation==Animation{},"animation_empty");}
+    {Packet empty=p;empty.animation={};auto w=encodeAnimation(empty);check(w.size()==WireSize+3&&decode(w.data(),w.size(),q)==Error::None&&q.animation==Animation{},"animation_empty");}
     {auto w=b;w.pop_back();w[8]=uint8_t(w.size());rechecksum(w);check(decode(w.data(),w.size(),q)==Error::Length,"animation_short");}
     {auto w=b;w.push_back(0);w[8]=uint8_t(w.size());rechecksum(w);check(decode(w.data(),w.size(),q)==Error::Length,"animation_long");}
     {auto w=b;w[WireSize+5]^=1;check(decode(w.data(),w.size(),q)==Error::Checksum,"animation_checksum");}
@@ -53,14 +53,18 @@ void parser() {
     {Packet h=p;h.kind=Kind::Presence;auto w=encode(h);std::vector<uint8_t> v(w.begin(),w.end());v.push_back(0);v.push_back(0);v[8]=uint8_t(v.size());rechecksum(v);
      check(decode(v.data(),v.size(),q)==Error::Length,"animation_only_long_kind");}
     {auto w=b;w[100]=1;rechecksum(w);check(decode(w.data(),w.size(),q)==Error::Reserved,"animation_reserved");}
-    // Float entries: [u8 index][f32]; the last entry starts 5 bytes before the end.
-    auto entry=[&](unsigned index,float v){auto w=b;size_t at=w.size()-5;w[at]=uint8_t(index);uint32_t bits;std::memcpy(&bits,&v,4);for(int i=0;i<4;++i)w[at+1+i]=uint8_t(bits>>(8*i));rechecksum(w);return w;};
+    // Float entries: [u8 index][f32]; the last entry starts before the hand block (count byte + one case).
+    auto entry=[&](unsigned index,float v){auto w=b;size_t at=w.size()-1-AnimationHandBytes-5;w[at]=uint8_t(index);uint32_t bits;std::memcpy(&bits,&v,4);for(int i=0;i<4;++i)w[at+1+i]=uint8_t(bits>>(8*i));rechecksum(w);return w;};
     {auto w=entry(AnimationFloats-1,std::numeric_limits<float>::quiet_NaN());check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}
     {auto w=entry(AnimationFloats-1,std::numeric_limits<float>::infinity());check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}
     {auto w=entry(AnimationFloats-1,2e6f);check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}
     {auto w=entry(AnimationFloats-1,0.f);check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}
     {auto w=entry(AnimationFloats,1.f);check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}
     {auto w=entry(17,1.f);check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}   // not increasing
+    {auto w=b;size_t at=w.size()-AnimationHandBytes;w[at]=w[at+1]=w[at+2]=w[at+3]=0;rechecksum(w);check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}   // no item
+    {auto w=b;size_t at=w.size()-AnimationHandBytes+5;w[at]=uint8_t(3001&0xff);w[at+1]=uint8_t(3001>>8);rechecksum(w);check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}
+    {auto w=b;w[w.size()-1-AnimationHandBytes]=3;rechecksum(w);check(decode(w.data(),w.size(),q)==Error::Length,"animation_hand_count");}
+    {Packet bad=p;bad.animation.hands[0].position[1]=-3001;bool threw=false;try{encodeAnimation(bad);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_encode_hand");}
     {Packet bad=p;bad.animation.floats[2]=std::numeric_limits<float>::quiet_NaN();bool threw=false;try{encodeAnimation(bad);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_encode_nan");}
     {Packet bad=p;bad.animation.floats[2]=-2e6f;bool threw=false;try{encodeAnimation(bad);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_encode_range");}
 }
@@ -75,6 +79,11 @@ void sessions() {
         auto b=a;b.held[1]=1;check(!f.host.sendAnimation(b,569),"animation_changed_burst");check(f.host.sendAnimation(b,570),"animation_changed_sends");
         f.drain(570);got=f.guest.takeAnimation(690);check(got&&got->fresh&&got->animation.held[1]==1,"animation_follows");
         check(f.guest.takeAnimation(1690).has_value()&&!f.guest.takeAnimation(1691),"animation_expiry");}
+    {Pair f;auto p=f.sample(1,20);p.animation.floats[4]=1;check(f.receive(p)==Error::None,"animation_between_first");
+        auto q=f.sample(2,70);q.animation.floats[4]=3;check(f.receive(q,70)==Error::None,"animation_between_second");
+        auto got=f.guest.takeAnimation(160);   // shown at 40: two fifths of the way from 20 to 70
+        check(got&&got->sequence==1&&got->between&&got->next.floats[4]==3&&std::abs(got->fraction-.4f)<1e-6f,"animation_between");
+        got=f.guest.takeAnimation(200);check(got&&got->sequence==2&&!got->between,"animation_between_last");}
     {Pair f;auto p=f.sample();p.animation.rose[0]=1;check(f.receive(p)==Error::None,"animation_first");
         auto p2=f.sample(2,40);p2.animation.rose[0]=2;check(f.receive(p2,40)==Error::None,"animation_second");
         auto got=f.guest.takeAnimation(200);check(got&&got->sequence==2&&got->animation.rose[0]==3,"animationRose");}
