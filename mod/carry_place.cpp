@@ -50,25 +50,37 @@ static bool pointers(const discovery::Sampler& s,uint64_t array,int32_t count,si
     out.clear();if(count<0||size_t(count)>most)return false;if(!count)return true;if(!array)return false;
     out.resize(size_t(count));return s.read(array,out.data(),out.size()*8);
 }
-std::optional<std::vector<Placed>> readPlaced(const discovery::Sampler& s,uint64_t entity,uint64_t vtable,uint64_t manager,const Transform& anchor,bool hands){
+std::optional<std::vector<Placed>> readPlaced(const discovery::Sampler& s,uint64_t entity,uint64_t vtable,uint64_t manager,const Transform& anchor,bool hands,SlotCache* cache,uint64_t now){
     using namespace mod::carry;
     uint64_t component=0,v=0,carrier=0;
     if(!entity||!load(s,entity+PorterCarrier,component)||!component||!load(s,component,v)||v!=vtable||!load(s,component+CarrierObject,carrier)||!carrier)return std::nullopt;
     int32_t slotCount=0;uint64_t slotArray=0;std::vector<uint64_t> slots;
-    if(!load(s,carrier+Slots,slotCount)||!load(s,carrier+SlotArray,slotArray)||!pointers(s,slotArray,slotCount,MaxSlots,slots))return std::nullopt;
+    if(!load(s,carrier+Slots,slotCount)||!load(s,carrier+SlotArray,slotArray))return std::nullopt;
+    bool cached=hands&&cache&&cache->carrier==carrier&&cache->array==slotArray&&now>=cache->at&&now-cache->at<2000;
+    if(cached)slots=cache->slots;
+    else if(!pointers(s,slotArray,slotCount,MaxSlots,slots))return std::nullopt;
+    std::vector<uint64_t> handSlots;
     std::vector<Placed> out;
     for(auto slot:slots){
-        uint8_t type=0;int32_t stackCount=0;uint64_t stackArray=0,slotCarrier=0;std::vector<uint64_t> stacks;
-        if(!slot||!load(s,slot+SlotType,type)||!load(s,slot+SlotCarrier,slotCarrier))return std::nullopt;
+        // The slot's header in one read (type +1, stack count +18, stack array +20, carrier +28): every read is guarded.
+        uint8_t head[0x30];std::vector<uint64_t> stacks;
+        if(!slot||!s.read(slot,head,sizeof head))return std::nullopt;
+        uint8_t type=head[SlotType];int32_t stackCount;uint64_t stackArray,slotCarrier;
+        std::memcpy(&stackCount,head+Stacks,4);std::memcpy(&stackArray,head+StackArray,8);std::memcpy(&slotCarrier,head+SlotCarrier,8);
         if(hands?(type<6||type>7):(type<1||type>5))continue;          // back, arms, hips; or the two hands
-        if(!load(s,slot+Stacks,stackCount)||!load(s,slot+StackArray,stackArray)||!pointers(s,stackArray,stackCount,MaxStacks,stacks))return std::nullopt;
+        if(hands)handSlots.push_back(slot);
+        if(!pointers(s,stackArray,stackCount,MaxStacks,stacks))return std::nullopt;
         for(auto stack:stacks){
             int32_t n=0;uint64_t itemArray=0;std::vector<uint64_t> records;
             if(!stack||!load(s,stack+Items,n)||!load(s,stack+ItemArray,itemArray)||!pointers(s,itemArray,n,MaxLevels,records))return std::nullopt;
             for(auto r:records){
                 if(r<manager+RecordBase||(r-manager-RecordBase)%RecordStride||(r-manager-RecordBase)/RecordStride>=RecordCount)continue;
-                uint64_t holder=0,mesh=0;uint32_t flags=0;Placed p;uint8_t raw[60];
-                if(!load(s,r+RecordHolder,holder)||!load(s,r+RecordHash,p.item)||!load(s,r+RecordFlags,flags)||!load(s,r+0x148,mesh)||!s.read(r+RecordWorld,raw,sizeof raw))return std::nullopt;
+                // The record from its world transform (+38) to its flags (+204) in one read.
+                uint64_t holder=0,mesh=0;uint32_t flags=0;Placed p;uint8_t block[RecordFlags+4-RecordWorld];
+                if(!s.read(r+RecordWorld,block,sizeof block))return std::nullopt;
+                auto at=[&](uint64_t off){return block+(off-RecordWorld);};
+                std::memcpy(&holder,at(RecordHolder),8);std::memcpy(&p.item,at(RecordHash),4);std::memcpy(&flags,at(RecordFlags),4);std::memcpy(&mesh,at(0x148),8);
+                const uint8_t* raw=block;
                 if(!((holder==slot&&slotCarrier==carrier)||holder==carrier)||!mesh)continue;   // not this carrier's, or not drawn
                 if(!p.item){uint64_t item=0;uint32_t id=0;if(load(s,r+RecordItem,item)&&item&&load(s,item+ItemId,id))p.item=id;}
                 Transform w;std::memcpy(w.position.data(),raw,24);std::memcpy(w.rotation.data(),raw+24,36);
@@ -82,6 +94,7 @@ std::optional<std::vector<Placed>> readPlaced(const discovery::Sampler& s,uint64
             }
         }
     }
+    if(hands&&cache&&!cached)*cache={carrier,slotArray,now,handSlots};
     return out;
 }
 ds::HeldCase toHeld(const Placed& p){

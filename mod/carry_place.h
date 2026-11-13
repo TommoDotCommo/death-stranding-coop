@@ -29,7 +29,11 @@ std::array<float,9> unpackRotation(uint64_t);
 // backpack). nullopt when the chain is unreadable; cases further than 3 m from the anchor are left out (a record the
 // game has not placed yet).
 // hands: the cases in his hands instead (slot types 6, 7), for the animation sample (core HeldCase).
-std::optional<std::vector<Placed>> readPlaced(const discovery::Sampler&,uint64_t porterEntity,uint64_t componentVtable,uint64_t manager,const Transform& anchor,bool hands=false);
+// slots (optional, hands only): the hand slots found last time, used for up to 2 s while the carrier and its slot
+// array are the same (every read is guarded; the full slot walk costs about a millisecond).
+struct SlotCache {uint64_t carrier=0,array=0,at=0;std::vector<uint64_t> slots;};
+std::optional<std::vector<Placed>> readPlaced(const discovery::Sampler&,uint64_t porterEntity,uint64_t componentVtable,uint64_t manager,const Transform& anchor,bool hands=false,
+                                              SlotCache* slots=nullptr,uint64_t now=0);
 // A case in a hand relative to the porter's root, as the animation sample carries it (millimetres, packed rotation;
 // tag = slot type | variant << 7), and back.
 ds::HeldCase toHeld(const Placed&);

@@ -65,8 +65,18 @@ void blending(){
     s.fraction=.5f;s.animation.handCount=1;s.animation.hands[0]={7,7,{100,0,-200},5};s.next.handCount=2;s.next.hands[0]={8,6,{900,900,900},5};s.next.hands[1]={7,7,{300,40,0},6};
     b=blend(s);CHECK(b.handCount==1&&b.hands[0].position==(std::array<int16_t,3>{200,20,-100})&&b.hands[0].rotation==5);
 }
+void aggregate(){
+    unsigned rewind=boolIndex("Action_Rewind"),rest=boolIndex("Is_TakeABreak"),fall=boolIndex("Is_Fall"),crouch=boolIndex("Is_Crouch");
+    ds::Animation a,b=a;setBit(b.held,rest,true);
+    auto w=plan(&a,b,false);CHECK(count(w,true,rewind,true)==1);       // an action begins: the game's rewind, even with its pulse missed
+    w=plan(&b,b,false);CHECK(count(w,true,rewind,true)==0);           // unchanged: none
+    auto c=b;setBit(c.held,fall,true);w=plan(&b,c,false);CHECK(count(w,true,rewind,true)==1);   // another set
+    w=plan(&c,a,false);CHECK(count(w,true,rewind,true)==0);           // back to none: the game sends none
+    auto d=a;setBit(d.held,crouch,true);w=plan(&a,d,false);CHECK(count(w,true,rewind,true)==0);   // not an action
+    auto e=b;setBit(e.rose,rewind,true);w=plan(&a,e,true);CHECK(count(w,true,rewind,true)==1);   // its own pulse: one, not two
+}
 int main(){
-    names();gather();planning();blending();
+    names();gather();planning();blending();aggregate();
     if(!failures)std::puts("controls gather, plan and clear checks passed");
     return failures?1:0;
 }

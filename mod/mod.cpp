@@ -355,6 +355,7 @@ struct Runtime final:ds::Transport {
     LocalVehicle localVehicle;bool partnerAboard=false;mod::puppet::FloatVariable restVar;bool localResting=false;
     // The porter's own animation controls (controls.h): read every frame, sent beside presence; echo keeps its own.
     mod::controls::Binding controlBinding;mod::controls::Gather controlGather;bool echoOwn=false;
+    mod::carryplace::SlotCache handSlots;
     std::vector<mod::carryplace::Placed> partnerHands;   // the cases in the partner's hands, relative to his root (tickStack)
     std::deque<std::pair<uint64_t,ds::Animation>> echoControls;std::array<uint8_t,ds::AnimationBoolBytes> echoLast{};bool echoHave=false;
     std::function<void(uint64_t,const mod::puppet::Transform&)> keepOut;uint64_t keptOutNoted=0;
@@ -1913,6 +1914,7 @@ struct Runtime final:ds::Transport {
                 uint32_t bits=0;if(v)std::memcpy(&bits,&*v,4);bool resting=(bits&0xff)!=0;if(resting)cache.local.flags|=ds::Rest;
                 if(resting!=localResting){localResting=resting;note(resting?"REST this porter sits down to rest\n":"REST this porter is up again\n");}}}
             // The porter's own animation controls (controls.h), every frame: a one-frame pulse is seen only so.
+            stages.enter("controls",mod::nowUs());
             if(config.partnerAnimation&&cache.available&&sampler&&core&&(core->connected()||twinMode==TwinMode::Echo)){auto a=anchorNow();
                 std::array<uint8_t,ds::AnimationBoolBytes> held{};std::array<float,ds::AnimationFloats> floats{};
                 if(a.entity&&mod::controls::readPorter(*sampler,a.entity,animatorVtable,controlBinding,held,floats)){
@@ -1925,9 +1927,10 @@ struct Runtime final:ds::Transport {
                         echoLast=held;echoHave=true;echoControls.emplace_back(now,e);}
                     controlGather.add(held,floats);
                     // What he holds in his hands, relative to his root: it moves with the mirrored arms (carry_visual).
+                    stages.enter("hands",mod::nowUs());
                     {std::array<ds::HeldCase,ds::AnimationHands> hands{};uint8_t count=0;uint64_t manager=0;
                      if(config.carryVisual&&cargoManagerSlot&&a.pose.available&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
-                         if(auto inHands=mod::carryplace::readPlaced(*sampler,a.entity,sampler->base+mod::carry::ComponentVtable,manager,mod::puppet::transform(a.pose),true))
+                         if(auto inHands=mod::carryplace::readPlaced(*sampler,a.entity,sampler->base+mod::carry::ComponentVtable,manager,mod::puppet::transform(a.pose),true,&handSlots,now))
                              for(auto& p:*inHands)if(count<hands.size())hands[count++]=mod::carryplace::toHeld(p);
                      controlGather.hands(hands,count);}
                     if(core->connected()&&core->sendAnimation(controlGather.current(),now))controlGather.sent();}}

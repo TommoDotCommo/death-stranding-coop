@@ -102,8 +102,26 @@ bool readPorter(const discovery::Sampler& s,uint64_t e,uint64_t animator,Binding
         else{float v;std::memcpy(&v,r,4);if(std::isfinite(v)&&std::abs(v)<=ds::AnimationFloatMax)floats[unsigned(-c-2)]=v;}}
     return true;
 }
+namespace {
+// The player's per-frame action set (research-pose, 0x2803e1a..): Is_Actions is its OR, and the game pulses
+// Action_Rewind whenever it changes to a nonzero set.
+const char* const ActionSet[]={"Is_Pickup","Is_Jump","Is_Damage","Is_Fall","Is_Tackle","Is_Dead","Is_Stepon","Is_Drag","Is_Interactive",
+    "Is_Elude","Is_Vehicle","Is_Natural","Is_TakeABreak","Is_InGameGesture","Is_PrivateRoom"};
+unsigned indexOf(const char* name){for(unsigned i=0;i<BoolCount;++i)if(BoolNames[i]&&!std::strcmp(BoolNames[i],name))return i;return BoolCount;}
+uint32_t actionSet(const ds::Animation& a){
+    static const auto idx=[]{std::vector<unsigned> v;for(auto n:ActionSet)v.push_back(indexOf(n));return v;}();
+    uint32_t s=0;for(size_t k=0;k<idx.size();++k)if(idx[k]<BoolCount&&bit(a.held,idx[k]))s|=1u<<k;return s;
+}
+}
 std::vector<Write> plan(const ds::Animation* last,const ds::Animation& now,bool fresh){
     std::vector<Write> out;
+    // The mod's tick is slower than the game's frames, so the porter's own one-frame pulses are often missed: the
+    // body gets the game's own rewind whenever the action set changes, unless the sample carries one already.
+    static const unsigned rewind=indexOf("Action_Rewind");
+#ifndef MUTANT_CONTROLS_AGGREGATE
+    {uint32_t was=last?actionSet(*last):0,is=actionSet(now);
+     if(is&&is!=was&&!(fresh&&rewind<BoolCount&&bit(now.rose,rewind)))out.push_back({true,rewind,1,true});}
+#endif
     for(unsigned i=0;i<FloatCount;++i){if(skipFloat(i))continue;
         if(!last||last->floats[i]!=now.floats[i])out.push_back({false,i,now.floats[i],false});}
     for(unsigned i=0;i<BoolCount;++i){if(skipBool(i))continue;
