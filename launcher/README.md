@@ -53,6 +53,12 @@ ping key), his vehicle while he rides (`partner_vehicle`), the cargo he carries 
 (`carry_visual`), his name over his head (`partner_tag`), notices in the game's info log when he joins or leaves or
 nobody has arrived yet (`notices`), the host's rain and timefall in the guest's world
 (`share_environment:"rain"`: rain only, never the host's hour), and with them shared cargo and structures.
+It also shares what each player does to the world (`share_enemies`, `share_orders`, `share_order_units`,
+`share_roads`, `share_saved_structures`): MULEs put down and camps alerted, BTs destroyed, the boss fight with one
+health bar, standard orders and the cargo units handed in, roads and paver deliveries, structures with their levels
+and materials (on joining, each world also gets what the other's save already has).
+Keys in the game: **J** next to the partner's truck rides along on it and gets off again (`passenger_key`); **L**
+sends a like only with `partner_likes`, which this setup leaves off.
 Automatic Continue and the virtual pad stay off. Existing environment-driven test
 tools still work independently of this app.
 
