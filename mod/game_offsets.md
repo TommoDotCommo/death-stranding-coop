@@ -1094,6 +1094,8 @@ looked at.
 - Removal: when a cart's record goes away the cargo manager marks the actor (byte `+0x110` = 1) and calls
   `0x22fbd10(GameActor manager, &id)` (finds the unit of `id >> 13`, then `0x22f8df0`); live the call alone removed
   the cart (its carrier gone, the game running on).
+- A cart made with no record (`+0x48` = 0) is not saved: made, autosaved by using the terminal, game restarted from
+  that autosave: no cart carrier (live). Another caller (`0x26cd664`, in `0x26cae00` of the player system) sets `+0x54` = 1.
 - Lab commands: `cart N` (make one N m east of the porter), `cartmove N`, `cartdel ID`. `carts.h` is the feature.
 
 ### Real captures and the end-of-fight message (2026-11-14, live)
