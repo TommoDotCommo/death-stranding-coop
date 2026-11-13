@@ -788,7 +788,8 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
     const uint64_t animator=s.base+0x3d09910;   // MorphemeAnimationManager
     // Handles are per manager; the double's network (sam/references/akukan) has these locomotion controls.
     struct Handles{uint64_t manager=0;int speed=-1,move=-1,moveFloat=-1,moveInterp=-1,crouchRate=-1,basic=-1,isVehicle=-1,vehicleType=-1,vehicleSeat=-1,
-        rewind=-1,rewindNoInter=-1,upperReset=-1,turnHeading=-1;bool riding=false;int action[7]={-1,-1,-1,-1,-1,-1,-1};};auto handles=std::make_shared<Handles>();
+        rewind=-1,rewindNoInter=-1,upperReset=-1,turnHeading=-1;bool riding=false;int action[7]={-1,-1,-1,-1,-1,-1,-1};
+        int isDead=-1,isDrag=-1,tb0=-1,tb1=-1,tb2=-1,tf0=-1,rewindLong=-1;uint32_t pose=0;uint64_t poseAt=0;};auto handles=std::make_shared<Handles>();
     using TriggerFn=void(*)(uint64_t,int,float);auto trigger=reinterpret_cast<TriggerFn>(s.base+entries[8].rva);
     // The borrowed instance is kept after release and swapped back in on the next borrow of the same manager,
     // so repeated borrows build one instance per double, not one per borrow.
@@ -852,6 +853,9 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
                 handles->vehicleSeat=initFloat(manager,"Vehicle_Seat");handles->rewind=initBool(manager,"Action_Rewind");
                 handles->rewindNoInter=initBool(manager,"Action_Rewind_NoInter");handles->upperReset=initBool(manager,"Is_Force_Upper_Reset");
                 handles->turnHeading=initFloat(manager,"Turn_Heading");
+                handles->isDead=initBool(manager,"Is_Dead");handles->isDrag=initBool(manager,"Is_Drag");
+                handles->tb0=initBool(manager,"Temporary_Bool0");handles->tb1=initBool(manager,"Temporary_Bool1");handles->tb2=initBool(manager,"Temporary_Bool2");
+                handles->tf0=initFloat(manager,"Temporary_Float0");handles->rewindLong=initBool(manager,"Action_Rewind_Long");
                 if(swapped)std::memcpy(reinterpret_cast<void*>(res+0xd8),&resDef,8);}
             // Riding: the porter network's own vehicle controls (enum 0x19 / 0x1b, set by the game's mount at 0x2772ee9 and
             // 0x2774469); locomotion stays at rest underneath.
@@ -865,6 +869,19 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
             handles->riding=riding;
             // A seated porter shows Is_Actions and Is_Landed (live 2026-11-08, driving a truck); locomotion at rest.
             if(riding){speed=0;flags=(flags&VehicleMask)|ActionsBit|LandedBit;}
+            // A pose of the game's own player states (DeadPoseBit, DragPoseBit): the gate open, the state's own writes,
+            // the rewind pulses once on entry; for the death, the lying loop a few seconds after the fall.
+            uint32_t pose=riding?0:(flags&(DeadPoseBit|DragPoseBit));
+            {auto ms=uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+             if(pose!=handles->pose){handles->pose=pose;handles->poseAt=ms;
+                 if(handles->isDead>=0)setBool(manager,handles->isDead,pose&DeadPoseBit);
+                 if(handles->isDrag>=0)setBool(manager,handles->isDrag,pose&DragPoseBit);
+                 for(int h:{handles->tb0,handles->tb1,handles->tb2})if(h>=0)setBool(manager,h,false);
+                 if(handles->tf0>=0)setFloat(manager,handles->tf0,(pose&DragPoseBit)?90.f:0.f);
+                 if(pose){if(handles->rewind>=0)trigger(manager,handles->rewind,0.1f);
+                     if((pose&DragPoseBit)&&handles->rewindLong>=0)trigger(manager,handles->rewindLong,0.1f);}}
+             if((pose&DeadPoseBit)&&handles->tb0>=0&&ms-handles->poseAt>=3000)setBool(manager,handles->tb0,true);}
+            if(pose){speed=0;flags=ActionsBit|LandedBit;}
             bool moving=speed>MovingSpeed;
             if(handles->speed>=0)setFloat(manager,handles->speed,float(speed));
             if(handles->move>=0)setBool(manager,handles->move,moving);

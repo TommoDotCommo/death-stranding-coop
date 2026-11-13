@@ -72,7 +72,7 @@ void refusedUpgrade(){
     CHECK(d.stage()==Double::Stage::Driving);d.tick(true,nullptr);CHECK(s.downgrades==0&&d.stage()==Double::Stage::Parked);
 }
 void actions(){
-    Scene s;auto d=s.make();d.enable();auto t=at(5);d.tick(true,&t,3,FlagSprintBit|FlagCrouchBit|0x20|JumpBit|(1u<<21));
+    Scene s;auto d=s.make();d.enable();auto t=at(5);d.tick(true,&t,3,FlagSprintBit|FlagCrouchBit|0x20|JumpBit|(1u<<23));
     CHECK(s.actions==(FlagSprintBit|FlagCrouchBit|JumpBit));               // only the replayed bits pass
     s.frame();auto u=at(6);d.tick(true,&u,3,FlagCrouchBit);CHECK(s.actions==FlagCrouchBit);
     d.tick(true,nullptr,3,FlagSprintBit);CHECK(s.actions==0&&s.speed==0);  // released standing

@@ -46,7 +46,12 @@ constexpr uint32_t FlagSprintBit=1,FlagCrouchBit=2;   // ds::Sprint, ds::Crouch 
 constexpr uint32_t JumpBit=1u<<16,ActionMoveBit=1u<<17,ActionsBit=1u<<18,FallBit=1u<<19,LandedBit=1u<<20;
 // Bits 24..26: the vehicle the partner rides (ds::VehicleKind, 0 on foot): the body takes the game's riding pose.
 constexpr uint32_t VehicleShift=24,VehicleMask=7u<<VehicleShift;
-constexpr uint32_t ReplayedActions=FlagSprintBit|FlagCrouchBit|JumpBit|ActionMoveBit|ActionsBit|FallBit|LandedBit|VehicleMask;
+// Bits 21, 22: a pose the game's own player states play (research-pose: the death state writes Is_Dead and, once the
+// fall is over, Temporary_Bool0; the BT state writes Is_Drag with Temporary_Float0 a heading), behind the Is_Actions
+// gate. The body has no player state machine, so these are written for it.
+constexpr uint32_t DeadPoseBit=1u<<21,DragPoseBit=1u<<22;
+constexpr uint32_t ReplayedActions=FlagSprintBit|FlagCrouchBit|JumpBit|ActionMoveBit|ActionsBit|FallBit|LandedBit|VehicleMask|DeadPoseBit|DragPoseBit;
+
 // Vehicle_Type for a wire kind (static, game_offsets.md "Riding"): motorbike 0, truck 1 (doors), speed car 3; -1 = none.
 float vehicleAnimationType(uint32_t kind);
 // The porter's bool variable for each bit, in this order.

@@ -1792,7 +1792,10 @@ struct Runtime final:ds::Transport {
                 else o<<"BODY the partner is off this truck (target "<<bool(target)<<" visible "<<cache.remote.visible<<" flag "<<bool(cache.remote.state.flags&ds::Passenger)<<" riding "<<localVehicle.riding<<" kind "<<int(localVehicle.kind)<<" read "<<int64_t(now)-int64_t(localVehicle.at)<<" ms ago)\n";
                 note(o.str().c_str());}}
         // A partner who is down lies on his back where he fell (no locomotion underneath).
-        {bool lay=target&&partnerMode()&&cache.remote.visible&&(cache.remote.state.flags&ds::Down)&&!cache.remote.state.vehicle;
+        if(config.partnerPoses&&target&&partnerMode()&&cache.remote.visible&&!cache.remote.state.vehicle){
+            if(cache.remote.state.flags&ds::Down){speed=0;actions=mod::puppet::DeadPoseBit;}
+            else if(cache.remote.state.flags&ds::Caught){speed=0;actions=mod::puppet::DragPoseBit;}}
+        {bool lay=!config.partnerPoses&&target&&partnerMode()&&cache.remote.visible&&(cache.remote.state.flags&ds::Down)&&!cache.remote.state.vehicle;
             if(lay){target=mod::puppet::laidDown(*target);speed=0;actions&=mod::puppet::FlagCrouchBit;}
             if(lay!=partnerLaid){partnerLaid=lay;note(lay?"BODY laid down: the partner is down\n":"BODY upright again\n");}}
         if(twinMode==TwinMode::Echo&&cache.available) {

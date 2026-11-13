@@ -1071,6 +1071,20 @@ looked at.
   (`+0xa8`, at the territory, radius about 280, shrinking with time; saved). Inside a cleared sphere 0 does nothing
   and the weather map there reads clear, so rain placed there brings no BTs.
 
+### The game's death and drag poses on the body (2026-11-13, static, then live)
+
+- The body is a `DSPlayerAKukanEntity` (vtable `0x3d7de48`, 0x7a0 bytes), not a `DSPlayerEntity`: it has no player
+  state machine and no control table at `+0x4dc8` (an earlier experiment that wrote there wrote past its end).
+- The player's states play these poses with ordinary named controls (no animation request): death (state 9) writes
+  `Is_Dead` = 1 and `Temporary_Bool0/1` = 0, then `Temporary_Bool0` = 1 once lying; the BT drag (state 16) writes
+  `Is_Drag` = 1, `Temporary_Float0` = a heading (plus or minus 90) and pulses `Action_Rewind` and `Action_Rewind_Long`.
+  Every frame the game ORs these into `Is_Actions`: the network leaves locomotion only through that gate, which the
+  mod had held shut for a downed partner.
+- Live (`partner_poses`, off by default): with the gate open and the death writes, the body played the game's own
+  collapse (thrown backwards, arms out) but stayed held in it for 20 s, upright, instead of reaching the lying loop
+  after `Temporary_Bool0` = 1. Not yet understood (the clip may need the body to fall under its own motion, which the
+  mover's target playback overrides). The default stays the laid-down transform.
+
 ### Voidout craters (2026-11-13, static, then live)
 
 - Boss BT manager `C = *(image+0x7bee060)`: active craters `+0x280` (count) / `+0x288` (records of 0x60), pending
