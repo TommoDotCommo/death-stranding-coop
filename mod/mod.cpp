@@ -30,6 +30,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "double.h"
 #include "controls.h"
 #include "wheels.h"
+#include "carts.h"
 #include "body.h"
 #include "vehicle.h"
 #include "ride.h"
@@ -368,6 +369,8 @@ struct Runtime final:ds::Transport {
         controlGather.add(held,floats);++frameSamples;return true;}
     mod::carryplace::SlotCache handSlots;uint8_t handsNoted=0;
     std::vector<mod::carryplace::Placed> partnerHands;
+    // Floating carriers (carts.h): the partner's towed carts made here, and what this porter tows.
+    mod::carts::Display cartDisplay;std::optional<mod::carts::Api> cartApi;bool cartTried=false;size_t cartsNoted=0,partnerCartsNoted=0;
     std::vector<mod::wheels::Joint> partnerJoints;uint16_t partnerSkeleton=0;bool wheelsReadNoted=false,wheelsWriteNoted=false;   // the partner's wheels (tickRide)   // the cases in the partner's hands, relative to his root (tickStack)
     std::deque<std::pair<uint64_t,ds::Animation>> echoControls;std::array<uint8_t,ds::AnimationBoolBytes> echoLast{};bool echoHave=false;
     std::function<void(uint64_t,const mod::puppet::Transform&)> keepOut;uint64_t keptOutNoted=0;
@@ -1902,6 +1905,16 @@ struct Runtime final:ds::Transport {
             if(controlsShown->between&&controlsShown->next.jointCount&&controlsShown->next.skeleton==a.skeleton){std::vector<mod::wheels::Joint> next;
                 for(size_t i=0;i<controlsShown->next.jointCount;++i)next.push_back(mod::wheels::fromWire(controlsShown->next.joints[i]));
                 partnerJoints=mod::wheels::blend(partnerJoints,next,controlsShown->fraction);}}
+        // The partner's floating carriers (carts.h): made here by the game's own creator and placed at his body.
+        if(config.partnerCart){
+#ifdef _WIN32
+            if(!cartTried){cartTried=true;try{cartApi=mod::carts::nativeApi(*sampler);}catch(const std::exception& e){note((std::string("CART unavailable: ")+e.what()+"\n").c_str());}}
+#endif
+            if(cartApi){std::vector<mod::carts::Place> places;
+                if(goal&&controlsShown&&partnerMode()&&cache.remote.visible)
+                    for(size_t i=0;i<controlsShown->animation.cartCount;++i)places.push_back(mod::carts::place(controlsShown->animation.carts[i],goal->position));
+                stages.enter("carts show",mod::nowUs());cartDisplay.show(places,*cartApi,now);
+                if(cartDisplay.count()!=partnerCartsNoted){partnerCartsNoted=cartDisplay.count();note(("CART the partner's floating carriers here: "+std::to_string(partnerCartsNoted)+"\n").c_str());}}}
         if(mirrorSample&&!animationNoted){animationNoted=true;note("BODY moves with the partner's own animation controls\n");}
         if(mirrorSample)++animationShown;
         if(useOwn&&ownEntity){
@@ -1969,6 +1982,11 @@ struct Runtime final:ds::Transport {
                     // Driving: the vehicle's wheel joints as the game posed them (wheels.h); the controls stay out of that
                     // sample (the partner does not mirror them on a vehicle, and the datagram must stay under the MTU).
                     auto sample=controlGather.current();
+                    // The carts he tows, relative to his root (carts.h); the ones drawn here for the partner stay out.
+                    if(config.partnerCart&&a.pose.available){stages.enter("carts",mod::nowUs());
+                        auto towed=mod::carts::towed(mod::carts::read(*sampler,sampler->base),mod::puppet::transform(a.pose).position,cartDisplay.ids());
+                        sample.cartCount=uint8_t(towed.size());for(size_t i=0;i<towed.size();++i)sample.carts[i]=towed[i];
+                        if(towed.size()!=cartsNoted){cartsNoted=towed.size();note(("CART this porter tows "+std::to_string(cartsNoted)+" floating carriers\n").c_str());}}
                     if(config.partnerVehicle&&localVehicle.riding&&localVehicle.entity&&localVehicle.at+1500>now){
                         stages.enter("wheels",mod::nowUs());
 #ifdef _WIN32
@@ -2290,6 +2308,46 @@ struct Runtime final:ds::Transport {
                         note(("BT test: catcher command "+std::to_string(*catcher)+"\n").c_str());
                         }
                     }else note("BT test: catcher command function differs\n");
+                }
+                else if(auto del=mod::puppet::parseCargoCommand(text,mod::runStamp(),"cartdel");del) {
+                    // Research: remove a GameActor by id the way the cargo manager removes a cart whose record went away
+                    // (0x2c94a1b): 0x22fbd10(GameActor manager *(image+0x7bbb8c0), &id) -> true when its unit removed it.
+                    uint64_t actors=0;uint8_t got[8]{};static const uint8_t want[8]={0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c};
+                    if(sampler->read(sampler->base+0x7bbb8c0,&actors,8)&&actors&&sampler->read(sampler->base+0x22fbd10,got,8)&&!std::memcmp(got,want,8)){
+                        uint32_t id=*del;bool ok=reinterpret_cast<bool(*)(uint64_t,const uint32_t*)>(sampler->base+0x22fbd10)(actors,&id);
+                        note(("CART test: remove actor "+std::to_string(id)+(ok?" done\n":" not found\n")).c_str());
+                    }else note("CART test: removal function differs\n");
+                }
+                else if(auto move=mod::puppet::parseCargoCommand(text,mod::runStamp(),"cartmove");move&&anchor.pose.available) {
+                    // Research: every floating carrier (a cargo-manager carrier of type 2, entity = carrier +0x20 - 0x20,
+                    // vtable image+0x3d5fed0) put N m east of this porter with the game's SetWorldTransform (0x2361ea0).
+                    uint64_t manager=0,list=0;int32_t count=0;unsigned moved=0;
+                    if(sampler->read(sampler->base+0x7bf4968,&manager,8)&&manager&&sampler->read(manager+0x46d280,&count,4)&&sampler->read(manager+0x46d288,&list,8)&&list&&count>0&&count<4096){
+                        for(int32_t i=0;i<count;++i){uint64_t c=0,inner=0,vt=0;uint32_t type=0;
+                            if(!sampler->read(list+8ull*i,&c,8)||!c||!sampler->read(c,&type,4)||type!=2||!sampler->read(c+0x20,&inner,8)||!inner)continue;
+                            uint64_t e=inner-0x20;if(!sampler->read(e,&vt,8)||vt!=sampler->base+0x3d5fed0)continue;
+                            auto t=mod::puppet::transform(anchor.pose);t.position[0]+=double(*move);
+                            // The game's own cart placement (0x2cb2e00) teleports the entity with a message (vtable
+                            // image+0x3dd96b8, +8 byte 0, +0x10 position, +0x28 rotation) sent by 0x235c990(entity, &msg, 0).
+                            alignas(16) uint8_t msg[0x60]{};uint64_t mv=sampler->base+0x3dd96b8;std::memcpy(msg,&mv,8);
+                            std::memcpy(msg+0x10,t.position.data(),24);std::memcpy(msg+0x28,t.rotation.data(),36);
+                            reinterpret_cast<void(*)(uint64_t,uint8_t*,uint32_t)>(sampler->base+0x235c990)(e,msg,0);++moved;}}
+                    note(("CART test: moved "+std::to_string(moved)+" carts\n").c_str());
+                }
+                else if(auto cart=mod::puppet::parseCargoCommand(text,mod::runStamp(),"cart");cart&&anchor.pose.available) {
+                    // Research: the game's floating-carrier creation (0x2669710(&id, request)): a 0x70-byte request that it
+                    // hands to the GameActor manager as actor type 9. Request: +0 position (3 f64), +0x18 rotation
+                    // (9 f32), +0x40 variant word (0xffff: default), +0x48 the carrier's cargo record (none here), +0x50
+                    // id (the image's default at 0x4af1150), +0x54/+0x55 bytes, +0x58 level-2 flag. "cart N": N m east.
+                    uint8_t got[8]{};static const uint8_t want[8]={0x40,0x53,0x55,0x56,0x57,0x41,0x56,0x48};
+                    if(sampler->read(sampler->base+0x2669710,got,8)&&!std::memcmp(got,want,8)){
+                        alignas(16) uint8_t request[0x70]{};auto t=mod::puppet::transform(anchor.pose);t.position[0]+=double(*cart);
+                        std::memcpy(request,t.position.data(),24);std::memcpy(request+0x18,t.rotation.data(),36);
+                        uint16_t variant=0xffff;std::memcpy(request+0x40,&variant,2);
+                        uint32_t id=0;sampler->read(sampler->base+0x4af1150,&id,4);std::memcpy(request+0x50,&id,4);
+                        uint32_t out=0;reinterpret_cast<uint32_t*(*)(uint32_t*,const uint8_t*)>(sampler->base+0x2669710)(&out,request);
+                        std::ostringstream o;o<<"CART test: requested at "<<t.position[0]<<","<<t.position[1]<<","<<t.position[2]<<" id "<<out<<"\n";note(o.str().c_str());
+                    }else note("CART test: creation function differs\n");
                 }
                 else if(auto reason=mod::puppet::parseCargoCommand(text,mod::runStamp(),"catcherend");reason) {
                     // Research: the game's end-of-fight message to every active catcher (0x2a6cf20(manager, -1, &reason,

@@ -54,7 +54,7 @@ size_t at=from;
     a.handCount=uint8_t(hands);
     size_t joints=b[at++]; if(joints>AnimationJoints||(joints&&at+2>n)) return Error::Length;
     if(joints) { a.skeleton=uint16_t(get(b,at,2)); at+=2; }
-    if(at+AnimationJointBytes*joints!=n) return Error::Length;
+    if(at+AnimationJointBytes*joints+1>n) return Error::Length;
     int lastJoint=-1;
     for(size_t i=0;i<joints;++i,at+=AnimationJointBytes) {
         VehicleJoint j; j.index=uint16_t(get(b,at,2));
@@ -64,6 +64,14 @@ size_t at=from;
         lastJoint=int(j.index); a.joints[i]=j;
     }
     a.jointCount=uint8_t(joints);
+    size_t carts=b[at++]; if(carts>AnimationCarts||at+AnimationCartBytes*carts!=n) return Error::Length;
+    for(size_t i=0;i<carts;++i,at+=AnimationCartBytes) {
+        CartPose c; for(int k=0;k<3;++k) c.offset[k]=int32_t(uint32_t(get(b,at+4*k,4)));
+        c.rotation=get(b,at+12,6); c.flags=b[at+18];
+        for(auto v:c.offset) if(p.animationRange && (v>AnimationCartMaxMm||v<-AnimationCartMaxMm)) return Error::Range;
+        a.carts[i]=c;
+    }
+    a.cartCount=uint8_t(carts);
     return Error::None;
 }
 Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
@@ -247,6 +255,16 @@ void appendAnimationPayload(std::vector<uint8_t>& b,const Animation& a) {
         b.push_back(uint8_t(j.index)); b.push_back(uint8_t(j.index>>8));
         for(auto c:j.rotation) { b.push_back(uint8_t(uint16_t(c))); b.push_back(uint8_t(uint16_t(c)>>8)); }
         for(auto c:j.position) { b.push_back(uint8_t(uint16_t(c))); b.push_back(uint8_t(uint16_t(c)>>8)); }
+    }
+    if(a.cartCount>AnimationCarts) throw std::invalid_argument("animation cart count");
+    b.push_back(a.cartCount);
+    for(size_t i=0;i<a.cartCount;++i) {
+        const auto& c=a.carts[i];
+        if(c.rotation>>48) throw std::invalid_argument("animation cart rotation");
+        for(auto v:c.offset) { if(v>AnimationCartMaxMm||v<-AnimationCartMaxMm) throw std::invalid_argument("animation cart offset");
+            for(int k=0;k<4;++k) b.push_back(uint8_t(uint32_t(v)>>(8*k))); }
+        for(int k=0;k<6;++k) b.push_back(uint8_t(c.rotation>>(8*k)));
+        b.push_back(c.flags);
     }
 }
 std::vector<uint8_t> encodeAnimationPayload(const Animation& a) { std::vector<uint8_t> b; appendAnimationPayload(b,a); return b; }

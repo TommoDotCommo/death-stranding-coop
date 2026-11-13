@@ -61,6 +61,8 @@ const char* progressReason(ProgressStatus);
 // A datagram longer than AnimationWireMax (a 1280-byte path MTU) is refused; the sender leaves the controls out while
 // it sends joints (the receiver does not mirror controls on a vehicle).
 constexpr size_t AnimationBoolBytes=32, AnimationFloats=192, AnimationHands=2, AnimationHandBytes=17, AnimationJoints=48, AnimationJointBytes=16;
+// Floating carriers the porter tows (up to two linked): offset from his root in game axes (mm), packed rotation, flags.
+constexpr size_t AnimationCarts=2, AnimationCartBytes=19; constexpr int32_t AnimationCartMaxMm=100000;
 constexpr float AnimationFloatMax=1e6f;
 constexpr int16_t AnimationHandMaxMm=3000;
 constexpr size_t AnimationWireMax=1252;
@@ -72,12 +74,17 @@ struct HeldCase {
     uint32_t item=0; uint8_t tag=0; std::array<int16_t,3> position{}; uint64_t rotation=0;   // tag: adapter-defined
     bool operator==(const HeldCase& o) const { return item==o.item&&tag==o.tag&&position==o.position&&rotation==o.rotation; }
 };
+struct CartPose {
+    std::array<int32_t,3> offset{}; uint64_t rotation=0; uint8_t flags=0;   // rotation: 48 bits, adapter-packed
+    bool operator==(const CartPose& o) const { return offset==o.offset&&rotation==o.rotation&&flags==o.flags; }
+};
 struct Animation {
     std::array<uint8_t,AnimationBoolBytes> held{}, rose{}; std::array<float,AnimationFloats> floats{};
     std::array<HeldCase,AnimationHands> hands{}; uint8_t handCount=0;
     std::array<VehicleJoint,AnimationJoints> joints{}; uint8_t jointCount=0; uint16_t skeleton=0;
+    std::array<CartPose,AnimationCarts> carts{}; uint8_t cartCount=0;
     bool operator==(const Animation& o) const { return held==o.held&&rose==o.rose&&floats==o.floats&&handCount==o.handCount&&hands==o.hands
-        &&jointCount==o.jointCount&&skeleton==o.skeleton&&joints==o.joints; }
+        &&jointCount==o.jointCount&&skeleton==o.skeleton&&joints==o.joints&&cartCount==o.cartCount&&carts==o.carts; }
     bool operator!=(const Animation& o) const { return !(*this==o); }
 };
 // The sample shown now (the presence delay applies), with rose gathered over every sample passed since the last take.

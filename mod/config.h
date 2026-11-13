@@ -18,6 +18,7 @@ struct Config {
     bool shareOrderUnits=false; // with share_orders: a cargo unit one player hands in is delivered for the partner too (a split delivery); not yet run with a real partial hand-in
     unsigned passengerKey=0x4a;      // with partner_vehicle: next to the partner's truck this key gets on and off (passenger.h); 0: off
     bool partnerAnimation=true;
+    bool partnerCart=false;          // the floating carriers the partner tows, made and moved here by the game's own calls (carts.h)
     bool recordAnimation=false;      // lab: every animation sample sent also goes into the presence log (coop-partner --replay-animation)      // the partner's own animation controls on his body (controls.h, core ANIMATION)
     bool partnerPoses=true;          // a downed or caught partner in the game's own collapse and BT-drag poses (double.h DeadPoseBit); false: laid flat
     bool bodyUpdateLink=true;        // the partner body is joined to this porter's update group (updated in order with him, never beside him: mod.cpp, linkBodyUpdate); false only to compare

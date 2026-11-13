@@ -50,7 +50,7 @@ and stamina 255). Receivers do not require ignored fields to be zero.
 | 4 | 2 | Protocol version, exactly 1 |
 | 6 | 1 | Kind: HELLO=1, HELLO_ACK=2, PRESENCE=3, PING=4, PONG=5, BYE=6, CARGO=7, CARGO_ACK=8, ENVIRONMENT=9 (optional), ANIMATION=10 (optional, longer) |
 | 7 | 1 | Sender role: host=1, client=2; peer must have opposite role |
-| 8 | 2 | Datagram length, exactly 128 (ANIMATION: 128 plus its payload, at most 1154); actual received length must match; the checksum covers the whole datagram |
+| 8 | 2 | Datagram length, exactly 128 (ANIMATION: 128 plus its payload, at most 1252); actual received length must match; the checksum covers the whole datagram |
 | 10 | 2 | Reserved zero |
 | 12 | 4 | Steam game build, exactly **13300582** |
 | 16 | 16 | Exact `ModBuild` source hash in `build_id.h` |
@@ -355,13 +355,16 @@ This is game-free wire evidence, not proof of a visible sky change.
 in this mod `mod/controls.h`) on the presence timeline. It is the one packet longer
 than 128 bytes: the usual header (bytes 96..119 reserved zero), then
 `[u8 n][held: n bytes][rose: n bytes][u8 m][m x (u8 index, f32 little endian)][u8 k][k x (u32 item, u8 tag,
-3 x i16 millimetres, u48 rotation)]`; `k <= 2` cases held in the hands, relative to the porter's root, item nonzero
-and each coordinate within 3 m (`tag` and the rotation packing belong to the adapter).
+3 x i16 millimetres, u48 rotation)][u8 j][u16 skeleton, when j > 0][j x (u16 index, 4 x i16 rotation, 3 x i16
+millimetres)][u8 c][c x (3 x i32 millimetres, u48 rotation, u8 flags)]`; `k <= 2` cases held in the hands, relative
+to the porter's root, item nonzero and each coordinate within 3 m (`tag` and the rotation packing belong to the
+adapter); `j <= 48` joints of the vehicle he drives, indices strictly increasing and below `skeleton`; `c <= 2`
+floating carriers he tows, as offsets from his root in game axes, each coordinate within 100 m.
 `n <= 32` bytes of bool bits; `held` is each bool when sampled, `rose` marks a bool
 that went from off to on at any frame since the previous sample (a one-frame
 pulse shows only there). Floats are sparse: zero is left out, indices strictly
 increase and stay below 192, values are finite with `|v| <= 1e6` and nonzero. The
-length must match exactly; at most 1189 bytes, under a 1280-byte path MTU.
+length must match exactly; at most 1252 bytes, under a 1280-byte path MTU.
 
 Either side sends while connected and not gated: at most every 50 ms, an unchanged
 sample at most every 500 ms (`sendAnimation` returns whether it went, so the
@@ -377,5 +380,5 @@ refresh connection liveness; disconnect clears them.
 `make -C core animation-test` runs roundtrip, full and empty payloads, length,
 oversize, checksum, reserved, range (NaN, infinity, magnitude, zero, index,
 order), sessions (delay, pulse once, rates, ordering, freshness, nonce, reset)
-and 100 lossy simulated sessions, with three named mutants (`animationRange`,
+joints, carts and 100 lossy simulated sessions, with three named mutants (`animationRange`,
 `animationOrder`, `animationRose`).

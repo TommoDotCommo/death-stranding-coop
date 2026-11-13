@@ -38,11 +38,11 @@ void rechecksum(std::vector<uint8_t>& b){uint32_t h=2166136261u;for(size_t i=0;i
 Animation varied(){Animation a;a.held[0]=5;a.held[17]=128;a.rose[3]=1;a.floats[0]=1.5f;a.floats[17]=-90.f;a.floats[AnimationFloats-1]=4.f;a.handCount=1;a.hands[0]={0xdeadbeef,7,{-3000,120,2999},0xabcdef012345ull};return a;}
 void parser() {
     Packet p;p.kind=Kind::Animation;p.sequence=1;p.stamp=5;p.animation=varied();Packet q;
-    auto b=encodeAnimation(p);check(b.size()==WireSize+1+2*18+1+3*5+1+AnimationHandBytes+1,"animation_size");
+    auto b=encodeAnimation(p);check(b.size()==WireSize+1+2*18+1+3*5+1+AnimationHandBytes+1+1,"animation_size");
     check(decode(b.data(),b.size(),q)==Error::None&&q.kind==Kind::Animation&&q.animation==p.animation&&q.sequence==1&&q.stamp==5,"animation_roundtrip");
     {Packet full=p;for(auto& x:full.animation.held)x=0xff;for(auto& x:full.animation.rose)x=0xff;for(size_t k=0;k<AnimationFloats;++k)full.animation.floats[k]=float(k+1)*(k%2?-1.f:1.f);full.animation.handCount=2;full.animation.hands[1]={1,6,{0,0,0},(1ull<<48)-1};
-     auto w=encodeAnimation(full);check(w.size()==WireSize+1+64+1+5*AnimationFloats+1+2*AnimationHandBytes+1&&decode(w.data(),w.size(),q)==Error::None&&q.animation==full.animation,"animation_full");}
-    {Packet empty=p;empty.animation={};auto w=encodeAnimation(empty);check(w.size()==WireSize+4&&decode(w.data(),w.size(),q)==Error::None&&q.animation==Animation{},"animation_empty");}
+     auto w=encodeAnimation(full);check(w.size()==WireSize+1+64+1+5*AnimationFloats+1+2*AnimationHandBytes+1+1&&decode(w.data(),w.size(),q)==Error::None&&q.animation==full.animation,"animation_full");}
+    {Packet empty=p;empty.animation={};auto w=encodeAnimation(empty);check(w.size()==WireSize+5&&decode(w.data(),w.size(),q)==Error::None&&q.animation==Animation{},"animation_empty");}
     {auto w=b;w.pop_back();w[8]=uint8_t(w.size());rechecksum(w);check(decode(w.data(),w.size(),q)==Error::Length,"animation_short");}
     {auto w=b;w.push_back(0);w[8]=uint8_t(w.size());rechecksum(w);check(decode(w.data(),w.size(),q)==Error::Length,"animation_long");}
     {auto w=b;w[WireSize+5]^=1;check(decode(w.data(),w.size(),q)==Error::Checksum,"animation_checksum");}
@@ -53,28 +53,39 @@ void parser() {
     {Packet h=p;h.kind=Kind::Presence;auto w=encode(h);std::vector<uint8_t> v(w.begin(),w.end());v.push_back(0);v.push_back(0);v[8]=uint8_t(v.size());rechecksum(v);
      check(decode(v.data(),v.size(),q)==Error::Length,"animation_only_long_kind");}
     {auto w=b;w[100]=1;rechecksum(w);check(decode(w.data(),w.size(),q)==Error::Reserved,"animation_reserved");}
-    // Float entries: [u8 index][f32]; the last entry starts before the hand block (count byte + one case).
-    auto entry=[&](unsigned index,float v){auto w=b;size_t at=w.size()-2-AnimationHandBytes-5;w[at]=uint8_t(index);uint32_t bits;std::memcpy(&bits,&v,4);for(int i=0;i<4;++i)w[at+1+i]=uint8_t(bits>>(8*i));rechecksum(w);return w;};
+    // Float entries: [u8 index][f32]; the last entry starts before the hand block (count byte + one case), the joint
+    // and cart counts.
+    auto entry=[&](unsigned index,float v){auto w=b;size_t at=w.size()-3-AnimationHandBytes-5;w[at]=uint8_t(index);uint32_t bits;std::memcpy(&bits,&v,4);for(int i=0;i<4;++i)w[at+1+i]=uint8_t(bits>>(8*i));rechecksum(w);return w;};
     {auto w=entry(AnimationFloats-1,std::numeric_limits<float>::quiet_NaN());check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}
     {auto w=entry(AnimationFloats-1,std::numeric_limits<float>::infinity());check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}
     {auto w=entry(AnimationFloats-1,2e6f);check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}
     {auto w=entry(AnimationFloats-1,0.f);check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}
     {auto w=entry(AnimationFloats,1.f);check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}
     {auto w=entry(17,1.f);check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}   // not increasing
-    {auto w=b;size_t at=w.size()-1-AnimationHandBytes;w[at]=w[at+1]=w[at+2]=w[at+3]=0;rechecksum(w);check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}   // no item
-    {auto w=b;size_t at=w.size()-1-AnimationHandBytes+5;w[at]=uint8_t(3001&0xff);w[at+1]=uint8_t(3001>>8);rechecksum(w);check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}
-    {auto w=b;w[w.size()-2-AnimationHandBytes]=3;rechecksum(w);check(decode(w.data(),w.size(),q)==Error::Length,"animation_hand_count");}
+    {auto w=b;size_t at=w.size()-2-AnimationHandBytes;w[at]=w[at+1]=w[at+2]=w[at+3]=0;rechecksum(w);check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}   // no item
+    {auto w=b;size_t at=w.size()-2-AnimationHandBytes+5;w[at]=uint8_t(3001&0xff);w[at+1]=uint8_t(3001>>8);rechecksum(w);check(decodeForTest(w.data(),w.size(),q,protection)==Error::Range,"animationRange");}
+    {auto w=b;w[w.size()-3-AnimationHandBytes]=3;rechecksum(w);check(decode(w.data(),w.size(),q)==Error::Length,"animation_hand_count");}
     {Packet bad=p;bad.animation.hands[0].position[1]=-3001;bool threw=false;try{encodeAnimation(bad);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_encode_hand");}
     {   // While driving: no controls, the vehicle's joints.
         Packet r;r.kind=Kind::Animation;r.sequence=2;r.stamp=6;r.animation.skeleton=uint16_t(AnimationJoints+16);r.animation.jointCount=AnimationJoints;
         for(size_t i=0;i<AnimationJoints;++i)r.animation.joints[i]={uint16_t(i+10),{int16_t(i),-32767,5,32767},{-2000,int16_t(i*7),1500}};
-        auto w=encodeAnimation(r);check(w.size()==WireSize+4+2+AnimationJoints*AnimationJointBytes&&w.size()<=AnimationWireMax,"animation_joints_size");
+        auto w=encodeAnimation(r);check(w.size()==WireSize+5+2+AnimationJoints*AnimationJointBytes&&w.size()<=AnimationWireMax,"animation_joints_size");
         check(decode(w.data(),w.size(),q)==Error::None&&q.animation==r.animation,"animation_joints_roundtrip");
         auto bad=w;bad[WireSize+6+AnimationJointBytes*(AnimationJoints-1)]=uint8_t(AnimationJoints+16);rechecksum(bad);check(decodeForTest(bad.data(),bad.size(),q,protection)==Error::Range,"animationRange");   // index past the skeleton
         bad=w;bad[WireSize+6+AnimationJointBytes]=10;rechecksum(bad);check(decodeForTest(bad.data(),bad.size(),q,protection)==Error::Range,"animationRange");   // not increasing
         bad=w;bad.pop_back();bad[8]=uint8_t(bad.size());bad[9]=uint8_t(bad.size()>>8);rechecksum(bad);check(decode(bad.data(),bad.size(),q)==Error::Length,"animation_joints_short");
         Packet both=r;for(size_t k=0;k<AnimationFloats;++k)both.animation.floats[k]=1;bool threw=false;try{encodeAnimation(both);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_too_long");
         Packet wrong=r;wrong.animation.joints[3].index=uint16_t(AnimationJoints+16);threw=false;try{encodeAnimation(wrong);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_encode_joint");}
+    {   // Towed floating carriers: two carts after the joints, offsets up to 100 m, nothing past them.
+        Packet c=p;c.animation.cartCount=2;c.animation.carts[0]={{-2500,120,-1800},0x123456789abcull,1};c.animation.carts[1]={{-AnimationCartMaxMm,0,AnimationCartMaxMm},0xffffffffffffull,3};
+        auto w=encodeAnimation(c);check(w.size()==b.size()+2*AnimationCartBytes,"animation_carts_size");
+        check(decode(w.data(),w.size(),q)==Error::None&&q.animation==c.animation,"animation_carts_roundtrip");
+        auto bad=w;size_t first=w.size()-2*AnimationCartBytes;bad[first+3]=0x7f;rechecksum(bad);   // offset x past +100 m
+        check(decodeForTest(bad.data(),bad.size(),q,protection)==Error::Range,"animationRange");
+        bad=w;bad[first-1]=3;rechecksum(bad);check(decode(bad.data(),bad.size(),q)==Error::Length,"animation_carts_count");
+        bad=w;bad.push_back(0);bad[8]=uint8_t(bad.size());bad[9]=uint8_t(bad.size()>>8);rechecksum(bad);check(decode(bad.data(),bad.size(),q)==Error::Length,"animation_carts_trailing");
+        Packet far=c;far.animation.carts[1].offset[1]=AnimationCartMaxMm+1;bool threw=false;try{encodeAnimation(far);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_encode_cart");
+        Packet many=c;many.animation.cartCount=3;threw=false;try{encodeAnimation(many);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_encode_carts");}
     {   // The payload alone, as a recording keeps it: the same bytes after the header, the same checks.
         auto pay=encodeAnimationPayload(p.animation);check(pay.size()+WireSize==b.size()&&std::equal(pay.begin(),pay.end(),b.begin()+WireSize),"animation_payload_bytes");
         Animation back;check(decodeAnimationPayload(pay.data(),pay.size(),back)&&back==p.animation,"animation_payload_roundtrip");

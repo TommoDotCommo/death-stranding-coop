@@ -1071,6 +1071,31 @@ looked at.
   (`+0xa8`, at the territory, radius about 280, shrinking with time; saved). Inside a cleared sphere 0 does nothing
   and the weather map there reads clear, so rain placed there brings no BTs.
 
+### Floating carriers (2026-11-14, live)
+
+- Fabricate Equipment (terminal, Vehicles & Bots tab) makes a Floating Carrier item; Offload in the locker puts it in
+  the field, where it deploys. The deployed cart is a `DSHoveringCartEntity` (vtable `0x3d5fed0`; its `DSCartMover`,
+  model, `DSBaggage2CarrierComponent`), with a carrier in the cargo manager `*(image+0x7bf4968)` (`+0x46d280` count,
+  `+0x46d288` array): carrier `+0` u32 type 2 (Cart; 1 player, 3 truck, 4 bike, 6 post, 7 terminal, 8 MULE),
+  `+0x20` the entity's `+0x20` (entity = it - 0x20), `+0x38` id (bits 13..20: GameActor unit 9, as the game's own cart
+  listing `0x2c52160(manager, 9, &list)` filters), `+0x40` position (3 f64), `+0x88` flags (bit 0 set while attached
+  to the porter: 0x20 -> 0x21 on Attach Carrier). Entity world transform `+0xc8` / `+0xe0`.
+- Creation: `0x2669710(&id, request)` (the only formatter of `DSCart_Debug_%d`; called by the cargo manager when a
+  Floating Carrier item is placed) fills a 0x70 creation record and asks the GameActor manager `*(image+0x7bbb8c0)`
+  for actor type 9 (`0x22fbe60(manager, 9, record, &id)`). Request: `+0` position, `+0x18` rotation (36 bytes), `+0x40`
+  variant word (from the item `+0xc4`; 0xffff picks the default), `+0x48` the item's cargo record, `+0x50` id (the
+  image's default at `0x4af1150`), `+0x54`/`+0x55` bytes, `+0x58` level-2 flag. Live with no record: a cart appeared
+  at the place asked, could be attached, towed and ridden ("Detach Carrier", "Open Cargo Menu", "Ride Carrier").
+- Moving: `Entity_ExportedSetWorldTransform` (`0x2361ea0`) does not last (the cart's mover puts it back). The game's
+  own placement `0x2cb2e00(record, transform, 1)` sends the entity a teleport message: object with vtable
+  `0x3dd96b8`, `+8` byte 0, `+0x10` position, `+0x28` rotation, sent by `0x235c990(entity, &msg, flag)`; live this
+  moves the cart and it stays. For a cart record (list item `+0x3b` == 0xa, record `+0x80` == 0xf) it also moves the
+  cart's GameActor (`0x2c56650`, virtual `+0x10`).
+- Removal: when a cart's record goes away the cargo manager marks the actor (byte `+0x110` = 1) and calls
+  `0x22fbd10(GameActor manager, &id)` (finds the unit of `id >> 13`, then `0x22f8df0`); live the call alone removed
+  the cart (its carrier gone, the game running on).
+- Lab commands: `cart N` (make one N m east of the porter), `cartmove N`, `cartdel ID`. `carts.h` is the feature.
+
 ### Real captures and the end-of-fight message (2026-11-14, live)
 
 - A real capture is scriptable: two copies, the shared rain at the BT area by 668,252, and one porter walked with
