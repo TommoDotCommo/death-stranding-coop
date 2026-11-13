@@ -60,7 +60,7 @@ const char* progressReason(ProgressStatus);
 // u48 rotation)][u8 j][if j: u16 skeleton][j x (u16 joint, i16 x4 rotation, i16 x3 millimetres)], indices increasing.
 // A datagram longer than AnimationWireMax (a 1280-byte path MTU) is refused; the sender leaves the controls out while
 // it sends joints (the receiver does not mirror controls on a vehicle).
-constexpr size_t AnimationBoolBytes=32, AnimationFloats=192, AnimationHands=2, AnimationHandBytes=17, AnimationJoints=24, AnimationJointBytes=16;
+constexpr size_t AnimationBoolBytes=32, AnimationFloats=192, AnimationHands=2, AnimationHandBytes=17, AnimationJoints=48, AnimationJointBytes=16;
 constexpr float AnimationFloatMax=1e6f;
 constexpr int16_t AnimationHandMaxMm=3000;
 constexpr size_t AnimationWireMax=1252;

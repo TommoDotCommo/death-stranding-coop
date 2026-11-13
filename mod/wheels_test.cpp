@@ -11,8 +11,8 @@ int main(){
     CHECK((c==std::vector<uint16_t>{1,2,3,4,5,6,7,8,9,10,11}));                 // wheel and up to three parents, never the root
     CHECK((chain({2},parents)==std::vector<uint16_t>{1,2}));
     CHECK(chain({0},parents).empty());
-    std::vector<int16_t> deep(40,-1);for(int16_t j=1;j<40;++j)deep[size_t(j)]=int16_t(j-1);
-    std::vector<int32_t> many;for(int j=39;j>0;j-=1)many.push_back(j);
+    std::vector<int16_t> deep(100,-1);for(int16_t j=1;j<100;++j)deep[size_t(j)]=int16_t(j-1);
+    std::vector<int32_t> many;for(int j=99;j>0;j-=1)many.push_back(j);
     CHECK(chain(many,deep).size()==ds::AnimationJoints);
     // Wire: quaternion to 1/32767, millimetres; normalised back.
     Joint j;j.index=7;j.rotation={0.6f,0,0,0.8f};j.position={1.2345f,-0.5f,0.0004f};

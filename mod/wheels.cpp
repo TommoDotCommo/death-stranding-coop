@@ -77,7 +77,12 @@ std::optional<Read> read(const discovery::Sampler& s,uint64_t vehicle,uint8_t ki
     if(!s.read(r->table,table.data(),table.size()))return std::nullopt;
     std::vector<int16_t> parents(size_t(r->count));
     for(size_t j=0;j<parents.size();++j)std::memcpy(&parents[j],table.data()+j*SkeletonStride+SkeletonParent,2);
-    auto picked=chain(wheels,parents);if(picked.empty())return std::nullopt;
+    // A model small enough goes whole (every joint but the root): the bike's pose routine also leans its body and moves
+    // the front pair's arms and the handlebar linkage, not only the wheel chains (live: 16 of 40 joints matched).
+    std::vector<uint16_t> picked;
+    if(size_t(r->count)-1<=ds::AnimationJoints)for(int32_t j=1;j<r->count;++j)picked.push_back(uint16_t(j));
+    else picked=chain(wheels,parents);
+    if(picked.empty())return std::nullopt;
     std::vector<uint8_t> pose(size_t(picked.back()+1)*JointStride);
     if(!s.read(r->joints,pose.data(),pose.size()))return std::nullopt;
     Read out;out.skeleton=uint16_t(r->count);

@@ -66,15 +66,15 @@ void parser() {
     {auto w=b;w[w.size()-2-AnimationHandBytes]=3;rechecksum(w);check(decode(w.data(),w.size(),q)==Error::Length,"animation_hand_count");}
     {Packet bad=p;bad.animation.hands[0].position[1]=-3001;bool threw=false;try{encodeAnimation(bad);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_encode_hand");}
     {   // While driving: no controls, the vehicle's joints.
-        Packet r;r.kind=Kind::Animation;r.sequence=2;r.stamp=6;r.animation.skeleton=40;r.animation.jointCount=AnimationJoints;
+        Packet r;r.kind=Kind::Animation;r.sequence=2;r.stamp=6;r.animation.skeleton=uint16_t(AnimationJoints+16);r.animation.jointCount=AnimationJoints;
         for(size_t i=0;i<AnimationJoints;++i)r.animation.joints[i]={uint16_t(i+10),{int16_t(i),-32767,5,32767},{-2000,int16_t(i*7),1500}};
         auto w=encodeAnimation(r);check(w.size()==WireSize+4+2+AnimationJoints*AnimationJointBytes&&w.size()<=AnimationWireMax,"animation_joints_size");
         check(decode(w.data(),w.size(),q)==Error::None&&q.animation==r.animation,"animation_joints_roundtrip");
-        auto bad=w;bad[WireSize+6+AnimationJointBytes*(AnimationJoints-1)]=uint8_t(40);rechecksum(bad);check(decodeForTest(bad.data(),bad.size(),q,protection)==Error::Range,"animationRange");   // index past the skeleton
+        auto bad=w;bad[WireSize+6+AnimationJointBytes*(AnimationJoints-1)]=uint8_t(AnimationJoints+16);rechecksum(bad);check(decodeForTest(bad.data(),bad.size(),q,protection)==Error::Range,"animationRange");   // index past the skeleton
         bad=w;bad[WireSize+6+AnimationJointBytes]=10;rechecksum(bad);check(decodeForTest(bad.data(),bad.size(),q,protection)==Error::Range,"animationRange");   // not increasing
         bad=w;bad.pop_back();bad[8]=uint8_t(bad.size());bad[9]=uint8_t(bad.size()>>8);rechecksum(bad);check(decode(bad.data(),bad.size(),q)==Error::Length,"animation_joints_short");
         Packet both=r;for(size_t k=0;k<AnimationFloats;++k)both.animation.floats[k]=1;bool threw=false;try{encodeAnimation(both);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_too_long");
-        Packet wrong=r;wrong.animation.joints[3].index=40;threw=false;try{encodeAnimation(wrong);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_encode_joint");}
+        Packet wrong=r;wrong.animation.joints[3].index=uint16_t(AnimationJoints+16);threw=false;try{encodeAnimation(wrong);}catch(const std::invalid_argument&){threw=true;}check(threw,"animation_encode_joint");}
     {   // The payload alone, as a recording keeps it: the same bytes after the header, the same checks.
         auto pay=encodeAnimationPayload(p.animation);check(pay.size()+WireSize==b.size()&&std::equal(pay.begin(),pay.end(),b.begin()+WireSize),"animation_payload_bytes");
         Animation back;check(decodeAnimationPayload(pay.data(),pay.size(),back)&&back==p.animation,"animation_payload_roundtrip");

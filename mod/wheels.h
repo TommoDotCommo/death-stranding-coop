@@ -32,8 +32,8 @@ Joint fromWire(const ds::VehicleJoint&);
 // Between two samples: the same joints move towards the next sample (quaternion the short way, normalised).
 std::vector<Joint> blend(const std::vector<Joint>& from,const std::vector<Joint>& to,float fraction);
 #ifdef _WIN32
-// Reads only: the vehicle's wheel joint indices (kind ds::Motorbike / ds::Truck), its skeleton's parents and joint
-// count, and the chosen joints' current locals. Nothing when unreadable or out of range.
+// Reads only: the vehicle's model, whole when it has at most ds::AnimationJoints joints besides the root (the truck 47,
+// the bike 40), else its wheel joint chains (wheel indices by kind ds::Motorbike / ds::Truck); the joints' current locals. Nothing when unreadable or out of range.
 struct Read {uint16_t skeleton=0;std::vector<Joint> joints;};
 std::optional<Read> read(const discovery::Sampler&,uint64_t vehicle,uint8_t kind);
 // Writes the joints into the vehicle's current pose record (rotation and translation; scale kept) when its skeleton
