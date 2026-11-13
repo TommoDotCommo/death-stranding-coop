@@ -67,7 +67,9 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
 - BTs: where they drift and whom they notice is per game; a real grenade kill, a real capture and a real boss kill were not played (kills, the fight, its health and the cleared area are shared, "Works"); MULE positions and fights (who is down and camp alarms are shared, "Works"); the partner's death shown as the game's collapse on the ground and his capture as the game's BT drag ("Works", `partner_poses`), a death pose for the partner (his body is laid down stiffly) and his capture shown on the body,
   one shared load for an order (order states and handed-in units are shared, "Works"), story progress and facility connection levels, the partner's own controller input.
 - Structures: custom settings, the safe house (materials and levels are shared, "Works"; dismantling through the game's own
-  structure menu, "Works").
+  structure menu, "Works"; upgrading through it, "Works": live 2026-11-14, metals claimed at a
+  terminal and added to a new post from its Upgrade menu took it to level 2, and the partner's copy counted the metals at
+  once and reached level 2 a little later, through the game's own level-up queue).
 - A real two-PC session. The mod accepts any unicast IPv4 peer (LAN or VPN) and binds only the address that routes
   to it (README, "Two PCs"). On one PC (2026-11-12) two copies ran with the PC's own LAN address as each other's
   partner, the network policy enforcing with only that address allowed: both bound and addressed the LAN address and
