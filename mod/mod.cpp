@@ -1935,6 +1935,9 @@ struct Runtime final:ds::Transport {
             if(cartApi){std::vector<mod::carts::Place> places;
                 if(goal&&controlsShown&&partnerMode()&&cache.remote.visible)
                     for(size_t i=0;i<controlsShown->animation.cartCount;++i)places.push_back(mod::carts::place(controlsShown->animation.carts[i],goal->position));
+                // A copy this porter attached is the partner's, not his: it goes, and a new one is made at the partner.
+                if(cartDisplay.count()){auto shown=cartDisplay.ids();
+                    for(auto& c:mod::carts::read(*sampler,sampler->base))if(c.attached&&shown.count(c.id)){cartApi->remove(c.id);note("CART this porter took the partner's cart: removed, made again at the partner\n");}}
                 stages.enter("carts show",mod::nowUs());cartDisplay.show(places,*cartApi,now);
                 if(cartDisplay.count()!=partnerCartsNoted){partnerCartsNoted=cartDisplay.count();note(("CART the partner's floating carriers here: "+std::to_string(partnerCartsNoted)+"\n").c_str());}}}
         if(mirrorSample&&!animationNoted){animationNoted=true;note("BODY moves with the partner's own animation controls\n");}
