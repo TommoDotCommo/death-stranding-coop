@@ -18,6 +18,7 @@
 #include <cstring>
 #include "redirect.h"
 #include "iat_patch.h"
+#include "module_hold.h"
 #include "module_policy.h"
 #include "audit_throttle.h"
 #include "hook_list.h"
@@ -494,7 +495,13 @@ void patch_all(bool startup=false) {
     if(!Module32FirstW(snap,&m)) fatal("redirect: no modules\n");
     size_t host_count=0;
     do {
-        auto count=patch(m.hModule);
+        // The snapshot lists addresses, not references (module_hold.h): the module is held loaded while it is
+        // patched, and one that another thread has unloaded since the snapshot needs no patch.
+        size_t count=0;
+        if(!redirect::with_module_held(m.hModule,[&count](HMODULE module){count=patch(module);})) {
+            note(L"MODULE_GONE",m.szExePath,L"unloaded between snapshot and patch; tid="+std::to_wstring(GetCurrentThreadId()));
+            continue;
+        }
         if(startup) note(L"MODULE_STARTUP",m.szExePath,L"startup snapshot; tid="+std::to_wstring(GetCurrentThreadId()));
         if(count) note(L"MODULE_PATCH",m.szExePath,L"iat="+std::to_wstring(count)+L" tid="+std::to_wstring(GetCurrentThreadId()));
         if(m.hModule==GetModuleHandleW(nullptr)) host_count=count;
