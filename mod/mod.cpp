@@ -1800,6 +1800,10 @@ struct Runtime final:ds::Transport {
             lastProvider=clock;++ticks;
             stages.enter("provider",mod::nowUs());
             cache.sampledAt=now;cache.available=provider->readLocal(cache.local);cache.gated=provider->isInCutsceneOrLoading();
+            // Riding along on the partner's truck (passenger.h): the porter moves with the truck, not on his feet. The
+            // partner's game shows his body from these samples: with no speed it holds still at the truck's side
+            // instead of running beside it.
+            if(cache.available&&rider.riding())cache.local.velocity={0,0,0};
             stages.enter("start",mod::nowUs());
             // A bounded, read-only observation; never writes story or save state.
             if(game&&cache.available&&sampler&&now>=nextProgressRead){
