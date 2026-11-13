@@ -376,7 +376,7 @@ UINT WINAPI hook_GetRawInputData(HRAWINPUT handle,UINT command,LPVOID data,PUINT
     RAWINPUT r{};const auto& e=kbm_current;
     if(e.mouse) {
         r.header.dwType=RIM_TYPEMOUSE;r.header.dwSize=sizeof(RAWINPUTHEADER)+sizeof(RAWMOUSE);
-        r.data.mouse.usFlags=MOUSE_MOVE_RELATIVE;r.data.mouse.usButtonFlags=e.buttonFlags;r.data.mouse.lLastX=e.dx;r.data.mouse.lLastY=e.dy;
+        r.data.mouse.usFlags=MOUSE_MOVE_RELATIVE;r.data.mouse.usButtonFlags=e.buttonFlags;r.data.mouse.usButtonData=USHORT(e.wheel);r.data.mouse.lLastX=e.dx;r.data.mouse.lLastY=e.dy;
     } else {
         bool extended=e.vk>=0x21&&e.vk<=0x2e;   // navigation cluster and arrows
         r.header.dwType=RIM_TYPEKEYBOARD;r.header.dwSize=sizeof(RAWINPUTHEADER)+sizeof(RAWKEYBOARD);
@@ -526,7 +526,7 @@ int kbm_sample(redirect::kbm::Input& in) {
     auto source=pad_source.load(std::memory_order_acquire);if(!source)return 0;
     mod_pad_state m{};m.size=sizeof m;if(source(&m)!=1)return 0;
     static_assert(sizeof m.keys==sizeof in.keys,"key slots");
-    memcpy(in.keys,m.keys,sizeof in.keys);in.keyCount=m.key_count;in.buttons=m.mouse_buttons;in.mouseX=m.mouse_x;in.mouseY=m.mouse_y;
+    memcpy(in.keys,m.keys,sizeof in.keys);in.keyCount=m.key_count;in.buttons=m.mouse_buttons;in.mouseX=m.mouse_x;in.mouseY=m.mouse_y;in.wheel=m.mouse_wheel;in.wheelSeq=m.wheel_seq;
     return 1;
 }
 DWORD WINAPI hook_XInputGetState(DWORD user,void* state) {

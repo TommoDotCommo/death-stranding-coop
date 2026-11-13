@@ -84,6 +84,12 @@ std::vector<Step> parse(const std::string& text,const std::string& stamp){
             keys(w[1],s.keys,n);s.ms=duration(w[2],n);
             if(w.size()==6){s.keys.mouseX=speed(w[4],n);s.keys.mouseY=speed(w[5],n);}
             steps.push_back(s);
+        } else if(w[0]=="wheel"){
+            if(w.size()!=3&&w.size()!=4)fail(n,"wheel N MS [KEYS]");
+            int notches=0;try{notches=std::stoi(w[1]);}catch(...){fail(n,"wheel notches "+w[1]);}
+            if(notches==0||notches<-20||notches>20)fail(n,"wheel notches -20..20, not 0");
+            s.keys.wheel=int8_t(notches);s.ms=duration(w[2],n);if(w.size()==4)keys(w[3],s.keys,n);
+            steps.push_back(s);
         } else if(w[0]=="tap"||w[0]=="click"){
             if(w.size()!=2&&w.size()!=3)fail(n,w[0]+(w[0]=="tap"?" KEYS [MS]":" L|R|M [MS]"));
             if(w[0]=="tap")keys(w[1],s.keys,n);
@@ -113,9 +119,9 @@ bool Player::sample(uint64_t now,Gamepad& out,Keys* keys){
     for(size_t i=0;i<steps_.size();++i){
         at+=steps_[i].ms;
 #ifndef MUTANT_PADSCRIPT_TIMING
-        if(now<at){index_=i;out=steps_[i].pad;if(keys)*keys=steps_[i].keys;return true;}
+        if(now<at){index_=i;out=steps_[i].pad;if(keys){*keys=steps_[i].keys;keys->wheelStep=uint8_t(loads_*37u+i+1u);if(!keys->wheelStep)keys->wheelStep=1;}return true;}
 #else
-        if(now<=at){index_=i;out=steps_[i].pad;if(keys)*keys=steps_[i].keys;return true;}
+        if(now<=at){index_=i;out=steps_[i].pad;if(keys){*keys=steps_[i].keys;keys->wheelStep=uint8_t(loads_*37u+i+1u);if(!keys->wheelStep)keys->wheelStep=1;}return true;}
 #endif
     }
     index_=steps_.size();done_=true;return false;

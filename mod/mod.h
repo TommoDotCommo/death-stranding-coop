@@ -42,6 +42,9 @@ typedef struct mod_pad_state {
     uint8_t keys[8];
     uint8_t key_count, mouse_buttons;
     int16_t mouse_x, mouse_y;
+    /* Mouse wheel: notches to turn once (120 each), and which script step asked (it turns once per new value). */
+    int8_t mouse_wheel;
+    uint8_t wheel_seq;
 } mod_pad_state;
 MOD_API int mod_pad(mod_pad_state* state);
 /* Copies a NUL-terminated JSON status, returns required bytes including NUL. */

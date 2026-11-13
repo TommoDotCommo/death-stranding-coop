@@ -44,6 +44,12 @@ int main(){
     Input z;z.keyCount=200;z.keys[0]=0;z.keys[7]=0x41;
     f.frame(true,z,5000000);e=drain(f);CHECK(e.size()==1&&e[0].vk==0x41);
     f.frame(false,none,5016000);drain(f);
+    // The wheel: once per step that asks (120 a notch, positive away from the player), not again while it lasts.
+    { Feed w;Input in;in.wheel=-2;in.wheelSeq=5;w.frame(true,in,10000000);auto ev=drain(w);
+      CHECK(ev.size()==1&&ev[0].mouse&&(ev[0].buttonFlags&0x0400)&&ev[0].wheel==-240);
+      w.frame(true,in,10016000);CHECK(!w.pending());                                        // the same step: once
+      in.wheel=1;in.wheelSeq=6;w.frame(true,in,10032000);ev=drain(w);CHECK(ev.size()==1&&ev[0].wheel==120);
+      Input none;w.frame(true,none,10048000);CHECK(!w.pending());w.frame(false,in,10064000);CHECK(!w.pending()); }
     if(!failures)std::puts("virtual keyboard and mouse checks passed");
     return failures?1:0;
 }

@@ -2628,6 +2628,7 @@ int mod_pad(mod_pad_state* s) {
     s->buttons=g.buttons;s->left_trigger=g.leftTrigger;s->right_trigger=g.rightTrigger;s->lx=g.lx;s->ly=g.ly;s->rx=g.rx;s->ry=g.ry;
     static_assert(sizeof s->keys==mod::pad::MaxKeys,"key slots");
     memcpy(s->keys,k.vk,sizeof s->keys);s->key_count=k.count;s->mouse_buttons=k.mouseButtons;s->mouse_x=k.mouseX;s->mouse_y=k.mouseY;
+    s->mouse_wheel=k.wheel;s->wheel_seq=k.wheel?k.wheelStep:0;
     ++padShared.active;return 1;
 }
 int mod_init(const char* path) {

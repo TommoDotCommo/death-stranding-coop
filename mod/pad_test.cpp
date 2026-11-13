@@ -33,6 +33,13 @@ int main(){
       Player q;Gamepad g;Keys held;q.load(k);
       CHECK(q.sample(100,g,&held)&&held.count==2&&g.buttons==0);CHECK(q.sample(1700,g,&held)&&held.count==1&&held.vk[0]==0x45);
       CHECK(q.sample(1730,g,&held)&&held.count==0);CHECK(q.sample(100000,g,&held)==false&&held.count==0&&held.mouseX==0); }
+    // The mouse wheel: notches once per step, keys held with it; each step and each new script has its own number.
+    { auto k=parse("pad S1\nwheel -1 400 1\nwheel 2 300\n","S1");
+      CHECK(k.size()==2&&k[0].keys.wheel==-1&&k[0].keys.count==1&&k[0].keys.vk[0]=='1'&&k[0].ms==400&&k[1].keys.wheel==2&&k[1].keys.count==0);
+      Player q;Gamepad g;Keys a,b,c;q.load(k);CHECK(q.sample(10,g,&a)&&q.sample(500,g,&b)&&a.wheelStep&&b.wheelStep&&a.wheelStep!=b.wheelStep);
+      q.load(k);CHECK(q.sample(2000,g,&c)&&c.wheelStep!=a.wheelStep); }
+    for(const char* bad:{"pad S1\nwheel 0 10\n","pad S1\nwheel 21 10\n","pad S1\nwheel x 10\n","pad S1\nwheel 1\n"})
+        CHECK(refused([&]{parse(bad,"S1");}));
     for(const char* bad:{"pad S1\nkey 10\n","pad S1\nkey WW 10\n","pad S1\nkey x01 10\n","pad S1\nkey xff 10\n","pad S1\nkey F13 10\n",
                          "pad S1\nkey A+B+C+D+E+F+G+H+I 10\n","pad S1\nkey W 10 mouse 1\n","pad S1\nmouse 30000 0 10\n","pad S1\nmouse 1.5 0 10\n",
                          "pad S1\nmouse - 0 10\n","pad S1\nclick X\n","pad S1\nclick L 0\n","pad S1\ntap\n","pad S1\nkey w 10\n"})

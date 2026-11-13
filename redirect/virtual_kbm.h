@@ -15,9 +15,9 @@ constexpr uint64_t ForegroundReturn=0x19b9697;        // return address of the k
 // only for the dispatch of one scripted event and put back before the loop's next PeekMessage returns.
 constexpr uint64_t KeyboardSlot=0x5559208,MouseSlot=0x5559200;constexpr unsigned KeyboardDisabled=0x1dc,MouseDisabled=0xb9;
 constexpr unsigned MaxKeys=8,QueueSize=64;
-struct Input {uint8_t keys[MaxKeys]{};uint8_t keyCount=0,buttons=0;int16_t mouseX=0,mouseY=0;};   // mouse: counts per second
+struct Input {uint8_t keys[MaxKeys]{};uint8_t keyCount=0,buttons=0;int16_t mouseX=0,mouseY=0;int8_t wheel=0;uint8_t wheelSeq=0;};   // wheel: notches, turned once per new wheelSeq   // mouse: counts per second
 // A raw keyboard edge, or one raw mouse report (relative motion and button transitions, RI_MOUSE_* flags).
-struct Event {bool mouse=false;uint8_t vk=0;bool up=false;int32_t dx=0,dy=0;uint16_t buttonFlags=0;};
+struct Event {bool mouse=false;uint8_t vk=0;bool up=false;int32_t dx=0,dy=0;uint16_t buttonFlags=0;int16_t wheel=0;};   // wheel: RAWMOUSE usButtonData
 inline bool serves(uint64_t handle){
 #ifdef MUTANT_KBM_ANY_HANDLE
     (void)handle;return true;
@@ -57,7 +57,7 @@ inline Point cursor(Point middle,int32_t height,int32_t mouseX,int32_t mouseY){
     return p;
 }
 class Feed {
-    bool down_[256]{};uint8_t buttons_=0;double carryX_=0,carryY_=0;uint64_t last_=0;
+    bool down_[256]{};uint8_t buttons_=0,wheelSeq_=0;double carryX_=0,carryY_=0;uint64_t last_=0;
     Event queue_[QueueSize];unsigned head_=0,count_=0;
     void push(const Event& e){if(count_<QueueSize)queue_[(head_+count_++)%QueueSize]=e;}
 public:
@@ -79,6 +79,17 @@ public:
             if(!now&&was)m.buttonFlags|=uint16_t(2u<<(2*b));       // L 0x2, R 0x8, M 0x20 up
         }
         buttons_=buttons;
+        // The wheel turns once for each new step that asks for it (RI_MOUSE_WHEEL, 120 per notch).
+        if(active&&in.wheel&&in.wheelSeq&&in.wheelSeq!=wheelSeq_){
+#ifndef MUTANT_KBM_WHEEL_SIGN
+            m.buttonFlags|=0x0400;m.wheel=int16_t(in.wheel*120);
+#else
+            m.buttonFlags|=0x0400;m.wheel=int16_t(-in.wheel*120);
+#endif
+        }
+#ifndef MUTANT_KBM_WHEEL_REPEAT
+        if(active&&in.wheel)wheelSeq_=in.wheelSeq;
+#endif
         bool moving=active&&(in.mouseX||in.mouseY);
         if(moving&&last_&&nowUs>last_){
             // A stalled frame moves the pointer by at most 100 ms of travel.
@@ -88,7 +99,7 @@ public:
         }
         if(!moving){carryX_=carryY_=0;}
         last_=nowUs;
-        if(m.dx||m.dy||m.buttonFlags)push(m);
+        if(m.dx||m.dy||m.buttonFlags||m.wheel)push(m);
     }
     bool pop(Event& e){if(!count_)return false;e=queue_[head_];head_=(head_+1)%QueueSize;--count_;return true;}
     bool pending() const {return count_!=0;}
