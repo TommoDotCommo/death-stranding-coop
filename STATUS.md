@@ -65,7 +65,8 @@ Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.e
   the garage ramp and a 140 m drive at up to 43 km/h ran live); the partner's carried cargo is drawn as cases at the game's own places on back, hips and arms ("Works"; not in the hands or on carriers), no cutscene sharing.
 - BTs: where they drift and whom they notice is per game; a real grenade kill, a real capture and a real boss kill were not played (kills, the fight, its health and the cleared area are shared, "Works"); MULE positions and fights (who is down and camp alarms are shared, "Works"); the partner's death shown as the game's collapse on the ground and his capture as the game's BT drag ("Works", `partner_poses`), a death pose for the partner (his body is laid down stiffly) and his capture shown on the body,
   one shared load for an order (order states and handed-in units are shared, "Works"), story progress and facility connection levels, the partner's own controller input.
-- Structures: dismantling through the game's own menu, custom settings, the safe house (materials and levels are shared, "Works").
+- Structures: custom settings, the safe house (materials and levels are shared, "Works"; dismantling through the game's own
+  structure menu, "Works").
 - A real two-PC session. The mod accepts any unicast IPv4 peer (LAN or VPN) and binds only the address that routes
   to it (README, "Two PCs"). On one PC (2026-11-12) two copies ran with the PC's own LAN address as each other's
   partner, the network policy enforcing with only that address allowed: both bound and addressed the LAN address and
@@ -195,7 +196,9 @@ table, state "built"). Posts, shelters, watchtowers, bridges and ziplines reques
 during that run and were standing after the next load; syncing them is untested. Dismantling is shared too: when a porter's structure disappears, the partner's mod removes its Net copy with the
 game's `RemoveConstructionsInArea`, limited to Net structures in a 3 m box; both directions ran live. A partner's
 structure that already stands here (saved from an earlier session) is not built twice. Not done: upgrades, and
-structures dismantled through the game's own menus. Building through them works since 2026-11-12 ("Works": heavy
+structures dismantled through the game's own menus (since 2026-11-14 they are: live, two copies, a post built with the
+construction device and dismantled from its structure menu, hold Tab, went from the partner's game too; part of the build
+regression). Building through them works since 2026-11-12 ("Works": heavy
 structures stand at once, only the session's builds are sent).
 
 Cargo driven live with keyboard input (2026-11-07, one copy and `coop-partner`): the porter carried the partner's
