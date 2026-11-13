@@ -1,3 +1,3 @@
 #pragma once
 #include <array>
-namespace mod { constexpr std::array<unsigned char,16> WireBuild = {246,101,230,245,35,120,76,57,118,10,54,20,62,143,85,87}; }
+namespace mod { constexpr std::array<unsigned char,16> WireBuild = {224,186,224,51,203,53,92,255,123,11,139,191,15,103,201,246}; }

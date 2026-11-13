@@ -355,7 +355,17 @@ struct Runtime final:ds::Transport {
     struct LocalVehicle { bool riding=false; uint8_t kind=0; std::array<double,3> position{}; std::array<float,9> rotation{}; uint64_t at=0; uint64_t entity=0; };
     LocalVehicle localVehicle;bool partnerAboard=false;mod::puppet::FloatVariable restVar;bool localResting=false;
     // The porter's own animation controls (controls.h): read every frame, sent beside presence; echo keeps its own.
-    mod::controls::Binding controlBinding;mod::controls::Gather controlGather;bool echoOwn=false;
+    mod::controls::Binding controlBinding;mod::controls::Gather controlGather;bool echoOwn=false;uint64_t controlEntity=0;std::atomic<uint64_t> frameSamples{0};
+    // Every game frame between ticks (mod_game_thread_frame): the porter's controls only, so that a one-frame pulse is
+    // seen. Reads only; the porter of the last tick (readPorter checks the manager still belongs to it).
+    // Its own lock (the runtime's is held by the network thread every few milliseconds); the tick says whether it is wanted.
+    std::mutex controlsLock;std::atomic<bool> controlsWanted{false};
+    bool sampleControls(){
+        if(!controlsWanted.load(std::memory_order_acquire)||!sampler)return false;
+        std::unique_lock<std::mutex> g(controlsLock,std::try_to_lock);if(!g||!controlEntity)return false;
+        std::array<uint8_t,ds::AnimationBoolBytes> held{};std::array<float,ds::AnimationFloats> floats{};
+        if(!mod::controls::readPorter(*sampler,controlEntity,animatorVtable,controlBinding,held,floats))return false;
+        controlGather.add(held,floats);++frameSamples;return true;}
     mod::carryplace::SlotCache handSlots;uint8_t handsNoted=0;
     std::vector<mod::carryplace::Placed> partnerHands;
     std::vector<mod::wheels::Joint> partnerJoints;uint16_t partnerSkeleton=0;bool wheelsReadNoted=false,wheelsWriteNoted=false;   // the partner's wheels (tickRide)   // the cases in the partner's hands, relative to his root (tickStack)
@@ -1930,8 +1940,11 @@ struct Runtime final:ds::Transport {
                 if(resting!=localResting){localResting=resting;note(resting?"REST this porter sits down to rest\n":"REST this porter is up again\n");}}}
             // The porter's own animation controls (controls.h), every frame: a one-frame pulse is seen only so.
             stages.enter("controls",mod::nowUs());
+            controlsWanted.store(config.partnerAnimation&&cache.available&&sampler&&core&&core->connected(),std::memory_order_release);
             if(config.partnerAnimation&&cache.available&&sampler&&core&&(core->connected()||twinMode==TwinMode::Echo)){auto a=anchorNow();
+                std::lock_guard<std::mutex> controlsGuard(controlsLock);
                 std::array<uint8_t,ds::AnimationBoolBytes> held{};std::array<float,ds::AnimationFloats> floats{};
+                controlEntity=a.entity;
                 if(a.entity&&mod::controls::readPorter(*sampler,a.entity,animatorVtable,controlBinding,held,floats)){
                     if(controlBinding.rebound){controlBinding.rebound=false;std::ostringstream o;
                         o<<"CONTROLS the porter's animation manager has "<<controlBinding.count<<" controls; not mirrored ("<<controlBinding.unknown.size()<<"):";
@@ -2384,7 +2397,8 @@ struct Runtime final:ds::Transport {
             repTickEnd(now);
             stage="idle";stages.enter("idle",mod::nowUs());
             if(unappliedReceive) {receiveApply.add(clock-unappliedReceive);unappliedReceive=0;}
-            if(gameContext){auto line=stages.report(mod::nowUs());if(!line.empty())note(line.c_str());}
+            if(gameContext){auto line=stages.report(mod::nowUs());if(!line.empty()){note(line.c_str());
+                note(("CONTROLS read between ticks: "+std::to_string(frameSamples.exchange(0))+" frames in the last minute\n").c_str());}}
             if(!cache.available && !game) {err="provider unavailable during tick";note(err.c_str());return false;}
             if(now-startedAt>1000 && config.provider=="synthetic" && cache.remote.visible && core->connected()) {
                 uint64_t behind=core->presentationDelayMs();auto truth=mod::trajectory(now>behind?now-behind:0,config.peerSlot);double e=0;
@@ -2486,6 +2500,14 @@ int mod_tick(double dt) {
     std::string err;
     if(!r.tickOnce(err)) {error=err;return 0;}
     return 1;
+}
+int mod_game_thread_frame(const mod_game_thread_context* context) {
+    std::unique_lock<std::mutex> lock(lifecycle,std::try_to_lock);if(!lock)return 0;
+    if(!runtime||!context)return 0;
+    auto& r=*runtime;
+    if(!r.config.gameThread||!r.dispatchVerified||!r.gameGate.accept(*context,currentThread()))return 0;
+    if(r.failed)return 0;
+    try{return r.sampleControls()?1:0;}catch(...){return 0;}
 }
 int mod_game_thread_tick(const mod_game_thread_context* context) {
     // A hook must never wait for bootstrap or shutdown to release lifecycle.

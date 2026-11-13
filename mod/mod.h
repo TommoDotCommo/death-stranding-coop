@@ -25,6 +25,9 @@ typedef struct mod_game_thread_context {
     uint32_t network_enforced, reserved;
 } mod_game_thread_context;
 MOD_API int mod_game_thread_tick(const mod_game_thread_context* context);
+/* Optional, every game frame (the tick runs at most every 50 ms): reads only, never calls the game, never waits; 0 when
+   it did nothing. Lets the mod see one-frame values (the porter's animation pulses) the tick would miss. */
+MOD_API int mod_game_thread_frame(const mod_game_thread_context* context);
 MOD_API void mod_shutdown(void);
 /* Scripted virtual gamepad for player 1 (XInput gamepad layout), polled by the proxy's XInputGetState wrapper
    from the game's input thread and by its raw-input feed from the game thread. Never blocks. Returns 1 while a pad script is active, 0 otherwise, -1 on a

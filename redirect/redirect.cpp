@@ -266,7 +266,7 @@ using GetMessageFn=BOOL(WINAPI*)(LPMSG,HWND,UINT,UINT);
 PeekMessageFn real_peek=nullptr;
 GetMessageFn real_get=nullptr;
 using GameTick=int(*)(const mod_game_thread_context*);
-std::atomic<GameTick> game_tick{nullptr};
+std::atomic<GameTick> game_tick{nullptr},game_frame{nullptr};
 std::atomic_flag game_dispatching=ATOMIC_FLAG_INIT;
 DWORD game_thread_owner=0;
 uint64_t last_game_dispatch=0;
@@ -275,7 +275,16 @@ void dispatch_game_thread(const redirect::trace::Call& call,BOOL result) {
     if(!tick || result || call.depth!=1 || call.tid!=game_thread_owner)return;
     auto& host=thread_trace.buffer;
     if(call.caller<host.hostBase || call.caller-host.hostBase!=mod::dispatch::PeekReturn)return;
-    auto now=GetTickCount64();if(now<last_game_dispatch || now-last_game_dispatch<50)return;
+    auto now=GetTickCount64();
+    // Every frame: the mod's light reader (optional export; reads only, never waits).
+    if(now<last_game_dispatch || now-last_game_dispatch<50) {
+        auto frame=game_frame.load(std::memory_order_acquire);
+        if(frame && !game_dispatching.test_and_set(std::memory_order_acquire)) {
+            const mod_game_thread_context context{sizeof(mod_game_thread_context),1,call.tid,call.depth,mod::dispatch::FrameReturn,1u,0};
+            frame(&context);game_dispatching.clear(std::memory_order_release);
+        }
+        return;
+    }
     void* raw[32]{};auto count=CaptureStackBackTrace(0,32,raw,nullptr);uint64_t frames[32]{};
     for(unsigned i=0;i<count;++i)frames[i]=reinterpret_cast<uint64_t>(raw[i]);
     if(!mod::dispatch::frameStack(frames,count,host.hostBase,host.hostSize))return;
@@ -1228,7 +1237,7 @@ BOOL CALLBACK bootstrap_mod(PINIT_ONCE,PVOID,PVOID*) {
             if(!pad) fatal("redirect: virtual pad export missing\n");
             pad_source.store(pad,std::memory_order_release);
         }
-        if(c.gameThread){game_tick.store(callback,std::memory_order_release);note(L"GAME_THREAD_ARMED",L"empty Peek; main thread, reviewed stack, depth 1; 20 Hz",dll);}
+        if(c.gameThread){game_frame.store(reinterpret_cast<GameTick>(real_gpa(mod_handle,"mod_game_thread_frame")),std::memory_order_release);game_tick.store(callback,std::memory_order_release);note(L"GAME_THREAD_ARMED",L"empty Peek; main thread, reviewed stack, depth 1; 20 Hz",dll);}
         mod_result=1;note(L"MOD_STARTED",c.gameThread?L"guarded game-thread dispatch":L"network only; no game-thread hook",dll);return TRUE;
     } catch(...) {fatal("redirect: invalid mod config or mod bootstrap exception\n");}
 }
