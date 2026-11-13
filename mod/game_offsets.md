@@ -1084,6 +1084,9 @@ looked at.
   collapse (thrown backwards, arms out) but stayed held in it for 20 s, upright, instead of reaching the lying loop
   after `Temporary_Bool0` = 1. Not yet understood (the clip may need the body to fall under its own motion, which the
   mover's target playback overrides). The default stays the laid-down transform.
+- Read back while held (resident double as the body): `Is_Dead` 1, `Is_Actions` 1, `Is_BasicAction` 0, `Temporary_Bool0` 1,
+  so the writes land; but `Is_Landed` reads 0 although the mod writes 1 every tick: something on the body resets it
+  (I: the fall clip waits for a landing that only the player's controller reports).
 
 ### Voidout craters (2026-11-13, static, then live)
 
