@@ -23,9 +23,24 @@ std::vector<Transform> place(const Transform& a,const Layout& l,const std::vecto
     }
     return out;
 }
-void Stack::tick(bool permitted,const std::vector<Item>& wanted,const Transform* anchor){
+static Transform onAnchor(const Transform& a,const Transform& rel){
+    Transform w;
+    for(int j=0;j<3;++j){w.position[size_t(j)]=a.position[size_t(j)];for(int k=0;k<3;++k)w.position[size_t(j)]+=rel.position[size_t(k)]*a.rotation[size_t(3*k+j)];}
+    for(int i=0;i<3;++i)for(int j=0;j<3;++j){double v=0;for(int k=0;k<3;++k)v+=double(rel.rotation[size_t(3*i+k)])*a.rotation[size_t(3*k+j)];w.rotation[size_t(3*i+j)]=float(v);}
+    return w;
+}
+void Stack::tick(bool permitted,const std::vector<Item>& wanted,const Transform* anchor,const std::vector<Transform>* placed){
     if(!permitted||!anchor){if(!meshes_.empty())clear();return;}
-    std::vector<Item> items(wanted.begin(),wanted.begin()+long(std::min<size_t>(wanted.size(),MaxCases)));
+#ifndef MUTANT_STACK_PLACED_LAYOUT
+    bool exact=placed&&placed->size()==wanted.size();
+#else
+    bool exact=false;(void)placed;
+#endif
+    std::vector<Item> items(wanted.begin(),wanted.begin()+long(std::min<size_t>(wanted.size(),exact?MaxPlaced:MaxCases)));
+    auto where=[&](const std::vector<uint8_t>& volumes){
+        if(!exact)return place(*anchor,layout,volumes);
+        std::vector<Transform> at;for(size_t k=0;k<volumes.size();++k)at.push_back(onAnchor(*anchor,(*placed)[k]));
+        return at;};
     // Keep the meshes whose item is still at their place; release from the first change up (top first).
     size_t keep=0;
 #ifndef MUTANT_STACK_EXTRA
@@ -43,13 +58,13 @@ void Stack::tick(bool permitted,const std::vector<Item>& wanted,const Transform*
         if(!known->second||!known->second->model){++failures_;cases_.erase(known);
             log_(failures_>=MaxFailures?"STACK no case model (giving up)\n":"STACK no case model\n");break;}
         std::vector<uint8_t> volumes;for(auto& m:meshes_)volumes.push_back(m.volume);volumes.push_back(known->second->volume);
-        uint64_t m=api_.create(*known->second,place(*anchor,layout,volumes).back());
+        uint64_t m=api_.create(*known->second,where(volumes).back());
         if(!m){++failures_;log_(failures_>=MaxFailures?"STACK case refused (giving up)\n":"STACK case refused\n");break;}
         meshes_.push_back({m,item,known->second->volume});
         if(meshes_.size()==items.size())log_("STACK "+std::to_string(items.size())+" cases on the partner\n");
     }
     std::vector<uint8_t> volumes;for(auto& m:meshes_)volumes.push_back(m.volume);
-    auto at=place(*anchor,layout,volumes);
+    auto at=where(volumes);
     for(size_t k=0;k<meshes_.size();++k){
         if(api_.place(meshes_[k].mesh,at[k]))continue;
         // Not the mesh made any more: never released; the ones above it are, and all come back as new meshes.

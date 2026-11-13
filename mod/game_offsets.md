@@ -1071,6 +1071,19 @@ looked at.
   (`+0xa8`, at the territory, radius about 280, shrinking with time; saved). Inside a cleared sphere 0 does nothing
   and the weather map there reads clear, so rain placed there brings no BTs.
 
+### Carried cargo: where the game puts each case (2026-11-13, static, the reads confirmed live)
+
+- The porter's carrier is also at `*(image+0x7be7980)+0x20220`. Per stack of a slot: `+0x3c` the helper it hangs on
+  (a name hash; `0xffffffff` = the entity itself), `+0x40` its place on that helper, `+0x80` its world transform
+  (smoothed, written every frame). Per record: `+0x38` the case's world transform (3 f64 and 9 f32, rows right,
+  forward, up), written by the game's packing each frame, and `+0x148` its mesh (0: not drawn, as for worn gear).
+- Live (Episode 3 save): five back stacks on helper `0x024334b7` (two of them sideways or on top, with another
+  rotation), one case on each hip (slot types 4 and 5, helpers `0x0e83efbc`, `0x47f05029`), gear slots 10 and up on
+  the entity with no mesh.
+- There is no way to draw a load on another entity without real cargo records (the cargo menu's double shows the
+  porter's own carrier). So the mod sends each case's transform relative to the porter's backpack entity and places
+  its own case meshes at the same places on the body's backpack copy (carry_place.h).
+
 ### Structure levels (2026-11-13, live)
 
 - The construction object starts 0x18 before the table record described under "Structures" (record `+0x18` id is

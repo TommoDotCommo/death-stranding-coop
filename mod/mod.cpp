@@ -37,6 +37,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "vitals.h"
 #include "bts.h"
 #include "roads.h"
+#include "carry_place.h"
 #include "enemies.h"
 #include "orders.h"
 #include "guard_win.h"
@@ -258,7 +259,10 @@ struct Runtime final:ds::Transport {
         auto incoming=core->takeCargo();
         bool coop=partnerMode()&&cargoCreate&&cargoManagerSlot;
         for(auto& e:incoming) {
-            if(e.type==mod::carry::WireType){if(config.carryVisual)carry.incoming(e,carrySink);continue;}   // ds3: tickCarry
+            if(e.type==mod::carry::WireType){if(config.carryVisual)carry.incoming(e,carrySink);continue;}
+            if(e.type==mod::carryplace::WireType){                                       // where the partner's cases sit (tickStack)
+                if(config.carryVisual)if(auto list=placeRx.feed(e)){placeShown=std::move(*list);note(("CARRY the partner's "+std::to_string(placeShown->size())+" cases have their places\n").c_str());}
+                continue;}   // ds3: tickCarry
             if(e.type==3){structIn.push_back(e);continue;}   // a structure (tickStructures)
             if(e.type==mod::enemies::WireType){enemyIn.push_back(e);continue;}
             if(e.type==mod::bts::WireType){btIn.push_back(e);continue;}
@@ -414,6 +418,10 @@ struct Runtime final:ds::Transport {
     // carry summary (backpack slot); `puppet.ride` "stack N" / "stack auto" / "stack off" / "stack at ..." test it.
     std::unique_ptr<mod::stack::Stack> cargoStack;bool stackTried=false;Background<mod::stack::Api> stackJob;int stackTest=-1;uint64_t stackPorter=0;
     std::optional<mod::stack::Layout> stackLayout;
+    // Where each case sits (carry_place.h): this porter's go out measured from his backpack; the partner's are drawn
+    // at the same places on the copy of the backpack the body wears.
+    mod::carryplace::Sender placeTx;mod::carryplace::Receiver placeRx;std::optional<std::vector<mod::carryplace::Placed>> placeShown;
+    uint64_t ownBackpack=0,placeReadAt=0,placeSent=0;
     static std::vector<mod::stack::Item> backpackItems(const std::optional<mod::carry::Summary>& s){
         std::vector<mod::stack::Item> out;if(s)for(auto& e:*s)if(e.slot==1)for(unsigned i=0;i<e.count;++i)out.push_back({e.hash,e.variant});   // 1: BackPack
         return out;}
@@ -436,13 +444,21 @@ struct Runtime final:ds::Transport {
         if(!cargoStack)return;
         if(anchor.entity!=stackPorter){if(stackPorter)cargoStack->forget("world changed");stackPorter=anchor.entity;}
         auto wanted=stackTest>=0?std::vector<mod::stack::Item>(size_t(stackTest)):backpackItems(carrySink.shown);
+        if(!(core&&core->connected())){placeShown.reset();placeRx.reset();}
         uint64_t flags=0;bool shown=body&&sampler->read(body+mod::gear::Flags,&flags,8)&&(flags&mod::gear::FlagVisible);
         bool permitted=shown&&!inEvent&&(stackTest>=0||(partnerMode()&&core&&core->connected()));
         // On the copy of the backpack the body wears when there is one (it moves with the body's back), else the body.
         uint64_t on_=gear?gear->copyAt("HLP_Backpack"):0;
         auto pose=mod::puppet::readEntityPose(*sampler,on_?on_:body);
         if(!permitted||!(pose.available&&pose.coherent)){cargoStack->tick(false,{},nullptr);return;}
-        auto t=mod::puppet::transform(pose);cargoStack->tick(true,wanted,&t);
+        auto t=mod::puppet::transform(pose);
+        // With the partner's measured places and a backpack copy to hang them on: every case exactly there.
+        if(stackTest<0&&placeShown&&on_){
+            std::vector<mod::stack::Item> items;std::vector<mod::puppet::Transform> places;
+            for(auto& c:*placeShown){items.push_back({c.item,c.variant});places.push_back(c.rel);}
+            cargoStack->tick(true,items,&t,&places);return;
+        }
+        cargoStack->tick(true,wanted,&t);
     }
     // --- Likes for the partner (likes.h): opt-in partner_likes. L sends one like (at most one per 1.5 s); a like that
     // arrives is given to this porter the game's way (at most one a second, ten a minute).
@@ -619,6 +635,16 @@ struct Runtime final:ds::Transport {
         std::string d=read?"porter carries "+mod::carry::describe(*read):anchor.entity?"porter's carrier unreadable (layout or vtable check failed)":"";
         if(!d.empty()&&d!=carryLast){carryLast=d;note(("CARRY "+d+"\n").c_str());}
         for(auto& e:carry.tick(read,core->connected()&&partnerMode(),now,carrySink)){core->queueCargo(e);++carrySent;}
+        // Where the cases sit, measured from this porter's backpack (found by the gear read), twice a second.
+        if(now-placeReadAt>=500&&anchor.entity&&manager&&ownBackpack){
+            placeReadAt=now;auto pack=mod::puppet::readEntityPose(*sampler,ownBackpack);
+            if(pack.available&&pack.coherent){
+                auto placed=mod::carryplace::readPlaced(*sampler,anchor.entity,sampler->base+mod::carry::ComponentVtable,manager,mod::puppet::transform(pack));
+                auto events=placeTx.observe(placed,core->connected()&&partnerMode(),now);
+                for(auto& e:events){core->queueCargo(e);++placeSent;}
+                if(!events.empty())note(("CARRY this porter's "+std::to_string(placed?placed->size():0)+" cases with their places -> partner\n").c_str());
+            }
+        }
     }
     // --- end ds3 ---
     // Shared structures (structures.h): what this porter builds goes to the partner; theirs appear here as Net structures.
@@ -755,6 +781,7 @@ struct Runtime final:ds::Transport {
         if(now-cullNotedAt>=60000&&cullBusy){cullNotedAt=now;std::ostringstream o;o<<"CULL a pass was running when the tick began "<<cullBusy<<" of "<<cullTicks<<" times; not over within 4 ms "<<cullGaveUp<<" times\n";note(o.str().c_str());}
     }
     void repTickStart(){
+        if(!sampler)return;
         // The partner body and this porter: the mod calls the game on both from its tick.
         repBody.entity=repWatch;repSelf.entity=anchorNow().entity;
         for(auto* w:{&repBody,&repSelf}){w->entryEntity=w->entity;w->entryHead=repQueue(w->entity);if(w->entryHead)++w->waiting;}
@@ -1553,7 +1580,9 @@ struct Runtime final:ds::Transport {
         if(gearChurnLeft&&gear){
             if(gearChurnMode==1){gear->flash(gearChurnLeft%2==0?false:true);--gearChurnLeft;}
             else if(now-gearChurnAt>=6000){gearChurnAt=now;gear->clear();--gearChurnLeft;}
+#ifdef _WIN32
             if(!gearChurnLeft)note(("GEAR test: churn done, culling guard at "+std::to_string(mod::guard::cullSkipped.load())+"\n").c_str());
+#endif
         }
         // What this porter shows goes to the partner (read once a second; sent when it holds still, and on every connection).
         // Nothing is read until a load (a game event) has been over for SettleMs: right after one the porter shows gear
@@ -1561,7 +1590,9 @@ struct Runtime final:ds::Transport {
         constexpr uint64_t SettleMs=8000;
         bool settled=!inEvent&&now-eventOverAt>=SettleMs&&anchor.pose.available;
         if(core&&settled&&now-wornReadAt>=1000){wornReadAt=now;stages.enter("gear worn",mod::nowUs());
-            auto mine=mod::gear::worn(mod::gear::snapshot(*sampler,anchor.entity),sampler->base);
+            auto nodes=mod::gear::snapshot(*sampler,anchor.entity);
+            ownBackpack=0;for(auto& n:nodes)if(n.parent<0&&n.vtable==sampler->base+mod::gear::BackpackVtable){ownBackpack=n.entity;break;}
+            auto mine=mod::gear::worn(nodes,sampler->base);
             auto events=wornTx.observe(mine,core->connected(),now);
             if(!events.empty()){note(("GEAR sent "+std::to_string(mine.size())+" pieces\n").c_str());for(auto& e:events)core->queueCargo(e);}}
         stages.enter("gear",mod::nowUs());

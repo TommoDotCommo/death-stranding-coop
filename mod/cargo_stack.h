@@ -50,7 +50,10 @@ public:
     // `items` (bottom first; capped at MaxCases) placed on `anchor`; permitted=false (no body, a game event, the mode
     // off) removes them. A mesh is kept while its item stays at its place in the list; from the first changed item up,
     // the meshes are replaced.
-    void tick(bool permitted,const std::vector<Item>& items,const Transform* anchor);
+    // placed: when given (one per item, relative to the anchor: carry_place.h), each case goes exactly there instead
+    // of into the layout's columns, and up to MaxPlaced cases are drawn (hips and arms too).
+    void tick(bool permitted,const std::vector<Item>& items,const Transform* anchor,const std::vector<Transform>* placed=nullptr);
+    static constexpr unsigned MaxPlaced=24;
     void forget(const char* why);   // the world was replaced: the meshes went with it; never call the game
     void clear();                   // releases every mesh
     size_t shown() const {return meshes_.size();}

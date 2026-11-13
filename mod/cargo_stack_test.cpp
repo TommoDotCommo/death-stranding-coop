@@ -85,6 +85,18 @@ int main(){
     Engine z;z.noModel=true;Stack g(z.api(),[](const std::string&){});
     for(int i=0;i<10;++i)g.tick(true,I({0,0}),&anchor);
     CHECK(g.shown()==0&&z.creates==0&&z.lookups==Stack::MaxFailures);
+    // Exact places (carry_place.h): each case where it was measured, along the anchor's axes, more than the layout's cap;
+    // a list that does not match the items falls back to the layout.
+    { Engine e2;Stack p(e2.api(),[](const std::string&){});
+      Transform turned;turned.position={100,200,10};turned.rotation={0,1,0,-1,0,0,0,0,1};   // right = +y, forward = -x
+      std::vector<Item> many(14);std::vector<Transform> rel(14);
+      for(size_t i=0;i<rel.size();++i){rel[i].position={0.3,0,0.5+0.1*double(i)};rel[i].rotation={1,0,0,0,1,0,0,0,1};}
+      for(int i=0;i<8;++i)p.tick(true,many,&turned,&rel);
+      CHECK(p.shown()==14&&e2.live.size()==14);
+      bool right=true;size_t k=0;for(auto& [id,m]:e2.live){right=right&&std::fabs(m.at.position[0]-100)<1e-9&&std::fabs(m.at.position[1]-200.3)<1e-9&&std::fabs(m.at.position[2]-(10.5+0.1*double(k)))<1e-9&&std::fabs(m.at.rotation[1]-1)<1e-6;++k;}
+      CHECK(right);
+      std::vector<Transform> fewer(3);for(int i=0;i<8;++i)p.tick(true,many,&turned,&fewer);
+      CHECK(p.shown()==Stack::MaxCases); }
     if(failures)return 1;
     std::puts("stack tests passed");return 0;
 }
