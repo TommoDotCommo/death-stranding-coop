@@ -1161,7 +1161,7 @@ struct Runtime final:ds::Transport {
         voidIn.clear();
     }
     // Shared BTs (bts.h), with share_enemies: gazers destroyed, a catcher fight started, its area cleared.
-    mod::bts::GazerSync gazerSync;mod::bts::FightSync fightSync;mod::bts::HealthSync healthSync;std::function<void(const mod::bts::Catcher&,float)> btHurt;std::vector<ds::CargoEvent> btIn;
+    mod::bts::GazerSync gazerSync;mod::bts::FightSync fightSync;bool btQuietTold=false;mod::bts::HealthSync healthSync;std::function<void(const mod::bts::Catcher&,float)> btHurt;std::vector<ds::CargoEvent> btIn;
     std::function<void(uint64_t)> btDestroy;std::function<void(uint8_t)> btCatcher;uint64_t btReadAt=0,btSent=0,btApplied=0,btPorter=0,btSettled=0;bool btTried=false,btLinked=false,btTell=false;
     void tickBts(uint64_t now) {
         if(!core||!sampler||!config.shareEnemies){btIn.clear();return;}
@@ -1193,6 +1193,9 @@ struct Runtime final:ds::Transport {
             }
             double d=1e9;if(here)d=std::sqrt((at[0]-e.position[0])*(at[0]-e.position[0])+(at[1]-e.position[1])*(at[1]-e.position[1]));
             if(!mod::bts::FightSync::wanted(fights,e.item,d))continue;
+            // Not into a new fight while this porter is down or just lost one here (bts.h FightSync::resting).
+            if(e.item==mod::bts::FightOn&&(vitalsSeen.dead||fightSync.resting(now))){
+                if(!btQuietTold){btQuietTold=true;note("BT partner's fight not started here: this porter is down or just lost a fight\n");}continue;}
             btCatcher(e.item==mod::bts::FightOn?0:1);++btApplied;
             note(e.item==mod::bts::FightOn?"BT partner is in a catcher fight: it starts here too\n":"BT partner's catcher fight is over, area cleared: ended here too\n");
         }
@@ -1210,7 +1213,8 @@ struct Runtime final:ds::Transport {
             if(!send)continue;
             ds::CargoEvent e;e.type=mod::bts::WireType;e.item=mod::bts::GazerDead;e.ref=k;core->queueCargo(e);++btSent;note("BT a gazer was destroyed here -> partner\n");
         }
-        for(auto w:fightSync.observe(fights)){
+        if(!fightSync.resting(now))btQuietTold=false;
+        for(auto w:fightSync.observe(fights,now)){
             if(!send||!here)continue;
             ds::CargoEvent e;e.type=mod::bts::WireType;e.item=w;e.position=at;core->queueCargo(e);++btSent;
             note(w==mod::bts::FightOn?"BT a catcher fight runs here -> partner\n":"BT a catcher fight ended here with the area cleared -> partner\n");

@@ -42,13 +42,17 @@ class FightSync {
 public:
     // One call per look: FightOn when a fight starts and again every RepeatLooks while it runs (a partner who comes
     // near later joins it), AreaCleared when a sphere was cleared since the last look. The first look learns.
-    std::vector<uint32_t> observe(const Fights&);
-    static constexpr int RepeatLooks=20;
+    // A fight that stops here without a cleared sphere (the porter voided out, died or got away) is lost: for LostQuietMs
+    // after it the partner's fight news starts none here, or his fight, still running, would pull this porter straight
+    // back into one (seen live 2026-11-14: a voidout, then a new fight here from the partner's repeat).
+    std::vector<uint32_t> observe(const Fights&,uint64_t nowMs=0);
+    bool resting(uint64_t nowMs) const {return lostAt_&&nowMs-lostAt_<LostQuietMs;}
+    static constexpr int RepeatLooks=20;static constexpr uint64_t LostQuietMs=120000;
     // What the partner's news asks of this game: FightOn = start one (none runs here and the partner is in range),
     // AreaCleared = end the one running here. Otherwise nothing.
     static bool wanted(const Fights&,uint32_t what,double partnerDistance);
 private:
-    bool primed_=false;int32_t cleared_=0;bool active_=false;int looks_=0;
+    bool primed_=false;int32_t cleared_=0;bool active_=false;int looks_=0;uint64_t lostAt_=0;
 };
 // One catcher of the running fight: its life in percent of its full life (the unit the game keeps, so it compares
 // across difficulties) and where that number lives (the catcher component's life, +0x13c).

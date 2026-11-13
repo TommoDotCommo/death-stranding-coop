@@ -75,10 +75,13 @@ Fights readFights(const discovery::Sampler& s,uint64_t base){
     for(int32_t i=0;i<n;++i){uint8_t off=1;if(records&&s.read(records+0x110*uint64_t(i)+0xf0,&off,1)&&!off)++f.active;}
     f.readable=true;return f;
 }
-std::vector<uint32_t> FightSync::observe(const Fights& f){
+std::vector<uint32_t> FightSync::observe(const Fights& f,uint64_t nowMs){
     std::vector<uint32_t> out;if(!f.readable)return out;
     bool active=f.active>0;
     if(primed_){
+#ifndef MUTANT_BT_LOST_ECHO
+        if(active_&&!active&&f.cleared<=cleared_)lostAt_=nowMs?nowMs:1;
+#endif
 #ifndef MUTANT_BT_CLEARED_ANY
         if(f.cleared>cleared_)out.push_back(AreaCleared);
 #else

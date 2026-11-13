@@ -36,6 +36,11 @@ int main(){
       CHECK(s.observe(blind).empty());
       auto b=s.observe(won);CHECK(b.size()==1&&b[0]==AreaCleared);CHECK(s.observe(won).empty());
       CHECK(s.observe(fewer).empty());CHECK(s.observe(idle).size()==1); }
+    // A fight that stops without a cleared sphere (a voidout here) keeps the partner's fight news away for a while.
+    { FightSync s;Fights idle{true,0,2},on{true,1,2},won{true,0,3};
+      s.observe(idle,1000);s.observe(on,2000);CHECK(!s.resting(2000));
+      s.observe(idle,3000);CHECK(s.resting(3000)&&s.resting(3000+FightSync::LostQuietMs-1)&&!s.resting(3000+FightSync::LostQuietMs));
+      FightSync w;w.observe(idle,1000);w.observe(on,2000);w.observe(won,3000);CHECK(!w.resting(3000)); }
     // What the partner's news asks: a fight only when none runs here and the partner is near; an end only of a running one.
     { Fights idle{true,0,0},on{true,1,0},blind{};
       CHECK(FightSync::wanted(idle,FightOn,FightRange));CHECK(!FightSync::wanted(idle,FightOn,FightRange+1));CHECK(!FightSync::wanted(on,FightOn,10));
