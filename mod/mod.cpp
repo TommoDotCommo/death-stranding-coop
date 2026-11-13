@@ -38,6 +38,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "bts.h"
 #include "roads.h"
 #include "carry_place.h"
+#include "passenger.h"
 #include "enemies.h"
 #include "orders.h"
 #include "guard_win.h"
@@ -344,7 +345,86 @@ struct Runtime final:ds::Transport {
 #endif
 #endif
     }
+    // Riding along on the partner's truck (passenger.h).
+    mod::passenger::Rider rider;mod::passenger::Api passengerApi;bool passengerTried=false;mod::marker::KeyEdge passengerEdge;
+    void tickPassenger(const mod::puppet::Anchor& anchor,bool connected,uint64_t now){
+        if(!config.passengerKey||!ride||!anchor.entity)return;
+        if(!passengerTried){passengerTried=true;try{passengerApi=mod::passenger::nativeApi(*sampler);note("PASSENGER ready: the passenger key gets on and off the partner's truck\n");}catch(const std::exception& e){note((std::string("PASSENGER unavailable: ")+e.what()+"\n").c_str());}}
+        if(!passengerApi.attach)return;
+        const auto& r=cache.remote;mod::passenger::Look l;
+        l.permitted=connected&&partnerMode()&&!inEvent&&(rider.riding()||!cache.local.vehicle);
+        uint64_t truck=ride->entity();
+        l.partnerInTruck=r.visible&&r.state.vehicle==ds::Truck&&truck&&ride->kind()==ds::Truck;
+        l.truck=l.partnerInTruck?truck:0;
+        auto here=anchor.pose.available?std::optional<mod::puppet::Transform>(mod::puppet::transform(anchor.pose)):std::nullopt;
+        std::optional<mod::puppet::Transform> at;
+        if(truck){auto p=mod::puppet::readEntityPose(*sampler,truck);if(p.available)at=mod::puppet::transform(p);}
+        if(here&&at){double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1],dz=here->position[2]-at->position[2];l.distance=std::sqrt(dx*dx+dy*dy+dz*dz);}
+        l.key=passengerEdge.pressed(modKey(config.passengerKey),now);
+        l.mover=passengerApi.state(anchor.entity);
+        if(l.key&&!rider.riding()&&!(l.permitted&&l.partnerInTruck&&l.distance<=mod::passenger::Reach&&l.mover==mod::passenger::Free)){
+            std::ostringstream o;o<<"PASSENGER key: not now (permitted "<<l.permitted<<", partner in a truck "<<l.partnerInTruck<<", distance "<<l.distance<<" m, mover "<<int(l.mover)<<")\n";note(o.str().c_str());}
+        switch(rider.tick(l)){
+            case mod::passenger::Do::GetOn:
+                if(passengerApi.attach(anchor.entity,rider.truck(),"HLP_Enemy"))note("PASSENGER on the partner's truck\n");
+                else{rider.forget();note("PASSENGER refused by the game\n");}
+                break;
+            case mod::passenger::Do::GetOff:{
+                passengerApi.release(anchor.entity);
+                // Set down beside the truck, a step further out from its middle than he hung, on the ground.
+                if(here&&at&&rideTeleport){
+                    double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1],n=std::sqrt(dx*dx+dy*dy);
+                    if(n>0.1){mod::puppet::Transform t=*here;t.position[0]+=dx/n*1.5;t.position[1]+=dy/n*1.5;t.position[2]+=1.0;
+                        try{rideTeleport(anchor.entity,t);}catch(const std::exception&){}}
+                }
+                note(("PASSENGER off: "+rider.why()+"\n").c_str());break;}
+            default:break;
+        }
+        if(!rider.riding()&&!rider.why().empty()&&rider.why()=="the game let go"){note("PASSENGER off: the game let go\n");rider.forget();}
+    }
+    uint64_t passengerParent=0;uint8_t passengerSeen=0xff;
+    std::string passengerTest(const std::string& args,const mod::puppet::Anchor& anchor){
+#ifdef _WIN32
+        if(!sampler||!anchor.entity)return "PASSENGER refused: no porter\n";
+        auto same=[&](uint64_t rva,std::initializer_list<uint8_t> want){std::vector<uint8_t> got(want.size());return sampler->read(sampler->base+rva,got.data(),got.size())&&std::equal(want.begin(),want.end(),got.begin());};
+        if(!same(0x26bcfa0,{0x40,0x53,0x55,0x56,0x57,0x41,0x56,0x48,0x83,0xec,0x20})||!same(0x2696c50,{0xc5,0xfa,0x11,0x89,0x30,0x07,0x00,0x00})
+           ||!same(0x190aa00,{0x40,0x53,0x48,0x83,0xec,0x20,0x48,0x8b,0xd9})||!same(0x190ad20,{0x40,0x53,0x48,0x83,0xec,0x20,0x48,0x8b,0x19})
+           ||!same(0x191c790,{0x40,0x57,0x48,0x83,0xec,0x20,0x48,0x8b,0xf9,0x48,0x8b,0x09}))return "PASSENGER refused: the functions differ\n";
+        uint64_t mover=0,vtable=0;
+        if(!sampler->read(anchor.entity+0xb0,&mover,8)||!mover||!sampler->read(mover,&vtable,8)||vtable!=sampler->base+0x3d6f018)return "PASSENGER refused: no player mover\n";
+        uint8_t state=0;sampler->read(mover+0x720,&state,1);
+        auto parent=reinterpret_cast<void(*)(uint64_t,uint64_t,uint64_t)>(sampler->base+0x235e990);
+        if(args=="off"){
+            reinterpret_cast<void(*)(uint64_t,float)>(sampler->base+0x2696c50)(mover,0.0f);
+            if(passengerParent){parent(anchor.entity,0,0);passengerParent=0;}
+            return "PASSENGER released (state was "+std::to_string(state)+")\n";
+        }
+        char helper[64]{};char extra[16]{};int n=std::sscanf(args.c_str(),"on %63s %15s",helper,extra);
+        uint64_t vehicle=ride?ride->entity():0;
+        if(n<1||!vehicle)return "PASSENGER refused: say on HELPER, with the mod's vehicle made (lead 2, park)\n";
+        alignas(16) uint8_t name[32]{};alignas(16) uint64_t slot[4]{vehicle+0x20,0,0,0};
+        alignas(16) float local[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+        uint32_t joint=0;sampler->read(anchor.entity+0x934,&joint,4);
+        if(n>=2&&std::string(extra)=="parent"){parent(anchor.entity,vehicle,0);passengerParent=vehicle;}
+        reinterpret_cast<void(*)(void*,const char*)>(sampler->base+0x190aa00)(name,helper);
+        reinterpret_cast<void(*)(void*)>(sampler->base+0x191c790)(slot);
+        reinterpret_cast<void(*)(uint64_t,uint32_t,void*,void*,float*,float)>(sampler->base+0x26bcfa0)(mover,joint,slot,name,local,0.0f);
+        reinterpret_cast<void(*)(void*)>(sampler->base+0x190ad20)(name);
+        uint8_t after=0;sampler->read(mover+0x720,&after,1);passengerSeen=0xff;
+        std::ostringstream o;o<<"PASSENGER on "<<helper<<(passengerParent?" (parented)":"")<<" joint "<<joint<<": state "<<int(state)<<" -> "<<int(after)<<"\n";return o.str();
+#else
+        (void)args;(void)anchor;return "PASSENGER needs the game\n";
+#endif
+    }
+    void watchPassenger(const mod::puppet::Anchor& anchor){
+        uint64_t mover=0;uint8_t state=0;
+        if(!sampler||!anchor.entity||!sampler->read(anchor.entity+0xb0,&mover,8)||!mover||!sampler->read(mover+0x720,&state,1))return;
+        if(state!=passengerSeen&&passengerSeen!=0xfe){
+            if(passengerSeen!=0xff||state)note(("PASSENGER mover state "+std::to_string(state)+"\n").c_str());
+            passengerSeen=state;}
+    }
     void tickRide(const mod::puppet::Anchor& anchor,uint64_t now) {
+        watchPassenger(anchor);
         auto stamp=" "+mod::runStamp()+"\n";
         if(config.partnerVehicle&&!rideConfigDone){rideConfigDone=true;if(!ride)makeRide();rideOn=ride!=nullptr;if(rideOn)note("RIDE partner vehicle on (config)\n");}
         if(!rideCommand.empty()&&std::filesystem::exists(rideCommand)) {
@@ -391,12 +471,18 @@ struct Runtime final:ds::Transport {
                     note("RIDE goto done\n");}
                 else note("RIDE goto refused\n");
                 return;}
+            else if(text.rfind("passenger ",0)==0&&text.size()>stamp.size()&&text.compare(text.size()-stamp.size(),stamp.size(),stamp)==0){
+                // Lab test (research-passenger): "passenger on HELPER [parent]" holds this porter at HELPER of the mod's
+                // vehicle with the game's own follow-a-helper mode of the player mover (0x26bcfa0); "passenger off"
+                // releases him (0x2696c50). The mover's state (+0x720: 0 off, 1 blending in, 2 attached) is logged.
+                std::string rest=text.substr(10,text.size()-10-stamp.size());note(passengerTest(rest,anchor).c_str());
+                return;}
             else if(auto k=mod::puppet::parseCargoCommand(text,mod::runStamp(),"lead");k&&*k<=3){if(!ride)makeRide();rideOn=ride!=nullptr;rideLead=uint8_t(*k);}
             else {note("RIDE ignored command for another process\n");return;}
             note(("RIDE command "+text.substr(0,text.find(' '))+(rideLead?" "+std::to_string(rideLead):std::string())+"\n").c_str());
         }
         if(!ride)return;
-        if(anchor.entity!=ridePorter){if(ridePorter)ride->forget("world changed");ridePorter=anchor.entity;}
+        if(anchor.entity!=ridePorter){if(ridePorter)ride->forget("world changed");ridePorter=anchor.entity;rider.forget();}
         if(!rideOn){ride->tick(now,false,0,nullptr);return;}
         if(rideLead==0xff){ride->tick(now,true,0,nullptr);return;}
         if(rideLead){
@@ -409,6 +495,7 @@ struct Runtime final:ds::Transport {
         }
         bool connected=core&&core->connected();
         const auto& r=cache.remote;
+        tickPassenger(anchor,connected,now);
         if(!connected||inEvent){ride->tick(now,false,0,nullptr);return;}
         if(!r.visible||!r.state.vehicle){ride->tick(now,true,0,nullptr);return;}
         auto t=mod::ride::vehicleTransform(r.state.position,r.state.vehicleOffset,r.state.vehicleAngles);

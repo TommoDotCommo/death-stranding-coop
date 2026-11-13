@@ -1071,6 +1071,19 @@ looked at.
   (`+0xa8`, at the territory, radius about 280, shrinking with time; saved). Inside a cleared sphere 0 does nothing
   and the weather map there reads clear, so rain placed there brings no BTs.
 
+### Riding along (2026-11-13, static, then live)
+
+- No seat objects: every rider is parented or attached to a helper. For the player the "follow a helper" part is a
+  mode of `DSPlayerMover` (vtable `0x3d6f018`, the porter's `+0xb0`): `0x26bcfa0(mover, u32 joint = *(porter+0x934),
+  Ref* carrier, String* helper, float local[16], float blend)` holds him at the helper of the carrier's model each
+  frame; `0x2696c50(mover, float blend)` lets go. State byte `mover+0x720`: 0 free, 1 blending in, 2 held, 3 out.
+  The carrier is a registered ref slot `{entity+0x20, 0, 0}` (`0x191c790`), which the routine releases itself; the
+  name is a game string (`0x190aa00` / `0x190ad20`). It checks nothing about the vehicle: a missing helper just ends
+  the hold. The game carries the player on a buddy bot this way (`0x2911e30`, `HLP_C_SitDown`).
+- Live: on the mod's display truck (pooled, no physics, moved by transform playback) `HLP_Enemy` holds him on the
+  driver's side (`_2`, `_3`, `_4` other places along the sides); the hold followed the truck while it moved and the
+  porter walked normally after the release.
+
 ### Carried cargo: where the game puts each case (2026-11-13, static, the reads confirmed live)
 
 - The porter's carrier is also at `*(image+0x7be7980)+0x20220`. Per stack of a slot: `+0x3c` the helper it hangs on

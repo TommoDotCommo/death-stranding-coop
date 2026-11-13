@@ -733,6 +733,16 @@ game's record list is still the one it joined (otherwise left alone, never freed
 `nametag_test.cpp` (mutants MARKUP, STILL and ORDER); live, two copies: each showed the other's nickname over the
 partner body, and the label went when the other copy closed. The launcher's play setup turns it on.
 
+## Riding along on the partner's truck (`passenger_key`, with `partner_vehicle`)
+
+When the partner drives a truck, standing next to it (4.5 m) and pressing **J** holds this porter on the truck's side;
+J again lets go. He is also let go by himself when the partner gets out or leaves, a game event starts or the link
+drops, and is set down on the ground beside the truck. It uses the game's own "follow a helper" mode of the player
+mover (`passenger.h`; game_offsets.md, "Riding along"): the partner stays the only driver and nothing is saved.
+`"passenger_key": N` sets another virtual-key code, 0 turns it off. Log lines start with `PASSENGER`. Whether J is
+free in the game's default keys is not checked. Lab test: `puppet.ride passenger on HELPER [parent]` / `off` on the
+mod's own lead truck. Tests: `passenger_test.cpp` (mutants FAR and STAY).
+
 ## Likes for the partner (`partner_likes`, off by default)
 
 With `"partner_likes": true` (requires `puppet_probe`) pressing **L** (free in the game's default keys) while the partner
