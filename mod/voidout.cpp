@@ -52,6 +52,17 @@ bool Sync::wanted(const Table& t,const Crater& k){
 #endif
     return true;
 }
+std::function<uint32_t()> nativeArea(discovery::Sampler& s){
+#ifdef _WIN32
+    static const uint8_t want[12]={0x48,0x85,0xc0,0x74,0x0e,0x80,0xb8,0xa8,0x00,0x00,0x00,0x00};uint8_t got[12]{};
+    if(!s.read(s.base+0x262a8c7,got,12)||std::memcmp(got,want,12))throw std::runtime_error("area function differs");
+    uint64_t base=s.base;
+    return [&s,base]()->uint32_t{uint64_t module=0;if(!s.read(base+0x7be6318,&module,8)||!module)return 0xffff;
+        return uint32_t(reinterpret_cast<uint16_t(*)(uint64_t)>(base+0x262a8c0)(module));};
+#else
+    (void)s;throw std::runtime_error("voidouts need the game");
+#endif
+}
 std::function<uint32_t(const Crater&)> nativeAdd(discovery::Sampler& s){
 #ifdef _WIN32
     static const uint8_t grow[16]={0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x48,0x89,0x7c,0x24,0x18,0x41};uint8_t got[16]{};

@@ -33,6 +33,8 @@ public:
 private:
     bool primed_=false;uint32_t counter_=0;std::set<uint32_t> mine_;
 };
+// The area this porter is in (the game's 0x262a8c0); craters are kept per area. 0xffff: none.
+std::function<uint32_t()> nativeArea(discovery::Sampler&);
 // Adds a crater to this game's queue (Windows only): returns its id, 0 when refused.
 std::function<uint32_t(const Crater&)> nativeAdd(discovery::Sampler&);
 }

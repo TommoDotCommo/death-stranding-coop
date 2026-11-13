@@ -1071,6 +1071,21 @@ looked at.
   (`+0xa8`, at the territory, radius about 280, shrinking with time; saved). Inside a cleared sphere 0 does nothing
   and the weather map there reads clear, so rain placed there brings no BTs.
 
+### Voidout craters (2026-11-13, static, then live)
+
+- Boss BT manager `C = *(image+0x7bee060)`: active craters `+0x280` (count) / `+0x288` (records of 0x60), pending
+  `+0x290` / `+0x298`, id counter `+0x2a8`, "rebuild" byte `+0x2ac`, crater resource `+0x2a0`. Record: `+0x18`
+  position (3 f64), `+0x30` radius, `+0x3c` activated, `+0x44` countdown (8.1 s), `+0x48` id, `+0x50` area,
+  `+0x54` yaw, `+0x58` flags (bit 0 disabled crater, bit 1 remove). The only creator is the voidout itself
+  (`0x2a003d0`, from the catcher's annihilation); the update `0x2a74d90` moves pending records to the active list
+  and, when the countdown ends, activates them (area effects) and spawns the crater entity (`0x2a014e0`: a world
+  data map deformation and an effect component) and a topography rebake region. The active list is saved.
+- Adding one without a voidout (voidout.cpp): append to the pending list (grow with `0x2a6a260(list, data, count)`),
+  fill position, radius, area, yaw, a new id, `+0x3c = 1` (already activated: only the entity and the rebake), set
+  `+0x2ac`. Live: a 30 m crater appeared at once, a deep bowl with its floating debris, the porter unharmed.
+- Area: `0x262a8c0(*(image+0x7be6318))` (the current area, 22123 near Lake Knot); records are processed only in their
+  area.
+
 ### Riding along (2026-11-13, static, then live)
 
 - No seat objects: every rider is parented or attached to a helper. For the player the "follow a helper" part is a

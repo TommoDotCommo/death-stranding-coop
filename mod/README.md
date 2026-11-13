@@ -685,6 +685,9 @@ Each game keeps simulating its own world; these settings share the outcome of wh
 - `"share_enemies": true` (`enemies.h`): a MULE one player puts down (knocked out, fainted, asleep, dead) is put
   down in the partner's game with the game's own defeat function, and a camp that comes to know someone is there is
   alarmed in the partner's game. MULEs are matched by the UUID of their locator, which is the same in every game.
+  A voidout's crater is shared too (`voidout.h`): the crater a voidout leaves in one world is added to the other's
+  list of craters the way the game queues one, already activated, so the hole and its floating debris appear without
+  the blast's effects; it is saved with the world like the game's own.
   Where MULEs are and who they chase is not shared. On joining, the MULEs that are down and the BTs that are
   destroyed in each player's world are applied in the other's too.
   The same setting shares BTs (`bts.h`): a BT area is active for both players through the shared rain

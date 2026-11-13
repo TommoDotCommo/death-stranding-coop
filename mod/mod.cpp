@@ -2087,8 +2087,10 @@ struct Runtime final:ds::Transport {
                     if(*vo){
                         try{auto add=mod::voidout::nativeAdd(*sampler);auto t=mod::puppet::transform(anchor.pose);mod::voidout::Crater k;k.radius=float(*vo);
                             for(int i=0;i<3;++i)k.position[size_t(i)]=t.position[size_t(i)]+70*double(t.rotation[size_t(3+i)]);
-                            k.area=table.craters.empty()?0:table.craters.front().area;k.yaw=0.7f;
-                            auto id=add(k);if(id)voidSync.applied(id);o<<"VOIDOUT test: crater "<<id<<(id?" added":" refused")<<"\n";}
+                            k.area=mod::voidout::nativeArea(*sampler)();k.yaw=0.7f;o<<"VOIDOUT test: area "<<k.area<<"\n";
+                            // N >= 1000: a crater of N-1000 metres that the mod treats as this game's own voidout (sent to the partner).
+                            bool own=*vo>=1000;if(own)k.radius=float(*vo-1000);
+                            auto id=add(k);if(id&&!own)voidSync.applied(id);o<<"VOIDOUT test: crater "<<id<<(id?" added":" refused")<<(own?" as this game's own":"")<<"\n";}
                         catch(const std::exception& e){o<<"VOIDOUT test unavailable: "<<e.what()<<"\n";}
                     }
                     note(o.str().c_str());
