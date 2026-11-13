@@ -1083,6 +1083,8 @@ looked at.
 - Live: on the mod's display truck (pooled, no physics, moved by transform playback) `HLP_Enemy` holds him on the
   driver's side (`_2`, `_3`, `_4` other places along the sides); the hold followed the truck while it moved and the
   porter walked normally after the release.
+- The motorbike has only `HLP_C_Driver` of these (live: `HLP_Enemy` and `HLP_C_SitDown` are not on its model, the hold
+  ends at once); held there, the porter stands where the driver sits. A pillion seat needs an offset (the local 4x4).
 
 ### Carried cargo: where the game puts each case (2026-11-13, static, the reads confirmed live)
 
