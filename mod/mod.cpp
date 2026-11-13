@@ -1795,9 +1795,9 @@ struct Runtime final:ds::Transport {
         if(config.partnerPoses&&target&&partnerMode()&&cache.remote.visible&&!cache.remote.state.vehicle){
             if(cache.remote.state.flags&ds::Down){speed=0;actions=mod::puppet::DeadPoseBit;target=mod::puppet::laidDown(*target);}   // the collapse, laid on his back
             else if(cache.remote.state.flags&ds::Caught){speed=0;actions=mod::puppet::DragPoseBit;}}
-        {bool lay=!config.partnerPoses&&target&&partnerMode()&&cache.remote.visible&&(cache.remote.state.flags&ds::Down)&&!cache.remote.state.vehicle;
-            if(lay){target=mod::puppet::laidDown(*target);speed=0;actions&=mod::puppet::FlagCrouchBit;}
-            if(lay!=partnerLaid){partnerLaid=lay;note(lay?"BODY laid down: the partner is down\n":"BODY upright again\n");}}
+        {bool lay=target&&partnerMode()&&cache.remote.visible&&(cache.remote.state.flags&ds::Down)&&!cache.remote.state.vehicle;
+            if(lay&&!config.partnerPoses){target=mod::puppet::laidDown(*target);speed=0;actions&=mod::puppet::FlagCrouchBit;}   // with poses: done above
+            if(lay!=partnerLaid){partnerLaid=lay;note(lay?(config.partnerPoses?"BODY laid down: the partner is down (the game's collapse)\n":"BODY laid down: the partner is down\n"):"BODY upright again\n");}}
         if(twinMode==TwinMode::Echo&&cache.available) {
             echo.emplace_back(now,cache.local);
             while(echo.size()>1&&now-echo[1].first>=1000)echo.pop_front();
