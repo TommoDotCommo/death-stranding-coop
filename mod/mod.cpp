@@ -346,6 +346,7 @@ struct Runtime final:ds::Transport {
 #endif
     }
     // Riding along on the partner's truck (passenger.h).
+    std::function<void(uint64_t,const mod::puppet::Transform&)> keepOut;uint64_t keptOutNoted=0;
     mod::passenger::Rider rider;mod::passenger::Api passengerApi;bool passengerTried=false;mod::marker::KeyEdge passengerEdge;
     void tickPassenger(const mod::puppet::Anchor& anchor,bool connected,uint64_t now){
         if(!config.passengerKey||!ride||!anchor.entity)return;
@@ -375,12 +376,24 @@ struct Runtime final:ds::Transport {
                 if(here&&at&&rideTeleport){
                     double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1],n=std::sqrt(dx*dx+dy*dy);
                     if(n>0.1){mod::puppet::Transform t=*here;t.position[0]+=dx/n*1.5;t.position[1]+=dy/n*1.5;t.position[2]+=1.0;
-                        try{rideTeleport(anchor.entity,t);}catch(const std::exception&){}}
+                        auto porter=mod::join::readPorter(*sampler);
+                        try{if(porter.readable)rideTeleport(porter.player,t);}catch(const std::exception& e){note((std::string("PASSENGER set-down failed: ")+e.what()+"\n").c_str());}}
                 }
                 note(("PASSENGER off: "+rider.why()+"\n").c_str());break;}
             default:break;
         }
         if(!rider.riding()&&!rider.why().empty()&&rider.why()=="the game let go"){note("PASSENGER off: the game let go\n");rider.forget();}
+        // Not riding: kept out of the partner's truck, which has no collision of its own.
+        if(!rider.riding()&&truck&&ride->kind()==ds::Truck&&here&&at&&connected&&!inEvent&&!cache.local.vehicle){
+            if(auto out=mod::passenger::pushOut(*at,here->position)){
+#ifdef _WIN32
+                try{auto porter=mod::join::readPorter(*sampler);
+                    if(porter.readable){if(!keepOut)keepOut=mod::join::nativeTeleportExact(*sampler);mod::puppet::Transform t=*here;t.position=*out;keepOut(porter.player,t);
+                        if(now-keptOutNoted>=10000){keptOutNoted=now;note("PASSENGER kept out of the partner's truck\n");}}}
+                catch(const std::exception& e){if(now-keptOutNoted>=10000){keptOutNoted=now;note((std::string("PASSENGER keep-out failed: ")+e.what()+"\n").c_str());}}
+#endif
+            }
+        }
     }
     uint64_t passengerParent=0;uint8_t passengerSeen=0xff;
     std::string passengerTest(const std::string& args,const mod::puppet::Anchor& anchor){

@@ -1,4 +1,5 @@
 #include "passenger.h"
+#include <cmath>
 #include <cstdio>
 using namespace mod::passenger;
 static int failures=0;
@@ -23,6 +24,15 @@ int main(){
       { Rider r=on();Look l=near();CHECK(r.tick(l)==Do::Nothing&&r.tick(l)==Do::Nothing&&r.riding());      // still blending on: not over
         l.mover=Held;r.tick(l);l.mover=Free;CHECK(r.tick(l)==Do::Nothing&&r.riding());CHECK(r.tick(l)==Do::Nothing&&!r.riding()&&r.why()=="the game let go"); }
       { Rider r=on();r.forget();CHECK(!r.riding()&&r.tick(near())==Do::Nothing); } }
+    // Kept out of the truck: inside, out through the nearest side by the margin; outside, on the roof or below: nothing.
+    { Transform t;t.position={100,200,10};t.rotation={0,-1,0, 1,0,0, 0,0,1};   // right = -y, forward = +x
+      CHECK(!pushOut(t,{100,203,10}));CHECK(!pushOut(t,{105,200,10}));CHECK(!pushOut(t,{100,200,14}));CHECK(!pushOut(t,{100,200,8}));
+      auto a=pushOut(t,{100,198.8,10.5});                                 // 1.2 m to the right (-y), near the side
+      CHECK(a&&std::fabs((*a)[1]-(200-1.65))<1e-9&&std::fabs((*a)[0]-100)<1e-9&&std::fabs((*a)[2]-10.5)<1e-9);
+      auto b=pushOut(t,{103.5,200.2,10});                                 // near the front: out along forward
+      CHECK(b&&std::fabs((*b)[0]-(100+3.95))<1e-9&&std::fabs((*b)[1]-200.2)<1e-9);
+      auto c=pushOut(t,{96.5,200.5,10});CHECK(c&&std::fabs((*c)[0]-(100-3.95))<1e-9);
+      auto d=pushOut(t,{100,201.2,10});CHECK(d&&std::fabs((*d)[1]-(200+1.65))<1e-9); }
     if(failures){std::fprintf(stderr,"passenger oracle: %d failures\n",failures);return 1;}
     std::puts("passenger ok");return 0;
 }

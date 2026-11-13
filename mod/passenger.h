@@ -7,7 +7,9 @@
 // partner gets out, the truck goes, a game event starts or the link drops; he is then set down beside the truck.
 #include "puppet.h"
 #include <cstdint>
+#include <array>
 #include <functional>
+#include <optional>
 #include <string>
 namespace mod::passenger {
 using puppet::Transform;
@@ -35,6 +37,12 @@ public:
 private:
     uint64_t truck_=0;bool heldSeen_=false;unsigned freeLooks_=0;std::string why_;
 };
+// The display truck has no collision (the pooled creation skips the game's physics setup; its collision parts have
+// no instances: game_offsets.md, "Riding along"). The mod keeps this porter out of its box instead: a porter found
+// inside is put just outside the nearest side, as a wall would stop him.
+struct Box { double halfRight=1.5,halfForward=3.8,height=3.3,margin=0.15; };
+// truck: its transform (rows right, forward, up); porter: a position. The position to move him to, or nothing.
+std::optional<std::array<double,3>> pushOut(const Transform& truck,const std::array<double,3>& porter,const Box& box={});
 // The game's routines (Windows only): hold `porter` on `helper` of `vehicle`, let it go, read the follow state.
 struct Api {
     std::function<bool(uint64_t porter,uint64_t vehicle,const char* helper)> attach;

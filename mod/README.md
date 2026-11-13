@@ -739,7 +739,8 @@ When the partner drives a truck, standing next to it (4.5 m) and pressing **J** 
 J again lets go. He is also let go by himself when the partner gets out or leaves, a game event starts or the link
 drops, and is set down on the ground beside the truck. It uses the game's own "follow a helper" mode of the player
 mover (`passenger.h`; game_offsets.md, "Riding along"): the partner stays the only driver and nothing is saved.
-`"passenger_key": N` sets another virtual-key code, 0 turns it off. Log lines start with `PASSENGER`. Whether J is
+Not riding, a porter who walks into the partner's truck is kept out of its box (the display truck has no collision
+of its own). `"passenger_key": N` sets another virtual-key code, 0 turns it off (and the keep-out with it). Log lines start with `PASSENGER`. Whether J is
 free in the game's default keys is not checked. Lab test: `puppet.ride passenger on HELPER [parent]` / `off` on the
 mod's own lead truck. Tests: `passenger_test.cpp` (mutants FAR and STAY).
 

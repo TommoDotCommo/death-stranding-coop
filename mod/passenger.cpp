@@ -1,5 +1,6 @@
 #include "passenger.h"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
 #include <vector>
@@ -25,6 +26,22 @@ Do Rider::tick(const Look& l){
     if(heldSeen_&&l.mover==Free){if(++freeLooks_>=2){truck_=0;heldSeen_=false;why_="the game let go";return Do::Nothing;}}
     else freeLooks_=0;
     return Do::Nothing;
+}
+std::optional<std::array<double,3>> pushOut(const Transform& t,const std::array<double,3>& p,const Box& b){
+    double d[3]={p[0]-t.position[0],p[1]-t.position[1],p[2]-t.position[2]};
+    auto along=[&](int row){return d[0]*t.rotation[size_t(3*row)]+d[1]*t.rotation[size_t(3*row+1)]+d[2]*t.rotation[size_t(3*row+2)];};
+    double r=along(0),f=along(1),u=along(2);
+#ifndef MUTANT_PASSENGER_TALL
+    if(u<-0.5||u>b.height)return std::nullopt;                         // above the roof or below the ground: not inside
+#endif
+    if(std::fabs(r)>=b.halfRight||std::fabs(f)>=b.halfForward)return std::nullopt;
+    // Out through the nearest side.
+    double outR=b.halfRight-std::fabs(r),outF=b.halfForward-std::fabs(f);
+    double moveR=0,moveF=0;
+    if(outR<=outF)moveR=(r>=0?1:-1)*(outR+b.margin);else moveF=(f>=0?1:-1)*(outF+b.margin);
+    std::array<double,3> out=p;
+    for(int k=0;k<3;++k)out[size_t(k)]+=moveR*t.rotation[size_t(k)]+moveF*t.rotation[size_t(3+k)];
+    return out;
 }
 Api nativeApi(discovery::Sampler& s){
 #ifdef _WIN32
