@@ -758,6 +758,21 @@ std::function<bool()> nativeGameEvent(discovery::Sampler& s){
     return [event]{return event();};
 #endif
 }
+static bool liveAnimationControl(const discovery::Sampler& s,uint64_t manager,int handle){
+    uint64_t slots=0,network=0,holder=0,table=0,object=0;int32_t id=-1;
+    if(!manager||handle<0||!s.read(manager+0x58,&slots,8)||!slots||!s.read(slots+uint64_t(handle)*48+8,&id,4))return false;
+    if(id==-1)return true;   // the setter stores the value and sends nothing
+    if(!s.read(manager+0xa0,&network,8)||!network||!s.read(network+0x40,&holder,8)||!holder||!s.read(holder+8,&table,8)||!table)return false;
+    return s.read(table+uint64_t(uint16_t(id))*40+0x10,&object,8)&&object!=0;
+}
+AnimationTrigger animationTrigger(const discovery::Sampler& s,AnimationTrigger raw){
+    return [&s,raw](uint64_t manager,int handle,float seconds){
+#ifndef MUTANT_DOUBLE_TRIGGER_LIVE
+        if(!liveAnimationControl(s,manager,handle))return;
+#endif
+        raw(manager,handle,seconds);
+    };
+}
 DoubleApi nativeDoubleApi(discovery::Sampler& s){
 #ifndef _WIN32
     (void)s;throw std::runtime_error("native double API requires Windows");
@@ -797,12 +812,7 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
     // entries, object at +0x10) and use it unchecked. When the game takes the body back for an event of its own (seen
     // live after a long teleport) the network is another one and a handle bound before can name an empty entry: the
     // game then read through a null pointer. A control is set only while its entry is there.
-    auto live=[&s](uint64_t manager,int handle)->bool{
-        uint64_t slots=0,network=0,holder=0,table=0,object=0;int32_t id=-1;
-        if(!manager||handle<0||!s.read(manager+0x58,&slots,8)||!slots||!s.read(slots+uint64_t(handle)*48+8,&id,4))return false;
-        if(id==-1)return true;   // the setter stores the value and sends nothing
-        if(!s.read(manager+0xa0,&network,8)||!network||!s.read(network+0x40,&holder,8)||!holder||!s.read(holder+8,&table,8)||!table)return false;
-        return s.read(table+uint64_t(uint16_t(id))*40+0x10,&object,8)&&object!=0;};
+    auto live=[&s](uint64_t manager,int handle){return liveAnimationControl(s,manager,handle);};
     auto setFloat=[rawSetFloat,live](uint64_t manager,int handle,float value){if(live(manager,handle))rawSetFloat(manager,handle,value);};
     auto setBool=[rawSetBool,live](uint64_t manager,int handle,bool value){if(live(manager,handle))rawSetBool(manager,handle,value);};
     const uint64_t animator=s.base+0x3d09910;   // MorphemeAnimationManager
@@ -812,7 +822,7 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
         int isDead=-1,isDrag=-1,tb0=-1,tb1=-1,tb2=-1,tf0=-1,rewindLong=-1;uint32_t pose=0;uint64_t poseAt=0;
         int isRest=-1,restState=-1,restType=-1,restLoopEnd=-1,tf2=-1,tf8=-1,tb5=-1;
         std::vector<int> mirrorBool,mirrorFloat;std::optional<ds::Animation> applied;bool mirroring=false;};auto handles=std::make_shared<Handles>();
-    using TriggerFn=void(*)(uint64_t,int,float);auto trigger=reinterpret_cast<TriggerFn>(s.base+entries[8].rva);
+    using TriggerFn=void(*)(uint64_t,int,float);auto trigger=animationTrigger(s,reinterpret_cast<TriggerFn>(s.base+entries[8].rva));
     // The borrowed instance is kept after release and swapped back in on the next borrow of the same manager,
     // so repeated borrows build one instance per double, not one per borrow.
     struct Borrowed{uint64_t manager=0,own=0,instance=0,def=0;};auto borrowed=std::make_shared<Borrowed>();

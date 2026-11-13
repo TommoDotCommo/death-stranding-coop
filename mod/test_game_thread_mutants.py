@@ -2,13 +2,14 @@
 from pathlib import Path
 import subprocess
 import tempfile
+import sys
 import mutants
 ROOT=Path(__file__).resolve().parent
 families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNATURE','TARGET'],
            ['game_thread_test.cpp','game_thread.cpp','discovery.cpp']),
           ('puppet',['LAID_AXES','LAID_LIFT','PERMISSION','WORLD','ALIAS','LOCAL','READBACK','LIFETIME','ONCE','ARGUMENTS','REMOVE_MODE','RESOURCE'],
            ['puppet_test.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
-          ('double',['ANCHOR','STILL','NETWORK','ACTION_OWNER','ACTION_MASK','TRANSIENT','EFFECTS','SMOOTH','YIELD_ANCHOR','PRIVATE_ROOM','PERMISSION','PARKED','IDENTITY','YIELD','READBACK','LOCAL','RELEASE','WORLD','FIND_PARENT','FIND_UNIQUE','HOLD','HIDDEN_YIELD','MIRROR_ORDER','MIRROR_CLEAR'],
+          ('double',['ANCHOR','STILL','NETWORK','ACTION_OWNER','ACTION_MASK','TRANSIENT','EFFECTS','SMOOTH','YIELD_ANCHOR','PRIVATE_ROOM','PERMISSION','PARKED','IDENTITY','YIELD','READBACK','LOCAL','RELEASE','WORLD','FIND_PARENT','FIND_UNIQUE','HOLD','HIDDEN_YIELD','MIRROR_ORDER','MIRROR_CLEAR','TRIGGER_LIVE'],
            ['double_test.cpp','double.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
           ('ownbody',['WORLD','ALIVE','PARK','DRESS','OWN_PARSE','MODEL_OWNER','MODEL_EXACT','DRESSED_COUNT','APPLY_ALWAYS','INPLACE_SINGLE','INPLACE_PORTER','READY','INPLACE_RESOURCE','INPLACE_SAME','STREAMING_REF'],['double_test.cpp','double.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
           ('padscript',['BOUNDS','STAMP','TIMING'],['pad_test.cpp','pad.cpp']),
@@ -25,7 +26,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('enemy',['ALL_UP','KIND','ECHO','TWICE','HASTY','CAMP_ECHO','CAMP_TWICE'],['enemies_test.cpp','enemies.cpp','discovery.cpp']),
           ('wheels',['ROOT','LONG_WAY'],['wheels_test.cpp','wheels.cpp']),
           ('controls',['ROSE','PULSE_HELD','SHORT','BLEND_KINDS','BLEND_WRAP','AGGREGATE'],['controls_test.cpp','controls.cpp','discovery.cpp']),
-          ('voidout',['LOAD','ECHO','TWICE'],['voidout_test.cpp','voidout.cpp','discovery.cpp']),
+          ('voidout',['LOAD','ECHO','TWICE','CLASS','WRITABLE'],['voidout_test.cpp','voidout.cpp','discovery.cpp']),
           ('passenger',['TALL','FAR','STAY'],['passenger_test.cpp','passenger.cpp','discovery.cpp']),
           ('place',['ORDER','RESTLESS'],['carry_place_test.cpp','carry_place.cpp','structures.cpp','discovery.cpp']),
           ('road',['TOTAL_ADDS','LOAD','LESS','ECHO','TWICE','AMOUNT'],['roads_test.cpp','roads.cpp','discovery.cpp']),
@@ -40,6 +41,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('outfit',['COUNT','SKIP','RESEND','ELEMENTS'],['outfit_test.cpp','outfit.cpp','discovery.cpp']),
           ('weather',['KEEP','MARGIN','RENEW'],['weather_test.cpp','weather.cpp','discovery.cpp']),
           ('ride',['LEAK','IDENTITY','PAINT'],['ride_test.cpp','ride.cpp','providers.cpp','pose.cpp','discovery.cpp','../core/core.cpp'])]
+families=[f for f in families if not sys.argv[1:] or f[0] in sys.argv[1:]]
 with tempfile.TemporaryDirectory() as directory:
     builds=mutants.MacroBuilds(directory,[ROOT,ROOT.parent/'core'])
     builds.prepare(ROOT/s for _,_,sources in families for s in sources)

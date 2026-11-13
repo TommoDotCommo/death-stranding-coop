@@ -1167,7 +1167,7 @@ struct Runtime final:ds::Transport {
     uint64_t voidReadAt=0,voidPorter=0;bool voidTried=false;
     void tickVoidouts(uint64_t now){
         if(!core||!sampler||!config.shareEnemies){voidIn.clear();return;}
-        if(!voidTried){voidTried=true;try{voidAdd=mod::voidout::nativeAdd(*sampler);}catch(const std::exception& e){note((std::string("VOIDOUT unavailable: ")+e.what()+"\n").c_str());}}
+        if(!voidTried){voidTried=true;try{voidAdd=mod::voidout::nativeAdd(*sampler,[this](const std::string& row){note(row.c_str());});}catch(const std::exception& e){note((std::string("VOIDOUT unavailable: ")+e.what()+"\n").c_str());}}
         if(!voidAdd||(voidIn.empty()&&now-voidReadAt<1000))return;
         voidReadAt=now;
         auto anchor=anchorNow();if(anchor.entity!=voidPorter){voidPorter=anchor.entity;voidSync.forget();}
@@ -2305,7 +2305,7 @@ struct Runtime final:ds::Transport {
                     o<<"VOIDOUT test: "<<(table.readable?"":"(unreadable) ")<<table.craters.size()<<" craters, counter "<<table.counter<<"\n";
                     for(auto& k:table.craters)o<<"VOIDOUT crater "<<k.id<<" at "<<int(k.position[0])<<","<<int(k.position[1])<<","<<int(k.position[2])<<" r "<<k.radius<<" area "<<k.area<<(k.active?" active":"")<<(k.disabled?" disabled":"")<<"\n";
                     if(*vo){
-                        try{auto add=mod::voidout::nativeAdd(*sampler);auto t=mod::puppet::transform(anchor.pose);mod::voidout::Crater k;k.radius=float(*vo);
+                        try{auto add=mod::voidout::nativeAdd(*sampler,[this](const std::string& row){note(row.c_str());});auto t=mod::puppet::transform(anchor.pose);mod::voidout::Crater k;k.radius=float(*vo);
                             for(int i=0;i<3;++i)k.position[size_t(i)]=t.position[size_t(i)]+70*double(t.rotation[size_t(3+i)]);
                             k.area=mod::voidout::nativeArea(*sampler)();k.yaw=0.7f;o<<"VOIDOUT test: area "<<k.area<<"\n";
                             // N >= 1000: a crater of N-1000 metres that the mod treats as this game's own voidout (sent to the partner).

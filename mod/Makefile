@@ -114,6 +114,12 @@ build/controls-test: controls_test.cpp controls.cpp controls.h discovery.cpp | b
 build/voidout-test: voidout_test.cpp voidout.cpp voidout.h discovery.cpp | build
 	$(CXX) $(FLAGS) voidout_test.cpp voidout.cpp discovery.cpp -o $@
 
+robustness-test: build/double-test build/voidout-test
+	./build/double-test
+	./build/voidout-test
+	python3 -B test_game_thread_mutants.py double voidout
+.PHONY: robustness-test
+
 build/passenger-test: passenger_test.cpp passenger.cpp passenger.h discovery.cpp | build
 	$(CXX) $(FLAGS) passenger_test.cpp passenger.cpp discovery.cpp -o $@
 

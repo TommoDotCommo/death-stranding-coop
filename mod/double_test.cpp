@@ -396,7 +396,20 @@ void mirror(){
     Double e(api2,[&](const std::string& r){h.events.push_back(r);});e.enable();e.mirror(&a,true);e.tick(true,&t);h.frame();e.mirror(nullptr,false);e.tick(true,nullptr,0,0,true);
     CHECK(e.stage()==Double::Stage::Hidden&&o2.back()=="clear");
 }
+void triggerLiveness(){
+    fakemem::Fake f;auto s=f.sampler();auto B=f.base;unsigned calls=0;
+    auto trigger=animationTrigger(s,[&](uint64_t m,int h,float seconds){CHECK(m==B+0x7000&&h==0&&seconds==.1f);++calls;});
+    f.put<uint64_t>(0x7058,B+0x8000);f.put<int32_t>(0x8008,2);
+    f.put<uint64_t>(0x70a0,B+0x9000);f.put<uint64_t>(0x9040,B+0xa000);f.put<uint64_t>(0xa008,B+0xb000);
+    f.put<uint64_t>(0xb060,B+0xc000);trigger(B+0x7000,0,.1f);CHECK(calls==1);
+    f.put<uint64_t>(0xb060,0);trigger(B+0x7000,0,.1f);CHECK(calls==1); // the game replaced the network
+    f.put<uint64_t>(0x70a0,0);trigger(B+0x7000,0,.1f);CHECK(calls==1);
+    f.blocked=B+0x8008;trigger(B+0x7000,0,.1f);CHECK(calls==1);f.blocked=0;
+    trigger(0,0,.1f);trigger(B+0x7000,-1,.1f);CHECK(calls==1);
+    f.put<int32_t>(0x8008,-1);trigger(B+0x7000,0,.1f);CHECK(calls==2); // stored only, as with the setters
+}
 int main(){
+    triggerLiveness();
     lifecycle();mirror();mover();animation();network();refusedUpgrade();actions();effects();releasedByGame();cargoCommand();privateRoom();ownBody();ownCommand();modelSwap();inPlaceSwap();bodyReport();
     try{transient();}catch(const std::exception& e){std::fprintf(stderr,"double oracle: transient threw %s\n",e.what());++failures;}
     hold();busy();yields(true);yields(false);identity();unconfirmed();tree();conversion();
