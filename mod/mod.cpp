@@ -346,6 +346,9 @@ struct Runtime final:ds::Transport {
 #endif
     }
     // Riding along on the partner's truck (passenger.h).
+    // This porter's own vehicle, as the provider last saw it (game axes): where a partner riding along is held.
+    struct LocalVehicle { bool riding=false; uint8_t kind=0; std::array<double,3> position{}; std::array<float,9> rotation{}; uint64_t at=0; };
+    LocalVehicle localVehicle;bool partnerAboard=false;
     std::function<void(uint64_t,const mod::puppet::Transform&)> keepOut;uint64_t keptOutNoted=0;
     mod::passenger::Rider rider;mod::passenger::Api passengerApi;bool passengerTried=false;mod::marker::KeyEdge passengerEdge;
     void tickPassenger(const mod::puppet::Anchor& anchor,bool connected,uint64_t now){
@@ -1554,6 +1557,7 @@ struct Runtime final:ds::Transport {
                     if(auto t=mod::puppet::readFloatVariable(*raw,o.porter,raw->base+0x3d09910,"Turn_Heading",*steerVar))r.steer=std::clamp(double(*t),-ds::SteerMax,ds::SteerMax);
                     if(o.variant<=ds::VehicleVariantMax){r.variant=uint8_t(o.variant);r.look=o.appearance;}
                 }
+                localVehicle={o.available&&o.riding,r.kind,o.position,o.rotation,mod::nowMs()};
                 if(o.available&&int(r.kind)!=*lastKind){*lastKind=r.kind;
                     std::ostringstream m;m<<"RIDE local kind="<<int(r.kind)<<" vehicle=0x"<<std::hex<<o.vehicle<<"\n";note(m.str().c_str());}
                 return r;});}
@@ -1750,6 +1754,13 @@ struct Runtime final:ds::Transport {
         if(partnerMode()&&cache.remote.visible){target=mod::puppet::fromState(cache.remote.state.position,cache.remote.state.yaw);speed=horizontal(cache.remote.state);actions=packed(cache.remote.state);
             // Riding: the body sits on the seat with the vehicle's pitch and roll, in the game's riding pose.
             if(auto kind=cache.remote.state.vehicle){target->rotation=mod::rotationFromAngles(cache.remote.state.vehicleAngles);actions|=uint32_t(kind)<<mod::puppet::VehicleShift;}}
+        // A partner riding along on this porter's truck (passenger.h): held at the rider's place on this game's own
+        // truck, where it is now (his samples come a link delay late: at speed his body would trail behind).
+        {bool aboard=target&&partnerMode()&&cache.remote.visible&&(cache.remote.state.flags&ds::Passenger)&&localVehicle.riding&&localVehicle.kind==ds::Truck&&now-localVehicle.at<500;
+            if(aboard){auto& v=localVehicle;const double off[3]={-1.3,0.1,0.6};   // HLP_Enemy: right, forward, up (live)
+                for(int k=0;k<3;++k)target->position[k]=v.position[k]+off[0]*v.rotation[k]+off[1]*v.rotation[3+k]+off[2]*v.rotation[6+k];
+                speed=0;actions&=mod::puppet::FlagCrouchBit;}
+            if(aboard!=partnerAboard){partnerAboard=aboard;note(aboard?"BODY the partner rides along on this truck\n":"BODY the partner is off this truck\n");}}
         // A partner who is down lies on his back where he fell (no locomotion underneath).
         {bool lay=target&&partnerMode()&&cache.remote.visible&&(cache.remote.state.flags&ds::Down)&&!cache.remote.state.vehicle;
             if(lay){target=mod::puppet::laidDown(*target);speed=0;actions&=mod::puppet::FlagCrouchBit;}
@@ -1816,7 +1827,7 @@ struct Runtime final:ds::Transport {
             // Riding along on the partner's truck (passenger.h): the porter moves with the truck, not on his feet. The
             // partner's game shows his body from these samples: with no speed it holds still at the truck's side
             // instead of running beside it.
-            if(cache.available&&rider.riding())cache.local.velocity={0,0,0};
+            if(cache.available&&rider.riding()){cache.local.velocity={0,0,0};cache.local.flags|=ds::Passenger;}
             stages.enter("start",mod::nowUs());
             // A bounded, read-only observation; never writes story or save state.
             if(game&&cache.available&&sampler&&now>=nextProgressRead){
