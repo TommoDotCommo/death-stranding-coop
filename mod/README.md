@@ -735,7 +735,12 @@ Log lines: `ENEMY ...`, `ORDER ...`, `ORDERLOAD ...`. Test commands in `puppet.c
 load reads it), `loadsave <id*100+n>` and `loadmake 0` (remember a case, then make it again behind the porter with the
 creator the shared load uses); in `puppet.ride`: `place X Y Z HEADING`.
 
-## Delivery rewards and connection levels (`share_rewards`, with `share_orders`; off by default, nothing run live)
+## Delivery rewards and connection levels (`share_rewards`, with `share_orders`; off by default)
+
+Run live: the read, the add routine alone, and two copies (one facility's point added in one game reached the other,
+which added the shortfall with its own routine; both read the same total, nothing bounced). Seen and not yet
+understood: adding points up to a facility's cap left its level as it was, so the level is raised somewhere else
+(or the field read is not the stars). Not run live: a real delivery between two copies (step 4 below).
 
 `"share_rewards": true` (`rewards.h`; refused without `share_orders`). A facility's connection level (the stars of a
 knot city or a prepper) is a points total and a level in the game's residents system. Each mod reads every
@@ -880,7 +885,12 @@ list: id, LOD, position, life state of every MULE), not from the log alone.
 9. **Link.** The walking regression's poor link on the guest (loss and delay): moves continue, no move uses a sample
    over a second old (log ages), and after the link is cut for 5 s nothing is moved until samples return.
 
-## Story within a session (`share_story_orders`, `story_resync`; experiments, off by default, nothing run live)
+## Story within a session (`share_story_orders`, `story_resync`; experiments, off by default)
+
+Run live: `story_resync` in key mode between two copies (the guest's key, the host's checkpoint written, fetched,
+put in place, loaded in 2 s, the guest standing where the host saved, the two seeing each other again), and steps 1
+to 5 of the checklist below on one copy. Not run live: `auto` mode, `share_story_orders`, and a resync across an
+episode change.
 
 The host's save is the story, and a guest who joins through the launcher starts from the host's checkpoint. These two
 settings are for what happens after that, while both play. Both need an explicit `role`; the guest never moves the
@@ -923,7 +933,8 @@ checkpoint), `load <type*100+slot> <stamp>` (ask the game to load a save: `100` 
 `key 1 <stamp>` (the catch-up key).
 
 Live checklist (an authorized operator; disposable copies, one copy unless stated; expected values are what the
-static reading predicts, every one of them still to be seen):
+static reading predicts; steps 1 to 5 and the key mode of step 6 have been seen as written, and a save that changed
+under the running game does load, the open question of step 5):
 
 1. Arming. Config: the play setup plus `"story_resync":"key"` and `"role":"host"`. Expect at the first tick in the
    world `STORY resync on: host, key, key 120, save armed, load armed, account <id>`. `save off` or `load off` with
