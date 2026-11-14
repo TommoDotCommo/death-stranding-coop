@@ -303,3 +303,10 @@ so the next walk went the other way, and he stood still when the script ended; n
 
 Module snapshots retry on `ERROR_BAD_LENGTH`, the documented race with a concurrent module load, which once ended a copy at
 startup. Any other failure is still fatal, and the message includes the error code.
+
+A snapshot lists base addresses, not references. A module that another thread unloads after the snapshot is unmapped
+by the time the patch reads its header, which ended a copy about ten minutes into a session (access violation in the
+proxy; the base was no longer in the module list). Each listed module is now held loaded while it is patched
+(`module_hold.h`), and one that is already gone is skipped with a `MODULE_GONE` record. `make -C redirect
+module-hold-test` (native Windows, no game) loads and frees a DLL in a loop while another thread walks snapshots the
+same way: the run must see listed modules gone before the read, and the mutant without the hold must fault on one.
