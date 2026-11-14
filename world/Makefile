@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := test
 CXX ?= g++
-MINGW ?= x86_64-w64-mingw32-g++-posix
+# Debian names the POSIX-thread cross-compiler with a -posix suffix; MSYS2 has the plain name only.
+MINGW ?= $(shell command -v x86_64-w64-mingw32-g++-posix >/dev/null 2>&1 && echo x86_64-w64-mingw32-g++-posix || echo x86_64-w64-mingw32-g++)
 FLAGS := -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -pthread
 WINFLAGS := $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
 build:

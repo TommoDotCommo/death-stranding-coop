@@ -36,6 +36,12 @@ make test     # every game-free test and mutant
 make all      # Windows binaries (proxy, mod, probes)
 ```
 
+The supported build host is Linux with the cross-compiler. Building natively on Windows with MSYS2
+(`mingw-w64-x86_64-gcc`, `make`, `python`) works for `make all`: the Makefiles pick the compiler and `windres` names
+MSYS2 has, and link statically. `make test` in full needs Linux (the core's host tests use `sys/syscall.h`); on
+Windows run the suites one directory at a time (`make -C redirect portable-test` needs `rg`, ripgrep, on `PATH`). A
+compiler or resource compiler with another name can be given as `MINGW=...` or `WINDRES=...`.
+
 ## Two PCs (built, not yet tried live)
 
 Each player's `mod.json` names the other PC as `peer` (a numeric IPv4 address: a LAN address, or a VPN address
