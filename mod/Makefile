@@ -176,10 +176,13 @@ build/orderload-test: orderload_test.cpp orderload.cpp orderload.h cargo.cpp car
 	$(CXX) $(FLAGS) orderload_test.cpp orderload.cpp cargo.cpp discovery.cpp -o $@
 build/story-test: story_test.cpp story.cpp story.h ../launcher/saves.cpp ../launcher/saves.h ../launcher/saves_vectors.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(CXX) $(FLAGS) story_test.cpp story.cpp ../launcher/saves.cpp discovery.cpp ../core/core.cpp -o $@
+build/wire-test: wire_test.cpp rewards.cpp rewards.h signals.cpp signals.h orderload.cpp orderload.h cargo.cpp cargo.h discovery.cpp ../core/core.cpp ../core/core.h | build
+	$(CXX) $(FLAGS) wire_test.cpp rewards.cpp signals.cpp orderload.cpp cargo.cpp discovery.cpp ../core/core.cpp -o $@
 build/rewards-test: rewards_test.cpp rewards.cpp rewards.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(CXX) $(FLAGS) rewards_test.cpp rewards.cpp discovery.cpp ../core/core.cpp -o $@
-game-thread-test: build/rewards-test build/ui-test build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/passenger-test build/place-test build/roads-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test build/signals-test build/story-test build/enemy-poses-test
+game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/passenger-test build/place-test build/roads-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test build/signals-test build/story-test build/enemy-poses-test
 	./build/story-test
+	./build/wire-test
 	./build/rewards-test
 	./build/orderload-test
 	./build/game-thread-test
