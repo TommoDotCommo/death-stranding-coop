@@ -47,6 +47,15 @@ The manifest is `coop-mod.json` (schema 1: `id`, `version`, `game` with the supp
 `proxy`, `proton.dll_overrides`, `files` with SHA-256 and size, `user_data`). Entries with `"root": "data"` go to the
 data folder.
 
+## Setup from the launcher (no Python)
+
+A player does not need this script: the package's launcher installs itself. Started from the extracted package it
+finds the Steam game folder, and when the proxy or the mod is missing or differs it asks once and copies `avrt.dll`
+into the game folder and `mod.dll` into the co-op data folder (`launcher/core.h`, `setupInstall`); About has
+**Remove co-op from the game**, which deletes the proxy only while it is this package's. It writes no receipt, so
+`coop_install.py status` reports such an install as `installed-by-mod-manager`. The package carries
+`HOW-TO-PLAY.txt` with the steps for both players.
+
 ## Tests
 
 `make -C install test`: 18 behaviour tests (install adds only, shipped files byte-identical, uninstall restores the

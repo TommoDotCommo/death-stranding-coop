@@ -16,6 +16,29 @@ GAME = dict(name='DEATH STRANDING DIRECTOR\'S CUT', steam_appid=1850570, exe=['d
                          sha256='9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b')])
 
 
+HOW_TO = '''Death Stranding co-op {version} (experimental, two players)
+
+You need: DEATH STRANDING DIRECTOR'S CUT on Steam (build 13300582), installed, and Steam running.
+
+1. Extract this whole folder anywhere (keep the files together).
+2. Start deathstranding-coop.exe. It offers to install the mod into your game: choose Yes.
+   It adds one file (avrt.dll) to the game folder. Nothing of the game is replaced.
+   Co-op saves are separate from your ordinary saves (%LOCALAPPDATA%\\DeathStrandingCoop).
+3. First time: Saves, "Copy my Steam saves into co-op", so co-op continues your story instead of
+   starting a new one. Only the host needs this: a guest can start from the host's save.
+4. Host: Play, Host a game, Open lobby, Copy invite, send it to your friend.
+   Guest: Play, Join a friend, paste the invite, Join, then Ready.
+   Leave "Start from the host's save" ticked to play in the same world and episode.
+   Host: Start game. In the game both choose Continue.
+5. Windows Firewall asks once whether the game may use the network: choose Allow.
+   Not on the same network? Both install Tailscale (or another VPN) and use the same invite.
+
+Keys in the game: J rides along on your partner's truck or bike (and gets off), B pings the map.
+Something wrong? About, "Save diagnostics for a bug report", and send that file.
+Remove: About, "Remove co-op from the game". Starting the game from Steam as usual plays without co-op.
+'''
+
+
 def build_package(out, version, proxy, mod, proxy_name='avrt.dll', builds=None, launcher=None, world=None):
     out = Path(out)
     out.mkdir(parents=True)
@@ -38,6 +61,8 @@ def build_package(out, version, proxy, mod, proxy_name='avrt.dll', builds=None, 
                     proton=dict(dll_overrides=[proxy_name[:-4]+'=n,b']), files=files,
                     user_data='%LOCALAPPDATA%\\DeathStrandingCoop')
     (out/MANIFEST).write_text(json.dumps(manifest, indent=1), encoding='utf-8')
+    if launcher is not None:
+        (out/'HOW-TO-PLAY.txt').write_text(HOW_TO.format(version=version), encoding='utf-8', newline='\r\n')
     return manifest
 
 

@@ -103,6 +103,13 @@ choose Allow), firewall off, or not readable. Only rules that name the game's `d
 same sentence is in the diagnostics file, and `deathstranding-coop.exe --firewall-status` prints it without a window
 (exit code: 0 unknown, 1 off, 2 allowed, 3 blocked, 4 no rule). The launcher does not change the firewall.
 
+## Setup
+
+Started from an extracted package (the launcher with `avrt.dll` and `redirect-data\\mod\\mod.dll` beside it), the
+launcher asks once per start whether to install or update: it adds `avrt.dll` to the Steam game folder and the mod to
+the co-op data folder. A different `avrt.dll` already there is named in the question before it is replaced. About,
+**Remove co-op from the game** takes the proxy out again (only while it is this package's); saves stay.
+
 ## Steam and data
 
 Settings selects the game folder registered by Steam for app **1850570**. The

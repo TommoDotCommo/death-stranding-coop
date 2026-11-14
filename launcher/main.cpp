@@ -23,7 +23,7 @@ std::wstring player=L"Porter",gameFolder;
 std::string pasted,lastState,lastRows,saveNote;   // saveNote: what happened to the guest's saves, kept on the lobby page
 uint32_t requestedSecret=0,lastScan=0;
 std::vector<HWND> controls[4];
-enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import};
+enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import,Remove};
 HWND child(int id){return GetDlgItem(window,id);}
 std::wstring text(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(n+1,0);GetWindowTextW(h,s.data(),n+1);s.resize(n);return s;}
 std::string utf8(const std::wstring& s){if(s.empty())return {};int n=WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),nullptr,0,nullptr,nullptr);std::string v(n,0);WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),v.data(),n,nullptr,nullptr);return v;}
@@ -67,6 +67,27 @@ void importSaves(HWND h){
     auto aside=options.data/"backups"/("before-import-"+std::to_string(std::time(nullptr)));
     int copied=saves::importOrdinary(from,to,aside);
     MessageBoxW(h,(std::to_wstring(copied)+L" save(s) copied into co-op. Continue in the game loads the newest."+(have?L"\n\nEarlier co-op saves: "+aside.wstring():L"")).c_str(),L"Copy complete",MB_OK);
+}
+// Setup: the package this launcher was started from goes into the game (core.h). Asked once per start while needed.
+void offerSetup(HWND h){
+    if(options.direct||gameFolder.empty())return;
+    auto package=executable.parent_path();auto s=setupState(package,gameFolder,options.data);
+    if(!s.needed())return;
+    bool update=s.proxy==Part::Current||s.mod==Part::Different;
+    std::wstring ask=std::wstring(update?L"Update the co-op mod in your game to this package's version?":L"Install the co-op mod into your game?")
+        +L"\n\nGame: "+gameFolder+L"\nCo-op data and saves: "+options.data.wstring()
+        +L"\n\nIt adds one file (avrt.dll) to the game folder; no file of the game is replaced, and your ordinary saves are not touched."
+        +(s.proxy==Part::Different?L"\n\nThe game folder already has a different avrt.dll (an older co-op version, or another mod's). It will be replaced.":L"");
+    if(MessageBoxW(h,ask.c_str(),L"Death Stranding co-op setup",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
+    if(gameRunning(gameFolder))throw std::runtime_error("Close the game before installing.");
+    setupInstall(package,gameFolder,options.data,true);
+    MessageBoxW(h,L"Installed. Choose Host, Join or Play solo.\n\nTo remove it later: About, Remove co-op from the game.",L"Death Stranding co-op setup",MB_OK);
+}
+void removeSetup(HWND h){
+    if(net->lobby||gameRunning(gameFolder))throw std::runtime_error("Leave the lobby and close the game first.");
+    if(MessageBoxW(h,L"Remove the co-op mod from the game folder?\n\nYour co-op saves and settings are kept.",L"Remove co-op",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
+    if(!setupRemove(executable.parent_path(),gameFolder))throw std::runtime_error("The avrt.dll in the game folder is not this package's (another version or another mod). It was left alone.");
+    MessageBoxW(h,L"Removed. The game starts without co-op.",L"Remove co-op",MB_OK);
 }
 void saveSettings(){
     if(initializing)return;
@@ -136,7 +157,7 @@ void render(){
     if(selectedTab==1){place(210,30,120,w-60,65);place(211,30,200,w-60,180);place(OpenSaves,30,400,(w-75)/2,40);place(BackUp,45+(w-75)/2,400,(w-75)/2,40);place(Import,30,455,w-60,40);}
     if(selectedTab==2){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(Lan,30,270,w-60,30);place(Tailscale,30,310,w-60,30);place(Privacy,30,350,w-60,30);place(World,30,390,w-60,30);place(Protocol,30,440,w-60,40);place(222,30,500,w-60,80);
         bool edit=!net->lobby;for(int id:{GamePath,Port,Lan,Tailscale,Privacy,World})EnableWindow(child(id),edit);}
-    if(selectedTab==3){place(230,30,120,w-60,240);place(Guide,30,390,w-60,40);place(Home,30,445,w-60,40);place(Diagnose,30,500,w-60,40);}
+    if(selectedTab==3){place(230,30,120,w-60,240);place(Guide,30,390,w-60,40);place(Home,30,445,w-60,40);place(Diagnose,30,500,w-60,40);place(Remove,30,555,w-60,40);}
 }
 void copyInvite(){
     auto code=net->invite();char msg[1024];ci_message(net->session.name.c_str(),"Death Stranding co-op","https://tommodotcommo.github.io/death-stranding-coop/join/",code.c_str(),msg,sizeof(msg));
@@ -216,6 +237,7 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
                 if(id==Ready){net->setReady();render();}
                 if(id==HostSave){net->wantSave=SendMessageW(child(id),BM_GETCHECK,0,0)==BST_CHECKED;}
                 if(id==Import)importSaves(h);
+                if(id==Remove)removeSetup(h);
                 if(id==Lan||id==Tailscale||id==Privacy||id==World){auto checked=SendMessageW(child(id),BM_GETCHECK,0,0)==BST_CHECKED;if(id==Lan)lan=checked;if(id==Tailscale)tailscale=checked;if(id==Privacy)privacy=checked;if(id==World)sharedWorld=checked;saveSettings();}
                 if(id==Protocol){registerHandler(executable);MessageBoxW(h,L"Invite links now open this launcher for your Windows account.",L"Invite links",MB_OK);}
                 if(id==OpenSaves){fs::create_directories(options.data/"redirect-data");ShellExecuteW(h,L"open",(options.data/"redirect-data").c_str(),nullptr,nullptr,SW_SHOWNORMAL);}
@@ -249,7 +271,7 @@ void buildControls(){
     SendMessageW(child(Lan),BM_SETCHECK,lan?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Tailscale),BM_SETCHECK,tailscale?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Privacy),BM_SETCHECK,privacy?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(World),BM_SETCHECK,sharedWorld?BST_CHECKED:BST_UNCHECKED,0);
     control(2,Protocol,L"BUTTON",L"Open deathstranding-coop invite links in this launcher");label(2,222,L"Settings are saved on change. Each game uses two adjacent UDP ports.\nCo-op networking is always enforced offline. Other co-op rules, voice, controller navigation and router mapping are not available yet.");
     label(3,230,(L"Death Stranding co-op 0.1.0-dev\nSteam Director's Cut build 13300582\n\nExperimental; not a playable release. Native Windows launcher.\nCo-op mod standard: Play, Saves, Settings, About; DS invites and LAN/Tailscale discovery.\n\nInvite/discovery reference code: coop-mod-kit (MIT).\nNot affiliated with Kojima Productions or the game's publishers.\n\nWire version: "+wtext(wireVersion())).c_str());
-    control(3,Guide,L"BUTTON",L"Quick guide (F1)");control(3,Home,L"BUTTON",L"Project and issue tracker");control(3,Diagnose,L"BUTTON",L"Save diagnostics for a bug report");
+    control(3,Guide,L"BUTTON",L"Quick guide (F1)");control(3,Home,L"BUTTON",L"Project and issue tracker");control(3,Diagnose,L"BUTTON",L"Save diagnostics for a bug report");control(3,Remove,L"BUTTON",L"Remove co-op from the game");
 }
 }
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
@@ -309,6 +331,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         WNDCLASSW cls{};cls.hInstance=instance;cls.lpszClassName=L"DeathStrandingCoopLauncher";cls.lpfnWndProc=procedure;cls.hCursor=LoadCursorW(nullptr,IDC_ARROW);cls.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);RegisterClassW(&cls);
         window=CreateWindowExW(WS_EX_CONTROLPARENT,cls.lpszClassName,L"Death Stranding co-op",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,960,740,nullptr,nullptr,instance,nullptr);if(!window)throw std::runtime_error("Cannot create launcher window.");
         buildControls();if(!pasted.empty())set(Paste,wtext(pasted));initializing=false;render();ShowWindow(window,showCommand);SetTimer(window,1,100,nullptr);scan(true);
+        try{offerSetup(window);}catch(const std::exception& e){error(e);}
         MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){
             try{
                 if(msg.message==WM_KEYDOWN&&msg.wParam==VK_F1){SendMessageW(window,WM_COMMAND,Guide,0);continue;}

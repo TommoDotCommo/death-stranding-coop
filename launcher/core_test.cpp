@@ -131,5 +131,28 @@ int main(int argc,char** argv) {
         check(big.size()<=launcher::DiagnosticsMax&&big.find("(report shortened)")!=npos&&r.size()<launcher::DiagnosticsMax,"report bounded");
         check(launcher::diagnostics(root/"no-such-folder","h").find("(missing)")!=npos,"a missing data folder still gives a report");
     }
+    {   // Setup from the launcher
+        using launcher::Part;auto pkg=root/"pkg",game=root/"game",data=root/"cdata";
+        auto put=[](const fs::path& p,const std::string& b){fs::create_directories(p.parent_path());std::ofstream(p,std::ios::binary)<<b;};
+        auto get=[](const fs::path& p){std::ifstream f(p,std::ios::binary);return std::string((std::istreambuf_iterator<char>(f)),{});};
+        fs::create_directories(game);
+        check(!launcher::setupState(pkg,game,data).package&&!launcher::setupState(pkg,game,data).needed(),"no package beside the launcher, nothing to set up");
+        put(pkg/"avrt.dll","proxy-2");put(pkg/"redirect-data"/"mod"/"mod.dll","mod-2");
+        auto s=launcher::setupState(pkg,game,data);check(s.package&&s.proxy==Part::Missing&&s.mod==Part::Missing&&s.needed(),"a fresh game needs setup");
+        rejects([&]{launcher::setupInstall(pkg,game,data,false);});check(!fs::exists(game/"avrt.dll")&&!fs::exists(data/"redirect-data"),"not a game folder: nothing written");
+        put(game/"ds.exe","game");put(game/"other.dll","theirs");
+        launcher::setupInstall(pkg,game,data,false);
+        check(get(game/"avrt.dll")=="proxy-2"&&get(data/"redirect-data"/"mod"/"mod.dll")=="mod-2"&&!launcher::setupState(pkg,game,data).needed(),"setup adds the proxy and the mod");
+        check(get(game/"ds.exe")=="game"&&get(game/"other.dll")=="theirs","setup changes nothing of the game");
+        fs::remove(game/"avrt.dll");put(game/"AVRT.dll","someone else's");
+        check(launcher::setupState(pkg,game,data).proxy==Part::Different,"a foreign proxy is seen whatever its letter case");
+        rejects([&]{launcher::setupInstall(pkg,game,data,false);});check(get(game/"AVRT.dll")=="someone else's","a foreign proxy is never replaced unasked");
+        check(!launcher::setupRemove(pkg,game)&&get(game/"AVRT.dll")=="someone else's","nor removed");
+        launcher::setupInstall(pkg,game,data,true);check(get(game/"AVRT.dll")=="proxy-2"&&!fs::exists(game/"avrt.dll"),"replaced in place when the player says so");
+        put(data/"redirect-data"/"mod"/"mod.dll","mod-1");check(launcher::setupState(pkg,game,data).mod==Part::Different&&launcher::setupState(pkg,game,data).needed(),"an older mod needs an update");
+        launcher::setupInstall(pkg,game,data,false);check(get(data/"redirect-data"/"mod"/"mod.dll")=="mod-2","the mod is updated");
+        check(launcher::setupRemove(pkg,game)&&!fs::exists(game/"AVRT.dll")&&get(game/"ds.exe")=="game"&&fs::exists(data/"redirect-data"/"mod"/"mod.dll"),"removing takes our proxy out and keeps the data");
+        check(launcher::setupRemove(pkg,game),"removing twice is fine");
+    }
     std::cout<<"PASS: launcher config, DS invites, discovery, rendezvous, safe release startup, isolated backups and diagnostics\n";
 }

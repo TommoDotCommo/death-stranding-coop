@@ -94,6 +94,47 @@ void writeConfig(const std::filesystem::path& data,const Session& s) {
     auto bytes=config(s);
     atomicWrite(data/"redirect-data"/"mod"/"mod.json",bytes);
 }
+static std::string slurp(const std::filesystem::path& p) {std::ifstream f(p,std::ios::binary);return std::string((std::istreambuf_iterator<char>(f)),{});}
+static std::filesystem::path anyCase(const std::filesystem::path& folder,const std::string& name) {   // AVRT.dll is avrt.dll
+    std::error_code ec;auto low=[](std::string s){for(auto& c:s)if(c>='A'&&c<='Z')c=char(c+32);return s;};
+    for(std::filesystem::directory_iterator it(folder,ec),end;!ec&&it!=end;it.increment(ec))if(low(it->path().filename().string())==low(name))return it->path();
+    return folder/name;
+}
+static Part part(const std::filesystem::path& ours,const std::filesystem::path& theirs) {
+    std::error_code ec;
+    if(!std::filesystem::exists(std::filesystem::symlink_status(theirs,ec)))return Part::Missing;
+    return std::filesystem::is_regular_file(std::filesystem::symlink_status(theirs,ec))&&std::filesystem::file_size(ours,ec)==std::filesystem::file_size(theirs,ec)&&slurp(ours)==slurp(theirs)?Part::Current:Part::Different;
+}
+Setup setupState(const std::filesystem::path& package,const std::filesystem::path& game,const std::filesystem::path& data) {
+    Setup s;std::error_code ec;auto proxy=package/"avrt.dll",mod=package/"redirect-data"/"mod"/"mod.dll";
+    s.package=std::filesystem::is_regular_file(proxy,ec)&&std::filesystem::is_regular_file(mod,ec);
+    if(!s.package)return s;
+    s.proxy=part(proxy,anyCase(game,"avrt.dll"));s.mod=part(mod,data/"redirect-data"/"mod"/"mod.dll");
+    return s;
+}
+void setupInstall(const std::filesystem::path& package,const std::filesystem::path& game,const std::filesystem::path& data,bool replaceProxy) {
+    auto s=setupState(package,game,data);std::error_code ec;
+    if(!s.package)throw std::runtime_error("The co-op files are not beside the launcher. Extract the whole package and start the launcher from it.");
+    if(!std::filesystem::is_regular_file(game/"ds.exe",ec))throw std::runtime_error("The game was not found in the selected folder. Check the game folder in Settings.");
+#ifndef MUTANT_SETUP_OVERWRITE
+    if(s.proxy==Part::Different&&!replaceProxy)throw std::runtime_error("Another avrt.dll is already in the game folder. Nothing was changed.");
+#else
+    (void)replaceProxy;
+#endif
+    // The mod first: a proxy without its mod would stop the next co-op start.
+    if(s.mod!=Part::Current)atomicWrite(data/"redirect-data"/"mod"/"mod.dll",slurp(package/"redirect-data"/"mod"/"mod.dll"));
+    if(s.proxy!=Part::Current)atomicWrite(anyCase(game,"avrt.dll"),slurp(package/"avrt.dll"));
+}
+bool setupRemove(const std::filesystem::path& package,const std::filesystem::path& game) {
+    auto there=anyCase(game,"avrt.dll");std::error_code ec;
+    if(!std::filesystem::exists(std::filesystem::symlink_status(there,ec)))return true;
+#ifdef MUTANT_SETUP_REMOVE_ANY
+    (void)package;
+#else
+    if(part(package/"avrt.dll",there)!=Part::Current)return false;
+#endif
+    safeAncestors(there);return std::filesystem::remove(there,ec);
+}
 std::string ticket(const release_startup::Values& values,const std::string& target,uint64_t now) {
     auto v=values;v["target"]=target;v["expires"]=std::to_string(now+120);
     if(!release_startup::valid(v,release_startup::wide(target),now))throw std::runtime_error("Invalid isolated launch paths or policies.");
