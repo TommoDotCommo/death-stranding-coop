@@ -12,7 +12,7 @@ namespace ds {
 constexpr size_t WireSize = 128;
 constexpr uint32_t GameBuild = 13300582;
 using Bytes = std::array<uint8_t,WireSize>;
-enum class Kind : uint8_t { Hello=1, Ack, Presence, Ping, Pong, Bye, Cargo, CargoAck, Environment=9, Animation=10 };
+enum class Kind : uint8_t { Hello=1, Ack, Presence, Ping, Pong, Bye, Cargo, CargoAck, Environment=9, Animation=10, Enemies=11 };
 enum class Role : uint8_t { Host=1, Client=2 };
 enum class Error { None, Length, Magic, Version, Checksum, Reserved, Kind, Role, Build, Session, Nonce, Range, Duplicate, Time, Speed, Teleport, NotConnected, Progress };
 const char* reason(Error);
@@ -90,6 +90,22 @@ struct Animation {
 // The sample shown now (the presence delay applies), with rose gathered over every sample passed since the last take.
 // next/fraction: the sample after it and how far the shown time is towards it (0..1), when one has arrived.
 struct AnimationShown { Animation animation; uint32_t sequence=0; bool fresh=false; bool between=false; Animation next{}; float fraction=0; };
+// Optional host-only sample (ENEMIES, a longer packet like ANIMATION): where the host's game has its enemies now, so the
+// guest's game can put its own in the same place. Unreliable and unordered on the wire: a late or repeated sample is
+// refused, a lost one is replaced by the next. key: the adapter's identity of an enemy (below 2^52), strictly
+// increasing within a sample; position in the game's own axes (metres, |x| <= 100000); heading in radians; flags are
+// adapter-defined bits below EnemyFlagMask.
+// After the 128-byte header: [u8 n][n x (u56 key, i32 x3 centimetres, i16 heading (pi/32767), u8 flags)].
+constexpr size_t EnemyPosesMax=12, EnemyPoseBytes=22; constexpr uint8_t EnemyFlagMask=15;
+constexpr uint64_t EnemyKeyMax=(uint64_t(1)<<52)-1; constexpr double EnemyPositionMax=100000;
+constexpr uint32_t EnemySendMs=100, EnemyStaleMs=1000;
+struct EnemyPose {
+    uint64_t key=0; std::array<double,3> position{}; double heading=0; uint8_t flags=0;
+    bool operator==(const EnemyPose& o) const { return key==o.key&&position==o.position&&heading==o.heading&&flags==o.flags; }
+};
+struct EnemyPoses { std::array<EnemyPose,EnemyPosesMax> poses{}; uint8_t count=0; };
+// The newest accepted sample and how old it is on the receiver's clock (the sender's stamp, mapped).
+struct EnemiesShown { EnemyPoses enemies; uint32_t sequence=0; uint32_t ageMs=0; };
 struct Packet {
     Kind kind=Kind::Hello; Role role=Role::Host;
     uint32_t game=GameBuild; std::array<uint8_t,16> mod=ModBuild;
@@ -98,6 +114,7 @@ struct Packet {
     uint8_t byeReason=0;
     Progress progress{}; ProgressPolicy progressPolicy=ProgressPolicy::Warn; // HELLO/ACK only
     Animation animation{}; // ANIMATION only
+    EnemyPoses enemies{}; // ENEMIES only
 };
 // A shared-world cargo event (adapter axes, like State). Delivered reliably and in order, at most once per connection:
 // the sender repeats the oldest unacknowledged event, the receiver accepts only the next sequence and acknowledges
@@ -127,11 +144,13 @@ struct Protection {
     bool vehicle=true, vehicleLerp=true;
     bool environmentRange=true, environmentRole=true, environmentOrder=true, environmentFresh=true, environmentRate=true;
     bool animationRange=true, animationOrder=true, animationRose=true;
+    bool enemiesRange=true, enemiesRole=true, enemiesOrder=true, enemiesFresh=true, enemiesStale=true, enemiesRate=true;
     bool floor=true, extrapolate=true, stale=true, gate=true, timeout=true, buffer=true, rate=true;
     bool adapt=true, refine=true;
 };
 Bytes encode(Packet); // throws invalid_argument for nonfinite state
 std::vector<uint8_t> encodeAnimation(const Packet&); // throws invalid_argument for a nonfinite or out-of-range control
+std::vector<uint8_t> encodeEnemies(const Packet&); // throws invalid_argument for a pose the wire cannot carry
 // The payload alone (what follows the header), for recordings: the same bytes and checks.
 std::vector<uint8_t> encodeAnimationPayload(const Animation&);
 bool decodeAnimationPayload(const uint8_t*,size_t,Animation&);
@@ -204,6 +223,10 @@ public:
     bool sendAnimation(const Animation&,uint64_t now);
     // The sample due now on the presence timeline; nothing when none is due or the one due is over a second old.
     std::optional<AnimationShown> takeAnimation(uint64_t now);
+    // Connected host only, at most every EnemySendMs; false (nothing sent) for a sample the wire cannot carry.
+    bool sendEnemies(const EnemyPoses&,uint64_t now);
+    // The guest's newest sample from the host; nothing once it is older than EnemyStaleMs or after a reconnection.
+    std::optional<EnemiesShown> latestEnemies(uint64_t now) const;
 private:
     void send(Kind,uint64_t);
     void reset(bool rotateNonce);
@@ -232,6 +255,8 @@ private:
     struct AnimationSample { Animation animation; uint64_t time=0; uint32_t sequence=0; };
     std::deque<AnimationSample> animations_; Animation sentAnimation_{}; bool sentAnimationOnce_=false;
     uint32_t animationOut_=0, animationIn_=0, animationTaken_=0; uint64_t animationSent_=0, animationStamp_=0; bool haveAnimation_=false;
+    EnemyPoses enemies_{}; bool haveEnemies_=false, sentEnemies_=false;
+    uint32_t enemiesOut_=0, enemiesIn_=0; uint64_t enemiesStamp_=0, enemiesTime_=0, enemiesSent_=0;
     Error error_=Error::None;
 };
 }

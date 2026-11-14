@@ -13,7 +13,7 @@ namespace mod::enemies {
 constexpr uint8_t WireType=11;                       // the ordered event stream's type for a MULE going down
 // How a MULE is down (the game's defeat kinds, the argument of its defeat function); Up = standing.
 constexpr uint8_t Knocked=0,Fainted=1,Asleep=2,Dead=3,Up=255;
-struct Mule { uint64_t address=0; uint32_t id=0; std::array<uint8_t,16> uuid{}; uint32_t state=0,flags=0,lod=0; std::array<double,3> position{}; };
+struct Mule { uint64_t address=0; uint32_t id=0; std::array<uint8_t,16> uuid{}; uint32_t state=0,flags=0,lod=0; std::array<double,3> position{}; std::array<float,9> rotation{}; };
 // Life state +0xea0 (1, 2 up; 4 down with the kind in flag bits 19..21; 3 dead; 5 removed) and flags +0xea4.
 uint8_t condition(uint32_t state,uint32_t flags);
 // The wire key: 52 bits of the locator UUID (wire ids stay below 2^53).

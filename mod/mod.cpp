@@ -45,6 +45,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "passenger.h"
 #include "voidout.h"
 #include "enemies.h"
+#include "enemy_poses.h"
 #include "orders.h"
 #include "orderload.h"
 #include "story.h"
@@ -1599,6 +1600,41 @@ struct Runtime final:ds::Transport {
             std::ostringstream o;o<<"ENEMY a MULE went down here: kind "<<int(d.kind)<<" -> partner\n";note(o.str().c_str());
         }
     }
+    // MULE positions (enemy_poses.h): opt-in share_enemy_positions, with share_enemies. The host's game says where the
+    // MULEs near either player stand (the core's unreliable ENEMIES sample, five a second); the guest moves its own
+    // MULEs there with the MULE actor's own teleport, except the ones its porter is fighting hand to hand.
+    mod::enemyposes::Sampler enemyPoseSampler;mod::enemyposes::Corrector enemyPoseCorrector;
+    std::function<bool(uint64_t,const mod::enemyposes::Place&)> enemyMove;bool enemyMoveTried=false;
+    uint64_t enemyPoseAt=0,enemyPoseSent=0,enemyPoseMoved=0,enemyPoseRefused=0,enemyPoseSeen=0;
+    void tickEnemyPositions(uint64_t now) {
+        if(!core||!sampler||!config.shareEnemyPositions||!config.shareEnemies)return;
+        if(now-enemyPoseAt<200)return;
+        enemyPoseAt=now;
+        if(!core->connected()||!partnerMode()){enemyPoseCorrector.forget();return;}
+        auto anchor=anchorNow();if(!anchor.pose.available)return;
+        auto here=mod::puppet::transform(anchor.pose).position;
+        if(config.role=="host"){
+            auto mules=mod::enemies::readMules(*sampler,sampler->base);if(mules.empty())return;
+            std::optional<std::array<double,3>> partner;
+            if(cache.remote.visible){auto& p=cache.remote.state.position;partner=std::array<double,3>{p[0],p[2],p[1]};}   // adapter -> game axes
+            auto sample=enemyPoseSampler.select(mules,here,partner,now);
+            if(core->sendEnemies(sample,now)&&(++enemyPoseSent==1||enemyPoseSent%300==0)){
+                std::ostringstream o;o<<"ENEMYPOS host: "<<int(sample.count)<<" MULEs near the players -> partner (sample "<<enemyPoseSent<<")\n";note(o.str().c_str());}
+            return;
+        }
+        auto shown=core->latestEnemies(now);
+        if(!shown)return;                                   // nothing fresh from the host: the MULEs are this game's own
+        if(!enemyMoveTried){enemyMoveTried=true;try{enemyMove=mod::enemyposes::nativeTeleport(*sampler);}catch(const std::exception& e){note((std::string("ENEMYPOS unavailable: ")+e.what()+"\n").c_str());}}
+        if(!enemyMove)return;
+        if(++enemyPoseSeen==1){std::ostringstream o;o<<"ENEMYPOS guest: the host's first sample, "<<int(shown->enemies.count)<<" MULEs, "<<shown->ageMs<<" ms old\n";note(o.str().c_str());}
+        auto mules=mod::enemies::readMules(*sampler,sampler->base);if(mules.empty())return;
+        for(auto& mv:enemyPoseCorrector.decide(mules,&*shown,here,now,config.enemyPositionPull)){
+            mod::enemyposes::Place p;p.position=mv.position;p.rotation=mod::enemyposes::upright(mv.heading);
+            bool ok=enemyMove(mv.address,p);uint64_t n=ok?++enemyPoseMoved:++enemyPoseRefused;
+            if(n<=20||n%50==0){std::ostringstream o;o<<"ENEMYPOS guest: MULE "<<std::hex<<mv.key<<std::dec<<(mv.snap?" teleported":" stepped")<<", it was "<<mv.error<<" m from the host's, to "
+                <<mv.position[0]<<","<<mv.position[1]<<","<<mv.position[2]<<(ok?"":" REFUSED")<<" (moved "<<enemyPoseMoved<<", refused "<<enemyPoseRefused<<")\n";note(o.str().c_str());}
+        }
+    }
     std::deque<std::pair<uint64_t,ds::State>> echo;
     mod::puppet::ActionCache actionCache;uint64_t animatorVtable=0;
     std::filesystem::path padCommand;bool padRunning=false,posePublished=false,poseLogged=false;
@@ -1765,7 +1801,7 @@ struct Runtime final:ds::Transport {
                         throw std::runtime_error("UDP receive failed");
                     }
                     ++received;
-                    bool longKind=n>int(ds::WireSize)&&n<=int(ds::AnimationWireMax)&&uint8_t(raw[6])==uint8_t(ds::Kind::Animation);
+                    bool longKind=n>int(ds::WireSize)&&n<=int(ds::AnimationWireMax)&&(uint8_t(raw[6])==uint8_t(ds::Kind::Animation)||uint8_t(raw[6])==uint8_t(ds::Kind::Enemies));
                     bool fromPeer=source.sin_addr.s_addr==peer.sin_addr.s_addr&&source.sin_port==peer.sin_port;
                     // The checkpoint's datagrams (story.h) are not the core's: they carry their own secret and nonce.
                     if(fromPeer&&n>=13&&!std::memcmp(raw,"DSS1",4)&&(storyHost||storyFetch)){storyDatagram(std::string(raw,size_t(n)));continue;}
@@ -2498,6 +2534,7 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickStructures(now);
             stage="enemies";stages.enter("enemies",mod::nowUs());
             if(twin&&gameContext)tickEnemies(now);
+            if(twin&&gameContext)tickEnemyPositions(now);
             stage="bts";stages.enter("bts",mod::nowUs());
             if(twin&&gameContext)tickBts(now);
             if(twin&&gameContext)tickVoidouts(now);
@@ -2846,6 +2883,32 @@ struct Runtime final:ds::Transport {
                         else if(!best||*kind>3)note("MULE test: none standing, or kind out of range\n");
                         else{defeat(best->address,uint8_t(*kind));std::ostringstream o;o<<"MULE test: id "<<std::hex<<best->id<<std::dec<<" kind "<<*kind<<" lod "<<best->lod<<" at "<<best->position[0]<<","<<best->position[1]<<","<<best->position[2]<<" ("<<std::sqrt(bestD)<<" m)\n";note(o.str().c_str());}
                     }catch(const std::exception& e){note((std::string("MULE test unavailable: ")+e.what()+"\n").c_str());}
+                }
+                else if(auto count=mod::puppet::parseCargoCommand(text,mod::runStamp(),"muleat");count&&anchor.pose.available) {
+                    // Test, read-only: "muleat <n>" logs the n MULEs nearest to the porter (at most 12) as the position sync sees them.
+                    auto mules=mod::enemies::readMules(*sampler,sampler->base);auto here=mod::puppet::transform(anchor.pose).position;
+                    auto metres=[&](const mod::enemies::Mule& m){double d=0;for(int k=0;k<3;++k)d+=(m.position[k]-here[k])*(m.position[k]-here[k]);return std::sqrt(d);};
+                    std::sort(mules.begin(),mules.end(),[&](const mod::enemies::Mule& a,const mod::enemies::Mule& b){return metres(a)<metres(b);});
+                    std::ostringstream o;o<<"MULEPOS test: "<<mules.size()<<" MULEs, porter at "<<here[0]<<","<<here[1]<<","<<here[2]<<"\n";
+                    for(size_t i=0;i<mules.size()&&i<std::min<uint32_t>(*count,12);++i){auto& m=mules[i];
+                        o<<"MULEPOS test: key "<<std::hex<<mod::enemies::key(m.uuid)<<" id "<<m.id<<std::dec<<" lod "<<m.lod<<" state "<<m.state<<" at "<<m.position[0]<<","<<m.position[1]<<","<<m.position[2]
+                         <<" heading "<<mod::enemyposes::heading(m.rotation)<<" "<<metres(m)<<" m\n";}
+                    note(o.str().c_str());
+                }
+                else if(auto cm=mod::puppet::parseCargoCommand(text,mod::runStamp(),"mulemove");cm&&anchor.pose.available) {
+                    // Test: "mulemove <cm>" moves the standing MULE nearest to the porter that many centimetres east with the
+                    // MULE actor's own teleport (50 is one pull step, 500 a snap), and reads it back.
+                    try{
+                        auto move=mod::enemyposes::nativeTeleport(*sampler);auto mules=mod::enemies::readMules(*sampler,sampler->base);
+                        auto here=mod::puppet::transform(anchor.pose).position;const mod::enemies::Mule* best=nullptr;double bestD=1e18;
+                        for(auto& m:mules){if(mod::enemies::condition(m.state,m.flags)!=mod::enemies::Up||m.state==5)continue;
+                            double d=0;for(int k=0;k<3;++k)d+=(m.position[k]-here[k])*(m.position[k]-here[k]);if(d<bestD){bestD=d;best=&m;}}
+                        if(!best||*cm>10000)note("MULEPOS test: none standing, or more than 100 m asked\n");
+                        else{mod::enemyposes::Place p;p.position=best->position;p.position[0]+=double(*cm)/100.;p.rotation=mod::enemyposes::upright(mod::enemyposes::heading(best->rotation));
+                            bool ok=move(best->address,p);std::array<double,3> after{};sampler->read(best->address+0x28,after.data(),24);
+                            std::ostringstream o;o<<"MULEPOS test: key "<<std::hex<<mod::enemies::key(best->uuid)<<std::dec<<" lod "<<best->lod<<" "<<std::sqrt(bestD)<<" m away, from "<<best->position[0]<<","<<best->position[1]<<","<<best->position[2]
+                                <<" asked "<<p.position[0]<<","<<p.position[1]<<","<<p.position[2]<<" now "<<after[0]<<","<<after[1]<<","<<after[2]<<(ok?" moved":" REFUSED")<<"\n";note(o.str().c_str());}
+                    }catch(const std::exception& e){note((std::string("MULEPOS test unavailable: ")+e.what()+"\n").c_str());}
                 }
                 else if(auto mask=mod::puppet::parseCargoCommand(text,mod::runStamp(),"unbuild");mask&&unconstruct&&anchor.entity&&anchor.pose.available) {
                     // Removal experiment: "unbuild <mask> <stamp>", a 6 x 6 x 10 m box around the point 4 m in front of the

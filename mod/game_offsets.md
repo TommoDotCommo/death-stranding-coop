@@ -1005,6 +1005,64 @@ to phase 5 in both copies by itself. `0x2aa8000(actor, 1)` on a MULE with an ent
 on the ground; called in the partner's game for the same UUID it did the same there. No Gazer or Catcher actor was
 live at that place (units of 256 and 1, none live): BTs are not mapped beyond the unit kinds.
 
+### Moving a MULE, and whom its AI notices (2026-11-15, static only, nothing called)
+
+Read from the pinned image for `share_enemy_positions` (`enemy_poses.h`). Nothing here has run in a game yet.
+
+- **The cart's "teleport message" is not a general one.** The message with vtable `0x3dd96b8` that `carts.cpp` sends
+  with `0x235c990` is `MsgDSBaggage2SetWorldTransform` (its type getter `0x2c5d5e0` returns descriptor `0x4c61290`):
+  a cargo-system message, handled by carriers. It is not for a MULE.
+- **Every game actor has a teleport virtual.** `GameActor` vtable `0x3cfb9c0`: `+0x10` set transform
+  (actor, `const WorldTransform*`), `+0x18` get transform, `+0x40` teleport (actor, `const WorldTransform*`, bool).
+  The base teleport `0x22f8d90` calls `+0x10`, and at LOD 2 with an entity (`+0x68`) calls the entity teleport
+  `0x235a010(entity, actor transform, 0, 0)` (the call at `0x22f8dd5`), the function behind the porter's own
+  teleport ("Moving the porter": transform under the entity lock, `MsgEntityTeleported` to physics and to the
+  entity's message handlers). The bool is not read by the base.
+- **The game's own script call.** `DsNpcGeneralCommand_sExportedTeleportNpc` (`0x2bf7930`) looks up its NPC record,
+  takes the actor from the manager (`0x22fa980(*(image+0x7bbb8c0), id)`) and jumps to `actor->vtable[+0x40](actor,
+  transform, 1)`. So slot `+0x40` is what the game uses to put an actor somewhere.
+- **The MULE's override.** `DSMuleGameActor` vtable `0x3db7078` (type getter `0x2aad0c0`; the unit's vtable
+  `0x3db71b8` follows it): `+0x10` = `0x2acfeb0` writes the transform to `+0x28`/`+0x40` and a copy to
+  `+0xeb0`/`+0xec8`; `+0x40` = **`0x2ad20a0`**: set transform, then `+0x128` (`0x2dc75b0`) finds a place on the
+  navigation mesh near the new position (`0x2dd5400`, with the actor's search extents at `+0x240`; when the mesh has
+  none, the position as given), 0.1 m is added to its height, the base teleport `0x22f8d90` is called with that
+  (the call at `0x2ad216c`), and the result is remembered at `+0xd0` (position) and `+0xe8` (rotation). It needs no
+  entity: at a low LOD only the actor's transform moves. A second function of the same shape follows at `0x2ad21e0`
+  (one more argument; not used here), and the camp's actor has its own at `0x2b6cb00`.
+- **The MULE code teleports its entity itself** in nine places (`0x235a010` called from `0x2ab522e`, `0x2ab7628`,
+  `0x2ab7708`, `0x2ab7c84`, `0x2ab84b0`, `0x2abd040`, `0x2ac3675`, `0x2ace114`, `0x2ace30a`), e.g. `0x2ab5160` puts
+  the entity at a stored transform (`+0x3b8`) with placement on. An entity teleport of a MULE is ordinary for the game.
+- **No gentle push was found.** The movers' script functions are for other movers (`GliderMover` add displacement
+  `0x360c5f0`, route, path and simple-path movers, impulses for physics movers `0x23b7700`..`0x23b7730`). Which mover
+  a MULE's entity has (`DSGroundMovementComponent`, vtable `0x3defee8`, is one of its components) and whether a
+  displacement can be added to it is unknown. So a small correction is a teleport over a short distance, and how the
+  entity's animation takes a teleport of half a metre is unknown (the resident double restarted its animation when
+  it was set every tick: `double.cpp`).
+- **Reading.** The actor's transform at `+0x28` (3 doubles, 9 floats in rows) is what `enemies.cpp` already copies;
+  heading = `atan2(m[3], m[0])`. Whether it follows the entity every frame at LOD 2 is taken from the live
+  observation that the two games' MULEs stood up to 17 m apart; how the AI reacts to being moved (path replanned or
+  walked back) is unknown.
+
+Whom a MULE notices (research for "the partner's body as a target"; nothing implemented):
+
+- An entity's faction is the pointer at `+0x178` (`Entity_ExportedGetFaction` `0x2362980`); `Entity_ExportedSetFaction`
+  (`0x2361d00` -> `0x235dc00(entity, faction)`) changes it under the entity lock and tells the entity; the default
+  one comes back with `0x2361c90`. `AIFaction_ExportedIsHostileTowards` is `0x2562f10`. An entity's `+0x170` is the
+  object the AI names it by (`0x2a919c0(entity)` returns it under the lock).
+- `ControlledEntity_ExportedGetAIIndividual` (`0x34fd540` -> `0x34f0040`) gives a MULE entity's AI;
+  `AIIndividual_ExportedRaiseAlertLevel` (`0x2562e30`): level at `+0x2d70`, wanted level `+0x2d74`.
+- `AIIndividualComponent_ExportedAlertForEntity` (`0x34ef1e0` -> `0x34d59d0(component, entity)`; "with perfect
+  threat info" `0x34ef1d0` -> `0x34d5a80`): unless the component's owner is dead, it makes an
+  `AIAlertForEntityMessage` (descriptor `0x4b8abe0`, built by `0x250b2e0(message, 0, entity+0x170 object, perfect,
+  float)`) and hands it to the AI (`0x25487d0(component+0x50, message)`). This is the game's own "this AI now knows
+  of that entity". Stimuli: `AIManager_sExportedCreateVisualStimulus` `0x2562ec0`, `...CreateAuralStimulus`
+  `0x2562eb0`.
+- Unknown, and to be read live before anything is called: the faction and the `+0x170` object of the partner's body
+  (a `DSPlayerAKukanEntity`, not a player) and of the porter; whether a MULE's perception lists entities by faction
+  or only the player (the `AIManagerGame` exports all say "Player"); what a MULE that is alerted for a body with no
+  player behind it does (its attacks, the cargo theft and the camp's phase logic all read the player). The first
+  experiment would be read-only: the two factions and `IsHostileTowards` both ways.
+
 ## Orders: the mission system (2026-11-12, static, the reads and the three requests confirmed live)
 
 `DSMissionSystem* S = *(image+0x7c0aff8)`. Static orders: `*(S+0x108)` -> {count (i32), records pointer at +8}, one

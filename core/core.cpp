@@ -74,16 +74,33 @@ size_t at=from;
     a.cartCount=uint8_t(carts);
     return Error::None;
 }
+Error parseEnemiesPayload(const uint8_t* b,size_t from,size_t n,EnemyPoses& e,const Protection& p) {
+    if(from+1>n) return Error::Length;
+    size_t count=b[from]; if(count>EnemyPosesMax||from+1+EnemyPoseBytes*count!=n) return Error::Length;
+    size_t at=from+1; uint64_t last=0;
+    for(size_t i=0;i<count;++i,at+=EnemyPoseBytes) {
+        EnemyPose q; q.key=get(b,at,7);
+        for(int k=0;k<3;++k) q.position[k]=signedGet(b,at+7+4*k,4)/100.;
+        q.heading=signedGet(b,at+19,2)*Pi/32767.; q.flags=b[at+21];
+        if(p.enemiesRange) {
+            if(!q.key||q.key>EnemyKeyMax||(i&&q.key<=last)||(q.flags&~EnemyFlagMask)||signedGet(b,at+19,2)==-32768) return Error::Range;
+            for(double v:q.position) if(std::abs(v)>EnemyPositionMax) return Error::Range;
+        }
+        last=q.key; e.poses[i]=q;
+    }
+    e.count=uint8_t(count);
+    return Error::None;
+}
 Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
     // ANIMATION is the one kind longer than the header (its payload follows it).
-    bool long_=b && n>WireSize && n<=AnimationWireMax && b[6]==uint8_t(Kind::Animation);
+    bool long_=b && n>WireSize && n<=AnimationWireMax && (b[6]==uint8_t(Kind::Animation)||b[6]==uint8_t(Kind::Enemies));
     if(!b || (p.length && n!=WireSize && !long_)) return Error::Length;
     if(p.magic && get(b,0,4)!=0x31505344) return Error::Magic;
     if(p.version && get(b,4,2)!=1) return Error::Version;
     if(p.length && get(b,8,2)!=n) return Error::Length;
     if(p.checksum && get(b,120,4)!=checksum(b,long_?n:WireSize)) return Error::Checksum;
     if(p.reserved && (get(b,10,2)||b[95]||get(b,124,4))) return Error::Reserved;
-    if(p.kind && (b[6]<1||b[6]>10)) return Error::Kind;
+    if(p.kind && (b[6]<1||b[6]>11)) return Error::Kind;
     if(p.role && (b[7]<1||b[7]>2)) return Error::Role;
     Packet q; q.kind=Kind(b[6]); q.role=Role(b[7]); q.game=uint32_t(get(b,12,4));
     std::copy(b+16,b+32,q.mod.begin());
@@ -107,6 +124,10 @@ Error parse(const uint8_t* b,size_t n,Packet& out,const Protection& p) {
     } else if(q.kind==Kind::Animation) {
         if(p.reserved && (get(b,96,8)||get(b,104,8)||get(b,112,8))) return Error::Reserved;
         { Error e=parseAnimationPayload(b,WireSize,n,q.animation,p); if(e!=Error::None) return e; }
+    } else if(q.kind==Kind::Enemies) {
+        if(n==WireSize) return Error::Length;
+        if(p.reserved && (get(b,96,8)||get(b,104,8)||get(b,112,8))) return Error::Reserved;
+        { Error e=parseEnemiesPayload(b,WireSize,n,q.enemies,p); if(e!=Error::None) return e; }
     } else { q.t0=get(b,96,8); q.t1=get(b,104,8); q.t2=get(b,112,8); }
     if(p.time && (q.stamp>(1ull<<53)||q.t0>(1ull<<53)||q.t1>(1ull<<53)||q.t2>(1ull<<53))) return Error::Time;
     for(int i=0;i<3;++i) { q.state.position[i]=signedGet(b,72+4*i,4)/100.; q.state.velocity[i]=signedGet(b,84+2*i,2)/100.; }
@@ -278,6 +299,29 @@ std::vector<uint8_t> encodeAnimation(const Packet& q) {
     uint32_t c=checksum(b.data(),b.size()); for(int i=0;i<4;++i) b[120+i]=uint8_t(c>>(8*i));
     return b;
 }
+namespace {
+bool enemiesValid(const EnemyPoses& e) {
+    if(e.count>EnemyPosesMax) return false;
+    for(size_t i=0;i<e.count;++i) { auto& q=e.poses[i];
+        if(!q.key||q.key>EnemyKeyMax||(i&&q.key<=e.poses[i-1].key)||(q.flags&~EnemyFlagMask)) return false;
+        if(!std::isfinite(q.heading)||std::abs(q.heading)>Pi+1e-9) return false;
+        for(double v:q.position) if(!std::isfinite(v)||std::abs(v)>EnemyPositionMax) return false; }
+    return true;
+}
+}
+std::vector<uint8_t> encodeEnemies(const Packet& q) {
+    if(!enemiesValid(q.enemies)) throw std::invalid_argument("enemy sample out of range");
+    Packet h=q; h.kind=Kind::Enemies; h.t0=h.t1=h.t2=0; h.state={};
+    auto head=encode(h); std::vector<uint8_t> b(head.begin(),head.end());
+    b.push_back(q.enemies.count);
+    auto append=[&](uint64_t v,size_t n){ for(size_t i=0;i<n;++i) b.push_back(uint8_t(v>>(8*i))); };
+    for(size_t i=0;i<q.enemies.count;++i) { auto& e=q.enemies.poses[i];
+        append(e.key,7); for(double v:e.position) append(uint32_t(int32_t(std::lround(v*100))),4);
+        append(uint16_t(int16_t(std::lround(e.heading*32767/Pi))),2); b.push_back(e.flags); }
+    b[8]=uint8_t(b.size()); b[9]=uint8_t(b.size()>>8);
+    uint32_t c=checksum(b.data(),b.size()); for(int i=0;i<4;++i) b[120+i]=uint8_t(c>>(8*i));
+    return b;
+}
 Error decode(const uint8_t* b,size_t n,Packet& q) { return parse(b,n,q,{}); }
 #ifdef DS_TESTING
 Error decodeForTest(const uint8_t* b,size_t n,Packet& q,Protection p) { return parse(b,n,q,p); }
@@ -312,6 +356,7 @@ void Core::reset(bool rotate) {
     nextHello_=nextSend_=nextPing_=0; outgoing_=0;
     haveEnvironment_=false;environmentOut_=environmentIn_=0;environmentReceived_=environmentStamp_=0;
     animations_.clear();haveAnimation_=false;sentAnimationOnce_=false;animationOut_=animationIn_=animationTaken_=0;animationStamp_=0;
+    haveEnemies_=false;enemiesOut_=enemiesIn_=0;enemiesStamp_=enemiesTime_=0;
     // Send/apply rate limits survive reconnects; changing a nonce cannot accelerate native calls.
     localProgress_={};peerProgress_={};progressStatus_=ProgressStatus::Unknown;
     // A new connection numbers cargo from 1 again on both sides; undelivered events are kept and renumbered.
@@ -392,6 +437,17 @@ Error Core::receive(const uint8_t* b,size_t n,uint64_t now) {
         uint64_t time=uint64_t(mapped); if(!animations_.empty()) time=std::max(time,animations_.back().time+1);
         animations_.push_back({q.animation,time,q.sequence}); while(animations_.size()>64) animations_.pop_front();
         haveAnimation_=true; animationIn_=q.sequence; animationStamp_=q.stamp;
+        // Optional traffic cannot keep a dead presence connection alive.
+        return fail(Error::None);
+    }
+    if(q.kind==Kind::Enemies) {
+        // Only the host's game says where the enemies are.
+        if(protections_.enemiesRole && (config_.role!=Role::Client||q.role!=Role::Host))return fail(Error::Role);
+        uint32_t advance=q.sequence-enemiesIn_;
+        if(protections_.enemiesOrder && (!q.sequence||(haveEnemies_&&(advance==0||advance>=0x80000000u||q.stamp<=enemiesStamp_))))return fail(Error::Duplicate);
+        double mapped=double(q.stamp)-offset_;
+        if(protections_.enemiesFresh && (!clockValid_||mapped<0||std::abs(mapped-double(now))>2000))return fail(Error::Time);
+        enemies_=q.enemies;haveEnemies_=true;enemiesIn_=q.sequence;enemiesStamp_=q.stamp;enemiesTime_=mapped<0?0:uint64_t(mapped);
         // Optional traffic cannot keep a dead presence connection alive.
         return fail(Error::None);
     }
@@ -498,6 +554,19 @@ bool Core::sendAnimation(const Animation& a,uint64_t now) {
     Packet q; q.kind=Kind::Animation; q.role=config_.role; q.session=config_.session; q.nonce=config_.nonce; q.echo=peer_;
     q.stamp=std::min(provider_.localSampleTime(now),now); q.sequence=++animationOut_; q.animation=a;
     transport_.sendLong(encodeAnimation(q)); sentAnimation_=a; sentAnimationOnce_=true; animationSent_=now; return true;
+}
+bool Core::sendEnemies(const EnemyPoses& e,uint64_t now) {
+    if(!connected_||config_.role!=Role::Host||!enemiesValid(e))return false;
+    if(protections_.enemiesRate && sentEnemies_&&(now<enemiesSent_||now-enemiesSent_<EnemySendMs))return false;
+    Packet q;q.kind=Kind::Enemies;q.role=config_.role;q.session=config_.session;q.nonce=config_.nonce;q.echo=peer_;
+    q.stamp=now;q.sequence=++enemiesOut_;q.enemies=e;
+    transport_.sendLong(encodeEnemies(q));sentEnemies_=true;enemiesSent_=now;return true;
+}
+std::optional<EnemiesShown> Core::latestEnemies(uint64_t now) const {
+    if(!connected_||!haveEnemies_)return {};
+    uint64_t age=now>enemiesTime_?now-enemiesTime_:0;
+    if(protections_.enemiesStale && age>EnemyStaleMs)return {};
+    return EnemiesShown{enemies_,enemiesIn_,uint32_t(std::min<uint64_t>(age,0xffffffffu))};
 }
 std::optional<AnimationShown> Core::takeAnimation(uint64_t now) {
     if(!connected_||animations_.empty()) return {};

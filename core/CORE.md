@@ -37,7 +37,7 @@ not authentication or proof of a trusted binary.
 
 ## Wire format
 
-All ten packet types have the same 128-byte header and are one UDP datagram each; all but ANIMATION are **exactly 128 bytes**. Integers
+All eleven packet types have the same 128-byte header and are one UDP datagram each; all but ANIMATION and ENEMIES are **exactly 128 bytes**. Integers
 are explicitly little endian; signed values use two's complement. No packed
 structs, float bit patterns, pointer casts or native padding are on the wire.
 Reserved bytes must be zero. Fields unused by a packet type are ignored after
@@ -48,9 +48,9 @@ and stamina 255). Receivers do not require ignored fields to be zero.
 |---|---:|---|
 | 0 | 4 | Magic ASCII `DSP1` (`0x31505344`) |
 | 4 | 2 | Protocol version, exactly 1 |
-| 6 | 1 | Kind: HELLO=1, HELLO_ACK=2, PRESENCE=3, PING=4, PONG=5, BYE=6, CARGO=7, CARGO_ACK=8, ENVIRONMENT=9 (optional), ANIMATION=10 (optional, longer) |
+| 6 | 1 | Kind: HELLO=1, HELLO_ACK=2, PRESENCE=3, PING=4, PONG=5, BYE=6, CARGO=7, CARGO_ACK=8, ENVIRONMENT=9 (optional), ANIMATION=10 (optional, longer), ENEMIES=11 (optional, longer) |
 | 7 | 1 | Sender role: host=1, client=2; peer must have opposite role |
-| 8 | 2 | Datagram length, exactly 128 (ANIMATION: 128 plus its payload, at most 1252); actual received length must match; the checksum covers the whole datagram |
+| 8 | 2 | Datagram length, exactly 128 (ANIMATION and ENEMIES: 128 plus the payload, at most 1252); actual received length must match; the checksum covers the whole datagram |
 | 10 | 2 | Reserved zero |
 | 12 | 4 | Steam game build, exactly **13300582** |
 | 16 | 16 | Exact `ModBuild` source hash in `build_id.h` |
@@ -348,6 +348,23 @@ duplicate/reorder, age, disconnect and rate checks, five named mutants, and 200
 lossy simulated sessions with independent clocks, outage/reconnect and a final
 quiet period. Structured environment payloads exercise the new decoder branch.
 This is game-free wire evidence, not proof of a visible sky change.
+
+## Optional enemy poses (kind 11)
+
+`ENEMIES=11` says where the host's game has its enemies, so the guest's adapter can put its own in the same place.
+After the header: a count (at most 12) and per enemy 22 bytes: a 56-bit identity (the adapter's, nonzero, below 2^52,
+strictly increasing within a sample), the position as three int32 in centimetres (the game's own axes, at most
+100 km), the heading as int16 (pi / 32767) and a byte of adapter flags (the low four bits). Header bytes 96..119 are
+zero. The datagram's length is exactly 129 + 22 x count.
+
+It is unreliable on purpose: nothing is repeated and nothing acknowledged. Only a connected host sends
+(`sendEnemies`, at most every 100 ms; a sample the wire cannot carry is refused). Only a guest accepts, and only
+from the host; a sample that is not newer than the last one (sequence and stamp) is refused, as is one whose stamp
+does not map to within 2 s of the receiver's clock. `latestEnemies` gives the newest sample with its age and nothing
+once it is over a second old or after a reconnection, so a lost or late datagram never moves anything to an old
+place. It does not count as presence traffic. Guards and their mutants: `enemiesRange`, `enemiesRole`,
+`enemiesOrder`, `enemiesFresh`, `enemiesStale`, `enemiesRate` (`tests/enemies.cpp`, with a 200-seed lossy-link fuzz:
+loss, duplicates, corruption, reordering, an outage, independent clocks).
 
 ## Optional animation samples (kind 10)
 
