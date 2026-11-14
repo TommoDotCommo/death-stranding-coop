@@ -735,6 +735,68 @@ Log lines: `ENEMY ...`, `ORDER ...`, `ORDERLOAD ...`. Test commands in `puppet.c
 load reads it), `loadsave <id*100+n>` and `loadmake 0` (remember a case, then make it again behind the porter with the
 creator the shared load uses); in `puppet.ride`: `place X Y Z HEADING`.
 
+## Delivery rewards and connection levels (`share_rewards`, with `share_orders`; off by default, nothing run live)
+
+`"share_rewards": true` (`rewards.h`; refused without `share_orders`). A facility's connection level (the stars of a
+knot city or a prepper) is a points total and a level in the game's residents system. Each mod reads every
+facility's record once a second. When a facility's points rise in its game (a delivery handed in there), it tells
+the partner the new total (CARGO event type 23: name hash, points, level), and the partner's game is topped up to
+that total with the game's own "add connection points" routine, the one a delivery's reward calls, which also runs
+the level-ups and what they unlock. Rules:
+
+- totals travel, never amounts: a delivery both games rewarded is not counted twice;
+- only up: a total at or below the local one adds nothing, a total of zero is refused on the wire, and nothing is
+  added past the game's own cap for that facility;
+- what is added here for the partner is not sent back; more than three facilities rising in one look is a loaded
+  save and is learnt silently; a top-up waits until the porter is in the world and no game event runs;
+- a record counts only when its resource is one the residents system lists, of the same class as the others, with
+  the record's key as its name, and its numbers in the game's range;
+- only rises seen while connected are sent: two saves that already differ are not levelled on joining.
+
+Static research (`game_offsets.md`, "Delivery rewards") says the partner's game already runs the game's reward
+routine when an order is completed by request; how much it gives there is unknown, and the top-up closes the gap
+for connection points. The porter's likes and the five grade totals are read for the log only and are not shared.
+Connection points are real, saved progress, which is why the setting is off unless asked for.
+
+Log lines: `REWARD sharing on: add armed`, `REWARD facility <hash> rose here to <points> points (level <n>) ->
+partner`, `REWARD partner's facility <hash> is at <points> points (level <n>): <k> added here, <a> -> <b> points,
+level <x> -> <y>` (or `nothing to add`, `unknown here`, `not added (add unavailable)`), `REWARD refused: malformed
+news`. Test commands in `puppet.cargo` (lab only): `rewards 0` (every facility: row, name hash, points, level, floor,
+cap), `rewards 1` (the porter's likes and grade totals), `reward_add <row*10000+points>` (adds 1..9999 points to
+that row's facility with the game's routine; needs `share_rewards`).
+
+Live checklist (Episode 3 save in both copies, the crash recorder on, `share_orders`, `share_order_units` and
+`share_rewards` on in both; nothing below has been run):
+
+1. Read only, one copy: `rewards 0`, then `rewards 1`. Expect `REWARD test: <n> facilities` with n above 0 and one
+   row per facility; the facilities the save has delivered to show points above their floor and a level that
+   matches the stars on the map; the others sit at their floor. Expect `REWARD test: porter readable
+   likes <a> online <b> experience <five numbers> level <five numbers>`, with likes equal to the totals of the
+   porter's status screen. `unreadable`, or levels that do not match the status screen, means the grade state's
+   masks are not understood: stop and record the numbers. Zero facilities means the table layout is wrong.
+2. The candidate call alone, one copy, standing in the open: `reward_add <row*10000+1>` on a facility below its cap.
+   Expect `REWARD test: facility <hash> points <p> level <l> ...: 1 added, now points <p+1> level <l>` and no
+   fault record. Then an amount that crosses the next threshold (the thresholds are not printed: add in steps
+   until the level changes). Expect the level to rise by one and the game's own level-up notice; record what the
+   game shows and whether anything is unlocked. A `STALL` line or a crash record means the routine
+   is not safe to call from the mod's tick: stop, keep the record, leave `share_rewards` off.
+3. Save and reload that copy: `rewards 0` shows the raised numbers (they are saved state).
+4. What a request pays, two connected copies: `rewards 0` and `rewards 1` in both, then one player takes a standard
+   order at a terminal, carries it and hands it in at the other facility's terminal. Expect on his side `ORDER
+   success of <id> here -> partner` and `REWARD facility <hash> rose here to <P> points (level <L>) -> partner`; on
+   the partner's side `ORDER partner: success of <id> requested`, then either `REWARD facility <hash> rose here ...`
+   (the request paid there too) and `REWARD partner's facility <hash> is at <P> points ...: <k> added here` with k
+   the shortfall, or `nothing to add`. Read `rewards 0` and `rewards 1` in both again: the facility's points and
+   level are equal in both games; the difference of each porter's likes and grade totals before and after is the
+   answer to "what is each player paid".
+5. No echo and no double count: after step 4 neither log gains another `REWARD` line for that facility, and a
+   second `rewards 0` ten seconds later shows the same points in both games.
+6. The other direction: the partner hands in an order at a facility where he is ahead of the first player; the
+   first player's game is topped up, the partner's is not lowered.
+7. A loaded save: load an older checkpoint in one copy while connected. Expect no `REWARD facility ... -> partner`
+   lines from the load, and no lowering in the partner's game.
+8. After every run: the real saves are byte-identical.
+
 ## Story within a session (`share_story_orders`, `story_resync`; experiments, off by default, nothing run live)
 
 The host's save is the story, and a guest who joins through the launcher starts from the host's checkpoint. These two

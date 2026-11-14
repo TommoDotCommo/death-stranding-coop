@@ -34,6 +34,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('bt',['ALL_ALIVE','HEAL','KILL','HURT_ECHO','ECHO','UNSEEN','DYNAMIC','MASS','CLEARED_ANY','FAR','END_IDLE'],['bts_test.cpp','bts.cpp','discovery.cpp']),
           ('order',['STORY','ECHO','ANY_STATE','UNIT_ANY','UNIT_ECHO','STORY_BACK','STORY_IN','STORY_FAIL','WATCH_ANY'],['orders_test.cpp','orders.cpp','discovery.cpp']),
           ('story',['EMPTY','NONCE','UNASKED','GAP','EVENT','STALE','HASTY','SUM','OLD','KEYLESS','ASK_FLOOD','BUSY_LOAD','EVENT_LEFT','KEEP','FETCH_FOREVER'],['story_test.cpp','story.cpp','../launcher/saves.cpp','discovery.cpp','../core/core.cpp']),
+          ('reward',['VTABLE','FOREIGN','RANGE','MASK','ZERO','LEVEL','ECHO','LOAD','CAP','LOWER'],['rewards_test.cpp','rewards.cpp','discovery.cpp','../core/core.cpp']),
           ('guard',['ANY_FAULT','IN_IMAGE','CULL_ANY','REPAIR_ANY','WALK_ANY','WALK_WIDE'],['guard_test.cpp']),
           ('vitals',['BIT4','UNREADABLE_DEAD','NO_HOLD','CALL_ANY','CALL_HOLD'],['vitals_test.cpp','vitals.cpp','discovery.cpp','../core/core.cpp']),
           ('online',['HOST_ANY','PATH_ANY','ASK_BUSY','ASK_FOREVER','ASK_GAP'],['online_test.cpp','online.cpp','config.cpp','discovery.cpp']),

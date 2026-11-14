@@ -69,6 +69,8 @@ int main() {
     // One shared load per order: off by default, and only with shared orders.
     assert(!mod::parseConfig(threaded).shareOrderLoad&&mod::parseConfig(withKeys(threaded,"\"share_orders\":true,\"share_order_load\":true")).shareOrderLoad);
     assert(refused(withKeys(threaded,"\"share_order_load\":true")));
+    assert(!mod::parseConfig(threaded).shareRewards&&mod::parseConfig(withKeys(threaded,"\"share_orders\":true,\"share_rewards\":true")).shareRewards);
+    assert(refused(withKeys(threaded,"\"share_rewards\":true")));
     // The delivery-delay impairment works with the real game too (two copies on one PC standing in for an internet
     // link); injected faults stay synthetic-only.
     assert(!mod::parseConfig(threaded).impairment&&mod::parseConfig(withKeys(threaded,"\"impairment\":true")).impairment);

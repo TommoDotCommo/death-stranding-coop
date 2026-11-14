@@ -5588,6 +5588,77 @@ request sets to 3 when it was 0.
 - Not carried by a request: what the delivery terminal's own routine (`0x33b28e0`) does beside the state: the
   result screen, likes, the facility's connection level. A guest whose main order is completed by request gets the
   state and whatever the order's logic gives, not the terminal's rewards (the same holds for shared standard
-  orders).
+  orders). (Corrected 2026-11-15, "Delivery rewards" below: the reward routine runs from the
+  success request itself, so a request does reach it; what it then gives is unknown.)
 - The mod sends a story order's "fail" only for state 8; any other way out of "in progress" (states 32 cancel, 64
   not available, 128, 256, 512, 1024, 2048 exist in `EDSMissionState`) is logged (`ORDER story ...`) and not sent.
+
+## Delivery rewards: likes, porter grade and facility connection levels (2026-11-15, static only, nothing called)
+
+Where the game keeps them:
+
+- Likes state `L = *(image+0x7bf83b0)` (section "Likes for the partner"): `+0x18` likes from the world (i64),
+  `+0x20` likes from other players.
+- Porter grade state `P = *(image+0x7bfd960)`: five experience totals (u64) at `P+0x18 + 8*i` and five levels (u32)
+  at `P+0x538 + 4*i`, i = 0..4, each stored XORed with a mask made from key words at `P+0x8b8..+0x8e0`. For a total
+  the 32-bit key is `u32[P+k] ^ u32[P+0x8d8]` with k = `0x8bc, 0x8c0, 0x8c4, 0x8c8, 0x8cc`, and the mask is
+  `(((key & 1 ? 0x120400002 : 0) ^ (key & ~1)) << 31) | key`. For a level the mask is the XOR of two key words:
+  `0x8c8^0x8dc`, `0x8cc^0x8dc`, `0x8d0^0x8dc`, `0x8d4^0x8dc`, `0x8e0^0x8b8`. Settings at `*(P+8)`: `+0x28` the cap of
+  a total, `+0x30`/`+0x34` the level range, `+0x88 + 4*reason` a coefficient per like reason. The writer is
+  `0x2f237c0(P)`: it takes the per-reason like totals from `L` (`0x2e0b6d0`), maps each of the 18 reasons to a bucket
+  (`0x2e1f020`), adds buckets 0, 1, 11, 2 and 12 to totals 0..4 (clamped to 999999999999) and recomputes each level
+  from the table at image `0x3e1cf00`. Which total is which of the five categories shown to the player is
+  **unknown** (no names in the code); the mask arithmetic is read from the code and not yet compared with a live
+  value.
+- Residents system `G = *(image+0x7bfd948)` (a lock at `G+8`): `*(G+0x10)` holds the facilities' resources (count
+  i32 at `+0x20`, pointers at `+0x28`), `R = *(G+0x18)` their records. A resource (`DSHouseholdInfoResource`):
+  `+0x08` its UUID, `+0x20` the lowest points a record is set to, `+0x24` an initial level, `+0x28..+0x38` the
+  points needed for levels 1..5, `+0x3c` the points per level above 5, `+0x40` the name hash (u32), `+0x58` the
+  argument of the highest-level lookup `0x2f2cd60`. Records: an open-addressing table `*(R+0x28)` with capacity
+  (u32, a power of two) at `R+0x34`, 0x30-byte entries: `+0x00` slot hash (crc32 of the name hash | 0x80000000;
+  0 = free), `+0x08` the name hash, `+0x10` the resource, `+0x18` the connection points (i32), `+0x1c` the connection
+  level (i32). Lookup: `0x2f28d60(R, name hash)` returns the entry's `+0x10`. The highest points a record takes is
+  `resource+0x38 + 94 * resource+0x3c`.
+- The level of given points: `0x2f23510(R, resource, points, highest level)` counts the thresholds reached.
+
+What adds to them:
+
+- `0x2f29f00(R, resource, amount, context)` is the delivery reward's "add connection points": points += amount
+  (clamped as above), the level is recomputed, and for every level gained it runs the level-up: two calls on the HUD
+  object of `0x32173a0()` (`0x321e070` before, `0x321dfa0` after, each given `context`), the record's level, a
+  node-graph event through `R+0x38` when set, `0x345e900(resource, level)` (unlocks of that level when the porter is
+  at a terminal of that facility: `0x3435fc0` per level, the terminal's byte `+0x96`), per-level bookkeeping in `P`
+  (`0x2f21f60(P, level, 1)` for levels 1..5), a telemetry object, and the graph at `*R`. It also lowers a stored level
+  that is above what the points give. Two callers: the delivery reward (`0x3349a58`, context = the order's record)
+  and `0x2ab3bfa` with a null context, so a null context is a case the game itself uses.
+- `0x2f22490(R, out, resource, amount)` adds the points with the same clamps and no level-up (the reward's other
+  branch, taken when its evaluation says the level-up is shown later).
+- `0x2f40a80(likes, points, resource, reason, ...)` (script route, under the lock at `G+8`): likes through
+  `0x2e12c80` and points with the same clamps, no level-up. `0x2f410a0(uuid, level)`
+  (`DSResidentsBasicNode_sSetForceFirendshipOfHouseholdByGGUUID`) writes the level as given (it can lower it), raises
+  the points to that level's threshold and calls `0x345e900`.
+- Script getters for comparison: `0x2f3f760(resource, out points, out level)`
+  (`...sGetFirendshipOfHousehold`), `0x2f3f6f0` by mission id, `0x2f3f750` by name hash.
+
+What a completed delivery does:
+
+- The mission system's update `0x33b1750(S)` drains the request queue (`S+0x814f0`). Every success entry (flag
+  `0x10`) is collected (`0x33b51d0`) and handed to `0x3348ee0(instance)`, which, unless the order record's flags
+  (`+0x30`) have bit 7, runs the evaluation and reward routine `0x3348f70(instance)`: it evaluates the delivery,
+  adds connection points to the client's facility (`0x2f29f00`, or `0x2f22490`; skipped when the order's resource
+  flags `+0x74` have bit 7) and gives the likes (`0x2e12c80(L, amount, resource, reason, ...)`, or `0x2e12de0` for
+  orders of that flag). After the batch the update calls `0x3345fa0` (at `0x33b1ba4`), which gives more likes through
+  `0x2e12c80` and recomputes the porter grade (`0x2f237c0(P)` at `0x33464ab`).
+- A hand-in at a terminal reaches it the same way: the terminal's routine `0x33b28e0` marks cargo units delivered,
+  the completion check `0x33b1410(S)` (called just before `0x33b1750` at `0x33c4082`) calls the success request
+  `0x33b82d0`, and the next update rewards it.
+- So a mission completed by request (what the mod does for the partner) runs the same reward routine as a hand-in.
+  This corrects the note in "Story orders" above that the rewards belong to the terminal's routine. What differs
+  is its input: the evaluation reads this game's own delivery data (the unit rows' packed word and condition
+  values, the play log of the order), and a game that never carried the cargo has other numbers there. How many
+  likes and connection points the partner's game then gives is **unknown** until both games are read after one
+  delivery; the mod's `REWARD` log lines are made for that.
+
+The mod (`rewards.h`, `share_rewards`): reads the records once a second, sends a facility's points total when it
+rises, and tops the partner's record up to that total with `0x2f29f00(R, resource, short, null)`. Nothing has been
+called live yet.

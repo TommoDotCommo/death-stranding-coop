@@ -48,6 +48,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "orders.h"
 #include "orderload.h"
 #include "story.h"
+#include "rewards.h"
 #include "guard_win.h"
 #include "link.h"
 #include "nametag.h"
@@ -99,7 +100,7 @@ template<class T> struct Background {
 namespace wiretypes {
 constexpr uint8_t all[]={2,3,4,5,mod::carry::WireType,mod::gear::GearWireType,mod::outfit::WireType,mod::likes::WireType,mod::nametag::WireType,
     mod::enemies::WireType,mod::orders::WireType,mod::bts::WireType,mod::roads::WireType,15,mod::carryplace::WireType,mod::voidout::WireType,
-    mod::carryplace::CartWireType,mod::orderload::WireType,mod::signals::EventWireType,mod::signals::VitalsWireType,mod::story::WireType};
+    mod::carryplace::CartWireType,mod::orderload::WireType,mod::signals::EventWireType,mod::signals::VitalsWireType,mod::story::WireType,mod::rewards::WireType};
 constexpr bool distinct(){for(size_t i=0;i<sizeof all;++i)for(size_t j=i+1;j<sizeof all;++j)if(all[i]==all[j])return false;return true;}
 static_assert(distinct(),"two CARGO event features share a wire type");
 // ... and the core delivers it: a type above its limit is refused and the ordered stream stops at that event.
@@ -306,6 +307,7 @@ struct Runtime final:ds::Transport {
                 loadTag.reset();
                 if(config.shareOrderLoad){loadTag=mod::orderload::decode({e.item,e.ref,e.position});if(!loadTag)note("ORDERLOAD a case's tag was refused (not a standard order's case)\n");}
                 continue;}
+            if(e.type==mod::rewards::WireType){rewardIn.push_back(e);continue;}  // a facility's connection total (tickRewards)
             if(e.type==mod::story::WireType){storyIn.push_back(e);continue;}     // story resync news (tickStory)
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
             if(e.type==mod::signals::EventWireType){signalIn.push_back(e);continue;}   // a shout or a scan (tickSignals)
@@ -1413,6 +1415,57 @@ struct Runtime final:ds::Transport {
             std::ostringstream o;o<<"ORDER "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<" here -> partner\n";note(o.str().c_str());
         }
     }
+    // Shared rewards (rewards.h): opt-in share_rewards, with share_orders. A facility's connection points that rise
+    // here are told to the partner as a total; his total is topped up here with the game's own routine.
+    mod::rewards::Sync rewardSync;std::vector<ds::CargoEvent> rewardIn;mod::rewards::Api rewardApi;std::map<uint32_t,mod::rewards::News> rewardPending;
+    uint64_t rewardReadAt=0,rewardSent=0,rewardApplied=0,rewardPorter=0,rewardSettled=0;bool rewardTried=false,rewardLinked=false;
+    static std::string rewardLine(const mod::rewards::Facility& f){
+        std::ostringstream o;o<<"facility "<<std::hex<<f.hash<<std::dec<<" points "<<f.points<<" level "<<f.level<<" (floor "<<f.floor<<", cap "<<f.cap<<")";return o.str();
+    }
+    void tickRewards(uint64_t now) {
+        if(!core||!sampler||!config.shareRewards){rewardIn.clear();return;}
+        if(!rewardTried){
+            rewardTried=true;try{rewardApi=mod::rewards::nativeApi(*sampler);}catch(const std::exception& e){note((std::string("REWARD add unavailable: ")+e.what()+"\n").c_str());}
+            note((std::string("REWARD sharing on: add ")+(rewardApi.add?"armed":"off (read and log only)")+"\n").c_str());
+        }
+        // Another world (a save loaded): every total jumps; learn them again once it has settled.
+        auto anchor=anchorNow();
+        if(anchor.entity!=rewardPorter){rewardPorter=anchor.entity;rewardSync.forget();rewardPending.clear();rewardSettled=now+8000;}
+        bool linked=core->connected()&&partnerMode();
+        if(linked!=rewardLinked){rewardSync.unlinked();rewardPending.clear();}
+        rewardLinked=linked;
+        for(auto& e:rewardIn){
+            auto n=mod::rewards::decode(e);
+            if(!n){note("REWARD refused: malformed news\n");continue;}
+            if(!linked)continue;
+            auto& p=rewardPending[n->hash];if(n->points>p.points)p=*n;     // the highest total heard counts
+        }
+        rewardIn.clear();
+        if(!rewardPorter||now<rewardSettled||now-rewardReadAt<1000)return;
+        rewardReadAt=now;
+        auto facilities=mod::rewards::readFacilities(*sampler,sampler->base);if(facilities.empty())return;
+        // First what rose here (so a delivery here is never mistaken for a top-up), then the partner's totals.
+        for(auto& n:rewardSync.observe(facilities)){
+            if(!linked)continue;
+            core->queueCargo(mod::rewards::encode(n));++rewardSent;
+            std::ostringstream o;o<<"REWARD facility "<<std::hex<<n.hash<<std::dec<<" rose here to "<<n.points<<" points (level "<<n.level<<") -> partner\n";note(o.str().c_str());
+        }
+        if(rewardPending.empty()||inEvent||!cache.available)return;       // a top-up waits for the porter to be in the world
+        for(auto& [hash,n]:rewardPending){
+            rewardSync.heard(n);
+            const mod::rewards::Facility* local=nullptr;for(auto& f:facilities)if(f.hash==hash)local=&f;
+            std::ostringstream o;o<<"REWARD partner's facility "<<std::hex<<hash<<std::dec<<" is at "<<n.points<<" points (level "<<n.level<<"): ";
+            if(!local){o<<"unknown here\n";note(o.str().c_str());continue;}
+            int32_t owed=mod::rewards::Sync::owed(*local,n);
+            if(owed<=0){o<<"nothing to add (here "<<local->points<<", level "<<local->level<<")\n";note(o.str().c_str());continue;}
+            if(!rewardApi.add){o<<owed<<" short here, not added (add unavailable)\n";note(o.str().c_str());continue;}
+            bool ok=rewardApi.add(local->resource,owed);
+            int32_t after[2]{local->points,local->level};sampler->read(local->record+8,after,8);
+            if(ok)++rewardApplied;
+            o<<owed<<(ok?" added here":" refused by the game")<<", "<<local->points<<" -> "<<after[0]<<" points, level "<<local->level<<" -> "<<after[1]<<"\n";note(o.str().c_str());
+        }
+        rewardPending.clear();
+    }
     // Shared roads (roads.h): opt-in share_roads. What this player delivers to a paver goes to the partner's paver
     // as delivered by others; a road built here is completed there.
     mod::roads::Sync roadSync;std::vector<ds::CargoEvent> roadIn;mod::roads::Api roadApi;uint64_t roadReadAt=0,roadSent=0,roadApplied=0,roadPorter=0,roadSettled=0;bool roadTried=false,roadLinked=false,roadTell=false;
@@ -2505,6 +2558,7 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickRoads(now);
             stage="orders";stages.enter("orders",mod::nowUs());
             if(twin&&gameContext)tickOrders(now);
+            if(twin&&gameContext)tickRewards(now);
             stage="story";stages.enter("story",mod::nowUs());
             if(gameContext)tickStory(now);
             tickGuard();
@@ -2819,6 +2873,37 @@ struct Runtime final:ds::Transport {
                         for(auto& r:mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,mod::cargo::MaxRecords))
                             if(r.mission==id&&r.unit==n){cargoDelete(r.index);++removed;}
                     std::ostringstream o;o<<"ORDER test: unit "<<int(n)<<" of "<<std::hex<<id<<std::dec<<(done?" marked delivered, ":" not waiting, ")<<removed<<" cargo record(s) removed\n";note(o.str().c_str());
+                }
+                else if(auto what=mod::puppet::parseCargoCommand(text,mod::runStamp(),"rewards");what) {
+                    // Test: "rewards 0" prints every facility's connection points and level, "rewards 1" the porter's
+                    // likes and grade totals (read-only, whatever share_rewards says).
+                    if(*what==0){
+                        auto facilities=mod::rewards::readFacilities(*sampler,sampler->base);
+                        note(("REWARD test: "+std::to_string(facilities.size())+" facilities\n").c_str());
+                        for(size_t i=0;i<facilities.size();++i)note(("REWARD test: "+std::to_string(i)+" "+rewardLine(facilities[i])+"\n").c_str());
+                    }
+                    else{
+                        auto p=mod::rewards::readPorter(*sampler,sampler->base);std::ostringstream o;
+                        o<<"REWARD test: porter "<<(p.readable?"readable":"unreadable")<<" likes "<<p.likes<<" online "<<p.likesOnline<<" experience";
+                        for(auto x:p.experience)o<<" "<<x;
+                        o<<" level";for(auto x:p.level)o<<" "<<x;
+                        o<<"\n";note(o.str().c_str());
+                    }
+                }
+                else if(auto add=mod::puppet::parseCargoCommand(text,mod::runStamp(),"reward_add");add) {
+                    // Test: "reward_add <row * 10000 + points>" adds 1..9999 connection points to the facility in that
+                    // row of "rewards 0" with the game's own routine (needs share_rewards).
+                    try{
+                        if(!config.shareRewards)throw std::runtime_error("share_rewards is off");
+                        auto api=mod::rewards::nativeApi(*sampler);auto facilities=mod::rewards::readFacilities(*sampler,sampler->base);
+                        size_t row=*add/10000;int32_t points=int32_t(*add%10000);
+                        if(row>=facilities.size()||points<1||inEvent||!cache.available)note("REWARD test: add refused (row or points out of range, or the porter is not in the world)\n");
+                        else{
+                            auto& f=facilities[row];int32_t owed=mod::rewards::Sync::owed(f,{f.hash,f.points+points,f.level});
+                            bool ok=owed>0&&api.add(f.resource,owed);int32_t after[2]{f.points,f.level};sampler->read(f.record+8,after,8);
+                            std::ostringstream o;o<<"REWARD test: "<<rewardLine(f)<<": "<<owed<<(ok?" added":" not added")<<", now points "<<after[0]<<" level "<<after[1]<<"\n";note(o.str().c_str());
+                        }
+                    }catch(const std::exception& e){note((std::string("REWARD test unavailable: ")+e.what()+"\n").c_str());}
                 }
                 else if(auto order=mod::puppet::parseCargoCommand(text,mod::runStamp(),"order");order) {
                     // Test: "order <mission id>" asks the game to start that order; + 1000000000 to complete it,
