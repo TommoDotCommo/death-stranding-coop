@@ -27,6 +27,11 @@ config parser), then:
   Paste a `DS-...` invite, a fragment link, `deathstranding-coop://join/DS-...`,
   numeric IPv4 address, address:port, or host/Tailscale name. Recognition is shown
   before joining. Choose a row or use the pasted routes, then **Ready**.
+- **Start from the host's save** (guest, on by default): the lobby shows the title of the host's newest co-op save.
+  Choosing Ready first fetches that save over the lobby's own connection, re-signs it for the guest's Steam account
+  and makes it the guest's only co-op save, so both games continue in the same world and episode. The co-op saves the
+  guest had move to `backups\before-join-<time>` (never deleted); the same save offered again changes nothing. Untick
+  the box to keep playing from your own co-op save. A host without a co-op save offers nothing.
 - **Play solo** starts an isolated co-op save session without a partner. Ordinary
   Steam starts outside the launcher keep their ordinary saves and co-op stays off.
 
@@ -122,6 +127,16 @@ actual executable directory, keeping adjacent game folders and writes there refu
 Any explicit isolation environment selects the old fail-closed lab path instead;
 `d3dcompiler_47.dll` always retains that path.
 
+**Copy my Steam saves into co-op** (Saves) copies the player's ordinary checkpoints into the co-op data, so co-op does
+not have to start a new story; settings and key bindings come along when the co-op side has none. The ordinary saves
+are only read. Co-op saves already there move to `backups\before-import-<time>`. It needs the game and lobby closed.
+
+The save transfer (`saves.h`) is a pull on the lobby socket: `DSS1` query, offer (size, CRC-32, title), get(index),
+chunk (1 KiB). Every datagram carries the lobby's secret and nonce and only the lobby's two endpoints are served;
+the host keeps no state per guest. A file is handed over only when its checksum matches and it parses as a
+checkpoint. The account a save belongs to is `steam_<64-bit id>` inside its encrypted block; the id comes from
+the account signed in to Steam. Container and cipher after mi5hmash/DeathStrandingSaveDataResigner (MIT).
+
 Saves displays only the co-op data location. Back up copies only
 `redirect-data/{local,roaming,documents,savedgames,profile}` to a new folder under
 `backups/`. The app requires the game and lobby closed. It rejects symbolic links,
@@ -147,7 +162,8 @@ the same link/code into the launcher works without a hosted page.
 ```sh
 make -C launcher test   # production config round trip, DS codec/URIs, discovery,
                        # lobby packets, startup tickets, backup confinement;
-                       # reference fuzzers and 16 mutants
+                       # saves: format against independent vectors, install,
+                       # copy-in, transfer over a lossy link; fuzzers and mutants
 make all               # mod, both proxies, launcher and Windows fixtures
 ```
 
@@ -165,8 +181,8 @@ Additional game-free checks on native Windows (never start the game):
 python .\redirect\test_passthrough_windows.py --work-dir "<disposable fixture folder>" --fixture .\redirect\build\proxy_fixture.exe --proxy .\redirect\build\avrt.dll --mutant .\redirect\build\mutant-missing-config-closes.dll
 ```
 
-The first creates two loopback launchers, checks wrong-secret refusal, Ready/Start
-and matching configs. The second is the kit's Windows adapter/socket suite. The
+The first creates two loopback launchers, checks wrong-secret refusal, the save
+handoff (offer, fetch on Ready, Ready only after it is placed), Ready/Start and matching configs. The second is the kit's Windows adapter/socket suite. The
 third clears COOP_* and uses fake LOCALAPPDATA: release forwarding must survive
 without creating files; the missing-config-closes mutant must exit 125.
 
@@ -191,6 +207,7 @@ network policy `enforce`, updates the exact peer allowlist and role/ports/sessio
 and leaves other test switches inherited. Direct/lab data must be outside the real
 user folders, preserving the lab nested-root refusal. It performs no Steam emulation.
 `--dev-start` skips the launcher lobby for a stand-in; `--dev-client` chooses client.
+`--dev-take-save FILE` (with `--dev-direct`) installs FILE the way the lobby installs the host's save.
 Add `--prepare-only` to write/validate configuration and exit without a game.
 Custom `--data-dir` is accepted only with `--dev-direct`.
 

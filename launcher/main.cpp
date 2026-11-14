@@ -23,7 +23,7 @@ std::wstring player=L"Porter",gameFolder;
 std::string pasted,lastState,lastRows;
 uint32_t requestedSecret=0,lastScan=0;
 std::vector<HWND> controls[4];
-enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World};
+enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import};
 HWND child(int id){return GetDlgItem(window,id);}
 std::wstring text(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(n+1,0);GetWindowTextW(h,s.data(),n+1);s.resize(n);return s;}
 std::string utf8(const std::wstring& s){if(s.empty())return {};int n=WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),nullptr,0,nullptr,nullptr);std::string v(n,0);WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),v.data(),n,nullptr,nullptr);return v;}
@@ -33,6 +33,41 @@ HWND control(int page,int id,const wchar_t* klass,const wchar_t* label,DWORD sty
 void label(int page,int id,const wchar_t* s){control(page,id,L"STATIC",s,SS_LEFT);}
 void place(int id,int x,int y,int w,int h){MoveWindow(child(id),x,y,w,h,TRUE);}
 void show(int id,bool yes){ShowWindow(child(id),yes?SW_SHOW:SW_HIDE);}
+// Where this player's co-op saves are, and whose they are. The account is the one signed in to Steam; without Steam
+// running it is the only account folder the co-op saves (or, failing that, the ordinary saves) have.
+fs::path coopGame(){return saves::gameFolder(options.data/"redirect-data"/"local");}
+fs::path ordinaryGame(){return saves::gameFolder(known(FOLDERID_LocalAppData));}
+uint32_t steamAccount(){
+    DWORD value=0,size=sizeof(value);
+    if(RegGetValueW(HKEY_CURRENT_USER,L"Software\\Valve\\Steam\\ActiveProcess",L"ActiveUser",RRF_RT_REG_DWORD,nullptr,&value,&size)==ERROR_SUCCESS&&value)return value;
+    for(auto& folder:{coopGame(),ordinaryGame()}){auto found=saves::accounts(folder);if(found.size()==1)return found[0];}
+    return 0;
+}
+fs::path coopAccount(){auto id=steamAccount();if(!id)throw std::runtime_error("Your Steam account is not known yet. Start Steam, then try again.");return coopGame()/std::to_string(id);}
+std::optional<saves::Checkpoint> ownSave(){try{return saves::newest(coopAccount());}catch(const std::exception&){return std::nullopt;}}
+std::string hostSaveLine(){
+    if(!net->offer.offering())return "You have no co-op save yet, so the game starts a new story. Saves: Copy my Steam saves.";
+    auto mine=ownSave();return "Your friend can start from your save: "+(mine&&!mine->title.empty()?mine->title:std::string("your newest co-op save"));
+}
+void placeHostSave(){
+    try {
+        auto aside=options.data/"backups"/("before-join-"+std::to_string(std::time(nullptr)));
+        int moved=saves::install(coopAccount(),steamAccount(),net->incoming.bytes(),aside);
+        net->saveInstalled();
+        if(moved>0)net->status="The host's save is in place. Your "+std::to_string(moved)+" earlier co-op save(s) are in backups\\"+aside.filename().string()+".";
+    }catch(const std::exception& e){net->saveRefused(std::string("The host's save was not used: ")+e.what()+" Choose Ready to play from your own.");}
+}
+void importSaves(HWND h){
+    if(!backupAllowed(net->lobby,gameRunning(gameFolder)))throw std::runtime_error("Leave the lobby and close the game before copying saves.");
+    auto id=steamAccount();if(!id)throw std::runtime_error("Your Steam account is not known yet. Start Steam, then try again.");
+    auto from=ordinaryGame()/std::to_string(id),to=coopGame()/std::to_string(id);
+    bool have=bool(saves::newest(to));
+    if(MessageBoxW(h,have?L"Copy your ordinary Death Stranding saves into co-op?\n\nYour current co-op saves move to a backups folder. Your ordinary saves are only read, never changed."
+                         :L"Copy your ordinary Death Stranding saves into co-op?\n\nYour ordinary saves are only read, never changed.",L"Copy my Steam saves",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
+    auto aside=options.data/"backups"/("before-import-"+std::to_string(std::time(nullptr)));
+    int copied=saves::importOrdinary(from,to,aside);
+    MessageBoxW(h,(std::to_wstring(copied)+L" save(s) copied into co-op. Continue in the game loads the newest."+(have?L"\n\nEarlier co-op saves: "+aside.wstring():L"")).c_str(),L"Copy complete",MB_OK);
+}
 void saveSettings(){
     if(initializing)return;
     std::string name=utf8(player),game=utf8(gameFolder);
@@ -88,14 +123,17 @@ void render(){
         bool join=choice==1&&!net->lobby;show(201,join);show(Paste,join);show(202,join);show(Rows,join);show(Primary,!net->lobby||net->hosting);
         set(Primary,net->lobby?L"Start game":choice==0?L"Open lobby":choice==1?L"Join selected host":L"Play solo");
         EnableWindow(child(Primary),!net->lobby||(net->joined&&net->peerReady));EnableWindow(child(Name),!net->lobby);
-        place(203,30,235,w-60,60);place(Invite,30,310,w-60,64);place(Copy,30,390,(w-75)/2,36);place(Leave,45+(w-75)/2,390,(w-75)/2,36);place(Ready,30,450,w-60,40);
+        place(203,30,235,w-60,72);place(Invite,30,310,w-60,64);place(HostSave,30,310,w-60,64);place(Copy,30,390,(w-75)/2,36);place(Leave,45+(w-75)/2,390,(w-75)/2,36);place(Ready,30,450,w-60,40);
         show(203,net->lobby);show(Invite,net->lobby&&net->hosting);show(Copy,net->lobby&&net->hosting);show(Leave,net->lobby);show(Ready,net->lobby&&!net->hosting);
-        set(203,wtext(std::string(net->hosting?"Friends can join by: same network or Tailscale. Internet needs a VPN.\n":"Your host decides when to start. Choose Ready, then keep this launcher open.\n")+firewallText(firewall)));
-        EnableWindow(child(Ready),net->joined);set(Ready,net->ready?L"Not ready":L"Ready");
+        {bool offered=net->lobby&&!net->hosting&&net->joined&&net->incoming.offered&&net->incoming.size;show(HostSave,offered);
+         if(offered){set(HostSave,wtext("Start from the host's save: "+(net->incoming.title.empty()?std::string("their newest co-op save"):net->incoming.title)+"\n(your own co-op saves are kept in a backups folder)"));
+             SendMessageW(child(HostSave),BM_SETCHECK,net->wantSave?BST_CHECKED:BST_UNCHECKED,0);EnableWindow(child(HostSave),!net->ready&&!net->fetchingSave());}}
+        set(203,wtext(std::string(net->hosting?"Friends can join by: same network or Tailscale. Internet needs a VPN.\n":"Your host decides when to start. Choose Ready, then keep this launcher open.\n")+firewallText(firewall)+(net->hosting?"\n"+hostSaveLine():std::string())));
+        EnableWindow(child(Ready),net->joined);set(Ready,net->fetchingSave()?L"Stop":net->ready?L"Not ready":L"Ready");
         if(!net->lobby&&choice!=1){set(203,choice==0?L"Open a two-player lobby, copy its invite, then start when your friend is ready.":L"Play by yourself with the separate co-op saves. Your ordinary Steam saves stay separate.");show(203,true);}
         set(Status,wtext(net->status));refreshRows();
     }
-    if(selectedTab==1){place(210,30,120,w-60,65);place(211,30,200,w-60,180);place(OpenSaves,30,400,(w-75)/2,40);place(BackUp,45+(w-75)/2,400,(w-75)/2,40);}
+    if(selectedTab==1){place(210,30,120,w-60,65);place(211,30,200,w-60,180);place(OpenSaves,30,400,(w-75)/2,40);place(BackUp,45+(w-75)/2,400,(w-75)/2,40);place(Import,30,455,w-60,40);}
     if(selectedTab==2){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(Lan,30,270,w-60,30);place(Tailscale,30,310,w-60,30);place(Privacy,30,350,w-60,30);place(World,30,390,w-60,30);place(Protocol,30,440,w-60,40);place(222,30,500,w-60,80);
         bool edit=!net->lobby;for(int id:{GamePath,Port,Lan,Tailscale,Privacy,World})EnableWindow(child(id),edit);}
     if(selectedTab==3){place(230,30,120,w-60,240);place(Guide,30,390,w-60,40);place(Home,30,445,w-60,40);place(Diagnose,30,500,w-60,40);}
@@ -125,7 +163,7 @@ void beginJoin(){
 void primary(){
     if(net->lobby){net->start();return;}
     if(choice!=2)readFirewallNow();
-    if(choice==0){net->openHost(chosenSession(),privacy);set(Invite,wtext(net->invite()));}
+    if(choice==0){net->openHost(chosenSession(),privacy);net->offer.offer(ownSave());set(Invite,wtext(net->invite()));}
     else if(choice==2){auto s=chosenSession();s.secret=random32();options.game=gameFolder;launchGame(options,s,true);net->status=options.prepareOnly?"Configuration prepared; no game started.":"Steam launch requested using separate co-op saves.";}
     else {
         auto paste=utf8(text(child(Paste)));
@@ -151,9 +189,10 @@ void timer(){
             else{SendMessageW(child(Rows),LB_SETCURSEL,selected,0);beginJoin();}}
     }
     if(net->joined&&!net->hosting&&!remembered){remembered=true;cd_recent_add(&net->recents,net->joinedName.c_str(),net->session.peer.c_str(),net->session.port,CD_R_ADDRESS,uint64_t(std::time(nullptr)));char bytes[CD_RECENT_BYTES];int n=cd_recents_encode(&net->recents,bytes,sizeof(bytes));if(n>0)atomicWrite(options.data/"recents.tsv",std::string(bytes,n));}
+    if(net->saveArrived)placeHostSave();
     if(net->launch){options.game=gameFolder;launchGame(options,net->session);net->launched();}
     scan();
-    std::string state=std::to_string(net->lobby)+std::to_string(net->hosting)+std::to_string(net->joined)+std::to_string(net->ready)+std::to_string(net->peerReady)+net->status;
+    std::string state=std::to_string(net->lobby)+std::to_string(net->hosting)+std::to_string(net->joined)+std::to_string(net->ready)+std::to_string(net->peerReady)+std::to_string(net->incoming.offered)+std::to_string(net->fetchingSave())+net->incoming.title+net->status;
     if(state!=lastState){lastState=state;render();}
 }
 LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
@@ -175,6 +214,8 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
                 if(id==Copy)copyInvite();
                 if(id==Leave){net->leave();render();}
                 if(id==Ready){net->setReady();render();}
+                if(id==HostSave){net->wantSave=SendMessageW(child(id),BM_GETCHECK,0,0)==BST_CHECKED;}
+                if(id==Import)importSaves(h);
                 if(id==Lan||id==Tailscale||id==Privacy||id==World){auto checked=SendMessageW(child(id),BM_GETCHECK,0,0)==BST_CHECKED;if(id==Lan)lan=checked;if(id==Tailscale)tailscale=checked;if(id==Privacy)privacy=checked;if(id==World)sharedWorld=checked;saveSettings();}
                 if(id==Protocol){registerHandler(executable);MessageBoxW(h,L"Invite links now open this launcher for your Windows account.",L"Invite links",MB_OK);}
                 if(id==OpenSaves){fs::create_directories(options.data/"redirect-data");ShellExecuteW(h,L"open",(options.data/"redirect-data").c_str(),nullptr,nullptr,SW_SHOWNORMAL);}
@@ -198,10 +239,10 @@ void buildControls(){
     control(0,Host,L"BUTTON",L"Host a game",BS_AUTORADIOBUTTON|WS_GROUP);control(0,Join,L"BUTTON",L"Join a friend",BS_AUTORADIOBUTTON);control(0,Solo,L"BUTTON",L"Play solo",BS_AUTORADIOBUTTON);
     label(0,201,L"Paste an invite code, link, address or Tailscale name");control(0,Paste,L"EDIT",L"",ES_AUTOHSCROLL);SendMessageW(child(Paste),EM_SETLIMITTEXT,CR_INPUT_MAX,0);
     label(0,202,L"LAN and Tailscale hosts appear below.");control(0,Rows,L"LISTBOX",L"",LBS_NOTIFY|WS_VSCROLL|WS_BORDER);label(0,Status,L"");control(0,Primary,L"BUTTON",L"Open lobby",BS_DEFPUSHBUTTON);
-    label(0,203,L"");control(0,Invite,L"EDIT",L"",ES_READONLY|ES_MULTILINE);control(0,Copy,L"BUTTON",L"Copy invite");control(0,Leave,L"BUTTON",L"Leave lobby");control(0,Ready,L"BUTTON",L"Ready");
+    label(0,203,L"");control(0,Invite,L"EDIT",L"",ES_READONLY|ES_MULTILINE);control(0,Copy,L"BUTTON",L"Copy invite");control(0,Leave,L"BUTTON",L"Leave lobby");control(0,Ready,L"BUTTON",L"Ready");control(0,HostSave,L"BUTTON",L"",BS_AUTOCHECKBOX|BS_MULTILINE|BS_TOP);
     label(1,210,L"Co-op saves\nOnly the separate co-op save trees are included in backups. Close the game first.");
-    label(1,211,(L"Co-op data:\n"+options.data.wstring()+L"\n\nSave trees: redirect-data\\local, roaming, documents, savedgames, profile\n\nBackups: backups\\<time>\nThe launcher never opens your ordinary game saves.").c_str());
-    control(1,OpenSaves,L"BUTTON",L"Open co-op save folder");control(1,BackUp,L"BUTTON",L"Back up co-op saves");
+    label(1,211,(L"Co-op data:\n"+options.data.wstring()+L"\n\nSave trees: redirect-data\\local, roaming, documents, savedgames, profile\n\nBackups: backups\\<time>\nYour ordinary game saves are opened only when you choose Copy my Steam saves, and then only read.").c_str());
+    control(1,OpenSaves,L"BUTTON",L"Open co-op save folder");control(1,BackUp,L"BUTTON",L"Back up co-op saves");control(1,Import,L"BUTTON",L"Copy my Steam saves into co-op");
     label(2,220,L"Launcher / game folder (applies next start)\nSteam mode must use the folder registered with Steam.");control(2,GamePath,L"EDIT",gameFolder.c_str(),ES_AUTOHSCROLL);
     label(2,221,L"Network / host UDP port (49000..49014)");control(2,Port,L"EDIT",std::to_wstring(port).c_str(),ES_NUMBER|ES_AUTOHSCROLL);
     control(2,Lan,L"BUTTON",L"Find games on my network",BS_AUTOCHECKBOX);control(2,Tailscale,L"BUTTON",L"Find friends on Tailscale",BS_AUTOCHECKBOX);control(2,Privacy,L"BUTTON",L"Invite only (host decides)",BS_AUTOCHECKBOX);control(2,World,L"BUTTON",L"Shared world (experimental; the host decides): each other's ladders and cairns through the game's own online layer",BS_AUTOCHECKBOX);
@@ -220,7 +261,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         choice=int(GetPrivateProfileIntW(L"launcher",L"choice",0,settingsFile.c_str()));if(choice<0||choice>2)choice=0;
         port=GetPrivateProfileIntW(L"launcher",L"port",49000,settingsFile.c_str());if(port<49000||port>49014)port=49000;
         lan=GetPrivateProfileIntW(L"launcher",L"lan",1,settingsFile.c_str());tailscale=GetPrivateProfileIntW(L"launcher",L"tailscale",1,settingsFile.c_str());privacy=GetPrivateProfileIntW(L"launcher",L"privacy",0,settingsFile.c_str());sharedWorld=GetPrivateProfileIntW(L"launcher",L"world",0,settingsFile.c_str())!=0;
-        bool registerOnly=false,devStart=false,diagnosticsOnly=false,firewallOnly=false,forceWorld=false;std::string devPeer="127.0.0.1";uint32_t devSession=1;
+        bool registerOnly=false,devStart=false,diagnosticsOnly=false,firewallOnly=false,forceWorld=false;std::string devPeer="127.0.0.1";uint32_t devSession=1;fs::path takeSave;
         int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);if(!argv)throw std::runtime_error("Cannot read launcher arguments.");
         for(int i=1;i<argc;++i){std::wstring a=argv[i];auto value=[&](){if(++i>=argc)throw std::runtime_error("Missing launcher option value.");return std::wstring(argv[i]);};
             if(a==L"--dev-direct")options.direct=true;
@@ -235,6 +276,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
             else if(a==L"--dev-peer")devPeer=utf8(value());
             else if(a==L"--dev-session"){auto v=utf8(value());if(v.empty()||v.size()>10||v.find_first_not_of("0123456789")!=std::string::npos||std::stoull(v)>UINT32_MAX)throw std::runtime_error("Invalid development session.");devSession=uint32_t(std::stoull(v));}
             else if(a==L"--dev-client")choice=1;
+            else if(a==L"--dev-take-save")takeSave=value();
             else if(a==L"--port"){auto raw=utf8(value());if(raw.size()!=5||raw.find_first_not_of("0123456789")!=std::string::npos)throw std::runtime_error("Host port must be 49000..49014.");auto v=std::stoul(raw);if(v<49000||v>49014)throw std::runtime_error("Host port must be 49000..49014.");port=unsigned(v);}
             else if(a.rfind(L"deathstranding-coop://",0)==0){pasted=utf8(a);choice=1;}
             else throw std::runtime_error("Unknown launcher option.");
@@ -254,6 +296,13 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         std::ifstream recents(options.data/"recents.tsv",std::ios::binary);char store[CD_RECENT_BYTES+1];recents.read(store,sizeof(store));auto count=recents.gcount();if(count<=CD_RECENT_BYTES)cd_recents_decode(&net->recents,store,size_t(count));
         settingsFile=options.data/"launcher.ini";
         options.game=gameFolder;
+        if(!takeSave.empty()) {   // test path for "start from the host's save": the same install the lobby does, from a file
+            if(!options.direct)throw std::runtime_error("--dev-take-save requires --dev-direct.");
+            std::ifstream f(takeSave,std::ios::binary);if(!f)throw std::runtime_error("Cannot read the save to take.");
+            std::string bytes((std::istreambuf_iterator<char>(f)),{});
+            saves::install(coopAccount(),steamAccount(),bytes,options.data/"backups"/("before-join-"+std::to_string(std::time(nullptr))));
+            if(!devStart)return 0;
+        }
         if(devStart){Session s=chosenSession();s.host=choice!=1;s.peer=devPeer;s.secret=devSession;launchGame(options,s);return 0;}
         INITCOMMONCONTROLSEX cc{sizeof(cc),ICC_TAB_CLASSES};InitCommonControlsEx(&cc);
         font=CreateFontW(-17,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");titleFont=CreateFontW(-24,0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");

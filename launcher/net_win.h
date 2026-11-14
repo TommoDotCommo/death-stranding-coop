@@ -1,6 +1,7 @@
 #pragma once
 #include "vendor/coop_discover_win.h"
 #include "core.h"
+#include "saves.h"
 #include "../mod/identity.h"
 #include <atomic>
 #include <functional>
@@ -20,7 +21,7 @@ class Network {
     sockaddr_in partner{};
     cd_rate rate{};
     uint32_t lastPeer=0,lastSend=0,startAt=0,startSent=0;
-    bool occupied=false,starting=false;
+    bool occupied=false,starting=false,fetching=false;
     HANDLE scanner=nullptr;
     volatile LONG stopScan=0;
     std::atomic<bool> scanDone{false};
@@ -39,10 +40,19 @@ public:
     cd_list hosts{};
     cd_recents recents{};
     std::string joinedName;
+    // The guest can start from the host's save (saves.h). The host offers its newest co-op checkpoint to the partner
+    // that occupies the lobby; the guest fetches it when Ready is chosen with `wantSave`, and reports Ready only after
+    // the window code has put it in place (`saveArrived` -> saveInstalled()).
+    saves::Sender offer;
+    saves::Receiver incoming;
+    bool wantSave=true,saveArrived=false,savePlaced=false;
+    void saveInstalled(){saveArrived=false;savePlaced=true;if(!ready)setReady();}
+    void saveRefused(const std::string& why){saveArrived=false;wantSave=false;status=why;}
     ~Network(){InterlockedExchange(&stopScan,1);if(scanner){WaitForSingleObject(scanner,INFINITE);CloseHandle(scanner);}closeSocket();}
     void leave() {
         if(lobby&&occupied)send(Kind::leave);
         closeSocket();lobby=hosting=joined=ready=peerReady=launch=occupied=starting=false;startAt=0;
+        incoming=saves::Receiver();fetching=saveArrived=savePlaced=false;
         status="Left the lobby.";
     }
     void openHost(Session s,bool privacy) {
@@ -123,16 +133,30 @@ public:
         u_long nb=1;ioctlsocket(sock,FIONBIO,&nb);lobby=true;occupied=true;hosting=false;lastPeer=GetTickCount();lastSend=0;
         joinedName=row.name[0]?row.name:"friend";status="Joining "+joinedName+"...";
     }
-    void setReady(){if(!joined||hosting)return;ready=!ready;send(Kind::ready,ready);}
+    void setReady(){
+        if(!joined||hosting)return;
+        if(fetching){fetching=false;status="Stopped getting the host's save.";return;}
+        if(!ready&&wantSave&&!savePlaced&&(!incoming.offered||incoming.size)){fetching=true;status="Getting the host's save...";return;}
+        ready=!ready;send(Kind::ready,ready);
+    }
+    bool fetchingSave() const {return fetching;}
     void start(){if(!hosting||!occupied||!peerReady)throw std::runtime_error("Wait for your friend to join and choose Ready.");starting=true;startSent=GetTickCount();send(Kind::start);lastSend=GetTickCount();status="Starting with your friend...";}
     void tick() {
         if(sock==INVALID_SOCKET)return;
         auto now=GetTickCount();
-        for(int count=0;count<32;++count) {
-            char bytes[256];sockaddr_in from{};int size=sizeof(from);int n=recvfrom(sock,bytes,sizeof(bytes),0,reinterpret_cast<sockaddr*>(&from),&size);
+        for(int count=0;count<128;++count) {
+            char bytes[1500];sockaddr_in from{};int size=sizeof(from);int n=recvfrom(sock,bytes,sizeof(bytes),0,reinterpret_cast<sockaddr*>(&from),&size);
             if(n<0)break;
             auto ip=ntohl(from.sin_addr.s_addr);
             if(!mod::peerAddress(ipText(ip)))continue;
+            if(n>=4&&!memcmp(bytes,"DSS1",4)) {   // the save transfer: only between the two lobby endpoints, and outside the
+                // discovery rate limit (a request that does not carry the lobby's secret and nonce gets no answer)
+                if(hosting&&occupied&&sameEndpoint(from,partner)) {
+                    auto reply=offer.answer(std::string(bytes,n),session.secret,nonce);
+                    if(!reply.empty()){sendto(sock,reply.data(),int(reply.size()),0,reinterpret_cast<sockaddr*>(&from),size);lastPeer=now;}
+                } else if(!hosting&&joined&&sameEndpoint(from,partner)) {incoming.take(std::string(bytes,n),session.secret,nonce);lastPeer=now;}
+                continue;
+            }
             if(hosting&&!cd_rate_allow(&rate,ip,now))continue;
             if(hosting) {
                 cd_host h{GameId,nullptr,session.name.c_str(),CD_IN_LOBBY,inviteOnly,0,occupied?2u:1u,2};auto version=wireVersion();h.version=version.c_str();uint8_t reply[CD_REPLY_MAX];
@@ -154,12 +178,18 @@ public:
             } else {
                 if(!sameEndpoint(from,partner)||p.nonce!=nonce||!p.secret||(session.secret&&p.secret!=session.secret))continue;
                 if(p.kind==Kind::accepted||p.kind==Kind::start)session.sharedWorld=sessionWorld(false,session.sharedWorld,p.world);   // the host's choice
-                if(p.kind==Kind::accepted){session.secret=p.secret;joined=true;lastPeer=now;status="Joined "+joinedName+". Choose Ready when you are ready.";}
+                if(p.kind==Kind::accepted){session.secret=p.secret;joined=true;lastPeer=now;if(!fetching&&!saveArrived)status=ready?"Ready. Waiting for "+joinedName+" to start.":"Joined "+joinedName+". Choose Ready when you are ready.";}
                 if(p.kind==Kind::start&&joined&&ready){send(Kind::started);if(!startAt)startAt=now;lastPeer=now;status="Host is starting the game...";}
                 if(p.kind==Kind::leave){leave();status="The host closed the lobby.";return;}
             }
         }
         if(!hosting&&startAt&&now-startAt>=1000){launch=true;closeSocket();return;}
+        if(!hosting&&joined&&!startAt) {
+            for(auto& d:incoming.poll(session.secret,nonce,fetching,48))sendto(sock,d.data(),int(d.size()),0,reinterpret_cast<sockaddr*>(&partner),sizeof(partner));
+            if(fetching&&incoming.offered&&!incoming.size){fetching=false;savePlaced=true;setReady();}   // the host has no save to give
+            else if(fetching&&incoming.done){fetching=false;saveArrived=true;status="Got the host's save.";}
+            else if(fetching)status="Getting the host's save: "+std::to_string(incoming.percent())+" %";
+        }
         if(occupied&&now-lastPeer>15000){if(hosting){occupied=joined=peerReady=false;starting=false;status="Lost your friend. They can join again.";}else{leave();status="Lost the host. Choose Join and try again.";}return;}
         if(starting&&now-startSent>10000){starting=false;status="Your friend did not acknowledge Start. Try again.";}
         if(now-lastSend>=500) {

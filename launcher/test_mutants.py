@@ -31,6 +31,19 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
                                       'BACKUP_RUNNING', 'NESTED_LAB', 'NESTED_RELEASE',
                                       'DIAG_SECRET', 'DIAG_ADDRESS', 'DIAG_USER', 'DIAG_BOUND', 'FIREWALL_BLOCK_WINS', 'FIREWALL_ANY_PROGRAM']):
         print('killed', name)
+    def save(name):
+        exe = work/name
+        result = run(['g++', '-std=c++17', '-O1', '-Wall', '-Wextra', '-Werror', '-DMUTANT_'+name,
+                      'saves_test.cpp', 'saves.cpp', 'core.cpp', '../mod/config.cpp', '../redirect/path_map.cpp', '-o', str(exe)])
+        if result.returncode:
+            raise SystemExit(result.stderr)
+        with tempfile.TemporaryDirectory(dir=work) as fixture:
+            result = run([str(exe), fixture])
+        if result.returncode != 1 or 'launcher oracle:' not in result.stderr:
+            raise SystemExit(f'SURVIVED or crashed {name}: {result.returncode}\n{result.stdout}\n{result.stderr}')
+        return name
+    for name in mutants.parallel(save, ['SAVE_LINKS', 'SAVE_SECRET', 'SAVE_RESIGN', 'SAVE_KEEP', 'SAVE_CHECKSUM']):
+        print('killed', name)
     changes = [
         ('invite-crc', 'coop_invite.h', ' || ci_crc8(b, n - 1) != b[n - 1]', '', 'coop_invite_test.c'),
         ('invite-prefix', 'coop_invite.h', 'if (which != mine)', 'if (0 && which != mine)', 'coop_invite_test.c'),
