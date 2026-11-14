@@ -1034,11 +1034,12 @@ void install_redirect(void* self,bool releaseSession) {
     }
     if(!safe_tree(policy.instance,true)) fatal("redirect: unsafe instance\n");
     modules.instance=env(L"COOP_MODULE_INSTANCE");modules.windows=env(L"SystemRoot");modules.steam=policy.steam;
-    if(releaseSession) {
+    {   // The game's own folder is admitted on every path, not only for a release ticket: with the data folder
+        // outside the game folder (the launcher's direct path) the game's own steam_api64.dll was refused.
         wchar_t exe[32768];auto count=GetModuleFileNameW(nullptr,exe,32768);
-        if(!count||count>=32768)fatal("redirect: release game path unavailable\n");
+        if(!count||count>=32768)fatal("redirect: game path unavailable\n");
         auto path=redirect::canonical(exe);auto slash=path.find_last_of(L'\\');
-        if(path.empty()||slash==std::wstring::npos)fatal("redirect: invalid release game path\n");
+        if(path.empty()||slash==std::wstring::npos)fatal("redirect: invalid game path\n");
         modules.release_game=path.substr(0,slash);
     }
     if(policy.instance!=modules.instance+L"\\redirect-data" || !safe_tree(modules.instance,false)) fatal("redirect: module/redirect instance mismatch\n");

@@ -41,9 +41,10 @@ The [launcher](../launcher/README.md) writes the ticket to
 enforced policies to one executable and expires after 120 seconds. The proxy
 consumes it before installing any hook. Only this validated release path permits
 the co-op data tree inside LocalAppData; save opens and queries exclude that tree
-first to prevent recursive remapping. Its module allowlist also admits the exact
-executable directory (with the same path/reparse evidence), since release data
-lives outside the game folder. Adjacent game directories remain refused; two
+first to prevent recursive remapping. The module allowlist also admits the exact
+executable directory (with the same path/reparse evidence) on every path, since
+the data folder can live outside the game folder (always for a release, and on
+the direct path with a separate `--data-dir`). Adjacent game directories remain refused; two
 module-policy mutants cover this boundary. Explicit `COOP_*` isolation environments
 still select the existing fail-closed path, including incomplete environments.
 The `d3dcompiler_47.dll` lab proxy always requires that environment and still exits

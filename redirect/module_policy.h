@@ -6,8 +6,8 @@ enum class ModuleMode { strict, allowlist, log_only };
 struct ModulePolicy {
     ModuleMode mode=ModuleMode::strict;
     std::wstring instance, windows, steam, program_data;
-    // Only a validated release ticket supplies the executable's own directory;
-    // release data and game files live in different trees. Lab default stays empty.
+    // The executable's own directory (data and game files can live in different trees: a release ticket, or the
+    // launcher's direct path with a separate data folder). The proxy fills it on every path; empty admits nothing.
     std::wstring release_game=L"";
 };
 // Evidence means an absolute long path opened without reparse ancestors, whose
