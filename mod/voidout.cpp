@@ -2,6 +2,9 @@
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 namespace mod::voidout {
 constexpr uint64_t Manager=0x7bee060,Active=0x280,Pending=0x290,Counter=0x2a8,Dirty=0x2ac,Resource=0x2a0,Stride=0x60;
 Table read(const discovery::Sampler& s,uint64_t base){
@@ -63,21 +66,35 @@ std::function<uint32_t()> nativeArea(discovery::Sampler& s){
     (void)s;throw std::runtime_error("voidouts need the game");
 #endif
 }
-std::function<uint32_t(const Crater&)> nativeAdd(discovery::Sampler& s){
-#ifdef _WIN32
-    static const uint8_t grow[16]={0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x48,0x89,0x7c,0x24,0x18,0x41};uint8_t got[16]{};
-    if(!s.read(s.base+0x2a6a260,got,16)||std::memcmp(got,grow,16))throw std::runtime_error("crater list function differs");
+std::function<uint32_t(const Crater&)> craterAdder(discovery::Sampler& s,Writable writable,Grow grow,Log log){
     uint64_t base=s.base;
-    return [&s,base](const Crater& k)->uint32_t{
+    return [&s,base,writable,grow,log,logged=false](const Crater& k) mutable ->uint32_t{
+        auto refuse=[&](){if(!logged){logged=true;if(log)log("VOIDOUT refused: crater identity or writable memory changed\n");}return uint32_t(0);};
         uint64_t c=0,resource=0;
-        if(!s.read(base+Manager,&c,8)||!c||!s.read(c+Resource,&resource,8)||!resource)return 0;   // the crater resource is not loaded
+        if(!s.read(base+Manager,&c,8)||!c)return 0;
+#ifndef MUTANT_VOIDOUT_CLASS
+        uint64_t v=0;if(!s.read(c,&v,8)||v!=base+0x3daf258)return refuse(); // constructor, game_offsets.md "Detecting and reproducing a voidout"
+#endif
+#ifndef MUTANT_VOIDOUT_WRITABLE
+        if(!writable(c,Dirty+1))return refuse();
+#endif
+        if(!s.read(c+Resource,&resource,8)||!resource)return 0;   // the crater resource is not loaded
         uint64_t arr=c+Pending;int32_t n=0,cap=0;uint64_t list=0;
         if(!s.read(arr,&n,4)||!s.read(arr+4,&cap,4)||!s.read(arr+8,&list,8)||n<0||n>64)return 0;
+#ifndef MUTANT_VOIDOUT_WRITABLE
+        if(n&&(!list||!writable(list,size_t(n)*Stride)))return refuse();
+#endif
         if(n+1>cap||!list){
-            auto grown=reinterpret_cast<uint64_t(*)(uint64_t,uint64_t,int32_t)>(base+0x2a6a260)(arr,list,n+1+(n+1)/8+2);
+            auto grown=grow(arr,list,n+1+(n+1)/8+2);
             if(!grown)return 0;
+#ifndef MUTANT_VOIDOUT_WRITABLE
+            if(!writable(grown,size_t(n+1)*Stride))return refuse();
+#endif
             *reinterpret_cast<uint64_t*>(arr+8)=grown;list=grown;
         }
+#ifndef MUTANT_VOIDOUT_WRITABLE
+        if(!writable(list,size_t(n+1)*Stride))return refuse();
+#endif
         auto* r=reinterpret_cast<uint8_t*>(list+uint64_t(n)*Stride);std::memset(r,0,Stride);
         std::memcpy(r+0x18,k.position.data(),24);std::memcpy(r+0x30,&k.radius,4);
         uint32_t id=++*reinterpret_cast<volatile uint32_t*>(c+Counter);std::memcpy(r+0x48,&id,4);
@@ -87,8 +104,18 @@ std::function<uint32_t(const Crater&)> nativeAdd(discovery::Sampler& s){
         *reinterpret_cast<volatile int32_t*>(arr)=n+1;*reinterpret_cast<volatile uint8_t*>(c+Dirty)=1;
         return id;
     };
+}
+std::function<uint32_t(const Crater&)> nativeAdd(discovery::Sampler& s,Log log){
+#ifdef _WIN32
+    static const uint8_t grow[16]={0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x48,0x89,0x7c,0x24,0x18,0x41};uint8_t got[16]{};
+    if(!s.read(s.base+0x2a6a260,got,16)||std::memcmp(got,grow,16))throw std::runtime_error("crater list function differs");
+    auto writable=[](uint64_t at,size_t n){MEMORY_BASIC_INFORMATION info{};
+        return at&&at<0x800000000000ULL&&n<=0x800000000000ULL-at
+            &&VirtualQuery(reinterpret_cast<void*>(at),&info,sizeof info)==sizeof info&&info.State==MEM_COMMIT&&info.Protect==PAGE_READWRITE
+            &&n<=info.RegionSize&&at-reinterpret_cast<uint64_t>(info.BaseAddress)<=info.RegionSize-n;};
+    return craterAdder(s,writable,reinterpret_cast<uint64_t(*)(uint64_t,uint64_t,int32_t)>(s.base+0x2a6a260),std::move(log));
 #else
-    (void)s;throw std::runtime_error("voidouts need the game");
+    (void)s;(void)log;throw std::runtime_error("voidouts need the game");
 #endif
 }
 }
