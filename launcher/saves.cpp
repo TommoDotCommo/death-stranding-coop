@@ -184,6 +184,21 @@ std::optional<Checkpoint> newest(const fs::path& account) {
     }
     return std::nullopt;
 }
+std::optional<Checkpoint> named(const fs::path& account,const std::string& folder,std::string* why) {
+#ifdef MUTANT_SAVE_NAMED_OTHER
+    auto fail=[&](const char* text){if(why)*why=text;return newest(account);};
+#else
+    auto fail=[&](const char* text)->std::optional<Checkpoint>{if(why)*why=text;return std::nullopt;};
+#endif
+    if(!saveFolder(folder))return fail("not a save folder");
+    auto dir=account/folder,file=dir/"checkpoint.dat";std::error_code ec;
+    if(linked(dir)||linked(file)||!fs::is_regular_file(file,ec))return fail("no checkpoint file there");
+    try {
+        Checkpoint c;c.folder=folder;c.bytes=readFile(file);
+        auto info=inspect(c.bytes);if(!info.checkpoint)return fail("the file is not a checkpoint");
+        c.title=info.title;return c;
+    } catch(const std::exception& e) {if(why)*why=e.what();return std::nullopt;}
+}
 int install(const fs::path& account,uint32_t accountId,const std::string& hostFile,const fs::path& aside) {
     if(!accountId)throw std::runtime_error("Your Steam account is not known yet. Start Steam, or play solo once, then join again.");
     if(!inspect(hostFile).checkpoint)bad();

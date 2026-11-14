@@ -60,7 +60,10 @@ int main(int argc,char** argv) {
         check(!newest(root/"nothing"),"no checkpoint, nothing to offer");
         {auto broken=game/"555";write(broken/"autosave1"/"checkpoint.dat",A);write(broken/"autosave2"/"checkpoint.dat","garbage");
          fs::last_write_time(broken/"autosave1"/"checkpoint.dat",fs::file_time_type::clock::now()-std::chrono::hours(2));
-         auto b=newest(broken);check(b&&b->folder=="autosave1","a damaged newest file is passed over");fs::remove_all(broken);}
+         auto b=newest(broken);check(b&&b->folder=="autosave1","a damaged newest file is passed over");
+         std::string why;check(!named(broken,"autosave2",&why)&&!why.empty(),"a named damaged checkpoint is not replaced by another");
+         auto o=named(broken,"autosave1");check(o&&o->folder=="autosave1"&&o->bytes==A,"a named checkpoint is read");
+         check(!named(broken,"autosave7")&&!named(broken,"../555/autosave1"),"a named folder that is missing or not a save folder gives nothing");fs::remove_all(broken);}
         auto aside=root/"backups"/"before-join-1";
         check(throws([&]{install(account,0,A,aside);}),"needs the account");
         check(throws([&]{install(account,accountB,Profile,aside);})&&throws([&]{install(account,accountB,"junk",aside);}),"installs checkpoints only");

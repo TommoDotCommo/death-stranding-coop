@@ -16,14 +16,23 @@ void atomicWrite(const fs::path& path,const std::string& bytes){
 }
 namespace mod::story {
 namespace saves=launcher::saves;
+// The news on the wire. An event's position is metres, sent as centimetres held to +-100 km, so a size put there
+// arrived as 100000 and the fetch never completed; the integers must each stay under 2^53. So: the checksum in id, and
+// the size above 28 bits of generation in ref (16 MiB << 28 is 2^52).
+constexpr unsigned GenerationBits=28;
 ds::CargoEvent encode(const News& n){
-    ds::CargoEvent e;e.type=WireType;e.item=n.what;e.ref=n.generation;e.position={double(n.size),double(n.sum),0};return e;
+    ds::CargoEvent e;e.type=WireType;e.item=n.what;e.id=n.sum;
+    e.ref=uint64_t(n.size)<<GenerationBits|(n.generation&((1u<<GenerationBits)-1));return e;
 }
 std::optional<News> decode(const ds::CargoEvent& e){
-    if(e.type!=WireType||e.item<Ready||e.item>Failed||!e.ref||e.ref>0xffffffffull)return std::nullopt;
-    double size=e.position[0],sum=e.position[1];
-    if(!std::isfinite(size)||!std::isfinite(sum)||size<0||sum<0||size>double(saves::MaxSave)||sum>4294967295.0||size!=std::floor(size)||sum!=std::floor(sum))return std::nullopt;
-    News n;n.what=e.item;n.generation=uint32_t(e.ref);n.size=uint32_t(size);n.sum=uint32_t(sum);
+    uint64_t generation=e.ref&((1u<<GenerationBits)-1),size=e.ref>>GenerationBits;
+    if(e.type!=WireType||e.item<Ready||e.item>Failed||!generation||e.id>0xffffffffull)return std::nullopt;
+#ifndef MUTANT_STORY_SIZE_BOUND
+    if(size>saves::MaxSave)return std::nullopt;
+#endif
+    for(double v:e.position)if(v!=0)return std::nullopt;
+    uint64_t sum=e.id;
+    News n;n.what=e.item;n.generation=uint32_t(generation);n.size=uint32_t(size);n.sum=uint32_t(sum);
 #ifndef MUTANT_STORY_EMPTY
     if(n.what==Ready&&!n.size)return std::nullopt;
 #endif

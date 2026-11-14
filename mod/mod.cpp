@@ -1091,6 +1091,7 @@ struct Runtime final:ds::Transport {
     std::vector<ds::CargoEvent> storyIn;std::function<void()> storySave;std::function<int(uint8_t,uint8_t)> storyLoad;
     std::optional<mod::story::Account> storyAccount;std::optional<mod::story::Stamp> storyNewest;std::filesystem::path storyFolder,storyCommand;
     bool storyTried=false,storyKeyCommand=false;uint64_t storyLookAt=0,storyPollAt=0,storyWatchUntil=0,storyWatchNext=0,storyChunks=0;int storyPercent=-1;mod::marker::KeyEdge storyEdge;
+    uint32_t storyOfferGeneration=0;uint64_t storyOfferUntil=0;   // a written checkpoint still to be read and offered
     unsigned guardNoted=0,cullNoted=0,walkNoted=0;
     // The partner body's queue of deferred rep calls (game_offsets.md, "Deferred rep calls"): what the mod's own
     // calls put there in a tick is run at the end of that tick with the game's own flush, so no node waits for a
@@ -1305,11 +1306,15 @@ struct Runtime final:ds::Transport {
             auto out=storyHost->tick(in);
             for(auto& l:out.log)note((l+"\n").c_str());
             if(out.save){if(storySave)storySave();else note("STORY save request unavailable: nothing asked\n");}
-            if(out.offer){
-                std::optional<launcher::saves::Checkpoint> c;if(storyAccount)c=launcher::saves::newest(storyAccount->folder);
-                if(c)storyServe.offer(config.session,out.generation,*c);
-                if(c&&storyServe.news().what){storyTell(storyServe.news());note(("STORY offering "+c->folder+" to the partner, "+std::to_string(c->bytes.size())+" bytes\n").c_str());}
-                else{storyHost->unreadable();note("STORY the checkpoint could not be read: nothing offered\n");}
+            if(out.offer){storyOfferGeneration=out.generation;storyOfferUntil=now+5000;}
+            if(storyOfferGeneration){
+                // The checkpoint the game just wrote, and no other: the newest readable one could be an older save.
+                // The game can still hold the file for a moment, so the read is tried again for five seconds.
+                std::optional<launcher::saves::Checkpoint> c;std::string why="the save folder is not known";
+                if(storyAccount&&storyNewest)c=launcher::saves::named(storyAccount->folder,storyNewest->folder,&why);
+                if(c)storyServe.offer(config.session,storyOfferGeneration,*c);
+                if(c&&storyServe.news().what){storyOfferGeneration=0;storyTell(storyServe.news());note(("STORY offering "+c->folder+" to the partner, "+std::to_string(c->bytes.size())+" bytes\n").c_str());}
+                else if(now>=storyOfferUntil){storyOfferGeneration=0;storyHost->unreadable();note(("STORY the checkpoint could not be read ("+(c?std::string("too large or empty"):why)+"): nothing offered\n").c_str());}
             }
         }
         if(storyGuest){

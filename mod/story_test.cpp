@@ -46,9 +46,14 @@ int main(){
     // News on the ordered stream.
     { News n{Ready,7,5000000,0xfedcba98};auto e=encode(n);CHECK(e.type==WireType&&e.type<=ds::CargoTypeMax);
       auto d=decode(e);CHECK(d&&d->what==Ready&&d->generation==7&&d->size==5000000&&d->sum==0xfedcba98);
-      auto bad=e;bad.item=9;CHECK(!decode(bad));bad=e;bad.ref=0;CHECK(!decode(bad));bad=e;bad.type=12;CHECK(!decode(bad));
-      bad=e;bad.position[0]=double(saves::MaxSave)+1;CHECK(!decode(bad));bad=e;bad.position[0]=std::nan("");CHECK(!decode(bad));bad=e;bad.position[1]=-1;CHECK(!decode(bad));
-      bad=e;bad.position[0]=0;CHECK(!decode(bad));                                    // nothing to fetch is no offer
+      auto bad=e;bad.item=9;CHECK(!decode(bad));bad=e;bad.ref&=~0xfffffffull;CHECK(!decode(bad));bad=e;bad.type=12;CHECK(!decode(bad));
+      bad=e;bad.ref=(uint64_t(saves::MaxSave)+1)<<28|7;CHECK(!decode(bad));bad=e;bad.position[0]=1;CHECK(!decode(bad));bad=e;bad.id=1ull<<32;CHECK(!decode(bad));
+      bad=e;bad.ref=7;CHECK(!decode(bad));                                            // nothing to fetch is no offer
+      // What the wire does to an event must not touch the news: positions are held to +-100 km in centimetres (a
+      // size carried there arrived as 100000), integers must stay under 2^53.
+      CHECK(e.position[0]==0&&e.position[1]==0&&e.position[2]==0);
+      { auto big=encode({Ready,(1u<<28)-1,uint32_t(saves::MaxSave),0xffffffffu});CHECK(big.id<(1ull<<53)&&big.ref<(1ull<<53));
+        auto d2=decode(big);CHECK(d2&&d2->size==saves::MaxSave&&d2->sum==0xffffffffu&&d2->generation==(1u<<28)-1); }
       CHECK(decode(encode({Ask,1,0,0}))&&decode(encode({Loaded,3,0,0})));
       CHECK(secretOf(session)&&nonceOf(session,1)&&nonceOf(session,1)!=nonceOf(session,2)&&secretOf(session)!=secretOf(session+1)); }
     // Host: automatic. A story move asks the game for a checkpoint in the world only, and offers the new file only

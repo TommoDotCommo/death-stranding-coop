@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
         if result.returncode != 1 or 'launcher oracle:' not in result.stderr:
             raise SystemExit(f'SURVIVED or crashed {name}: {result.returncode}\n{result.stdout}\n{result.stderr}')
         return name
-    for name in mutants.parallel(save, ['SAVE_LINKS', 'SAVE_SECRET', 'SAVE_RESIGN', 'SAVE_KEEP', 'SAVE_CHECKSUM']):
+    for name in mutants.parallel(save, ['SAVE_LINKS', 'SAVE_SECRET', 'SAVE_RESIGN', 'SAVE_KEEP', 'SAVE_CHECKSUM', 'SAVE_NAMED_OTHER']):
         print('killed', name)
     changes = [
         ('invite-crc', 'coop_invite.h', ' || ci_crc8(b, n - 1) != b[n - 1]', '', 'coop_invite_test.c'),

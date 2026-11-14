@@ -29,6 +29,8 @@ std::filesystem::path gameFolder(const std::filesystem::path& local);
 std::vector<uint32_t> accounts(const std::filesystem::path& gameFolder);
 struct Checkpoint { std::string folder,bytes,title; };
 std::optional<Checkpoint> newest(const std::filesystem::path& account);   // by the checkpoint's last write time
+// That one folder's checkpoint, or nullopt with the reason (never another folder's: the caller asked for this one).
+std::optional<Checkpoint> named(const std::filesystem::path& account,const std::string& folder,std::string* why=nullptr);
 // Guest: the host's checkpoint becomes this account's only save (InstallFolder), re-signed for `accountId`. The saves
 // that were there move to `aside`, never deleted. Returns how many moved; -1 when the same save was already in place.
 int install(const std::filesystem::path& account,uint32_t accountId,const std::string& hostFile,const std::filesystem::path& aside);
