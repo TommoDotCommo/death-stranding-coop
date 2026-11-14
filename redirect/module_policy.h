@@ -28,6 +28,12 @@ RequestAction classify_request(const ModulePolicy&, const std::wstring& requeste
 // DONT_RESOLVE_DLL_REFERENCES (0x1) hands out an unresolved image and stays refused outside log-only.
 bool loader_flags_allowed(const ModulePolicy&, unsigned long flags);
 enum class ModulePhase { request, mapped, loaded };
+// What a refused module means for the process. A refused request is answered like a load that failed: the module
+// never enters the process and the game goes on without it (a third-party input method's DLL, loaded by Windows into
+// every process with a window, used to end the game). A module that is found loaded after the fact has already run
+// code here, so that still ends the process.
+enum class Refusal { fail_load, end_process };
+Refusal refusal(ModulePhase phase);
 // Shared orchestration seam: audit BEFORE refusal; patch AFTER successful load.
 bool module_event(const ModulePolicy&, const std::wstring&, bool evidence,
                   bool existing, ModulePhase,

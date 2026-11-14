@@ -72,6 +72,9 @@ int main(int argc,char** argv) {
     check(!is_api_set_name(L"c:\\x\\api-ms-win-evil.dll") && !is_api_set_name(L"api-ms-win-x/..\\y.dll") && !is_api_set_name(L"apix.dll"));
     check(classify_request(c,L"ext-ms-win-core-resourcepolicy-l1-1-0.dll",false,false)==RequestAction::api_set_forward);
     check(classify_request(c,L"hkCompatFormats.dll",false,false)==RequestAction::not_found);
+    // A refused request fails the load and the game goes on; a module found loaded after the fact ends the process.
+    check(refusal(ModulePhase::request)==Refusal::fail_load);
+    check(refusal(ModulePhase::loaded)==Refusal::end_process&&refusal(ModulePhase::mapped)==Refusal::end_process);
     check(classify_request(c,L"c:\\lab\\s0\\x.dll",false,true)==RequestAction::policy);
     check(classify_request(c,L"x.dll",true,false)==RequestAction::policy);
     {auto s=c;s.mode=ModuleMode::strict; check(classify_request(s,L"api-ms-win-core-x-l1-1-0.dll",false,false)==RequestAction::not_found);}

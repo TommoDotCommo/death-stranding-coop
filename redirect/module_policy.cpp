@@ -86,6 +86,13 @@ RequestAction classify_request(const ModulePolicy& c,const std::wstring& request
     return RequestAction::policy;
 #endif
 }
+Refusal refusal(ModulePhase phase) {
+#ifdef MUTANT_MODULE_REFUSED_STAYS
+    (void)phase;return Refusal::fail_load;
+#else
+    return phase==ModulePhase::request?Refusal::fail_load:Refusal::end_process;
+#endif
+}
 bool module_event(const ModulePolicy& c,const std::wstring& p,bool evidence,bool existing,
                   ModulePhase phase,const std::function<void(bool)>& audit,
                   const std::function<void()>& patch) {

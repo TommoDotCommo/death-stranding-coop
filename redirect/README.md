@@ -15,6 +15,11 @@ loaded module so that the copy:
 - **loads only expected code** (`.ds-module-policy.json`: `strict`, `allowlist`, `log-only`). Allowlist admits the
   copy's own folder, System32, the Steam client libraries and Windows Defender's in-process scanner, by exact path
   rules.
+  A module that is refused when it is asked for is not loaded and the request is answered as a failed load (audit
+  records `MODULE_REFUSE` and `MODULE_LOAD_FAILED ... error=5`): the game goes on without it. This is what happens to
+  software Windows loads into every process with a window, such as a third-party input method. A module that is only
+  found after it was loaded (a dependency the loader brought in by itself) has already run code, and that still ends
+  the game.
 - **can run next to another copy.** Named kernel objects listed per copy (the game's single-instance mutex) get a
   per-copy suffix (`objects.h`).
 - **stays off the online service** (`network_policy.h`, default `enforce`). Only loopback and the co-op partners'
