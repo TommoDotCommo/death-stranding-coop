@@ -150,7 +150,7 @@ inline bool matches(const State& s,const std::string& expr){return detail::any(e
 State read(const discovery::Sampler&,uint64_t base,bool inWorld);
 // The candidate memory for the highlighted entry, as text rows (addresses, vtables as image offsets, the first bytes
 // of the page manager, the layer manager and the first entries of its two lists). Read-only.
-std::vector<std::string> dump(const discovery::Sampler&,uint64_t base);
+std::vector<std::string> dump(const discovery::Sampler&,uint64_t base,bool inWorld=false);
 // A line when the description changed, at most one look every Every ms (unless forced).
 class Watch {
 public:

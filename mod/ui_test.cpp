@@ -86,7 +86,7 @@ int main(){
     q(list,page+0x40);q(layers+LayerArrayA,list);
     auto rows=dump(s,base);CHECK(rows.size()>8&&rows[0].find("UI dump state: paused")==0);
     bool sawIdentity=false;for(auto& r:rows)sawIdentity=sawIdentity||r=="UI dump page identity a0a1a2a3a4a5a6a7a8a9aaabacadaeaf";CHECK(sawIdentity);
-    q(base+Menu,0);CHECK(dump(s,base).size()==2);
+    q(base+Menu,0);{auto none=dump(s,base,true);CHECK(none.size()==3&&none[0].find("world=1")!=std::string::npos&&none[1].find("UI dump chain: menu 0 ")==0);}
     if(!failures)std::puts("ui state, page, guard, expression and log checks passed");
     return failures?1:0;
 }

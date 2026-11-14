@@ -1726,7 +1726,7 @@ struct Runtime final:ds::Transport {
         if(!force&&!dump&&wanted.empty()&&(!(uiOn||config.virtualPad)||!uiWatch.due(now)))return;
         auto state=mod::ui::read(*sampler,sampler->base,cache.available);
         if(uiWatch.changed(state,now)||force)note(("UI state: "+uiWatch.text()+"\n").c_str());
-        if(dump)for(auto& row:mod::ui::dump(*sampler,sampler->base))note((row+"\n").c_str());
+        if(dump)for(auto& row:mod::ui::dump(*sampler,sampler->base,cache.available))note((row+"\n").c_str());
         if(!wanted.empty()&&mod::ui::matches(state,wanted)){
             {std::lock_guard<std::mutex> l(padShared.lock);padShared.player.met(mod::nowMs());}
             note(("PAD waitui met: "+wanted+"\n").c_str());
