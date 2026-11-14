@@ -36,6 +36,20 @@ int main() {
         check(dev.c_str(),Action::deny,L"",true,true);
     }
     check(L"\\\\?\\hid#vid_1532&pid_02a7&mi_01&col01#9&2fcb1b56&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}\\kbd",Action::device);
+    // (1c) XInput's interface (XUSB): a Bluetooth Xbox pad (hid#, the shape of the live 2026-11-13 path in both letter
+    // cases, with the pad's own address and instance replaced) and a wired one (usb#). The usb# head passes with that
+    // interface only, the interface passes behind hid# and usb# only, and a near-miss guid stays refused.
+    for(auto s:{L"\\\\?\\hid#{00001812-0000-1000-8000-00805f9b34fb}&dev&vid_045e&pid_0b22&rev_0522&0123456789ab&col01&ig_00#c&1a2b3c4&0&0000#{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}",
+                L"\\\\?\\HID#{00001812-0000-1000-8000-00805f9b34fb}&Dev&VID_045e&PID_0b22&REV_0522&0123456789ab&Col01&IG_00#c&1a2b3c4&0&0000#{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}",
+                L"\\\\?\\usb#vid_045e&pid_02ea#0123456789abcd#{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}"}) {
+        check(s,Action::device,s,true);check(s,Action::device,s,false);check(s,Action::deny,L"",true,true);
+    }
+    for(auto s:{L"\\\\?\\usb#vid_045e&pid_02ea#0123456789abcd#{4d1e55b2-f16f-11cf-88cb-001111000030}",
+                L"\\\\?\\usb#vid_0781&pid_5581#0123456789#{a5dcbf10-6530-11d2-901f-00c04fb951ed}",
+                L"\\\\?\\hid#a#b#c#{ec87f1e3-c13b-4100-b5f7-8b84d54260cf}",L"\\\\?\\usbstor#a#b#c#{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}",
+                L"\\\\?\\usb#a#b{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}",L"\\\\?\\usb#a#b#c#{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}\\..\\x"}) {
+        check(s,Action::deny,L"",true);check(s,Action::deny,L"",false);
+    }
     // (2) Drive paths behind \\?\ and \\.\ are classified like the plain path.
     const wchar_t* local=L"c:\\lab\\s0\\redirect-data\\local\\nvidia\\dxcache\\x.nvph";
     check(L"\\\\?\\C:\\Users\\Player\\AppData\\Local\\NVIDIA\\DXCache\\x.nvph",Action::redirect,local);

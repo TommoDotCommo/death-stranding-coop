@@ -8,7 +8,10 @@ loaded module so that the copy:
 - **keeps its saves and settings to itself.** Known-folder and environment lookups (`LocalAppData`, `Roaming`,
   `Documents`, `Saved Games`, profile), file creation, deletion, moves, attribute queries, enumeration and free-space
   queries under the real save roots are mapped into the copy's own `redirect-data` folder. The real save tree is
-  never read or written. Anything that would write outside the copy is refused.
+  never read or written. Anything that would write outside the copy is refused. Device paths are not files: an
+  input device's HID interface (`\\?\hid#...#{4d1e55b2-...}`) and XInput's interface for Xbox pads (XUSB,
+  `...#{ec87f1e3-...}`, behind `hid#` for a Bluetooth pad or `usb#` for a wired one) open untouched; every other
+  device namespace is refused.
 - **loads only expected code** (`.ds-module-policy.json`: `strict`, `allowlist`, `log-only`). Allowlist admits the
   copy's own folder, System32, the Steam client libraries and Windows Defender's in-process scanner, by exact path
   rules.
