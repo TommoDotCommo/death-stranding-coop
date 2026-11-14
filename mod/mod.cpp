@@ -53,6 +53,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "environment.h"
 #include "auto_continue.h"
 #include "pad.h"
+#include "ui.h"
 #include "cargo.h"
 #include "marker.h"
 #include "carry_visual.h"
@@ -1349,8 +1350,34 @@ struct Runtime final:ds::Transport {
                 padRunning=true;note(("PAD script started steps="+std::to_string(n)+"\n").c_str());
             } catch(const std::exception& e) {note((std::string("PAD script refused: ")+e.what()+"\n").c_str());}
         }
-        if(padRunning) {bool done;{std::lock_guard<std::mutex> l(padShared.lock);done=padShared.player.done();}
-            if(done){padRunning=false;note("PAD script finished\n");}}
+        if(padRunning) {bool done,failed;std::string why;{std::lock_guard<std::mutex> l(padShared.lock);done=padShared.player.done();failed=padShared.player.failed();why=padShared.player.failure();}
+            if(done&&failed){padRunning=false;note(("PAD script FAILED: "+why+" (UI state: "+(uiWatch.text().empty()?"not read":uiWatch.text())+")\n").c_str());}
+            else if(done){padRunning=false;note("PAD script finished\n");}}
+    }
+    // ui.h: which screen the game shows, read-only. A line per change while scripted input is on (virtual_pad) or after
+    // `puppet.ui on`; `puppet.ui state` writes the line now, `puppet.ui dump` the candidate memory for the highlighted
+    // entry. A running script's waitui step is answered here.
+    std::filesystem::path uiCommand;mod::ui::Watch uiWatch;bool uiOn=false;
+    void tickUi() {
+        bool force=false,dump=false;auto now=mod::nowMs();
+        if(!uiCommand.empty()&&std::filesystem::exists(uiCommand)) {
+            auto text=readConfig(uiCommand);auto stamp=" "+mod::runStamp()+"\n";
+            if(!std::filesystem::remove(uiCommand))throw std::runtime_error("cannot consume ui command");
+            if(text=="on"+stamp)uiOn=true;else if(text=="off"+stamp)uiOn=false;
+            else if(text=="state"+stamp)force=true;else if(text=="dump"+stamp)dump=true;
+            else note("UI command refused (on, off, state, dump)\n");
+        }
+        std::string wanted;
+        if(padRunning){std::lock_guard<std::mutex> l(padShared.lock);if(auto w=padShared.player.waiting(now))wanted=*w;}
+        if(!sampler){if(force||dump)note("UI state: unknown (no reader in this mode)\n");return;}
+        if(!force&&!dump&&wanted.empty()&&(!(uiOn||config.virtualPad)||!uiWatch.due(now)))return;
+        auto state=mod::ui::read(*sampler,sampler->base,cache.available);
+        if(uiWatch.changed(state,now)||force)note(("UI state: "+uiWatch.text()+"\n").c_str());
+        if(dump)for(auto& row:mod::ui::dump(*sampler,sampler->base))note((row+"\n").c_str());
+        if(!wanted.empty()&&mod::ui::matches(state,wanted)){
+            {std::lock_guard<std::mutex> l(padShared.lock);padShared.player.met(mod::nowMs());}
+            note(("PAD waitui met: "+wanted+"\n").c_str());
+        }
     }
     // One line per change, so an outside driver can wait for gameplay by reading the log.
     void notePose() {
@@ -1690,7 +1717,7 @@ struct Runtime final:ds::Transport {
                 return r;});}
             game=g.get();provider=std::move(g);
         } else provider=std::make_unique<mod::SyntheticProvider>(config.slot);
-        padCommand=path.parent_path()/"pad.script";padShared.enabled=config.virtualPad;
+        padCommand=path.parent_path()/"pad.script";uiCommand=path.parent_path()/"puppet.ui";padShared.enabled=config.virtualPad;
         if(sampler)animatorVtable=sampler->base+0x3d09910;   // MorphemeAnimationManager (pinned build)
 #ifndef MOD_FAKE_NETWORK
         if(sampler){cargoManagerSlot=sampler->base+0x7bf4968;cargoManagerVtable=sampler->base+0x3dd9338;}   // DSBaggage2Manager global, vtable
@@ -2576,7 +2603,7 @@ struct Runtime final:ds::Transport {
             stage="body";stages.enter("body",mod::nowUs());
             if(body&&gameContext)tickBody();
             stage="pad";stages.enter("pad",mod::nowUs());
-            tickPad();notePose();
+            tickUi();tickPad();notePose();
             repTickEnd(now);
             stage="idle";stages.enter("idle",mod::nowUs());
             if(unappliedReceive) {receiveApply.add(clock-unappliedReceive);unappliedReceive=0;}

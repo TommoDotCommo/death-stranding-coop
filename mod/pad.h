@@ -7,6 +7,10 @@
 //   stick 0 1 3000 [buttons]   left stick x,y in [-1,1] for ms, optionally holding buttons
 //   look 1 0 500               right stick x,y in [-1,1] for ms
 //   wait 2000                  nothing pressed for ms
+//   waitui STATE 8000          nothing pressed until the game shows STATE (ui.h: gameplay, paused, menu, cutscene,
+//                              loading, a flag name like PauseMenu, page:NAME, '!' negates, '+' all of, '|' any of);
+//                              the next step starts as soon as it does. Not there after ms: the script stops and the
+//                              mod logs "PAD script FAILED". Needs the mod's ui reader (a waitui without it fails).
 // Buttons: A B X Y START BACK UP DOWN LEFT RIGHT LB RB LS RS LT RT.
 // Keyboard and mouse (the proxy feeds them to the game as raw input, with or without the window focus):
 //   key W+SHIFT 1500 [mouse DX DY]   hold keys for ms, optionally moving the mouse (counts per second)
@@ -26,17 +30,26 @@ namespace mod::pad {
 struct Gamepad {uint16_t buttons=0;uint8_t leftTrigger=0,rightTrigger=0;int16_t lx=0,ly=0,rx=0,ry=0;};
 constexpr size_t MaxKeys=8;constexpr int MaxMouseSpeed=20000;
 struct Keys {uint8_t vk[MaxKeys]{};uint8_t count=0,mouseButtons=0;int16_t mouseX=0,mouseY=0;int8_t wheel=0;uint8_t wheelStep=0;};   // wheelStep: which step turned it (Player::sample)   // buttons: 1 L, 2 R, 4 M
-struct Step {Gamepad pad;uint32_t ms=0;std::string line;Keys keys;};
+struct Step {Gamepad pad;uint32_t ms=0;std::string line;Keys keys;std::string waitUi;};   // waitUi: the STATE of a waitui step (ms its timeout)
 constexpr uint32_t ReleaseGapMs=200,MaxStepMs=120000;constexpr size_t MaxSteps=2000,MaxBytes=32768;
 // Throws std::runtime_error naming the line on any malformed or foreign script.
 std::vector<Step> parse(const std::string& text,const std::string& stamp);
 class Player {
     std::vector<Step> steps_;uint64_t start_=0;bool started_=false,done_=true;size_t index_=0;uint8_t loads_=0;
+    std::vector<uint8_t> met_;uint64_t skipped_=0;bool failed_=false;std::string failure_;
 public:
-    void load(std::vector<Step> steps){steps_=std::move(steps);started_=false;done_=steps_.empty();index_=0;++loads_;}
+    void load(std::vector<Step> steps){steps_=std::move(steps);started_=false;done_=steps_.empty();index_=0;++loads_;
+        met_.assign(steps_.size(),0);skipped_=0;failed_=false;failure_.clear();}
     void stop(){steps_.clear();done_=true;}
     // Active while a step is running; out is neutral otherwise.
     bool sample(uint64_t now,Gamepad& out,Keys* keys=nullptr);
+    // The STATE the script is waiting for at `now` (a waitui step that is running and not met yet), or null.
+    const std::string* waiting(uint64_t now);
+    // The game shows that STATE: the waitui step ends and the next step starts at `now`.
+    void met(uint64_t now);
+    // A waitui step ran out: the script stopped there. failure() names the step.
+    bool failed() const {return failed_;}
+    const std::string& failure() const {return failure_;}
     bool done() const {return done_;}
     size_t index() const {return index_;}
     size_t size() const {return steps_.size();}

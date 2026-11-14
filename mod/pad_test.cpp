@@ -57,6 +57,28 @@ int main(){
     CHECK(!p.sample(2800,g)&&g.buttons==0&&g.ly==0&&p.done());      // total 1800 ms
     CHECK(!p.sample(9000,g));
     p.load(steps);CHECK(p.sample(5000,g)&&g.buttons==0x1000);p.stop();CHECK(!p.sample(5001,g)&&g.buttons==0&&p.done());
+    // waitui: the step ends when the state is there (the next one starts at once), and the script stops when it never is.
+    { auto k=parse("pad S1\ntap ESC 100\nwaitui paused|page:InGamePauseMenu 5000\nkey DOWN 300\nwaitui !PauseMenu+gameplay 1000\nkey W 100\n","S1");
+      CHECK(k.size()==6&&k[2].waitUi=="paused|page:InGamePauseMenu"&&k[2].ms==5000&&k[2].keys.count==0&&k[4].waitUi=="!PauseMenu+gameplay");
+      Player q;Gamepad g;Keys held;q.load(k);
+      CHECK(q.sample(1000,g,&held)&&held.count==1&&!q.waiting(1000));           // the tap
+      CHECK(q.sample(1400,g,&held)&&held.count==0&&q.waiting(1400)&&*q.waiting(1400)=="paused|page:InGamePauseMenu");
+      CHECK(q.sample(3000,g,&held)&&held.count==0&&q.waiting(3000));            // still waiting, nothing pressed
+      q.met(3000);
+      CHECK(!q.waiting(3000)&&q.sample(3000,g,&held)&&held.count==1&&held.vk[0]==0x28&&q.index()==3);   // DOWN starts now
+      CHECK(q.sample(3299,g,&held)&&held.vk[0]==0x28);
+      CHECK(q.sample(3300,g,&held)&&held.count==0&&q.waiting(3300)&&*q.waiting(3300)=="!PauseMenu+gameplay");
+      q.met(1);                                                                // a call outside a waitui step changes nothing
+      CHECK(q.sample(4299,g,&held)&&q.waiting(4299)&&!q.failed());
+      CHECK(!q.sample(4300,g,&held)&&held.count==0&&q.done()&&q.failed()&&q.failure()=="waitui !PauseMenu+gameplay not there after 1000 ms");
+      CHECK(!q.sample(4400,g,&held)&&held.count==0&&!q.waiting(4400));          // W is never pressed
+      q.load(k);CHECK(!q.failed()&&q.failure().empty()&&q.sample(9000,g,&held)&&held.count==1);
+      // Met in time, the script runs to its end without a failure.
+      q.load(k);q.sample(0,g);CHECK(q.waiting(400));q.met(400);CHECK(q.waiting(800));q.met(800);
+      CHECK(q.sample(850,g,&held)&&held.vk[0]==0x57&&!q.sample(900,g,&held)&&q.done()&&!q.failed()); }
+    for(const char* bad:{"pad S1\nwaitui paused\n","pad S1\nwaitui 5000\n","pad S1\nwaitui pawsed 5000\n","pad S1\nwaitui paused 0\n",
+                         "pad S1\nwaitui paused 5000 x\n","pad S1\nwaitui page: 100\n","pad S1\nwaitui menu+ 100\n"})
+        CHECK(refused([&]{parse(bad,"S1");}));
     if(!failures)std::puts("pad script parse and timing checks passed");
     return failures?1:0;
 }
