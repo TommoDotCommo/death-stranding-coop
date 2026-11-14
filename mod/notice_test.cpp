@@ -153,6 +153,15 @@ int main(){
         h.there=true;h.log.clear();unsigned before=n.shown();for(int i=0;i<400;++i)n.tick(t+=100,true,true,"A");
         CHECK(n.shown()-before<=Notifier::MaxPending+1&&n.pending()==0);
     }
+    {   // The partner scans: told once, then not again for ScanGapMs however often he scans; never while disconnected.
+        Hud h;auto n=h.make();uint64_t t=1000;auto run=[&](bool scan,int ticks){for(int i=0;i<ticks;++i){if(scan)n.scan(t,true);n.tick(t+=50,true,true,"Higgs");}};
+        run(false,80);CHECK(h.shown.size()==1);
+        run(true,1);run(false,80);CHECK(h.shown.size()==2&&h.shown[1]==u"Higgs scanned the area.");
+        run(true,100);CHECK(h.shown.size()==2);                                             // five seconds of scanning
+        for(uint64_t end=t+Notifier::ScanGapMs;t<end;)n.tick(t+=50,true,true,"Higgs");
+        run(true,1);run(false,80);CHECK(h.shown.size()==3);
+        Hud g;auto m=g.make();m.scan(1000,false);for(uint64_t u=1000;u<6000;u+=50)m.tick(u,true,false,"");CHECK(g.shown.empty());
+    }
     if(!failures)std::puts("notice checks passed");
     return failures?1:0;
 }

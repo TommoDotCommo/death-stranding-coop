@@ -29,6 +29,7 @@ std::u16string text(Kind kind,const std::string& partnerName){
     case Kind::Slow:return u"The connection to "+name+u" is slow. You see each other a moment late.";
     case Kind::Steady:return u"The connection to "+name+u" is steady again.";
     case Kind::Episode:return name+u" is in a different episode. Start from the same save to share the story.";
+    case Kind::Scan:return name+u" scanned the area.";
     }
     return {};
 }
@@ -70,6 +71,13 @@ void Notifier::call(uint64_t now,bool connected,bool calling){
     if(callTold_&&now-lastCall_<CallGapMs)return;
 #endif
     callTold_=true;lastCall_=now;add(Kind::Call,lastName_,now);
+}
+void Notifier::scan(uint64_t now,bool connected){
+    if(!connected)return;
+#ifndef MUTANT_NOTICE_SCAN_GAP
+    if(scanTold_&&now-lastScan_<ScanGapMs)return;
+#endif
+    scanTold_=true;lastScan_=now;add(Kind::Scan,lastName_,now);
 }
 void Notifier::link(uint64_t now,bool connected,uint32_t delayMs){
     if(!connected){slow_=false;linkSince_=0;return;}
@@ -156,7 +164,7 @@ void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& 
 #endif
     if(api_.show&&api_.show(text(e.kind,e.name),icon(e.kind))){
         ++shown_;lastShown_=now;if(e.kind==Kind::Joined)joining_=false;
-        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call","slow","steady","episode"};static_assert(sizeof(names)/sizeof(names[0])==size_t(Kind::Episode)+1,"a name for every notice");
+        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call","slow","steady","episode","scan"};static_assert(sizeof(names)/sizeof(names[0])==size_t(Kind::Scan)+1,"a name for every notice");
         log_(std::string("NOTICE shown: ")+names[unsigned(e.kind)]+"\n");
         pending_.pop_front();return;
     }

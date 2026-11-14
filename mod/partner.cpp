@@ -24,6 +24,9 @@
 // by BTs (presence flags Down, Caught).
 // --away ON OFF: from ON to OFF seconds after connecting the partner reports a game event or private room (presence
 // flag PrivateRoom), as a real copy does in a cutscene or its private room.
+// --shout-every S, --scan-every S: the partner shouts / scans every S seconds while connected (signals.h one-shot events;
+// the game needs partner_shout / partner_scan). --vitals BLOOD STAMINA BITS: his vitals as the game's name tag shows them
+// with partner_vitals (percent 0..100 or 255 unknown; bits 1 overloaded, 2 off balance), sent on every connection.
 // --carry tells the game what the partner carries (carry_visual.h; the game needs carry_visual true): SPEC is
 // "hash[:slot[:count]],..." (slot 1 BackPack, 6 LeftHand, 7 RightHand; default 1 and 1), sent once connected and again
 // after every reconnect; --carry-drop-after puts it all down SECONDS after connecting. What the game's porter carries
@@ -31,6 +34,7 @@
 #include "partner.h"
 #include "structures.h"
 #include "carry_visual.h"
+#include "signals.h"
 #include "environment.h"
 #include <chrono>
 #include <cmath>
@@ -125,6 +129,7 @@ int main(int argc,char** argv){
     unsigned slot=1,peerSlot=0;ds::Role role=ds::Role::Client;uint64_t session=0;double seconds=3600,dropAfter=-1,takeAfter=-1,takeOwnAfter=-1,buildAfter=-1,unbuildAfter=-1;uint32_t dropItem=0,buildType=0;
     std::string replayFile,stopFile;bool withAnimation=false;Shell shell;ds::ProgressPolicy progressPolicy=ds::ProgressPolicy::Warn;std::optional<mod::carry::Summary> carrySpec;double carryDropAfter=-1;
     std::optional<ds::Environment> fixedEnvironment;double rideOn=-1,rideOff=-1,awayOn=-1,awayOff=-1,downOn=-1,downOff=-1,caughtOn=-1,caughtOff=-1,flagOn=-1,flagOff=-1;std::optional<float> fixedRain;
+    double shoutEvery=-1,scanEvery=-1;std::optional<mod::signals::Vitals> vitalsSpec;
     for(int i=1;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc)usage(("missing value after "+a).c_str());return std::string(argv[++i]);};
         if(a=="--slot")slot=unsigned(std::stoul(next()));else if(a=="--peer-slot")peerSlot=unsigned(std::stoul(next()));
@@ -153,6 +158,11 @@ int main(int argc,char** argv){
             shell.extraFlags=uint16_t(bits);flagOn=std::stod(next());flagOff=std::stod(next());if(!(flagOn>=0&&flagOff>flagOn))usage("flag needs ON < OFF seconds");}
         else if(a=="--caught"){caughtOn=std::stod(next());caughtOff=std::stod(next());if(!(caughtOn>=0&&caughtOff>caughtOn))usage("caught needs ON < OFF seconds");}
         else if(a=="--vehicle"){auto k=std::stoul(next());if(k<1||k>ds::VehicleKindMax)usage("vehicle kind is 1..3");shell.rideKind=uint8_t(k);rideOn=std::stod(next());rideOff=std::stod(next());}
+        else if(a=="--shout-every"){shoutEvery=std::stod(next());if(!(shoutEvery>=2))usage("shout-every needs 2 seconds or more");}
+        else if(a=="--scan-every"){scanEvery=std::stod(next());if(!(scanEvery>=2))usage("scan-every needs 2 seconds or more");}
+        else if(a=="--vitals"){mod::signals::Vitals v;auto b=std::stoul(next()),st=std::stoul(next()),bits=std::stoul(next());
+            if((b>100&&b!=255)||(st>100&&st!=255)||bits>3)usage("vitals takes BLOOD STAMINA (0..100 or 255) BITS (0..3)");
+            v.blood=uint8_t(b);v.stamina=uint8_t(st);v.overloaded=bits&1;v.unsteady=bits&2;vitalsSpec=v;}
         else if(a=="--take-after")takeAfter=std::stod(next());else if(a=="--take-own-after")takeOwnAfter=std::stod(next());
         else usage(("unknown option "+a).c_str());
     }
@@ -259,6 +269,16 @@ int main(int argc,char** argv){
         if(builtRef&&unbuildAfter>=0&&now-builtAt>=unbuildAfter*1000){
             ds::CargoEvent e;e.type=4;e.ref=builtRef;e.item=buildType;e.position=builtAtPos;e.id=(nowMs()<<4)|slot|10;core.queueCargo(e);
             std::printf("STRUCT dismantled ref %llu\n",(unsigned long long)builtRef);builtRef=0;
+        }
+        {   // signals.h: shouts and scans on a timer, the vitals once per connection
+            static uint64_t nextShout=0,nextScan=0;static uint32_t serial=0;static bool vitalsSent=false;
+            if(!core.connected()){nextShout=nextScan=0;vitalsSent=false;}
+            else{
+                if(shoutEvery>0){if(!nextShout)nextShout=now+uint64_t(shoutEvery*1000);else if(now>=nextShout){nextShout=now+uint64_t(shoutEvery*1000);
+                    core.queueCargo(mod::signals::encodeEvent(mod::signals::Kind::Shout,++serial));std::printf("SIGNAL shout sent\n");}}
+                if(scanEvery>0){if(!nextScan)nextScan=now+uint64_t(scanEvery*1000);else if(now>=nextScan){nextScan=now+uint64_t(scanEvery*1000);
+                    core.queueCargo(mod::signals::encodeEvent(mod::signals::Kind::Scan,++serial));std::printf("SIGNAL scan sent\n");}}
+                if(vitalsSpec&&!vitalsSent){vitalsSent=true;core.queueCargo(mod::signals::encodeVitals(*vitalsSpec,++serial));std::printf("SIGNAL vitals sent\n");}}
         }
         if(carrySpec&&now>=carryTickAt){
             carryTickAt=now+250;
