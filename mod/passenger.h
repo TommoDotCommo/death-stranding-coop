@@ -41,12 +41,31 @@ private:
 // no instances: game_offsets.md, "Riding along"). The mod keeps this porter out of its box instead: a porter found
 // inside is put just outside the nearest side, as a wall would stop him.
 struct Box { double halfRight=1.5,halfForward=3.8,height=3.3,margin=0.15; };
+// Where a rider is held on each kind of display vehicle: a helper of its model and a place from it (metres right,
+// forward and up of the helper). The truck has a helper on its side; the bike only its driver's, so the rider sits
+// behind the driver. Nothing for a kind nobody can ride along on.
+// place: no helper is followed; the porter is held at a place worked out from the vehicle's own transform every frame
+// (the game's "hold at a fixed place" form of the same mover mode). The display bike's driver helper holds a rider
+// 3.6 m behind the bike whatever offset is given (live), so the bike uses this.
+struct Seat { const char* helper;float right,forward,up;bool place=false; };
+// The rider's transform for a `place` seat: the vehicle's, moved by the seat's offsets along its own axes.
+Transform seatPlace(const Transform& vehicle,const Seat&);
+std::optional<Seat> seat(uint8_t vehicleKind);
+// The keep-out box of a kind (the truck's, a bike's much smaller one); nothing for other kinds.
+std::optional<Box> box(uint8_t vehicleKind);
+// Where the driver's game shows a partner who rides along on a bike: behind the driver, from the driver's own place.
+constexpr double BikeBehind=0.62,BikeUp=0.06;
+// The bike's driver sits this far behind the bike's origin (live: 0.55 m), so the rider's place is behind that.
+constexpr double BikeDriverBehind=0.55;
 // truck: its transform (rows right, forward, up); porter: a position. The position to move him to, or nothing.
 std::optional<std::array<double,3>> pushOut(const Transform& truck,const std::array<double,3>& porter,const Box& box={});
 // The game's routines (Windows only): hold `porter` on `helper` of `vehicle`, let it go, read the follow state.
 struct Api {
-    std::function<bool(uint64_t porter,uint64_t vehicle,const char* helper)> attach;
+    std::function<bool(uint64_t porter,uint64_t vehicle,const Seat& seat)> attach;
     std::function<void(uint64_t porter)> release;
+    // `place` seats: hold the porter at a world transform, and move that place (every frame while he is held).
+    std::function<bool(uint64_t porter,const Transform& at)> hold;
+    std::function<void(uint64_t porter,const Transform& at)> move;
     std::function<uint8_t(uint64_t porter)> state;
 };
 Api nativeApi(discovery::Sampler&);

@@ -28,6 +28,7 @@ std::u16string text(Kind kind,const std::string& partnerName){
     case Kind::Call:return name+u" is calling out.";
     case Kind::Slow:return u"The connection to "+name+u" is slow. You see each other a moment late.";
     case Kind::Steady:return u"The connection to "+name+u" is steady again.";
+    case Kind::Episode:return name+u" is in a different episode. Start from the same save to share the story.";
     }
     return {};
 }
@@ -84,6 +85,14 @@ void Notifier::link(uint64_t now,bool connected,uint32_t delayMs){
 #else
     add(Kind::Slow,lastName_,now);
 #endif
+}
+void Notifier::progress(uint64_t now,bool connected,bool mismatch){
+    if(!connected){episodeTold_=false;return;}
+    if(!mismatch)return;
+#ifndef MUTANT_NOTICE_EPISODE_ONCE
+    if(episodeTold_)return;
+#endif
+    episodeTold_=true;add(Kind::Episode,lastName_,now);
 }
 void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& partnerName,bool partnerAway){
     if(!partnerName.empty())lastName_=partnerName;
@@ -147,7 +156,7 @@ void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& 
 #endif
     if(api_.show&&api_.show(text(e.kind,e.name),icon(e.kind))){
         ++shown_;lastShown_=now;if(e.kind==Kind::Joined)joining_=false;
-        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call","slow","steady"};
+        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call","slow","steady","episode"};static_assert(sizeof(names)/sizeof(names[0])==size_t(Kind::Episode)+1,"a name for every notice");
         log_(std::string("NOTICE shown: ")+names[unsigned(e.kind)]+"\n");
         pending_.pop_front();return;
     }

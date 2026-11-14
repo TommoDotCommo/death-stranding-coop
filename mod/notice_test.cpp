@@ -56,6 +56,14 @@ int main(){
         run(400,Notifier::LinkHoldMs+4000);CHECK(h.shown.size()==4);
         run(400,1000,false);run(120,20000,false);CHECK(h.shown.size()==5&&h.shown[4]==u"Higgs left the session.");   // no "steady" after he left
     }
+    {   // Different episodes: told once per connection, after the join; again after he comes back still elsewhere.
+        Hud h;auto n=h.make();uint64_t t=1000;auto run=[&](bool mismatch,uint64_t ms,bool connected=true){for(uint64_t end=t+ms;t<end;){n.tick(t+=50,true,connected,"Higgs");n.progress(t,connected,mismatch);}};
+        run(false,8000);CHECK(h.shown.size()==1);
+        run(true,8000);CHECK(h.shown.size()==2&&h.shown[1]==u"Higgs is in a different episode. Start from the same save to share the story.");
+        run(true,20000);CHECK(h.shown.size()==2);
+        run(true,6000,false);CHECK(h.shown.size()==3);   // left
+        run(true,12000);CHECK(h.shown.size()==5&&h.shown[4]==u"Higgs is in a different episode. Start from the same save to share the story.");
+    }
     {   // No name ever: told after the wait, as "Your partner".
         Hud h;auto n=h.make();uint64_t t=1000;n.tick(t,true,true,"");
         for(;t<1000+Notifier::NameMs-50;t+=50)n.tick(t,true,true,"");

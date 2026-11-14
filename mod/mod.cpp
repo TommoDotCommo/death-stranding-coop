@@ -387,15 +387,25 @@ struct Runtime final:ds::Transport {
     std::vector<mod::wheels::Joint> partnerJoints;uint16_t partnerSkeleton=0;bool wheelsReadNoted=false,wheelsWriteNoted=false;   // the partner's wheels (tickRide)   // the cases in the partner's hands, relative to his root (tickStack)
     std::deque<std::pair<uint64_t,ds::Animation>> echoControls;std::array<uint8_t,ds::AnimationBoolBytes> echoLast{};bool echoHave=false;
     std::function<void(uint64_t,const mod::puppet::Transform&)> keepOut;uint64_t keptOutNoted=0;
-    mod::passenger::Rider rider;mod::passenger::Api passengerApi;bool passengerTried=false;mod::marker::KeyEdge passengerEdge;
+    mod::passenger::Rider rider;mod::passenger::Api passengerApi;bool passengerTried=false;mod::marker::KeyEdge passengerEdge;std::optional<std::array<float,3>> seatTest;std::optional<mod::passenger::Seat> heldSeat;uint64_t seatedAt=0;   // heldSeat: a `place` seat being ridden (moved every frame)uint64_t seatedAt=0;
+    // A rider held at a place (the bike): the place follows the display vehicle. Every tick and every frame between.
+    uint64_t heldPorter=0;
+    void movePassenger(){
+        if(!heldSeat||!rider.riding()||!heldPorter||!passengerApi.move||!sampler)return;
+        auto p=mod::puppet::readEntityPose(*sampler,rider.truck());
+        if(p.available)passengerApi.move(heldPorter,mod::passenger::seatPlace(mod::puppet::transform(p),*heldSeat));
+    }
     void tickPassenger(const mod::puppet::Anchor& anchor,bool connected,uint64_t now){
+        heldPorter=anchor.entity;
         if(!config.passengerKey||!ride||!anchor.entity)return;
-        if(!passengerTried){passengerTried=true;try{passengerApi=mod::passenger::nativeApi(*sampler);note("PASSENGER ready: the passenger key gets on and off the partner's truck\n");}catch(const std::exception& e){note((std::string("PASSENGER unavailable: ")+e.what()+"\n").c_str());}}
+        if(!passengerTried){passengerTried=true;try{passengerApi=mod::passenger::nativeApi(*sampler);note("PASSENGER ready: the passenger key gets on and off the partner's truck or bike\n");}catch(const std::exception& e){note((std::string("PASSENGER unavailable: ")+e.what()+"\n").c_str());}}
         if(!passengerApi.attach)return;
         const auto& r=cache.remote;mod::passenger::Look l;
         l.permitted=connected&&partnerMode()&&!inEvent&&(rider.riding()||!cache.local.vehicle);
         uint64_t truck=ride->entity();
-        l.partnerInTruck=r.visible&&r.state.vehicle==ds::Truck&&truck&&ride->kind()==ds::Truck;
+        auto seat=mod::passenger::seat(r.state.vehicle);   // a truck's side, or behind the driver of a bike
+        if(seat&&seatTest){seat->right=(*seatTest)[0];seat->forward=(*seatTest)[1];seat->up=(*seatTest)[2];}
+        l.partnerInTruck=r.visible&&seat&&truck&&ride->kind()==r.state.vehicle;
         l.truck=l.partnerInTruck?truck:0;
         auto here=anchor.pose.available?std::optional<mod::puppet::Transform>(mod::puppet::transform(anchor.pose)):std::nullopt;
         std::optional<mod::puppet::Transform> at;
@@ -404,14 +414,15 @@ struct Runtime final:ds::Transport {
         l.key=passengerEdge.pressed(modKey(config.passengerKey),now);
         l.mover=passengerApi.state(anchor.entity);
         if(l.key&&!rider.riding()&&!(l.permitted&&l.partnerInTruck&&l.distance<=mod::passenger::Reach&&l.mover==mod::passenger::Free)){
-            std::ostringstream o;o<<"PASSENGER key: not now (permitted "<<l.permitted<<", partner in a truck "<<l.partnerInTruck<<", distance "<<l.distance<<" m, mover "<<int(l.mover)<<")\n";note(o.str().c_str());}
+            std::ostringstream o;o<<"PASSENGER key: not now (permitted "<<l.permitted<<", partner in a truck or on a bike "<<l.partnerInTruck<<", distance "<<l.distance<<" m, mover "<<int(l.mover)<<")\n";note(o.str().c_str());}
         switch(rider.tick(l)){
             case mod::passenger::Do::GetOn:
-                if(passengerApi.attach(anchor.entity,rider.truck(),"HLP_Enemy"))note("PASSENGER on the partner's truck\n");
+                if(seat&&(seat->place?(at&&passengerApi.hold(anchor.entity,mod::passenger::seatPlace(*at,*seat))):passengerApi.attach(anchor.entity,rider.truck(),*seat))){if(seat->place)heldSeat=*seat;}
+                if(seat&&passengerApi.state(anchor.entity)!=mod::passenger::Free){seatedAt=now;note(r.state.vehicle==ds::Truck?"PASSENGER on the partner's truck\n":"PASSENGER on the partner's bike\n");}
                 else{rider.forget();note("PASSENGER refused by the game\n");}
                 break;
             case mod::passenger::Do::GetOff:{
-                passengerApi.release(anchor.entity);
+                heldSeat.reset();passengerApi.release(anchor.entity);
                 // Set down beside the truck, a step further out from its middle than he hung, on the ground.
                 if(here&&at&&rideTeleport){
                     double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1],n=std::sqrt(dx*dx+dy*dy);
@@ -422,14 +433,22 @@ struct Runtime final:ds::Transport {
                 note(("PASSENGER off: "+rider.why()+"\n").c_str());break;}
             default:break;
         }
+        if(rider.riding()&&seatedAt&&now-seatedAt>=2000&&here&&at){seatedAt=0;   // where he ended up, in the vehicle's own axes (and from its driver)
+            double d[3]={here->position[0]-at->position[0],here->position[1]-at->position[1],here->position[2]-at->position[2]};auto dot=[&](int row){return d[0]*at->rotation[size_t(3*row)]+d[1]*at->rotation[size_t(3*row+1)]+d[2]*at->rotation[size_t(3*row+2)];};
+            auto driver=mod::puppet::fromState(r.state.position,r.state.yaw);double e[3]={here->position[0]-driver.position[0],here->position[1]-driver.position[1],here->position[2]-driver.position[2]};
+            auto dotE=[&](int row){return e[0]*at->rotation[size_t(3*row)]+e[1]*at->rotation[size_t(3*row+1)]+e[2]*at->rotation[size_t(3*row+2)];};
+            std::ostringstream o;o<<"PASSENGER held at right "<<dot(0)<<" forward "<<dot(1)<<" up "<<dot(2)<<" of the vehicle; right "<<dotE(0)<<" forward "<<dotE(1)<<" up "<<dotE(2)<<" of its driver\n";note(o.str().c_str());}
+        if(!rider.riding())heldSeat.reset();
+        movePassenger();
         if(!rider.riding()&&!rider.why().empty()&&rider.why()=="the game let go"){note("PASSENGER off: the game let go\n");rider.forget();}
         // Not riding: kept out of the partner's truck, which has no collision of its own.
-        if(!rider.riding()&&truck&&ride->kind()==ds::Truck&&here&&at&&connected&&!inEvent&&!cache.local.vehicle){
-            if(auto out=mod::passenger::pushOut(*at,here->position)){
+        auto keepBox=truck?mod::passenger::box(ride->kind()):std::nullopt;
+        if(!rider.riding()&&keepBox&&here&&at&&connected&&!inEvent&&!cache.local.vehicle){
+            if(auto out=mod::passenger::pushOut(*at,here->position,*keepBox)){
 #ifdef _WIN32
                 try{auto porter=mod::join::readPorter(*sampler);
                     if(porter.readable){if(!keepOut)keepOut=mod::join::nativeTeleportExact(*sampler);mod::puppet::Transform t=*here;t.position=*out;keepOut(porter.player,t);
-                        if(now-keptOutNoted>=10000){keptOutNoted=now;note("PASSENGER kept out of the partner's truck\n");}}}
+                        if(now-keptOutNoted>=10000){keptOutNoted=now;note(ride->kind()==ds::Truck?"PASSENGER kept out of the partner's truck\n":"PASSENGER kept out of the partner's bike\n");}}}
                 catch(const std::exception& e){if(now-keptOutNoted>=10000){keptOutNoted=now;note((std::string("PASSENGER keep-out failed: ")+e.what()+"\n").c_str());}}
 #endif
             }
@@ -487,6 +506,8 @@ struct Runtime final:ds::Transport {
             else if(text=="off"+stamp){rideOn=false;rideLead=0;}
             else if(text=="park"+stamp){rideLead=0xff;}   // test: the lead vehicle stops where it is
             else if(text=="rider"+stamp){rideHideRider=!rideHideRider;}
+            else if(float r=0,f=0,u=0;text.size()>stamp.size()&&text.compare(text.size()-stamp.size(),stamp.size(),stamp)==0&&std::sscanf(text.c_str(),"seat %f %f %f",&r,&f,&u)==3){
+                seatTest=std::array<float,3>{r,f,u};note("RIDE seat offset set for the next ride along\n");}   // lab: where the rider is held, from the helper
             else if(text=="notice"+stamp){noticeTest=true;}           // test: one line in the game's info log
             else if(text=="continue"+stamp){continueAgain=true;}      // test: load the last save again (from the title screen)
             else if(text=="tag on"+stamp){tagTest=true;}              // test: a name over the partner body
@@ -693,6 +714,7 @@ struct Runtime final:ds::Transport {
         notices->link(now,connected,connected?core->presentationDelayMs():0);
         notices->status(now,connected,connected&&(cache.remote.state.flags&ds::Down),connected&&(cache.remote.state.flags&ds::Caught));
         notices->tick(now,poseAvailable&&!inEvent,connected,partnerName,connected&&((cache.remote.state.flags&ds::PrivateRoom)||!cache.remote.visible));
+        notices->progress(now,connected,connected&&core->progressStatus()==ds::ProgressStatus::Mismatch);
     }
     // --- A name over the partner (nametag.h): one of the game's hologram-name records above the partner body.
     // On with config partner_tag; `puppet.ride` "tag on" / "tag off" test it. The name is the partner's nickname.
@@ -1863,14 +1885,18 @@ struct Runtime final:ds::Transport {
             if(auto kind=cache.remote.state.vehicle){target->rotation=mod::rotationFromAngles(cache.remote.state.vehicleAngles);actions|=uint32_t(kind)<<mod::puppet::VehicleShift;}}
         // A partner riding along on this porter's truck (passenger.h): held at the rider's place on this game's own
         // truck, where it is now (his samples come a link delay late: at speed his body would trail behind).
-        {bool aboard=target&&partnerMode()&&cache.remote.visible&&(cache.remote.state.flags&ds::Passenger)&&localVehicle.riding&&localVehicle.kind==ds::Truck&&localVehicle.at+1500>now;   // (read during this tick: at may be past now)
+        {bool aboard=target&&partnerMode()&&cache.remote.visible&&(cache.remote.state.flags&ds::Passenger)&&localVehicle.riding&&(localVehicle.kind==ds::Truck||localVehicle.kind==ds::Motorbike)&&localVehicle.at+1500>now;   // (read during this tick: at may be past now)
             // Seated in the cab beside this porter (the driver sits 0.43 m left of the truck's middle, 0.82 m ahead, 1.94 m
             // up: live), in the riding pose: held against the truck's side the body pushed the real truck (live).
-            if(aboard){auto& v=localVehicle;const double off[3]={0.43,0.82,1.94};
+            if(aboard&&localVehicle.kind==ds::Truck){auto& v=localVehicle;const double off[3]={0.43,0.82,1.94};
                 for(int k=0;k<3;++k)target->position[k]=v.position[k]+off[0]*v.rotation[k]+off[1]*v.rotation[3+k]+off[2]*v.rotation[6+k];
                 target->rotation=v.rotation;speed=0;actions=uint32_t(ds::Truck)<<mod::puppet::VehicleShift;}
+            // On a bike: behind this porter, from where he sits now, leaning with the bike.
+            else if(aboard){auto& v=localVehicle;auto me=mod::puppet::fromState(cache.local.position,cache.local.yaw);
+                for(int k=0;k<3;++k)target->position[k]=me.position[k]-mod::passenger::BikeBehind*v.rotation[3+k]+mod::passenger::BikeUp*v.rotation[6+k];
+                target->rotation=v.rotation;speed=0;actions=uint32_t(ds::Motorbike)<<mod::puppet::VehicleShift;}
             if(aboard!=partnerAboard){partnerAboard=aboard;std::ostringstream o;
-                if(aboard)o<<"BODY the partner rides along on this truck\n";
+                if(aboard)o<<"BODY the partner rides along on this "<<(localVehicle.kind==ds::Truck?"truck":"bike")<<"\n";
                 else o<<"BODY the partner is off this truck (target "<<bool(target)<<" visible "<<cache.remote.visible<<" flag "<<bool(cache.remote.state.flags&ds::Passenger)<<" riding "<<localVehicle.riding<<" kind "<<int(localVehicle.kind)<<" read "<<int64_t(now)-int64_t(localVehicle.at)<<" ms ago)\n";
                 note(o.str().c_str());}}
         // The partner's own animation controls (controls.h), taken every tick so that each pulse is given once. While he is
@@ -2665,7 +2691,7 @@ int mod_game_thread_frame(const mod_game_thread_context* context) {
     auto& r=*runtime;
     if(!r.config.gameThread||!r.dispatchVerified||!r.gameGate.accept(*context,currentThread()))return 0;
     if(r.failed)return 0;
-    try{return r.sampleControls()?1:0;}catch(...){return 0;}
+    try{r.movePassenger();return r.sampleControls()?1:0;}catch(...){return 0;}
 }
 int mod_game_thread_tick(const mod_game_thread_context* context) {
     // A hook must never wait for bootstrap or shutdown to release lifecycle.

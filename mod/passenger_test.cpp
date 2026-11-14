@@ -33,6 +33,17 @@ int main(){
       CHECK(b&&std::fabs((*b)[0]-(100+3.95))<1e-9&&std::fabs((*b)[1]-200.2)<1e-9);
       auto c=pushOut(t,{96.5,200.5,10});CHECK(c&&std::fabs((*c)[0]-(100-3.95))<1e-9);
       auto d=pushOut(t,{100,201.2,10});CHECK(d&&std::fabs((*d)[1]-(200+1.65))<1e-9); }
+    {   // seats and boxes by vehicle kind (core VehicleKind: 1 bike, 2 truck, 3 car)
+      auto truck=seat(2),bike=seat(1);
+      CHECK(truck&&std::string(truck->helper)=="HLP_Enemy"&&truck->forward==0);
+      CHECK(bike&&bike->place&&bike->forward<-0.9f&&bike->right==0&&!truck->place);   // held at a place behind the driver
+      {Transform v;v.position={10,20,30};v.rotation={0,1,0, -1,0,0, 0,0,1};   // facing -x
+       auto p=seatPlace(v,*bike);CHECK(std::fabs(p.position[0]-(10-double(bike->forward)))<1e-6&&std::fabs(p.position[1]-20)<1e-6&&std::fabs(p.position[2]-(30+double(bike->up)))<1e-6&&p.rotation==v.rotation);}
+      CHECK(!seat(0)&&!seat(3)&&!box(0)&&!box(3));
+      CHECK(box(2)&&box(1)&&box(1)->halfRight<box(2)->halfRight&&box(1)->halfForward<box(2)->halfForward);
+      Transform t;t.position={100,200,10};t.rotation={1,0,0, 0,1,0, 0,0,1};
+      CHECK(pushOut(t,{100.2,200.5,10.2},*box(1)));CHECK(!pushOut(t,{100.6,200.5,10.2},*box(1)));CHECK(pushOut(t,{100.6,200.5,10.2},*box(2)));
+    }
     if(failures){std::fprintf(stderr,"passenger oracle: %d failures\n",failures);return 1;}
     std::puts("passenger ok");return 0;
 }

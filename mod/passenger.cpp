@@ -27,6 +27,23 @@ Do Rider::tick(const Look& l){
     else freeLooks_=0;
     return Do::Nothing;
 }
+std::optional<Seat> seat(uint8_t kind){
+    if(kind==2)return Seat{"HLP_Enemy",0,0,0};
+#ifndef MUTANT_PASSENGER_BIKE
+    if(kind==1)return Seat{"",0,float(-(BikeDriverBehind+BikeBehind)),0.1f,true};
+#endif
+    return std::nullopt;
+}
+Transform seatPlace(const Transform& v,const Seat& s){
+    Transform t=v;
+    for(int k=0;k<3;++k)t.position[size_t(k)]+=double(s.right)*v.rotation[size_t(k)]+double(s.forward)*v.rotation[size_t(3+k)]+double(s.up)*v.rotation[size_t(6+k)];
+    return t;
+}
+std::optional<Box> box(uint8_t kind){
+    if(kind==2)return Box{};
+    if(kind==1)return Box{0.45,1.25,1.5,0.15};
+    return std::nullopt;
+}
 std::optional<std::array<double,3>> pushOut(const Transform& t,const std::array<double,3>& p,const Box& b){
     double d[3]={p[0]-t.position[0],p[1]-t.position[1],p[2]-t.position[2]};
     auto along=[&](int row){return d[0]*t.rotation[size_t(3*row)]+d[1]*t.rotation[size_t(3*row+1)]+d[2]*t.rotation[size_t(3*row+2)];};
@@ -53,16 +70,32 @@ Api nativeApi(discovery::Sampler& s){
     auto mover=[&s,base](uint64_t porter){uint64_t m=0,v=0;return porter&&s.read(porter+0xb0,&m,8)&&m&&s.read(m,&v,8)&&v==base+0x3d6f018?m:uint64_t(0);};
     Api a;
     a.state=[&s,mover](uint64_t porter){uint8_t st=0;uint64_t m=mover(porter);if(m)s.read(m+0x720,&st,1);return st;};
-    a.attach=[&s,base,mover](uint64_t porter,uint64_t vehicle,const char* helper){
+    a.attach=[&s,base,mover](uint64_t porter,uint64_t vehicle,const Seat& seat){
         uint64_t m=mover(porter),model=0;uint32_t joint=0;
         if(!m||!vehicle||!s.read(vehicle+0xb8,&model,8)||!model||!s.read(porter+0x934,&joint,4))return false;
         alignas(16) uint8_t name[32]{};alignas(16) uint64_t slot[4]{vehicle+0x20,0,0,0};
-        alignas(16) float local[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
-        reinterpret_cast<void(*)(void*,const char*)>(base+0x190aa00)(name,helper);
+        alignas(16) float local[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, seat.right,seat.forward,seat.up,1};
+        reinterpret_cast<void(*)(void*,const char*)>(base+0x190aa00)(name,seat.helper);
         reinterpret_cast<void(*)(void*)>(base+0x191c790)(slot);                  // the attach releases this slot itself
         reinterpret_cast<void(*)(uint64_t,uint32_t,void*,void*,float*,float)>(base+0x26bcfa0)(m,joint,slot,name,local,0.25f);
         reinterpret_cast<void(*)(void*)>(base+0x190ad20)(name);
         return true;
+    };
+    // The game's own world transform: three doubles, then a 3x3 of floats (the entity pose's layout).
+    struct World { double position[3];float rotation[9]; };
+    if(!same(0x26bd130,{0x48,0x89,0x5c,0x24,0x08,0x57,0x48,0x83,0xec,0x20,0xc4,0xc1,0x78,0x10,0x00}))throw std::runtime_error("passenger functions differ");
+    a.hold=[base,mover](uint64_t porter,const Transform& at){
+        uint64_t m=mover(porter);if(!m)return false;
+        alignas(16) World w{};for(int k=0;k<3;++k)w.position[k]=at.position[size_t(k)];for(int k=0;k<9;++k)w.rotation[k]=at.rotation[size_t(k)];
+        alignas(16) float local[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+        reinterpret_cast<void(*)(uint64_t,uint32_t,const World*,const float*,float)>(base+0x26bd130)(m,0xffffffffu,&w,local,0.25f);
+        return true;
+    };
+    a.move=[&s,mover](uint64_t porter,const Transform& at){
+        uint64_t m=mover(porter);uint8_t state=0,fixed=0;
+        if(!m||!s.read(m+0x720,&state,1)||!state||!s.read(m+0x7b8,&fixed,1)||!fixed)return;   // only while the game holds him at a place
+        World w{};for(int k=0;k<3;++k)w.position[k]=at.position[size_t(k)];for(int k=0;k<9;++k)w.rotation[k]=at.rotation[size_t(k)];
+        std::memcpy(reinterpret_cast<void*>(m+0x7c0),w.position,sizeof(w.position));std::memcpy(reinterpret_cast<void*>(m+0x7d8),w.rotation,sizeof(w.rotation));
     };
     a.release=[base,mover](uint64_t porter){uint64_t m=mover(porter);if(m)reinterpret_cast<void(*)(uint64_t,float)>(base+0x2696c50)(m,0.0f);};
     return a;
