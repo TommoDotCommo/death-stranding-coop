@@ -30,6 +30,9 @@ std::u16string text(Kind kind,const std::string& partnerName){
     case Kind::Steady:return u"The connection to "+name+u" is steady again.";
     case Kind::Episode:return name+u" is in a different episode. Start from the same save to share the story.";
     case Kind::Scan:return name+u" scanned the area.";
+    case Kind::StoryOffer:return name+u" has moved the story on. Press the catch-up key to load their checkpoint.";
+    case Kind::StoryLoaded:return u"Loaded the checkpoint of "+name+u". You share the story again.";
+    case Kind::StoryFailed:return u"The checkpoint of "+name+u" could not be loaded here.";
     }
     return {};
 }
@@ -164,7 +167,7 @@ void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& 
 #endif
     if(api_.show&&api_.show(text(e.kind,e.name),icon(e.kind))){
         ++shown_;lastShown_=now;if(e.kind==Kind::Joined)joining_=false;
-        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call","slow","steady","episode","scan"};static_assert(sizeof(names)/sizeof(names[0])==size_t(Kind::Scan)+1,"a name for every notice");
+        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call","slow","steady","episode","scan","story offer","story loaded","story failed"};static_assert(sizeof(names)/sizeof(names[0])==size_t(Kind::StoryFailed)+1,"a name for every notice");
         log_(std::string("NOTICE shown: ")+names[unsigned(e.kind)]+"\n");
         pending_.pop_front();return;
     }

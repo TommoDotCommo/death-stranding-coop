@@ -1,5 +1,6 @@
 #include "saves.h"
-#include "core.h"
+// The one thing this file needs from the launcher (core.cpp there); a program that links the saves alone brings its own.
+namespace launcher { void atomicWrite(const std::filesystem::path&,const std::string&); }
 #include <algorithm>
 #include <cstring>
 #include <fstream>

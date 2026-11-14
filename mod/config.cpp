@@ -20,7 +20,7 @@ Config parseConfig(const std::string& s) {
         ws();if(at==s.size() || s[at]!=',') break;++at;
     }
     take('}');ws();if(at!=s.size()) throw std::runtime_error("trailing JSON");
-    for(auto& kv:values) if(!std::set<std::string>{"slot","share_environment","share_enemies","share_orders","share_order_units","share_order_load","share_roads","share_saved_structures","body_update_link","passenger_key","partner_poses","partner_animation","partner_cart","record_animation","join_move","carry_visual","partner","partner_gear","partner_marker","partner_vehicle","partner_likes","partner_tag","notices","online_server","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","link","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host","partner_shout","partner_shout_voice","partner_scan","partner_vitals"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
+    for(auto& kv:values) if(!std::set<std::string>{"slot","share_story_orders","story_resync","story_key","share_environment","share_enemies","share_orders","share_order_units","share_order_load","share_roads","share_saved_structures","body_update_link","passenger_key","partner_poses","partner_animation","partner_cart","record_animation","join_move","carry_visual","partner","partner_gear","partner_marker","partner_vehicle","partner_likes","partner_tag","notices","online_server","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","link","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host","partner_shout","partner_shout_voice","partner_scan","partner_vitals"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
     auto text=[&](const char* k){if(!strings.count(k)) throw std::runtime_error(std::string("missing/string expected: ")+k);return values.at(k);};
     auto number=[&](const char* k){auto v=values[k];if(strings.count(k)||v.empty()||v.size()>15||v.find_first_not_of("0123456789")!=std::string::npos||(v.size()>1&&v[0]=='0')) throw std::runtime_error(std::string("invalid integer: ")+k);return std::stoull(v);};
     auto boolean=[&](const char* k,bool d){if(!values.count(k)) return d;auto v=values[k];if(strings.count(k)||(v!="true"&&v!="false")) throw std::runtime_error("boolean expected");return v=="true";};
@@ -80,6 +80,12 @@ Config parseConfig(const std::string& s) {
     c.shareOrderUnits=boolean("share_order_units",false);
     c.shareOrderLoad=boolean("share_order_load",false);
     if(c.shareOrderLoad&&!c.shareOrders)throw std::runtime_error("share_order_load requires share_orders");
+    c.shareStoryOrders=boolean("share_story_orders",false);
+    if(c.shareStoryOrders&&(!c.shareOrders||c.role=="none"))throw std::runtime_error("share_story_orders requires share_orders and an explicit role");
+    if(values.count("story_resync"))c.storyResync=text("story_resync");
+    if(c.storyResync!="off"&&c.storyResync!="key"&&c.storyResync!="auto")throw std::runtime_error("story_resync must be off, key or auto");
+    if(c.storyResync!="off"&&(!c.gameThread||c.role=="none"||c.provider!="game"))throw std::runtime_error("story_resync requires the game provider, game_thread and an explicit role");
+    if(values.count("story_key")){auto k=number("story_key");if(k>0xfe)throw std::runtime_error("story_key must be a virtual-key code 0..254 (0: off)");c.storyKey=unsigned(k);}
     c.shareRoads=boolean("share_roads",false);
     c.shareSavedStructures=boolean("share_saved_structures",false);
     c.bodyUpdateLink=boolean("body_update_link",true);

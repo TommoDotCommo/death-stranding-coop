@@ -47,6 +47,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "enemies.h"
 #include "orders.h"
 #include "orderload.h"
+#include "story.h"
 #include "guard_win.h"
 #include "link.h"
 #include "nametag.h"
@@ -98,7 +99,7 @@ template<class T> struct Background {
 namespace wiretypes {
 constexpr uint8_t all[]={2,3,4,5,mod::carry::WireType,mod::gear::GearWireType,mod::outfit::WireType,mod::likes::WireType,mod::nametag::WireType,
     mod::enemies::WireType,mod::orders::WireType,mod::bts::WireType,mod::roads::WireType,15,mod::carryplace::WireType,mod::voidout::WireType,
-    mod::carryplace::CartWireType,mod::orderload::WireType,mod::signals::EventWireType,mod::signals::VitalsWireType};
+    mod::carryplace::CartWireType,mod::orderload::WireType,mod::signals::EventWireType,mod::signals::VitalsWireType,mod::story::WireType};
 constexpr bool distinct(){for(size_t i=0;i<sizeof all;++i)for(size_t j=i+1;j<sizeof all;++j)if(all[i]==all[j])return false;return true;}
 static_assert(distinct(),"two CARGO event features share a wire type");
 // ... and the core delivers it: a type above its limit is refused and the ordered stream stops at that event.
@@ -305,6 +306,7 @@ struct Runtime final:ds::Transport {
                 loadTag.reset();
                 if(config.shareOrderLoad){loadTag=mod::orderload::decode({e.item,e.ref,e.position});if(!loadTag)note("ORDERLOAD a case's tag was refused (not a standard order's case)\n");}
                 continue;}
+            if(e.type==mod::story::WireType){storyIn.push_back(e);continue;}     // story resync news (tickStory)
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
             if(e.type==mod::signals::EventWireType){signalIn.push_back(e);continue;}   // a shout or a scan (tickSignals)
             if(e.type==mod::signals::VitalsWireType){if(!vitalsRx.feed(e))note("SIGNAL vitals refused: malformed\n");continue;}
@@ -1079,6 +1081,13 @@ struct Runtime final:ds::Transport {
     mod::orders::UnitSync unitSync;
     mod::orders::Sync orderSync;std::vector<ds::CargoEvent> orderIn;std::function<bool(uint64_t,uint8_t)> orderRequest;std::map<uint64_t,uint8_t> orderDetails;
     uint64_t orderReadAt=0,orderSent=0,orderApplied=0;bool orderTried=false,orderLinked=false;
+    // The story (opt-in experiments): share_story_orders widens the order scope one way, host to guest (orders.h);
+    // story_resync moves the host's fresh checkpoint to the guest and loads it there (story.h).
+    mod::orders::StoryWatch storyWatch;uint64_t storyWatchAt=0;
+    std::unique_ptr<mod::story::Host> storyHost;std::unique_ptr<mod::story::Guest> storyGuest;mod::story::Serve storyServe;std::unique_ptr<mod::story::Fetch> storyFetch;
+    std::vector<ds::CargoEvent> storyIn;std::function<void()> storySave;std::function<int(uint8_t,uint8_t)> storyLoad;
+    std::optional<mod::story::Account> storyAccount;std::optional<mod::story::Stamp> storyNewest;std::filesystem::path storyFolder,storyCommand;
+    bool storyTried=false,storyKeyCommand=false;uint64_t storyLookAt=0,storyPollAt=0,storyWatchUntil=0,storyWatchNext=0,storyChunks=0;int storyPercent=-1;mod::marker::KeyEdge storyEdge;
     unsigned guardNoted=0,cullNoted=0,walkNoted=0;
     // The partner body's queue of deferred rep calls (game_offsets.md, "Deferred rep calls"): what the mod's own
     // calls put there in a tick is run at the end of that tick with the game's own flush, so no node waits for a
@@ -1207,10 +1216,140 @@ struct Runtime final:ds::Transport {
             o<<"\n";note(o.str().c_str());}
 #endif
     }
+    void storySend(const std::string& d) {
+#ifndef MOD_FAKE_NETWORK
+        sendto(socket,d.data(),int(d.size()),0,reinterpret_cast<sockaddr*>(&peer),sizeof(peer));
+#else
+        (void)d;
+#endif
+    }
+    // On the network thread, under the mod's lock: the checkpoint's datagrams (launcher/saves.h) from the partner.
+    void storyDatagram(const std::string& d) {
+        if(storyHost){auto a=storyServe.answer(d);if(!a.empty()){storySend(a);++storyChunks;}}
+        else if(storyFetch)storyFetch->take(d);
+    }
+    void storyPoll(uint64_t now) {
+        if(!storyFetch||now<storyPollAt||!core||!core->connected())return;
+        storyPollAt=now+20;for(auto& d:storyFetch->poll(16))storySend(d);
+    }
+    void storyTell(const mod::story::News& n){core->queueCargo(mod::story::encode(n));}
+    std::string storyState(const mod::story::SaveState& s){
+        std::ostringstream o;o<<"readable="<<s.readable<<" in_game="<<s.inGame<<" requests="<<s.requests<<" pending_type="<<int(s.pendingType)<<" module_state="<<int(s.module);
+        if(storyNewest)o<<" newest="<<storyNewest->folder<<" size="<<storyNewest->size<<" time="<<storyNewest->time;else o<<" newest=none";
+        return o.str();
+    }
+    void tickStory(uint64_t now) {
+        if(!core||!sampler){storyIn.clear();return;}
+        bool on=config.storyResync!="off";
+        if((on||config.shareStoryOrders)&&cache.available&&now-storyWatchAt>=1000){
+            storyWatchAt=now;
+            for(auto& m:storyWatch.observe(mod::orders::readOrders(*sampler,sampler->base,orderDetails))){
+                std::ostringstream o;o<<"ORDER story "<<std::hex<<m.now.id<<std::dec<<" (detail "<<int(m.now.detail)<<") state "<<m.was.state<<"->"<<m.now.state<<" result "<<int(m.was.result)<<"->"<<int(m.now.result)<<"\n";note(o.str().c_str());
+            }
+        }
+        if(!on){storyIn.clear();return;}
+        bool host=config.role=="host";
+        if(!storyTried){
+            storyTried=true;
+            try{storyAccount=mod::story::account(storyFolder);}catch(const std::exception& e){note((std::string("STORY saves unavailable: ")+e.what()+"\n").c_str());}
+            try{storySave=mod::story::nativeSave(*sampler);}catch(const std::exception& e){note((std::string("STORY save request unavailable: ")+e.what()+"\n").c_str());}
+            try{storyLoad=mod::story::nativeLoad(*sampler);}catch(const std::exception& e){note((std::string("STORY load request unavailable: ")+e.what()+"\n").c_str());}
+            bool automatic=config.storyResync=="auto";
+            if(host)storyHost=std::make_unique<mod::story::Host>(automatic);else storyGuest=std::make_unique<mod::story::Guest>(automatic);
+            note((std::string("STORY resync on: ")+(host?"host":"guest")+", "+config.storyResync+", key "+std::to_string(config.storyKey)+", save "+(storySave?"armed":"off")+", load "+(storyLoad?"armed":"off")+", account "+(storyAccount?std::to_string(storyAccount->id):std::string("unknown"))+"\n").c_str());
+        }
+        auto state=mod::story::readSaveState(*sampler,sampler->base);
+        bool connected=core->connected(),inWorld=cache.available&&!cache.gated&&!inEvent&&state.readable&&state.inGame;
+        // Lab commands, each one call alone: "save 1", "load <type*100+slot>" (100: manualsave0), "state 0", "key 1",
+        // "watch <seconds>" (the save state twice a second).
+        if(std::filesystem::exists(storyCommand)){
+            auto text=readConfig(storyCommand);
+            if(!std::filesystem::remove(storyCommand))throw std::runtime_error("cannot consume story command");
+            auto stamp=mod::runStamp();
+            if(mod::puppet::parseCargoCommand(text,stamp,"state")){if(storyAccount)storyNewest=mod::story::newest(storyAccount->folder);note(("STORY test: state "+storyState(state)+"\n").c_str());}
+            else if(auto w=mod::puppet::parseCargoCommand(text,stamp,"watch");w&&*w<=600){storyWatchUntil=now+uint64_t(*w)*1000;storyWatchNext=0;}
+            else if(mod::puppet::parseCargoCommand(text,stamp,"key")){storyKeyCommand=true;note("STORY test: catch-up key\n");}
+            else if(mod::puppet::parseCargoCommand(text,stamp,"save")){
+                if(!storySave||!inWorld)note((std::string("STORY test: save not asked (")+(storySave?"not in the world":"unavailable")+")\n").c_str());
+                else{note(("STORY test: asking for a checkpoint; before: "+storyState(state)+"\n").c_str());storySave();
+                     note(("STORY test: asked; after: "+storyState(mod::story::readSaveState(*sampler,sampler->base))+"\n").c_str());if(!storyWatchUntil)storyWatchUntil=now+90000;}
+            }
+            else if(auto l=mod::puppet::parseCargoCommand(text,stamp,"load");l&&*l<10000){
+                if(!storyLoad||!inWorld||state.requests||state.pending)note((std::string("STORY test: load not asked (")+(!storyLoad?"unavailable":!inWorld?"not in the world":"the game is saving")+")\n").c_str());
+                else{note(("STORY test: asking the game to load type "+std::to_string(*l/100)+" slot "+std::to_string(*l%100)+"; before: "+storyState(state)+"\n").c_str());
+                     int r=storyLoad(uint8_t(*l/100),uint8_t(*l%100));
+                     note(("STORY test: load result "+std::to_string(r)+" (0 not asked, 1 the game does not list that save, 2 asked); after: "+storyState(mod::story::readSaveState(*sampler,sampler->base))+"\n").c_str());if(!storyWatchUntil)storyWatchUntil=now+90000;}
+            }
+            else note("STORY test: command refused\n");
+        }
+        if(storyWatchUntil&&now>=storyWatchNext){
+            storyWatchNext=now+500;if(now>=storyWatchUntil)storyWatchUntil=0;
+            if(storyAccount)storyNewest=mod::story::newest(storyAccount->folder);
+            note(("STORY watch: porter="+std::to_string(cache.available)+" event="+std::to_string(inEvent)+" "+storyState(state)+"\n").c_str());
+        }
+        std::vector<mod::story::News> news;
+        for(auto& e:storyIn){if(auto n=mod::story::decode(e))news.push_back(*n);else note("STORY refused: malformed news\n");}
+        storyIn.clear();
+        if(storyHost){
+            mod::story::HostIn in;in.now=now;in.connected=connected;in.inWorld=inWorld;in.saveBusy=state.requests||state.pending;in.episode=cache.story.episode;in.completed=storyWatch.completed();
+            for(auto& n:news){
+                if(n.what==mod::story::Ask)in.asked=true;
+                else if(n.what==mod::story::Loaded)note(("STORY the partner loaded generation "+std::to_string(n.generation)+" ("+std::to_string(storyChunks)+" chunks served so far)\n").c_str());
+                else if(n.what==mod::story::Failed)note(("STORY the partner could not load generation "+std::to_string(n.generation)+"\n").c_str());
+            }
+            if(storyAccount&&connected&&now-storyLookAt>=(storyHost->waiting()?500u:5000u)){storyLookAt=now;storyNewest=mod::story::newest(storyAccount->folder);}
+            in.newest=storyNewest;
+            auto out=storyHost->tick(in);
+            for(auto& l:out.log)note((l+"\n").c_str());
+            if(out.save){if(storySave)storySave();else note("STORY save request unavailable: nothing asked\n");}
+            if(out.offer){
+                std::optional<launcher::saves::Checkpoint> c;if(storyAccount)c=launcher::saves::newest(storyAccount->folder);
+                if(c)storyServe.offer(config.session,out.generation,*c);
+                if(c&&storyServe.news().what){storyTell(storyServe.news());note(("STORY offering "+c->folder+" to the partner, "+std::to_string(c->bytes.size())+" bytes\n").c_str());}
+                else{storyHost->unreadable();note("STORY the checkpoint could not be read: nothing offered\n");}
+            }
+        }
+        if(storyGuest){
+            mod::story::GuestIn in;in.now=now;in.connected=connected;in.inWorld=inWorld;in.porter=cache.available;in.saveBusy=state.requests||state.pending;in.news=news;
+            in.key=storyEdge.pressed(connected&&config.storyKey&&modKey(config.storyKey),now)||storyKeyCommand;storyKeyCommand=false;
+            in.fetched=storyFetch&&storyFetch->done();
+            if(storyFetch&&!in.fetched){int p=storyFetch->percent()/25*25;if(p!=storyPercent){storyPercent=p;note(("STORY fetch "+std::to_string(p)+"%\n").c_str());}}
+            auto out=storyGuest->tick(in);
+            for(auto& l:out.log)note((l+"\n").c_str());
+            if(out.ask)storyTell({mod::story::Ask,1,0,0});
+            if(out.fetch){storyFetch=std::make_unique<mod::story::Fetch>(config.session,*out.fetch);storyPercent=-1;storyPollAt=0;}
+            if(out.notice&&notices)notices->event(mod::notice::Kind::StoryOffer,partnerName,now);
+            if(out.install){
+                bool ok=false;
+                try{if(!storyAccount||!storyFetch)throw std::runtime_error("no account folder");mod::story::install(*storyAccount,storyFetch->bytes());ok=true;note("STORY the partner's checkpoint is in place as manualsave0 (re-signed for this account)\n");}
+                catch(const std::exception& e){note((std::string("STORY install failed: ")+e.what()+"\n").c_str());}
+                storyGuest->installed(ok);
+                if(!ok){storyFetch.reset();if(notices)notices->event(mod::notice::Kind::StoryFailed,partnerName,now);}
+            }
+            if(out.load){
+                int r=storyLoad?storyLoad(mod::story::LoadType,mod::story::LoadSlot):-1;
+                note(("STORY load request result "+std::to_string(r)+" (2 asked, 1 the game does not list the save, 0 not asked, -1 unavailable); "+storyState(mod::story::readSaveState(*sampler,sampler->base))+"\n").c_str());
+                if(r!=2){auto refused=storyGuest->refused(now);if(refused.tell)out.tell=refused.tell;note("STORY load refused\n");}
+            }
+            if(out.tell){
+                if(connected)storyTell(*out.tell);
+                storyFetch.reset();
+                if(out.tell->what==mod::story::Loaded){
+                    // A new world: what the order sync knew is the old one's. It learns again; nothing of the load is told as news.
+                    orderSync.reset();unitSync=mod::orders::UnitSync();storyWatch.reset();
+                    if(notices)notices->event(mod::notice::Kind::StoryLoaded,partnerName,now);
+                }
+                else if(notices)notices->event(mod::notice::Kind::StoryFailed,partnerName,now);
+            }
+        }
+    }
     void tickOrders(uint64_t now) {
         if(!core||!sampler||!config.shareOrders){orderIn.clear();return;}
         if(!orderTried){orderTried=true;try{orderRequest=mod::orders::nativeRequest(*sampler);}catch(const std::exception& e){note((std::string("ORDER unavailable: ")+e.what()+"\n").c_str());}}
         bool linked=core->connected()&&partnerMode();
+        // Story orders travel one way: the host tells, the guest takes (share_story_orders).
+        orderSync.scope.storyOut=config.shareStoryOrders&&config.role=="host";
+        orderSync.scope.storyIn=config.shareStoryOrders&&(config.role=="guest"||config.role=="client");
         if(!linked&&orderLinked)orderSync.reset();   // the next partner is told what is under way
         orderLinked=linked;
         if(!orderRequest||!linked){orderIn.clear();return;}
@@ -1224,6 +1363,8 @@ struct Runtime final:ds::Transport {
                 // The partner handed a unit in: it is delivered here too, and this game's copy of that cargo goes.
                 uint8_t n=uint8_t((e.item&0xffff)-mod::orders::UnitBase);
                 if(!config.shareOrderUnits)continue;
+                bool mine=false;for(auto& o:orders)if(o.id==e.ref)mine=mod::orders::takes(orderSync.scope,o);
+                if(!mine){std::ostringstream o;o<<"ORDER partner handed in unit "<<int(n)<<" of "<<std::hex<<e.ref<<std::dec<<": not an order taken from the partner here\n";note(o.str().c_str());continue;}
                 auto* u=unitSync.wanted(units,e.ref,n);
                 std::ostringstream o;o<<"ORDER partner handed in unit "<<int(n)<<" of "<<std::hex<<e.ref<<std::dec;
                 if(!u){o<<": not waiting here\n";note(o.str().c_str());continue;}
@@ -1243,7 +1384,9 @@ struct Runtime final:ds::Transport {
                 o<<": marked delivered, "<<removed<<" cargo record(s) removed\n";note(o.str().c_str());continue;
             }
             mod::orders::Change c{e.ref,uint8_t(e.item)};if(c.what<1||c.what>3)continue;
-            if(!orderSync.wanted(orders,c)){std::ostringstream o;o<<"ORDER partner's "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<" does not apply here\n";note(o.str().c_str());continue;}
+            if(!orderSync.wanted(orders,c)){std::ostringstream o;o<<"ORDER partner's "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<" does not apply here";
+                for(auto& x:orders)if(x.id==c.id)o<<" (detail "<<int(x.detail)<<", state "<<x.state<<", result "<<int(x.result)<<")";   // a story order that does not fit: the two stories differ
+                o<<"\n";note(o.str().c_str());continue;}
             bool ok=orderRequest(c.id,c.what);if(ok){orderSync.applied(c);++orderApplied;}
             if(ok&&config.shareOrderLoad){if(c.what==mod::orders::Start)orderLoads.started(c.id,true,now);else orderLoads.ended(c.id);}
             std::ostringstream o;o<<"ORDER partner: "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<(ok?" requested":" refused by the game")<<"\n";note(o.str().c_str());
@@ -1252,7 +1395,8 @@ struct Runtime final:ds::Transport {
         std::vector<uint64_t> under;for(auto& o:orders)if(mod::orders::shareable(o)&&o.state==mod::orders::Progress)under.push_back(o.id);
         if(config.shareOrderLoad){cargoSync.shareMissions(under);orderLoads.underWay(under,now);}   // their cases are shared cargo that stays order cargo (tickCargo)
         if(config.shareOrderUnits){
-            for(auto& u:unitSync.observe(units,under)){
+            std::vector<uint64_t> underSent;for(auto& o:orders)if(mod::orders::sends(orderSync.scope,o)&&o.state==mod::orders::Progress)underSent.push_back(o.id);
+            for(auto& u:unitSync.observe(units,underSent)){
                 ds::CargoEvent e;e.type=mod::orders::WireType;e.item=uint32_t(mod::orders::UnitBase+u.unit);e.ref=u.mission;
                 // The wire keeps positions within 100 km: the packed word travels as its low half there and its high
                 // half in the item's upper bits; the two condition values are small numbers (a float is exact in a double).
@@ -1622,7 +1766,10 @@ struct Runtime final:ds::Transport {
                     }
                     ++received;
                     bool longKind=n>int(ds::WireSize)&&n<=int(ds::AnimationWireMax)&&uint8_t(raw[6])==uint8_t(ds::Kind::Animation);
-                    if((n!=int(ds::WireSize)&&!longKind)||source.sin_addr.s_addr!=peer.sin_addr.s_addr||source.sin_port!=peer.sin_port) {++dropped;continue;}
+                    bool fromPeer=source.sin_addr.s_addr==peer.sin_addr.s_addr&&source.sin_port==peer.sin_port;
+                    // The checkpoint's datagrams (story.h) are not the core's: they carry their own secret and nonce.
+                    if(fromPeer&&n>=13&&!std::memcmp(raw,"DSS1",4)&&(storyHost||storyFetch)){storyDatagram(std::string(raw,size_t(n)));continue;}
+                    if((n!=int(ds::WireSize)&&!longKind)||!fromPeer) {++dropped;continue;}
                     std::vector<uint8_t> b(raw,raw+n);
                     auto fate=mod::link::fate(linkProfile,config.impairment,received,b[6]==uint8_t(ds::Kind::Presence));
                     if(fate.lost) {if(++linkLost%100==0){std::ostringstream o;o<<"LINK "<<config.link<<" lost "<<linkLost<<" of "<<received<<" received\n";note(o.str().c_str());}continue;}
@@ -1632,6 +1779,7 @@ struct Runtime final:ds::Transport {
                 }
                 #endif
                 for(size_t i=0;i<pending.size();) if(pending[i].due<=now) {auto p=pending[i];pending.erase(pending.begin()+i);accept(p,now);} else ++i;
+                storyPoll(now);
                 core->tick(now);paired|=core->connected();}
                 cadence.wait();
             }
@@ -1659,7 +1807,7 @@ struct Runtime final:ds::Transport {
             // An unavailable pose (main menu, loading) is NORMAL: presence stays gated until a pose is available.
             openPresenceLog(path);
             sampler=openSampler();stages.sampler=sampler.get();
-            vehicleCommand=path.parent_path()/"puppet.vehicle";
+            vehicleCommand=path.parent_path()/"puppet.vehicle";storyFolder=path.parent_path();storyCommand=path.parent_path()/"puppet.story";
             vehicleMonitor=std::make_unique<mod::vehicle::Monitor>(*sampler);
             environmentCommand=path.parent_path()/"puppet.environment";
             environmentReader=std::make_unique<mod::environment::Reader>(*sampler);
@@ -2357,6 +2505,8 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickRoads(now);
             stage="orders";stages.enter("orders",mod::nowUs());
             if(twin&&gameContext)tickOrders(now);
+            stage="story";stages.enter("story",mod::nowUs());
+            if(gameContext)tickStory(now);
             tickGuard();
             stage="markers";stages.enter("markers",mod::nowUs());
             if(twin&&gameContext)tickMarkers(now);
