@@ -38,6 +38,9 @@ struct DoubleApi {
     std::function<void(uint64_t,const ds::Animation*,bool)> mirror;
 };
 constexpr double MovingSpeed=.3;   // m/s; below this the double plays its standing animation
+// The trigger uses the same running-network check as the float/bool setters; host tests inject the export.
+using AnimationTrigger=std::function<void(uint64_t,int,float)>;
+AnimationTrigger animationTrigger(const discovery::Sampler&,AnimationTrigger);
 constexpr uint64_t MoverOffset=0xb0,MoverOwnerOffset=0x48,MoverTransformOffset=0x58;
 // Exactly one DSPlayerAKukanEntity among the children of the player's CameraEntity children,
 // every link checked back through the child's parent slot. Bounded walk; 0 otherwise.

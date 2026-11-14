@@ -11,6 +11,7 @@
 #include <functional>
 #include <optional>
 #include <set>
+#include <string>
 #include <vector>
 namespace mod::voidout {
 constexpr uint8_t WireType=17;
@@ -36,5 +37,10 @@ private:
 // The area this porter is in (the game's 0x262a8c0); craters are kept per area. 0xffff: none.
 std::function<uint32_t()> nativeArea(discovery::Sampler&);
 // Adds a crater to this game's queue (Windows only): returns its id, 0 when refused.
-std::function<uint32_t(const Crater&)> nativeAdd(discovery::Sampler&);
+using Writable=std::function<bool(uint64_t,size_t)>;
+using Grow=std::function<uint64_t(uint64_t,uint64_t,int32_t)>;
+using Log=std::function<void(const std::string&)>;
+// The same queue writer on host: only the OS protection query and native allocator are injected.
+std::function<uint32_t(const Crater&)> craterAdder(discovery::Sampler&,Writable,Grow,Log);
+std::function<uint32_t(const Crater&)> nativeAdd(discovery::Sampler&,Log);
 }
