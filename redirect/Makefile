@@ -99,7 +99,7 @@ portable-test: thread-trace-test | build
 	@python3 -B ../mod/mutants.py --sources "path_map.cpp module_policy.cpp module_test.cpp" --args "module_fixture.txt" MODULE_ALL MODULE_ROOT MODULE_PATCH MODULE_DEFENDER MODULE_REQUEST MODULE_FLAGS MODULE_NO_PREFIX MODULE_ANY_PREFIX MODULE_RELEASE_ROOT MODULE_RELEASE_WIDE
 	g++ -std=c++17 -Wall -Wextra -Werror path_map.cpp path_test.cpp -o build/path-test
 	./build/path-test
-	@python3 -B ../mod/mutants.py --sources "path_map.cpp path_test.cpp" DENY ROOT CASE TRAVERSAL PREFIX DEVICE NVROOT REPARSE QUERY_READS QUERY_ROOT0 FIND SUFFIX HEX
+	@python3 -B ../mod/mutants.py --sources "path_map.cpp path_test.cpp" DENY ROOT CASE TRAVERSAL PREFIX DEVICE NVROOT REPARSE QUERY_READS QUERY_ROOT0 FIND SUFFIX HEX XUSB_OFF XUSB_ANY_INTERFACE XUSB_ANY_HEAD
 	g++ -std=c++17 -Wall -Wextra -Werror hook_list_test.cpp -o build/hook-list-test
 	./build/hook-list-test
 	@python3 -B ../mod/mutants.py --sources "hook_list_test.cpp" --prefix build/mutant-hooks- NO_FIND NO_ATTRIBUTES

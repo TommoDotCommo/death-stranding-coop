@@ -49,6 +49,11 @@ std::wstring hex_flags(unsigned long v) {
 #endif
 }
 static const wchar_t* const hid_interface_guid=L"#{4d1e55b2-f16f-11cf-88cb-001111000030}";
+// XInput's device interface (XUSB), which xinput1_4.dll opens for an Xbox pad: a Bluetooth pad is a hid# device with
+// this interface, a wired or dongle pad a usb# one. Live 2026-11-13 (second PC): both opens of a Bluetooth Xbox pad
+// (hid#{00001812-...}&dev&vid_045e&pid_0b22...&ig_00#...#{ec87f1e3-...}) were denied. The usb# form is from the
+// documented path shape, not from a live record.
+static const wchar_t* const xusb_interface_guid=L"#{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}";
 Split split_namespace(const std::wstring& raw) {
     std::wstring s=raw;
     for(auto& c:s) if(c==L'/') c=L'\\';
@@ -68,7 +73,6 @@ Split split_namespace(const std::wstring& raw) {
     }
     // hid#<vid/pid/instance>#{interface guid}[\\<reference string>...]: the live run opened `...{guid}\\kbd`.
     // The suffix is device-relative; it may not climb (`.`/`..`), be empty or carry separators of other kinds.
-    const std::wstring tail=hid_interface_guid, head=L"hid#";
     std::wstring device=lower, suffix;
     auto slash=lower.find(L'\\');
     if(slash!=std::wstring::npos) {
@@ -85,8 +89,22 @@ Split split_namespace(const std::wstring& raw) {
 #endif
     }
     size_t hashes=0; for(auto c:device) if(c==L'#') ++hashes;
-    bool hid=device.size()>head.size()+tail.size() && device.compare(0,head.size(),head)==0 &&
-        device.compare(device.size()-tail.size(),tail.size(),tail)==0 && hashes>=3 &&
+    auto shaped=[&device](const std::wstring& head,const std::wstring& tail) {
+        return device.size()>head.size()+tail.size() && device.compare(0,head.size(),head)==0 &&
+            device.compare(device.size()-tail.size(),tail.size(),tail)==0;
+    };
+    // The usb# head is admitted with the XUSB interface only: a usb# path with any other interface stays refused,
+    // and so does the XUSB interface behind any other device class.
+#ifdef MUTANT_XUSB_OFF
+    bool known=shaped(L"hid#",hid_interface_guid); // the old rule: XInput's open of an Xbox pad is refused
+#elif defined(MUTANT_XUSB_ANY_INTERFACE)
+    bool known=shaped(L"hid#",hid_interface_guid) || shaped(L"hid#",xusb_interface_guid) || shaped(L"usb#",L"}"); // usb# with any interface (storage, hubs, ...)
+#elif defined(MUTANT_XUSB_ANY_HEAD)
+    bool known=shaped(L"hid#",hid_interface_guid) || shaped(L"",xusb_interface_guid); // the XUSB guid behind any device class
+#else
+    bool known=shaped(L"hid#",hid_interface_guid) || shaped(L"hid#",xusb_interface_guid) || shaped(L"usb#",xusb_interface_guid);
+#endif
+    bool hid=known && hashes>=3 &&
         device.find_first_of(L"\\:*?\"<>|/")==std::wstring::npos &&
         suffix.find_first_of(L":*?\"<>|/")==std::wstring::npos && (slash==std::wstring::npos || !suffix.empty());
     if(hid) return {PathKind::device,raw};
