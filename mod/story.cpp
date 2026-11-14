@@ -17,21 +17,23 @@ void atomicWrite(const fs::path& path,const std::string& bytes){
 namespace mod::story {
 namespace saves=launcher::saves;
 // The news on the wire. An event's position is metres, sent as centimetres held to +-100 km, so a size put there
-// arrived as 100000 and the fetch never completed; the integers must each stay under 2^53. So: the checksum in id, and
-// the size above 28 bits of generation in ref (16 MiB << 28 is 2^52).
+// arrived as 100000 and the fetch never completed; its id is the sender's own (the core numbers events with it) and
+// its other integers must stay under 2^53. So: the size above 28 bits of generation in ref (16 MiB << 28 is 2^52),
+// and the checksum as two 16-bit halves in the position, whole numbers the wire carries exactly.
 constexpr unsigned GenerationBits=28;
 ds::CargoEvent encode(const News& n){
-    ds::CargoEvent e;e.type=WireType;e.item=n.what;e.id=n.sum;
+    ds::CargoEvent e;e.type=WireType;e.item=n.what;e.position={double(n.sum&0xffff),double(n.sum>>16),0};
     e.ref=uint64_t(n.size)<<GenerationBits|(n.generation&((1u<<GenerationBits)-1));return e;
 }
 std::optional<News> decode(const ds::CargoEvent& e){
     uint64_t generation=e.ref&((1u<<GenerationBits)-1),size=e.ref>>GenerationBits;
-    if(e.type!=WireType||e.item<Ready||e.item>Failed||!generation||e.id>0xffffffffull)return std::nullopt;
+    if(e.type!=WireType||e.item<Ready||e.item>Failed||!generation)return std::nullopt;
 #ifndef MUTANT_STORY_SIZE_BOUND
     if(size>saves::MaxSave)return std::nullopt;
 #endif
-    for(double v:e.position)if(v!=0)return std::nullopt;
-    uint64_t sum=e.id;
+    double low=e.position[0],high=e.position[1];
+    if(!(low>=0&&low<=65535&&high>=0&&high<=65535)||low!=std::floor(low)||high!=std::floor(high)||e.position[2]!=0)return std::nullopt;
+    uint64_t sum=uint64_t(high)<<16|uint64_t(low);
     News n;n.what=e.item;n.generation=uint32_t(generation);n.size=uint32_t(size);n.sum=uint32_t(sum);
 #ifndef MUTANT_STORY_EMPTY
     if(n.what==Ready&&!n.size)return std::nullopt;

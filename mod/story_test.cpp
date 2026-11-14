@@ -41,19 +41,31 @@ static unsigned transfer(Serve& serve,Fetch& fetch,unsigned seed,int lossPercent
     }
     return 0;
 }
+namespace {
+struct WireEnd final:ds::StateProvider,ds::Transport {
+    std::deque<ds::Bytes>* out=nullptr;
+    bool readLocal(ds::State& s) override {s=ds::State{};s.position={1,0,1};return true;}
+    bool isInCutsceneOrLoading() const override {return false;}
+    void applyRemote(const ds::Render&) override {}
+    void send(const ds::Bytes& b) override {out->push_back(b);}
+};
+}
 int main(){
     const uint64_t session=0x1234567890abcdefull;
     // News on the ordered stream.
     { News n{Ready,7,5000000,0xfedcba98};auto e=encode(n);CHECK(e.type==WireType&&e.type<=ds::CargoTypeMax);
       auto d=decode(e);CHECK(d&&d->what==Ready&&d->generation==7&&d->size==5000000&&d->sum==0xfedcba98);
       auto bad=e;bad.item=9;CHECK(!decode(bad));bad=e;bad.ref&=~0xfffffffull;CHECK(!decode(bad));bad=e;bad.type=12;CHECK(!decode(bad));
-      bad=e;bad.ref=(uint64_t(saves::MaxSave)+1)<<28|7;CHECK(!decode(bad));bad=e;bad.position[0]=1;CHECK(!decode(bad));bad=e;bad.id=1ull<<32;CHECK(!decode(bad));
+      bad=e;bad.ref=(uint64_t(saves::MaxSave)+1)<<28|7;CHECK(!decode(bad));bad=e;bad.position[0]=65536;CHECK(!decode(bad));bad=e;bad.position[1]=0.5;CHECK(!decode(bad));
+      bad=e;bad.position[2]=1;CHECK(!decode(bad));bad=e;bad.position[0]=std::nan("");CHECK(!decode(bad));
       bad=e;bad.ref=7;CHECK(!decode(bad));                                            // nothing to fetch is no offer
-      // What the wire does to an event must not touch the news: positions are held to +-100 km in centimetres (a
-      // size carried there arrived as 100000), integers must stay under 2^53.
-      CHECK(e.position[0]==0&&e.position[1]==0&&e.position[2]==0);
-      { auto big=encode({Ready,(1u<<28)-1,uint32_t(saves::MaxSave),0xffffffffu});CHECK(big.id<(1ull<<53)&&big.ref<(1ull<<53));
-        auto d2=decode(big);CHECK(d2&&d2->size==saves::MaxSave&&d2->sum==0xffffffffu&&d2->generation==(1u<<28)-1); }
+      // What the wire and the core do to an event must not touch the news: positions are held to +-100 km in
+      // centimetres (a size carried there arrived as 100000), the id is the core's (it numbers the event when it is
+      // 0, and whatever it holds is not read), the other integers must stay under 2^53.
+      CHECK(e.id==0&&std::fabs(e.position[0])<=65535&&std::fabs(e.position[1])<=65535);
+      { auto big=encode({Ready,(1u<<28)-1,uint32_t(saves::MaxSave),0xffffffffu});CHECK(big.ref<(1ull<<53)&&big.position[0]==65535&&big.position[1]==65535);
+        big.id=0x123456789abcull;auto d2=decode(big);CHECK(d2&&d2->size==saves::MaxSave&&d2->sum==0xffffffffu&&d2->generation==(1u<<28)-1); }
+      { auto ask=encode({Ask,1,0,0});ask.id=77;CHECK(decode(ask)); }
       CHECK(decode(encode({Ask,1,0,0}))&&decode(encode({Loaded,3,0,0})));
       CHECK(secretOf(session)&&nonceOf(session,1)&&nonceOf(session,1)!=nonceOf(session,2)&&secretOf(session)!=secretOf(session+1)); }
     // Host: automatic. A story move asks the game for a checkpoint in the world only, and offers the new file only
@@ -200,6 +212,25 @@ int main(){
       put(manager+0xc8,4,1);st=readSaveState(s,base);CHECK(st.pending&&st.pendingType==4);
       put(manager+0xc8,0xff,1);put(module+0x2a0+0x88,1,4);put(module+0x450,3,1);st=readSaveState(s,base);CHECK(st.requests&&!st.pending&&st.module==3);
       deny=true;CHECK(!readSaveState(s,base).readable); }
+    {   // The news through the real core, both ways: what one copy tells is what the other reads. (The first live run
+        // of two copies lost the size here; the game-free tests had only ever handed encode's result to decode.)
+        std::deque<ds::Bytes> aToB,bToA;WireEnd ea,eb;ea.out=&aToB;eb.out=&bToA;
+        ds::Config ca;ca.role=ds::Role::Host;ca.session=9;ca.nonce=0xfedcba9876543210ull;ds::Config cb=ca;cb.role=ds::Role::Client;cb.nonce=22;
+        ds::Core a(ca,ea,ea),b(cb,eb,eb);uint64_t now=0;std::vector<News> atB,atA;
+        auto pump=[&](std::deque<ds::Bytes>& q,ds::Core& to){while(!q.empty()){auto p=q.front();q.pop_front();to.receive(p.data(),p.size(),now);}};
+        auto run=[&](uint64_t until){for(;now<until;now+=10){a.tick(now);b.tick(now);pump(aToB,b);pump(bToA,a);
+            for(auto& e:b.takeCargo())if(auto n=decode(e))atB.push_back(*n);else CHECK(false);
+            for(auto& e:a.takeCargo())if(auto n=decode(e))atA.push_back(*n);else CHECK(false);}};
+        run(3000);CHECK(a.connected()&&b.connected());
+        std::vector<News> hostSays={{Ready,1,274154,0x89abcdefu},{Ready,(1u<<28)-1,uint32_t(saves::MaxSave),0xffffffffu},{Ready,2,1,0}};
+        std::vector<News> guestSays={{Ask,1,0,0},{Loaded,7,0,0},{Failed,7,0,0}};
+        for(auto& n:hostSays)a.queueCargo(encode(n));
+        for(auto& n:guestSays)b.queueCargo(encode(n));
+        run(8000);
+        auto same=[](const std::vector<News>& x,const std::vector<News>& y){if(x.size()!=y.size())return false;
+            for(size_t i=0;i<x.size();++i)if(x[i].what!=y[i].what||x[i].generation!=y[i].generation||x[i].size!=y[i].size||x[i].sum!=y[i].sum)return false;return true;};
+        CHECK(same(atB,hostSays));CHECK(same(atA,guestSays));
+    }
     if(!failures)std::puts("story resync checks passed");
     return failures?1:0;
 }
