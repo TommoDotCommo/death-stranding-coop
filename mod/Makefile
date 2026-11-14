@@ -166,7 +166,10 @@ build/coop-partner: environment.cpp environment.h partner.cpp partner_logic.cpp 
 	$(CXX) $(FLAGS) partner.cpp partner_logic.cpp environment.cpp structures.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@
 build/coop-partner.exe: environment.cpp environment.h partner.cpp partner_logic.cpp partner.h identity.h structures.cpp structures.h carry_visual.cpp carry_visual.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(MINGW) $(WINFLAGS) partner.cpp partner_logic.cpp environment.cpp structures.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@ -lws2_32 -lbcrypt
+build/orderload-test: orderload_test.cpp orderload.cpp orderload.h cargo.cpp cargo.h discovery.cpp | build
+	$(CXX) $(FLAGS) orderload_test.cpp orderload.cpp cargo.cpp discovery.cpp -o $@
 game-thread-test: build/ui-test build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/passenger-test build/place-test build/roads-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test
+	./build/orderload-test
 	./build/game-thread-test
 	./build/puppet-test
 	./build/double-test

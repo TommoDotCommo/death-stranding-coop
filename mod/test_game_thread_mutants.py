@@ -14,6 +14,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('padscript',['BOUNDS','STAMP','TIMING','WAITUI_NAME','WAITUI_TIMEOUT','WAITUI_SKIP'],['pad_test.cpp','pad.cpp']),
           ('ui',['UNKNOWN_IS_GAMEPLAY','PAUSE_ORDER','NEGATE','LOG_EVERY','STATE_VTABLE','MENU_VTABLE','PAGES_OWNER','LAYER_BOUND','RESOURCE_VTABLE','NAME_BOUND'],['ui_test.cpp','ui.cpp','discovery.cpp']),
           ('cargo',['ECHO','HELD','TAKEN','TOOK_ECHO','DOOM','FIND','NEAR_HELD','CARRY_FRAME','LOCAL','STAGED','MOVED','OTHER_ID','RUN','FIRST511','SLOT32','ORDER_ANY','ORDER_KIND','ORDER_STALE'],['cargo_test.cpp','cargo.cpp','discovery.cpp']),
+          ('load',['DECODE_RANGE','LINK','ENDED','STRIP_TAKER','STRIP_SHARED','STRIP_CARRIED','CANCEL','DUPLICATE','STALE'],['orderload_test.cpp','orderload.cpp','cargo.cpp','discovery.cpp']),
           ('carry',['SLOT','HOLDER','CAP','DROP','DUPLICATE','REAL','LOST','VARIANT','ITEM'],['carry_visual_test.cpp','carry_visual.cpp','discovery.cpp','../core/core.cpp']),
           ('partner',['TELEPORT','ACCEL','WIRE','WIRE_ANY','OFFSET','OFFSET_RANGE','PROGRESS_RANGE'],['partner_test.cpp','partner_logic.cpp','../core/core.cpp']),
           ('structure',['MENU','MATERIAL_LESS','MATERIAL_LOAD','LEVEL_DOWN','LEVEL_ECHO','ALL_NET','PACK','NET','REMOVED','EARLY','FAR','OLD','HASTY','FORGET'],['structures_test.cpp','structures.cpp','discovery.cpp']),
