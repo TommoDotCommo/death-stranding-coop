@@ -303,12 +303,18 @@ void Double::tick(bool permitted,const Transform* target,double speed,uint32_t f
 uint64_t OwnBody::tick(const Anchor& porter){
     if(!porter.entity||!porter.pose.available)return 0;
 #ifndef MUTANT_OWNBODY_WORLD
-    if(porter.entity!=porter_){if(body_)record_("BODY world changed: a new body will be made\n");porter_=porter.entity;body_=0;}
+    if(porter.entity!=porter_){if(body_)record_("BODY world changed: a new body will be made\n");porter_=porter.entity;body_=0;undressed_=false;}
 #endif
 #ifndef MUTANT_OWNBODY_ALIVE
     if(body_&&!api_.alive(body_)){record_("BODY lost: a new body will be made\n");body_=0;}
 #endif
     if(body_||exhausted())return body_;
+    // A body that could not be dressed was removed (below): the resident double stands in until the game has dressed
+    // the porter, then the body is made again. (A brand-new save: the porter wears a one-part set in the prologue.)
+    if(undressed_){
+        if(!api_.ready||!api_.ready(porter.entity))return 0;
+        undressed_=false;record_("BODY the porter is dressed now: making the body again\n");
+    }
 #ifndef MUTANT_OWNBODY_READY
     if(api_.ready&&waited_<ReadyWaitTicks&&!api_.ready(porter.entity)){
         if(!waited_++)record_("BODY waiting: the game has not dressed the porter yet\n");
@@ -323,7 +329,19 @@ uint64_t OwnBody::tick(const Anchor& porter){
     body_=api_.create(resource,t);
     if(!body_){++failures_;record_(exhausted()?"BODY creation refused; giving up, the resident double is used\n":"BODY creation refused\n");return 0;}
 #ifndef MUTANT_OWNBODY_DRESS
-    if(api_.dress)record_(api_.dress(body_)?"BODY model components built\n":"BODY model components could not be built\n");
+    if(api_.dress){
+        if(api_.dress(body_))record_("BODY model components built\n");
+#ifndef MUTANT_OWNBODY_BARE
+        else{
+            // Kept, it would be a body nobody can see with the gear and the name label floating on it.
+            api_.remove(body_);body_=0;undressed_=true;
+            record_("BODY model components could not be built: the body is removed, the resident double is used until the porter is dressed\n");
+            return 0;
+        }
+#else
+        else record_("BODY model components could not be built\n");
+#endif
+    }
 #endif
 #ifndef MUTANT_OWNBODY_PARK
     api_.park(body_);

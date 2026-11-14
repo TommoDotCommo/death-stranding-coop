@@ -196,8 +196,9 @@ public:
     void remove();   // leaving own-body mode: the game removes the body
     bool exhausted() const {return failures_>=MaxFailures;}
     uint64_t body() const {return body_;}
+    bool undressed() const {return undressed_;}   // the body could not be dressed and was removed: waiting for the porter to be dressed
 private:
-    OwnBodyApi api_;std::function<void(const std::string&)> record_;uint64_t porter_=0,body_=0;unsigned failures_=0;unsigned waited_=0;
+    OwnBodyApi api_;std::function<void(const std::string&)> record_;uint64_t porter_=0,body_=0;unsigned failures_=0;unsigned waited_=0;bool undressed_=false;
 };
 class Double {
 public:

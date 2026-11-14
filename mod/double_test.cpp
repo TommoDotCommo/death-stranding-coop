@@ -153,6 +153,19 @@ void ownBody(){
      *ready=true;CHECK(g.tick(porter)!=0&&w->creates==before+1);
      OwnBody h(a3,[&](const std::string&){});*ready=false;unsigned made=0;
      for(unsigned i=0;i<=OwnBody::ReadyWaitTicks+1;++i)made+=h.tick(porter)!=0;CHECK(made>0&&w->creates==before+2);}
+    // A body that cannot be dressed (a brand-new save: the porter himself wears one part) is removed, not kept bare:
+    // the caller gets no body and uses the resident double. Nothing is made again until the porter counts as dressed.
+    {auto ready=std::make_shared<bool>(false),dress=std::make_shared<bool>(false);OwnBodyApi a4=api;
+     a4.ready=[ready](uint64_t){return *ready;};a4.dress=[dress](uint64_t){return *dress;};
+     std::vector<std::string> lines;OwnBody u(a4,[&](const std::string& r){lines.push_back(r);});w->refuse=false;
+     auto creates=w->creates,removes=w->removes;uint64_t got=0;
+     for(unsigned i=0;i<=OwnBody::ReadyWaitTicks+50;++i)got|=u.tick(porter);
+     CHECK(got==0&&u.body()==0&&u.undressed()&&!u.exhausted()&&w->creates==creates+1&&w->removes==removes+1);
+     bool told=false;for(auto& l:lines)told=told||l.find("the body is removed")!=std::string::npos;CHECK(told);
+     *ready=true;*dress=true;auto b2=u.tick(porter);CHECK(b2!=0&&!u.undressed()&&w->creates==creates+2&&u.tick(porter)==b2&&w->creates==creates+2);
+     // A new world forgets the wait.
+     OwnBody v(a4,[&](const std::string&){});*ready=false;*dress=false;for(unsigned i=0;i<=OwnBody::ReadyWaitTicks+5;++i)v.tick(porter);CHECK(v.undressed());
+     *dress=true;Anchor other=porter;other.entity=0x777;uint64_t later=0;for(unsigned i=0;i<=OwnBody::ReadyWaitTicks+5;++i)later|=v.tick(other);CHECK(later!=0&&!v.undressed());}
 }
 void ownCommand(){
     CHECK(parseOwnCommand("own S1\n"," S1\n")==DressArtPartsInPlace);CHECK(parseOwnCommand("own9 S1\n"," S1\n")==9u);
