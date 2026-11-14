@@ -2,7 +2,8 @@
 // Shared orders (orders.cpp). A standard delivery order one player takes on is taken on in the partner's game too, and
 // when it is completed or given up in one game it is completed or given up in the other, each through the game's own
 // mission requests (game_offsets.md, "Orders"). Only standard orders (the repeatable deliveries and collections) are
-// shared: main and sub orders move the story, and that stays each player's own.
+// shared: main and sub orders move the story, and that stays each player's own, unless the players opt in to the
+// experiment share_story_orders: then the host's main and sub orders travel the same way, to the guest only.
 #include "discovery.h"
 #include <cstdint>
 #include <functional>
@@ -16,12 +17,28 @@ constexpr uint8_t Completed=4;                       // the game's order result 
 struct Order { uint64_t id=0; uint16_t state=0; uint8_t result=0,detail=0; };
 // Category detail of the order's resource: 2 a standard delivery, 3 a standard collection.
 inline bool shareable(const Order& o){return o.detail==2||o.detail==3;}
+// Category detail 0 a main order, 1 a sub order: the story.
+inline bool story(const Order& o){return o.detail==0||o.detail==1;}
+// Which orders this side tells the partner about and takes from the partner. Story orders go one way: the host has
+// storyOut, the guest storyIn, never both, so a guest's game cannot move the host's story.
+struct Scope { bool standard=true,storyOut=false,storyIn=false; };
+inline bool sends(const Scope& s,const Order& o){
+#ifdef MUTANT_ORDER_STORY_BACK
+    if(story(o)&&(s.storyOut||s.storyIn))return true;
+#endif
+    return (s.standard&&shareable(o))||(s.storyOut&&story(o));}
+inline bool takes(const Scope& s,const Order& o){
+#ifdef MUTANT_ORDER_STORY_IN
+    if(story(o))return true;
+#endif
+    return (s.standard&&shareable(o))||(s.storyIn&&story(o));}
 // The static orders of the game's mission system (image+0x7c0aff8, array at +0x108); empty when unreadable.
 // details: a cache of each order's category detail (it never changes), filled as orders are first seen.
 std::vector<Order> readOrders(const discovery::Sampler&,uint64_t base,std::map<uint64_t,uint8_t>& details);
 struct Change { uint64_t id=0; uint8_t what=Start; };
 class Sync {
 public:
+    Scope scope;
     // One call per look while the partner is connected. The first look after reset() reports every shareable order
     // under way (the partner takes them on); later looks report what started, was completed or was given up here,
     // except what this side did for the partner (applied()).
@@ -32,6 +49,17 @@ public:
     void applied(const Change& c){applied_[c.id]=c.what;}
 private:
     std::map<uint64_t,Order> seen_;std::map<uint64_t,uint8_t> applied_;bool primed_=false;
+};
+// What the story orders do here, for the log and for the resync trigger (story.h): every main or sub order whose
+// state or result changed since the last look. The first look learns.
+struct StoryMove { Order was,now; };
+class StoryWatch {
+public:
+    std::vector<StoryMove> observe(const std::vector<Order>&);
+    void reset(){seen_.clear();primed_=false;}
+    uint32_t completed() const {return completed_;}       // story orders seen going to completed since the start
+private:
+    std::map<uint64_t,Order> seen_;bool primed_=false;uint32_t completed_=0;
 };
 // One cargo unit of an order (the game's table at mission system +0x18): state 1 not delivered, 2 delivered.
 // row: where the row's state is, to mark it delivered here.

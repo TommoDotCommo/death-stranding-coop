@@ -5256,3 +5256,107 @@ Unknown: why received shelters are removed; the letters of the remaining kinds (
 signboard, highway); what distinguishes the five arrays and the second list; the grid cell `x`/`y`; the key names of
 the `lookup` answer; and whether a build through the game's own menu sets the same flag (assumed, not seen).
 
+
+## Saving and loading on request (2026-11-14, static only, nothing called)
+
+Build 13300582, read with objdump from the pinned executable; no game ran. The mod's calls built on this are behind
+`story_resync` and its lab commands (`mod/story.h`); nothing below has been confirmed live.
+
+Names come from the game's own reflection data: `ESaveGameType` 1 Manual, 2 Quick, 4 Automatic (0xf: every type);
+`ESaveGameSlot` 0xfe Memory, 0xff Auto, 0..22 Slot0..; `ESaveGameRestoreReason` 0 Invalid, 1 Manual, 2 Continue,
+3 MissionFailed, 4 Debug, 5 AllDream, 6 AllDream_GasFaint, 7 AllDream_NoDemo, 8 BlackSam, 9 BlackSam_Annihilation
+(enum tables at `0x3f15d80`, `0x3f15fb0`, `0x3f15e20`).
+
+Objects: `GameModule* G = *(image+0x7be6318)` (null at the title screen; the application object is `image+0x7be6330`
+and holds the same pointer at `+0x700`). The save system is `G+0x2a0`: a list of requests (count i32 at `+0x88`,
+pointers at `+0x90`), one 0x80-byte request each with a state at `+0xc` (1..5 a save, 6..15 a restore while a game
+runs, 16 the load when a game starts, 17 an error shown to the player (inferred)), the type at `+0x10`, the slot at `+0x11`, the restore reason at
+`+0x48`. `0x3633640(system)` is its update (a jump table over the state at `0x3634624`); the save job is `0x36297c0`,
+the load job `0x36346b0` -> `0x2635ed0(G, reader, mode)`. `G+0x450` is a state byte of the module that a restore
+request sets to 3 when it was 0.
+
+**A save on request.**
+
+- Save system: `0x3630440(G+0x2a0, u8 type, u8 slot, u32, u8, ptr, u8, u8 reason, ptr)` makes a request in state 1.
+  One caller only: the update of the DS save manager (`0x341c51b`, the call at `0x341ca1a`).
+- DS save manager `M = *(*(image+0x7c0d6b0)+8)`: it holds one waiting save (`M+0xc0` kind, `+0xc2` flag word,
+  `+0xc8` type, 0xff = none, `+0xc9` slot, `+0xe1` reason) and each update works out the "unsave reasons"
+  (`0x33fea20`, a bit mask; the script exports `DSGameState_sExportedCalcUnsaveReason` `0x2dd3670` and
+  `...CalcAutosaveRequestUnsaveReason` `0x2dd3650` -> `0x33fe830` ask the same manager; their results were not
+  decoded). While a reason holds it waits or
+  drops the request (both paths exist: `0x341cbd6` keeps it, `0x341cbc0` clears it); otherwise it calls the save
+  system. A request is handed to it with `0x3411580(*(image+0x7c0d6b0), request*)` (-> `0x3411590(M, request*)`),
+  the request built by `0x28ac740`.
+- The node-graph functions the game's own scripts use (registered in `0x3656a30`):
+  `DSCreateSaveGame` `0x365c560(u8 type, u16 flags, u16 flags, u16 flags, u8, ptr)`, `DSCreateSaveGameForRetry`
+  `0x365c5c0` (type 4, slot Memory, reason 5), `DSCreateSaveGameWithActivity` `0x365c930`,
+  `..._PlusWakeupDreamDemo` `0x365c970`, `DSCreateSaveGameForStrideQpidArea` `0x365c6e0` (no arguments; kind 9, which
+  the manager drops unless bit 35 of the state word at `*(image+0x7bf6e88)+8` is set), `DSCreateSaveGamePlayWakeupDreamDemo` `0x365c8f0`.
+  All but two end in the common body `0x365c770`, which fills the request (type from the first argument, slot Auto,
+  tag `0x1d0d8b5`, kind 1 for an automatic save) and calls `0x3411580`. `DSCreateSaveGame` passes flag `0x40` where
+  the "PlayWakeupDreamDemo" variants pass 0: read as "no wake-up scene when this save is loaded" (inferred from the
+  names; not seen live).
+- What the mod calls (`story::nativeSave`): `0x365c560(4, 0, 0, 0, 0, null)`: an automatic save into the game's next
+  autosave slot, made by the manager when the game allows a save. The mod then waits for a newer `checkpoint.dat`.
+- `0x362b4a0(system)` is "a memory checkpoint exists" (used before the retry restores), not "saving is allowed".
+
+**A load while a game runs.**
+
+- Save system: `0x362d750(G+0x2a0, u8 type, u8 slot, u8, u8 reason, u32, u8)` makes a restore request (state 6): it
+  first drops waiting saves, refuses silently when a restore is already under way or when the module is not in a
+  running state (`*(G+0x400)`'s state under 4 or equal to 7; the byte `image+0x4ba4cdd`; `0x3581400`), then the update
+  opens that save's file again (the name from `0x3635630(type, slot, ...)`), checks it and runs the load job. Slot
+  Memory with reason 5 restores the in-memory checkpoint instead (the retry after a failed mission: callers
+  `0x2dcac60`, `0x3420020`).
+- Application: `0x2636990(app, u8 type, u8 slot)`: checks that the save exists (`0x26376e0(app, type, slot)`: a
+  non-empty name from `0x3635630`; false for type 0xff or slot 0xfc) and calls the restore with reason 1 (Manual).
+- The save dialog: its confirm handler `0x324f4b0` takes the chosen entry's type (`+0x30`) and slot (`+0x31`) and
+  goes to `0x3668f00(_, type, slot)` when a game runs (`app+0x700` set) and to `0x36655d0` at the title screen (the
+  title path that ends in the same application state change as `Application_sExportedContinueLastSave`).
+  `0x3668f00` requires `G`, checks type and slot against their enums and calls `0x26376e0` then `0x2636990`. So
+  this is the pause menu's Load Game. The script exports `Application_sExportedSelectAndLoadGame`,
+  `GameModule_sExportedReloadLastSaveGame` and `MenuSaveDataDialog_sExportedSelectLoadSlot` are empty stubs
+  (`0x18e9b10`) in this build.
+- `Application_sExportedContinueLastSave` (`0x2642a00`) returns at once when `G` is set, which is why it does nothing
+  during play (seen live 2026-11-07); it asks for type 0xf, slot Auto: the newest save of any type.
+- What the mod calls (`story::nativeLoad`): `0x26376e0(app, 1, 0)` to tell whether the game lists `manualsave0`, then
+  `0x3668f00(null, 1, 0)`.
+- `0x3635630` takes the list of saves from the storage object `*(image+0x577b670)` (virtual `+0x18`, one list per
+  name prefix `autosave`, `manualsave`, `quicksave`; entries of 0x38 bytes with the owner's user index and the
+  format version in the dword at `+0x28`). It skips an entry whose user index has no user object (`0x1ddd610`):
+  read as the place where a save of another account fails (inferred).
+
+**Unknown** (each needs a live look; the commands are in `mod/README.md`, "Story within a session"):
+
+- whether the storage object lists a `checkpoint.dat` that appeared or changed after the game started, or keeps a
+  list from start-up (if it does, the load of a freshly installed `manualsave0` is refused with result 1, or loads
+  the bytes that were there before);
+- the thread these functions expect (the mod calls them from its game-thread tick, as it calls the mission requests);
+- what the restore does to a running world in practice: the same path as the pause menu, so a loading screen and a
+  new world are expected, as after "return to title and load" (which the mod already survives while connected);
+- how long the manager takes to make the requested save, and which unsave reasons drop the request instead of
+  delaying it;
+- whether a save made with flag `0x40` really loads without a wake-up scene, and where the porter stands after it.
+
+## Story orders: what a mission request does for a main order (2026-11-14, static only)
+
+- The three requests the mod uses for standard orders (start `0x33b80a0`, success `0x33b82d0`, fail `0x33b75e0`)
+  are the ones the game's mission scripts call: the script commands `DSMissionLogicCommand_sRequestMissionStart`
+  (`0x33c9c30`), `...sRequestMissionSuccess` (`0x33c9c80`) and `...sRequestMissionCancelSilent` (`0x33c9bb0`) look
+  the mission up by UUID and jump into them.
+- Neither request looks at the order's category for main and sub orders. The start's check `0x33b0bc0` treats
+  category details 0..3 and 5 alike (it counts the orders under way against a limit); the success request needs
+  state 4 (in progress) or 0x800 and `0x33a1890(S, id)` false. Both only append `{id, new state, flags}` to the
+  system's queue (`S+0x814f0`, or `S+0x81530` while a flag of the construction manager's current object is set);
+  the system's update applies it.
+- What a main order then does (cutscenes, a move of the porter, the private room, the next orders becoming
+  available) is not in the executable: it is the order's own logic graph in the game's data, which reacts to the
+  state. **Unknown** until seen live. Expected from the design of the requests: the guest's game runs the same
+  logic as the host's did, wherever the guest's porter stands; a step that needs the porter at a terminal or inside
+  a facility may not fit.
+- Not carried by a request: what the delivery terminal's own routine (`0x33b28e0`) does beside the state: the
+  result screen, likes, the facility's connection level. A guest whose main order is completed by request gets the
+  state and whatever the order's logic gives, not the terminal's rewards (the same holds for shared standard
+  orders).
+- The mod sends a story order's "fail" only for state 8; any other way out of "in progress" (states 32 cancel, 64
+  not available, 128, 256, 512, 1024, 2048 exist in `EDSMissionState`) is logged (`ORDER story ...`) and not sent.

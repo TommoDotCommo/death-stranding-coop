@@ -723,6 +723,90 @@ Each game keeps simulating its own world; these settings share the outcome of wh
 Log lines: `ENEMY ...`, `ORDER ...`. Test commands in `puppet.cargo` (lab only): `mule <kind>`, `order <id>`,
 `unit <id*10+n>`, `unitlose <id*10+n>`; in `puppet.ride`: `place X Y Z HEADING`.
 
+## Story within a session (`share_story_orders`, `story_resync`; experiments, off by default, nothing run live)
+
+The host's save is the story, and a guest who joins through the launcher starts from the host's checkpoint. These two
+settings are for what happens after that, while both play. Both need an explicit `role`; the guest never moves the
+host's story. Research and addresses: `game_offsets.md`, "Saving and loading on request" and "Story orders".
+
+**`"share_story_orders": true`** (with `share_orders`; `orders.h`): the host's main and sub orders travel like standard
+orders: started, a unit handed in (with `share_order_units`), completed, and failed (state 8 only). The guest's game
+gets the game's own mission request, the one its story scripts use, so its own story logic runs. The guest's story
+orders are never sent; a story change the host receives is refused (`ORDER partner's ... does not apply here`).
+Both sides log every change of a story order: `ORDER story <id hex> (detail 0|1) state A->B result C->D`.
+What a main order's request sets off in the receiving game is unknown; a request that does not fit the guest's state
+is refused and logged with the guest's state for that order: that line means the two stories differ, and
+`story_resync` is the way back.
+
+**`"story_resync": "key"` or `"auto"`** (`story.h`; needs the game provider and `game_thread`): the host's game writes a
+checkpoint, the file goes to the guest over the mod's link, the guest's mod puts it in place as `manualsave0`
+re-signed for the guest's account (the `manualsave0` that was there moves to `story-backups` beside the account
+folder; the other saves stay) and asks the game to load it as the pause menu's Load Game does.
+
+- Host, `auto`: a checkpoint is asked for when the episode changes or a main or sub order is completed, at most every
+  30 s, only in the world and while the game is not saving. Host, `key`: only when the guest asks.
+- Guest, `auto`: an offered checkpoint is fetched and loaded at once. Guest, `key`: the info log says the partner
+  has moved the story on (with `notices`); `story_key` (a virtual-key code, default 120 = F9, 0 = none) fetches and
+  loads it. With nothing on offer the key asks the host for a fresh checkpoint (at most every 10 s) and loads it when
+  it arrives.
+- The load waits until the guest's porter is in the world, no game event runs and the game is not saving. After the
+  load the order sync learns the new world before it reports anything.
+- What fails is told and given up, never retried by itself: a checkpoint that has not arrived whole after 300 s, an
+  install that fails, a game that has not left the world 30 s after the load request (`STORY ... load refused`).
+- The news travels on the ordered event stream (type 19: ready, ask, loaded, failed); the bytes travel as the
+  launcher's save datagrams (`launcher/saves.h`) on the mod's socket, keyed by the session and the checkpoint's
+  generation, checked by size and checksum, and refused unless they are a checkpoint.
+- The mod only writes inside the copy's own data folder (`<data>/local/KojimaProductions/DeathStrandingDC/<the one
+  account>`, found from the mod's folder); two account folders there, or none, turn the feature off with a log line.
+
+Log lines start with `STORY`. Lab commands, file `puppet.story` in the mod folder (stamp-guarded like the others;
+they need `story_resync` set, and each makes one call alone): `state 0 <stamp>` (the game's save state and the
+newest checkpoint), `watch <seconds> <stamp>` (that twice a second), `save 1 <stamp>` (ask the game for a
+checkpoint), `load <type*100+slot> <stamp>` (ask the game to load a save: `100` = `manualsave0`, `400` = `autosave0`),
+`key 1 <stamp>` (the catch-up key).
+
+Live checklist (an authorized operator; disposable copies, one copy unless stated; expected values are what the
+static reading predicts, every one of them still to be seen):
+
+1. Arming. Config: the play setup plus `"story_resync":"key"` and `"role":"host"`. Expect at the first tick in the
+   world `STORY resync on: host, key, key 120, save armed, load armed, account <id>`. `save off` or `load off` with
+   `... function differs` means another build: stop.
+2. Reading. `state 0`: expect `readable=1 in_game=1 requests=0 pending_type=255 module_state=0` (module_state is
+   unknown: record it) and `newest=<the folder the copy was continued from>`.
+3. Save on request. `watch 60`, then `save 1`. Expect `STORY test: asked; after: ... pending_type=4`, then in the
+   watch rows `pending_type` back to 255, `requests=1` for a moment, and `newest=` changing to an autosave folder
+   with a later time within a few seconds; the game shows its saving icon. Compare the file on disk with the row
+   (size). If `pending_type` goes back to 255 and no file appears, the manager dropped the request: record the
+   porter's situation (near a terminal, in timefall, carrying, in a BT area) and try in the open. Repeat inside a
+   private room and during a cutscene to learn the refusals.
+4. Load on request, the game's own save. With an existing `autosave0`: `watch 90`, then `load 400`. Expect
+   `STORY test: load result 2`, `requests=1` and `module_state=3` right after, `porter=0` in the watch rows during
+   the loading screen, then `porter=1` again at the save's place. `result 1` means the game does not list that save.
+   A `STALL ... in 'story'` line means the call faulted: stop the copy and keep the crash record.
+5. Load of a file that changed under the running game (the open question). Stop watching; copy another valid
+   checkpoint of the same account over `manualsave0/checkpoint.dat` in the copy's save tree while the game runs
+   (a save baseline of the test copy), then `load 100`. Expect result 2 and the world of the new file. Result 1, or the
+   old world, means the game keeps its list or its bytes from start-up: the resync then needs another way to make
+   the game look again (record which).
+6. Two copies, key mode: host `"role":"host"`, guest `"role":"guest"`, both `"story_resync":"key"`, the guest started
+   from the host's save. On the guest: `key 1`. Expect on the guest `STORY catch-up key: asking the partner for a
+   checkpoint`; on the host `STORY checkpoint wanted: the partner asked`, `STORY asking the game for a checkpoint`,
+   `STORY checkpoint written: autosaveN, <bytes>, generation 1`, `STORY offering ...`; on the guest `STORY fetching
+   ... generation 1`, `STORY fetch 25%` .. `STORY checkpoint fetched`, `STORY the partner's checkpoint is in place as
+   manualsave0`, `STORY load request result 2`, `STORY the game left the world: loading`, `STORY loaded the partner's
+   checkpoint, generation 1, after N s`; on the host `STORY the partner loaded generation 1`. Then compare from both
+   processes: the episode (`PROGRESS episode=`), the order records (read from both processes) and the porter's
+   position (the guest stands where the host stood when the checkpoint was written). The partner body, gear and
+   name must come back on both sides as after a reload.
+7. Two copies, `"story_resync":"auto"` and `"share_story_orders":true` with `share_orders`: the host takes a sub
+   order at a terminal and completes it. Expect `ORDER story ... state 1->4` on the host, `ORDER start of <id> here ->
+   partner`, on the guest `ORDER partner: start of <id> requested` and its own `ORDER story ... state 1->4`; on
+   completion `ORDER story ... result ->4` on the host, the guest's `ORDER partner: success of <id> requested`, and
+   (auto) one checkpoint offered and loaded by the guest. Watch the guest's screen through the completion: a cutscene,
+   a move of the porter or a result screen there is the answer to "what does a main order's request set off".
+8. After every run: the real saves are byte-identical, and the guest copy's `story-backups` holds what `manualsave0`
+   was before.
+
 ## The partner's name over his body (`partner_tag`, off by default)
 
 With `"partner_tag": true` (requires `puppet_probe`) the partner body shows the partner's name (their `nickname`, which

@@ -57,13 +57,18 @@ std::vector<Change> Sync::observe(const std::vector<Order>& orders){
     std::vector<Change> out;std::map<uint64_t,Order> next;
     for(auto& o:orders){
 #ifndef MUTANT_ORDER_STORY
-        if(!shareable(o))continue;
+        if(!sends(scope,o))continue;
 #endif
         next[o.id]=o;
         auto old=seen_.find(o.id);bool was=old!=seen_.end()&&old->second.state==Progress,is=o.state==Progress;
         uint8_t what=0;
         if(is&&(!primed_||!was))what=Start;
         else if(primed_&&was&&!is)what=o.state==16||(o.state!=8&&o.result==Completed)?Success:Fail;   // 16 success, 8 failed
+#ifndef MUTANT_ORDER_STORY_FAIL
+        // A story order that leaves "under way" for a state that is neither success nor failed (unknown what the
+        // game means by it) is not turned into a give-up in the partner's game.
+        if(what==Fail&&story(o)&&o.state!=8)what=0;
+#endif
         if(!what)continue;
         auto mine=applied_.find(o.id);
 #ifndef MUTANT_ORDER_ECHO
@@ -77,13 +82,28 @@ std::vector<Change> Sync::observe(const std::vector<Order>& orders){
 }
 bool Sync::wanted(const std::vector<Order>& orders,const Change& c) const {
     for(auto& o:orders)if(o.id==c.id){
-        if(!shareable(o))return false;
+        if(!takes(scope,o))return false;
 #ifdef MUTANT_ORDER_ANY_STATE
         return true;
 #endif
         return c.what==Start?o.state==Available:(c.what==Success||c.what==Fail)&&o.state==Progress;
     }
     return false;
+}
+std::vector<StoryMove> StoryWatch::observe(const std::vector<Order>& orders){
+    std::vector<StoryMove> out;std::map<uint64_t,Order> next;
+    for(auto& o:orders){
+        if(!story(o))continue;
+        next[o.id]=o;auto old=seen_.find(o.id);
+        if(!primed_||old==seen_.end()||(old->second.state==o.state&&old->second.result==o.result))continue;
+        out.push_back({old->second,o});
+#ifndef MUTANT_ORDER_WATCH_ANY
+        if(o.result==Completed&&old->second.result!=Completed)
+#endif
+            ++completed_;
+    }
+    seen_.swap(next);primed_=true;
+    return out;
 }
 std::function<bool(uint64_t,uint8_t)> nativeRequest(discovery::Sampler& s){
 #ifndef _WIN32

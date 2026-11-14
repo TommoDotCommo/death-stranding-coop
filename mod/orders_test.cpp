@@ -31,6 +31,29 @@ int main(){
       auto* w=s.wanted(v,7,2);CHECK(w&&w->stateAt==0x1002);CHECK(!s.wanted(v,7,3));CHECK(!s.wanted(v,7,5));CHECK(!s.wanted(v,8,2));
       s.observe(v,on);s.applied(7,2);CHECK(s.observe({unit(7,2,2),unit(7,3,2)},on).empty());
       CHECK(UnitSync::key(0x372d7,3)==0x30000000372d7ull); }
+    // Story orders (share_story_orders): the host tells, the guest takes, and nothing of the story goes back.
+    { Sync host;host.scope.storyOut=true;Sync guest;guest.scope.storyIn=true;
+      std::vector<Order> h{order(1,Progress,2),order(30,Progress,2,0),order(31,Available,1,1)},g{order(1,Available),order(30,Available,1,0),order(31,Available,1,1)};
+      auto a=host.observe(h);CHECK(a.size()==2&&a[1].id==30&&a[1].what==Start);
+      CHECK(guest.observe(g).empty());
+      CHECK(guest.wanted(g,{30,Start}));CHECK(!host.wanted(h,{31,Start}));          // a host never takes a story change
+      guest.applied({30,Start});g[1]=order(30,Progress,2,0);
+      CHECK(guest.observe(g).empty());
+      g[1]=order(30,16,Completed,0);g[2]=order(31,Progress,2,1);                     // the guest's own story steps are not news
+      CHECK(guest.observe(g).empty());
+      h[1]=order(30,16,Completed,0);h[2]=order(31,Progress,2,1);auto b=host.observe(h);
+      CHECK(b.size()==2&&b[0].id==30&&b[0].what==Success&&b[1].id==31&&b[1].what==Start);
+      CHECK(!guest.wanted(g,{30,Success}));CHECK(!guest.wanted(g,{31,Start}));       // already there: does not apply twice
+      h[2]=order(31,64,2,1);CHECK(host.observe(h).empty());                          // a story order leaving for an unknown state is no give-up
+      h[2]=order(31,Progress,2,1);host.observe(h);h[2]=order(31,8,2,1);auto c=host.observe(h);CHECK(c.size()==1&&c[0].what==Fail);
+      Sync plain;CHECK(!plain.wanted(g,{31,Success}));
+      Scope none;none.standard=false;CHECK(!sends(none,order(1,Progress,2))&&!takes(none,order(1,Available))); }
+    // The story watch: every change of a main or sub order, and a count of those that were completed.
+    { StoryWatch w;CHECK(w.observe({order(30,Progress,2,0),order(1,Progress,2)}).empty());
+      auto m=w.observe({order(30,16,Completed,0),order(1,16,Completed)});CHECK(m.size()==1&&m[0].was.state==Progress&&m[0].now.state==16&&w.completed()==1);
+      CHECK(w.observe({order(30,16,Completed,0)}).empty());
+      auto n=w.observe({order(30,16,Completed,0),order(31,Progress,2,1)});CHECK(n.empty());   // first seen: learnt
+      auto k=w.observe({order(30,16,Completed,0),order(31,8,2,1)});CHECK(k.size()==1&&w.completed()==1); }
     if(!failures)std::puts("order sync checks passed");
     return failures?1:0;
 }

@@ -25,6 +25,9 @@ struct Config {
     bool shareSavedStructures=false; // on joining, the structures this player's save already has are built in the partner's world too (structures.h)
     bool shareRoads=false;     // what a player delivers to an auto-paver, and a road it builds, also counts in the partner's game (roads.h)
     bool shareOrders=false;    // a standard order one player takes on, completes or gives up does the same for the partner (orders.h)
+    bool shareStoryOrders=false; // experiment, with share_orders: the host's main and sub orders reach the guest's game the same way; never the other way (orders.h)
+    std::string storyResync="off"; // experiment: "key" or "auto": the guest loads the host's fresh checkpoint without leaving the game (story.h)
+    unsigned storyKey=0x78;    // with story_resync: the guest's catch-up key (F9); 0: none
     bool shareEnemies=false;   // a MULE one player puts down is down in the partner's game too (enemies.h)
     bool notices=false;        // session notices in the game's info log: partner joined / left / nobody yet (notice.h)
     bool partnerLikes=false;   // L gives the partner a like; the partner's likes arrive as the game's likes (likes.h)
