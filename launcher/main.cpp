@@ -20,7 +20,7 @@ bool lan=true,tailscale=true,privacy=false,sharedWorld=false,initializing=true,j
 std::string joinQuery;
 unsigned port=49000;
 std::wstring player=L"Porter",gameFolder;
-std::string pasted,lastState,lastRows;
+std::string pasted,lastState,lastRows,saveNote;   // saveNote: what happened to the guest's saves, kept on the lobby page
 uint32_t requestedSecret=0,lastScan=0;
 std::vector<HWND> controls[4];
 enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import};
@@ -54,7 +54,7 @@ void placeHostSave(){
         auto aside=options.data/"backups"/("before-join-"+std::to_string(std::time(nullptr)));
         int moved=saves::install(coopAccount(),steamAccount(),net->incoming.bytes(),aside);
         net->saveInstalled();
-        if(moved>0)net->status="The host's save is in place. Your "+std::to_string(moved)+" earlier co-op save(s) are in backups\\"+aside.filename().string()+".";
+        saveNote=moved>0?"The host's save is in place. Your "+std::to_string(moved)+" earlier co-op save(s) are in backups\\"+aside.filename().string()+".":"The host's save is in place.";
     }catch(const std::exception& e){net->saveRefused(std::string("The host's save was not used: ")+e.what()+" Choose Ready to play from your own.");}
 }
 void importSaves(HWND h){
@@ -128,7 +128,7 @@ void render(){
         {bool offered=net->lobby&&!net->hosting&&net->joined&&net->incoming.offered&&net->incoming.size;show(HostSave,offered);
          if(offered){set(HostSave,wtext("Start from the host's save: "+(net->incoming.title.empty()?std::string("their newest co-op save"):net->incoming.title)+"\n(your own co-op saves are kept in a backups folder)"));
              SendMessageW(child(HostSave),BM_SETCHECK,net->wantSave?BST_CHECKED:BST_UNCHECKED,0);EnableWindow(child(HostSave),!net->ready&&!net->fetchingSave());}}
-        set(203,wtext(std::string(net->hosting?"Friends can join by: same network or Tailscale. Internet needs a VPN.\n":"Your host decides when to start. Choose Ready, then keep this launcher open.\n")+firewallText(firewall)+(net->hosting?"\n"+hostSaveLine():std::string())));
+        set(203,wtext(std::string(net->hosting?"Friends can join by: same network or Tailscale. Internet needs a VPN.\n":"Your host decides when to start. Choose Ready, then keep this launcher open.\n")+firewallText(firewall)+(net->hosting?"\n"+hostSaveLine():saveNote.empty()?std::string():"\n"+saveNote)));
         EnableWindow(child(Ready),net->joined);set(Ready,net->fetchingSave()?L"Stop":net->ready?L"Not ready":L"Ready");
         if(!net->lobby&&choice!=1){set(203,choice==0?L"Open a two-player lobby, copy its invite, then start when your friend is ready.":L"Play by yourself with the separate co-op saves. Your ordinary Steam saves stay separate.");show(203,true);}
         set(Status,wtext(net->status));refreshRows();
@@ -158,7 +158,7 @@ void offerClipboard(){
 }
 void beginJoin(){
     int i=int(SendMessageW(child(Rows),LB_GETCURSEL,0,0));if(i<0||i>=net->hosts.n)throw std::runtime_error("Select a host from the list, or paste an invite and wait for discovery.");
-    auto& row=net->hosts.r[i];uint32_t secret=row.group==1?requestedSecret:0;net->joinHost(row,chosenSession(),secret);remembered=false;
+    saveNote.clear();auto& row=net->hosts.r[i];uint32_t secret=row.group==1?requestedSecret:0;net->joinHost(row,chosenSession(),secret);remembered=false;
 }
 void primary(){
     if(net->lobby){net->start();return;}
@@ -192,7 +192,7 @@ void timer(){
     if(net->saveArrived)placeHostSave();
     if(net->launch){options.game=gameFolder;launchGame(options,net->session);net->launched();}
     scan();
-    std::string state=std::to_string(net->lobby)+std::to_string(net->hosting)+std::to_string(net->joined)+std::to_string(net->ready)+std::to_string(net->peerReady)+std::to_string(net->incoming.offered)+std::to_string(net->fetchingSave())+net->incoming.title+net->status;
+    std::string state=std::to_string(net->lobby)+std::to_string(net->hosting)+std::to_string(net->joined)+std::to_string(net->ready)+std::to_string(net->peerReady)+std::to_string(net->incoming.offered)+std::to_string(net->fetchingSave())+net->incoming.title+saveNote+net->status;
     if(state!=lastState){lastState=state;render();}
 }
 LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
