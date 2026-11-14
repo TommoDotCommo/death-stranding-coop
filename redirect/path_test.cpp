@@ -47,7 +47,10 @@ int main() {
     for(auto s:{L"\\\\?\\usb#vid_045e&pid_02ea#0123456789abcd#{4d1e55b2-f16f-11cf-88cb-001111000030}",
                 L"\\\\?\\usb#vid_0781&pid_5581#0123456789#{a5dcbf10-6530-11d2-901f-00c04fb951ed}",
                 L"\\\\?\\hid#a#b#c#{ec87f1e3-c13b-4100-b5f7-8b84d54260cf}",L"\\\\?\\usbstor#a#b#c#{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}",
-                L"\\\\?\\usb#a#b{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}",L"\\\\?\\usb#a#b#c#{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}\\..\\x"}) {
+                L"\\\\?\\usb#a#b{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}",L"\\\\?\\usb#a#b#c#{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}\\..\\x",
+                // no reference string behind the XUSB interface: XInput opens the bare path
+                L"\\\\?\\usb#vid_045e&pid_02ea#0123456789abcd#{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}\\x",
+                L"\\\\?\\hid#a#b#c#{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}\\kbd",L"\\\\?\\usb#a#b#c#{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}\\kbd\\deep"}) {
         check(s,Action::deny,L"",true);check(s,Action::deny,L"",false);
     }
     // (2) Drive paths behind \\?\ and \\.\ are classified like the plain path.

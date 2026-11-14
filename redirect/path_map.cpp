@@ -104,6 +104,11 @@ Split split_namespace(const std::wstring& raw) {
 #else
     bool known=shaped(L"hid#",hid_interface_guid) || shaped(L"hid#",xusb_interface_guid) || shaped(L"usb#",xusb_interface_guid);
 #endif
+    // XInput opens the bare XUSB interface path. The reference-string suffix exists for the HID keyboard and mouse
+    // collections (`...\\kbd`); behind the XUSB interface nothing was ever seen to use one, so none is admitted.
+#ifndef MUTANT_XUSB_SUFFIX
+    if(slash!=std::wstring::npos && (shaped(L"hid#",xusb_interface_guid) || shaped(L"usb#",xusb_interface_guid))) known=false;
+#endif
     bool hid=known && hashes>=3 &&
         device.find_first_of(L"\\:*?\"<>|/")==std::wstring::npos &&
         suffix.find_first_of(L":*?\"<>|/")==std::wstring::npos && (slash==std::wstring::npos || !suffix.empty());
