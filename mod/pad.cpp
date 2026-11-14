@@ -1,4 +1,5 @@
 #include "pad.h"
+#include "ui.h"
 #include <cmath>
 #include <map>
 #include <sstream>
@@ -102,6 +103,12 @@ std::vector<Step> parse(const std::string& text,const std::string& stamp){
             s.keys.mouseX=speed(w[1],n);s.keys.mouseY=speed(w[2],n);s.ms=duration(w[3],n);
             if(w.size()==5)keys(w[4],s.keys,n);
             steps.push_back(s);
+        } else if(w[0]=="waitui"){
+            if(w.size()!=3)fail(n,"waitui STATE TIMEOUT_MS");
+#ifndef MUTANT_PADSCRIPT_WAITUI_NAME
+            if(!ui::validExpression(w[1]))fail(n,"unknown ui state "+w[1]);
+#endif
+            s.waitUi=w[1];s.ms=duration(w[2],n);steps.push_back(s);
         } else if(w[0]=="wait"){
             if(w.size()!=2)fail(n,"wait MS");
             s.ms=duration(w[1],n);steps.push_back(s);
@@ -115,15 +122,32 @@ bool Player::sample(uint64_t now,Gamepad& out,Keys* keys){
     out={};if(keys)*keys={};
     if(done_)return false;
     if(!started_){started_=true;start_=now;}
-    uint64_t at=start_;
+    uint64_t at=start_,t=now+skipped_;
     for(size_t i=0;i<steps_.size();++i){
         at+=steps_[i].ms;
 #ifndef MUTANT_PADSCRIPT_TIMING
-        if(now<at){index_=i;out=steps_[i].pad;if(keys){*keys=steps_[i].keys;keys->wheelStep=uint8_t(loads_*37u+i+1u);if(!keys->wheelStep)keys->wheelStep=1;}return true;}
+        if(t<at){index_=i;out=steps_[i].pad;if(keys){*keys=steps_[i].keys;keys->wheelStep=uint8_t(loads_*37u+i+1u);if(!keys->wheelStep)keys->wheelStep=1;}return true;}
 #else
-        if(now<=at){index_=i;out=steps_[i].pad;if(keys){*keys=steps_[i].keys;keys->wheelStep=uint8_t(loads_*37u+i+1u);if(!keys->wheelStep)keys->wheelStep=1;}return true;}
+        if(t<=at){index_=i;out=steps_[i].pad;if(keys){*keys=steps_[i].keys;keys->wheelStep=uint8_t(loads_*37u+i+1u);if(!keys->wheelStep)keys->wheelStep=1;}return true;}
+#endif
+#ifndef MUTANT_PADSCRIPT_WAITUI_TIMEOUT
+        // A waitui step that ran its whole time without the state: the script stops here, nothing after it is pressed.
+        if(!steps_[i].waitUi.empty()&&!met_[i]){index_=i;done_=true;failed_=true;failure_="waitui "+steps_[i].waitUi+" not there after "+std::to_string(steps_[i].ms)+" ms";return false;}
 #endif
     }
     index_=steps_.size();done_=true;return false;
+}
+const std::string* Player::waiting(uint64_t now){
+    Gamepad g;
+    if(!sample(now,g)||index_>=steps_.size()||steps_[index_].waitUi.empty()||met_[index_])return nullptr;
+    return &steps_[index_].waitUi;
+}
+void Player::met(uint64_t now){
+    if(!waiting(now))return;
+    met_[index_]=1;
+#ifndef MUTANT_PADSCRIPT_WAITUI_SKIP
+    uint64_t end=start_;for(size_t i=0;i<=index_;++i)end+=steps_[i].ms;
+    skipped_+=end-(now+skipped_);
+#endif
 }
 }

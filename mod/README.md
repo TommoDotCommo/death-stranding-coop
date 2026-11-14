@@ -833,6 +833,14 @@ Each command is a file in the mod folder. The mod consumes it and accepts it onl
 - `pad.script`: a virtual gamepad, keyboard and mouse script (`pad.h`), requires `virtual_pad` and `COOP_VIRTUAL_PAD=1`.
   The game never polls the gamepad; the keyboard and mouse steps (`key`, `tap`, `mouse`, `click`) drive it without
   the window focus. The mod's own keys (like, ping) follow the script's keys too.
+  `waitui STATE MS` waits until the game shows STATE and goes on at once; when it never does, the script stops and
+  the log says `PAD script FAILED: waitui STATE not there after MS ms (UI state: ...)`.
+- `puppet.ui` (which screen the game shows, `ui.h`, read-only): with `virtual_pad` on the mod logs `UI state: ...` on
+  every change (looked at four times a second): a kind (`gameplay paused menu cutscene loading busy frontend unknown`),
+  the game's own state flags by name, the open menu page (`slot:name`, `none`, `unknown`) and `item=unknown` (the
+  highlighted entry is not found yet). `state <stamp>` writes the line now, `on <stamp>` / `off <stamp>` switch the
+  change log without `virtual_pad`, `dump <stamp>` writes the menu objects for research (game_offsets.md, "Which
+  screen is up", with the live checklist; nothing there is confirmed in a running game yet).
 - `puppet.marker` (map markers, `marker.h`, OFF until armed; needs `puppet_probe` and a partner mode for the partner
   marker): `on <stamp>` shows the partner as a map pin (group 4) and arms pings on V; `off <stamp>` removes the mod's
   markers; `ping <stamp>` pings at the porter's position (group 3, here and, when connected, in the partner's world as a

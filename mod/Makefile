@@ -3,8 +3,8 @@ CXX ?= g++
 MINGW ?= x86_64-w64-mingw32-g++-posix
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = orderload.cpp carts.cpp wheels.cpp controls.cpp voidout.cpp passenger.cpp carry_place.cpp roads.cpp bts.cpp enemies.cpp orders.cpp vitals.cpp online.cpp notice.cpp nametag.cpp likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = orderload.h carts.h wheels.h controls.h link.h guard_win.h voidout.h passenger.h carry_place.h roads.h bts.h enemies.h orders.h vitals.h online.h notice.h nametag.h likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = ui.cpp orderload.cpp carts.cpp wheels.cpp controls.cpp voidout.cpp passenger.cpp carry_place.cpp roads.cpp bts.cpp enemies.cpp orders.cpp vitals.cpp online.cpp notice.cpp nametag.cpp likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = ui.h orderload.h carts.h wheels.h controls.h link.h guard_win.h voidout.h passenger.h carry_place.h roads.h bts.h enemies.h orders.h vitals.h online.h notice.h nametag.h likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -136,8 +136,6 @@ build/guard-test: guard_test.cpp guard_win.h | build
 	$(CXX) $(FLAGS) guard_test.cpp -o $@
 build/vitals-test: vitals_test.cpp vitals.cpp vitals.h discovery.cpp ../core/core.cpp | build
 	$(CXX) $(FLAGS) vitals_test.cpp vitals.cpp discovery.cpp ../core/core.cpp -o $@
-build/orderload-test: orderload_test.cpp orderload.cpp orderload.h cargo.cpp cargo.h discovery.cpp | build
-	$(CXX) $(FLAGS) orderload_test.cpp orderload.cpp cargo.cpp discovery.cpp -o $@
 build/online-test: online_test.cpp online.cpp online.h config.cpp discovery.cpp | build
 	$(CXX) $(FLAGS) online_test.cpp online.cpp config.cpp discovery.cpp -o $@
 build/likes-test: likes_test.cpp likes.cpp likes.h discovery.cpp ../core/core.cpp | build
@@ -154,7 +152,9 @@ build/gear-test: gear_test.cpp gear.cpp gear.h puppet.cpp puppet.h pose.cpp disc
 	$(CXX) $(FLAGS) gear_test.cpp gear.cpp puppet.cpp pose.cpp discovery.cpp -o $@
 build/carry-visual-test: carry_visual_test.cpp carry_visual.cpp carry_visual.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(CXX) $(FLAGS) carry_visual_test.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@
-build/pad-test: pad_test.cpp pad.cpp pad.h | build
+build/ui-test: ui_test.cpp ui.cpp ui.h discovery.cpp | build
+	$(CXX) $(FLAGS) ui_test.cpp ui.cpp discovery.cpp -o $@
+build/pad-test: pad_test.cpp pad.cpp pad.h ui.h | build
 	$(CXX) $(FLAGS) pad_test.cpp pad.cpp -o $@
 build/body-test: body_test.cpp body.cpp body.h discovery.cpp | build
 	$(CXX) $(FLAGS) body_test.cpp body.cpp discovery.cpp -o $@
@@ -166,11 +166,12 @@ build/coop-partner: environment.cpp environment.h partner.cpp partner_logic.cpp 
 	$(CXX) $(FLAGS) partner.cpp partner_logic.cpp environment.cpp structures.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@
 build/coop-partner.exe: environment.cpp environment.h partner.cpp partner_logic.cpp partner.h identity.h structures.cpp structures.h carry_visual.cpp carry_visual.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(MINGW) $(WINFLAGS) partner.cpp partner_logic.cpp environment.cpp structures.cpp carry_visual.cpp discovery.cpp ../core/core.cpp -o $@ -lws2_32 -lbcrypt
-game-thread-test: build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/passenger-test build/place-test build/roads-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test
+game-thread-test: build/ui-test build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/passenger-test build/place-test build/roads-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test
 	./build/game-thread-test
 	./build/puppet-test
 	./build/double-test
 	./build/pad-test
+	./build/ui-test
 	./build/cargo-test
 	./build/carry-visual-test
 	./build/structures-test
@@ -202,7 +203,6 @@ game-thread-test: build/orderload-test build/guard-test build/carts-test build/w
 	./build/enemies-test
 	./build/guard-test
 	./build/orders-test
-	./build/orderload-test
 	./build/link-test
 	./build/notice-test
 	./build/nametag-test

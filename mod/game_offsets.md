@@ -5297,3 +5297,119 @@ Unknown: why received shelters are removed; the letters of the remaining kinds (
 signboard, highway); what distinguishes the five arrays and the second list; the grid cell `x`/`y`; the key names of
 the `lookup` answer; and whether a build through the game's own menu sets the same flag (assumed, not seen).
 
+
+## Which screen is up: state flags and the open menu page (2026-11-14, static only)
+
+Read from the pinned executable only; nothing here has been read from a running game yet. The mod's reader is
+`mod/ui.h` (`puppet.ui`, pad `waitui`). The live checklist at the end settles what is marked inferred or unknown.
+
+### The game-state flags
+
+**Established:** `*(image+0x7bf6e88)` is the game-state object (constructor `0x2dc0020`, vtable `image+0x3dfedb0`).
+`+0x8` holds 64 state bits for this frame, `+0x10` the bits asked for, `+0x20` a lock. The setter `0x2dce3d0(state, mask)`
+takes the lock and ors the mask into `+0x10`; the object's update (`0x2dd0d2c`) compares the two words, reacts to the
+changed bits and copies `+0x10` into `+0x8`. The script exports read `+0x8`: `GetGameState2` (`0x2dd36c0`) returns it
+whole, `IsPauseMusic` (`0x2dd36e0`) tests mask `0x400000000037`, `IsStoppingGameEvent` (`0x2dd3760`) tests
+`0x184f407fec7f7f` on both words and its loose form (`0x2dd3710`) `0x184f407fe47f7f`.
+
+**Established — bits 0..30** have the values of the reflected enum `EDSGameStateForScript` (descriptor `0x4c66648`, 32
+entries at `0x3df6e60`, 0x28 bytes each: value, name):
+
+| Bit | Name | Bit | Name | Bit | Name |
+|---:|---|---:|---|---:|---|
+| 0 | TerminalOperation | 11 | Result | 22 | Loading |
+| 1 | TerminalOperationSimple | 12 | FastTravel | 23 | HeartmanRoom |
+| 2 | PauseMenu | 13 | GameOver | 24 | Renovation |
+| 3 | PrivateRoom | 14 | Faint | 25 | Onsen |
+| 4 | BaggageSelect | 15 | BossBattle | 26 | Setup |
+| 5 | HandcuffDevice | 16 | AfterBeatBoss | 27 | CallingRadio |
+| 6 | Cutscene | 17 | Annihilation | 28 | SystemPause |
+| 7 | WeaponSelector | 18 | Movie | 29 | AreaChanging |
+| 8 | Subspace | 19 | InGameCutscene | 30 | DirectIntoPrivateRoom |
+| 9 | KnotSpace | 20 | InGameActing | | |
+| 10 | StrideAreaEvent | 21 | RelocateBaggage | | |
+
+Supporting reads: the pause menu's open handler (`0x32311b0`) sets mask 4; the music-pause mask's low bits `0x37` are
+the two terminal states, the pause menu, the cargo selection and the cuff-link device; 49 call sites of the setter pass
+one-bit masks covering every bit of the table.
+
+**Inferred (two consistent reads) — bits 31..58** are the second enum `EDSGameStateForScript2` (descriptor `0x4c666c0`,
+29 entries at `0x3df7370`) shifted by 31: bit 31 Night, 32 WW1, 33 M650Beach, 34 HiggsFistfight, 35 AllowPathRecord,
+36 PathRecordStraightMode, 37 CancelMission, 38 EventsRestricted, 39 StayPrivateRoom, 40 RainSheleterSkipTime,
+41 WaitCloseLoadingScreen, 42 PlayerDied, 43 PlayerFainted, 44 HUDHideImmediately, 45 HUDHideFadeout, 46 SignboardMenu,
+47/48 the two ExplosionObject requests, 49 CanMoveCameraForInGameCutscene, 50 StaySubspace, 51 MemoriesOfCliff,
+52 EndingStaffRoll, 53 HeavyCutscene, 56 RaceMode, 57 FiringRangeMode, 58 AfterBeatBossForTimer. The reads: the
+music-pause mask's one high bit is 46 (the signboard menu, next to the other menus); `SetGameState` (`0x2dd3b80`, by
+name hash) can set bits 15, 34, 38, 49, 51, 53 and 58 only, which are script-owned states under this shift; one function
+sets bits 31, 32 and 57 side by side (`0x32c8288`..). The enum's table lists value `0x20000` twice; the second is
+taken as bit 18 of that enum.
+
+**Unknown:** which bits are set on the title screen and during the start-up notices (the stopping test is true there,
+but it also asks `0x26303b0`, a save-dialog and streaming test); which bit the map, the structure menu and a paused
+cutscene's Continue/Skip page set; whether `Setup` and `Renovation` are screens.
+
+### The menu and its open page
+
+**Established:** `*(image+0x57965f8)` is the game's menu object (constructor `0x1b1d150` stores itself there, vtable
+`image+0x3bbd988`; the HUD is a different menu object, see "Finding the marker HUD"). Its fields, from the
+initialisation at `0x1b1e150`:
+
+| Offset | Meaning |
+|---:|---|
+| `+0x20` | the menu resource (reference counted; for this game `DSUIMenuResource`, vtable `image+0x3e67750`) |
+| `+0x98` | u32 phase; an action asked while it is 1 or 3 is queued at `+0xf8` (`0x1b1dccc`) |
+| `+0xb0` | page manager, 0x60 bytes, vtable `image+0x3bc8820`: `+0x8` the menu, `+0x10` the open page, `+0x58` the resource's error page |
+| `+0xb8` | layer manager, 0xa0 bytes, vtable `image+0x3bc88d8`: `+0x8` the menu, counted pointer lists at `+0x10/+0x18` and `+0x20/+0x28` |
+| `+0xc0`, `+0xc8`, `+0xd0`, `+0xe0` | further managers (0x738, 0xb60, ?, 0x80 bytes) |
+
+`0x1b1dee0(menu)` returns `*(*(menu+0xb0)+0x10)`: the open page (a `MenuPage` resource) or null. The game's own code
+compares it with a page resource before opening one (`0x3669b39`..`0x3669bfd`, which then calls the open-page function
+`0x1b1e640(menu, page, ...)`), and treats null as "no page" (`0x30065b3`, `0x366559a`). `0x1b1eb60(menu)` asks the menu
+to quit. `0x1b1df00(menu)` returns the first entry of the layer manager's second list, else of its first, minus 0x40.
+
+**Established — a page's identity:** a page is a named resource: 16 identity bytes at `+0x8` (the resource's
+find-by-identity, vtable slot `+0x70`, base `0x1b2cd80`, compares them) and its name at `+0x20` (find-by-name, slot
+`+0x78`, compares `page+0x20`; the game's override `0x30e3c80` walks 19 slots). `DSUIMenuResource` (reflected, size
+0x588) holds 19 page references from `+0x1e8`, 8 bytes each, in the order of the reflected enum `EDSUIMenuPageId`
+(descriptor `0x4d0d048`): 0 DeviceMenu, 1 GameOverMenu, 2 DemoPauseMenu, 3 InGamePauseMenu, 4 SkipMenu, 5 MovieMenu,
+6 CommonDialogueMenu, 7 LoadingScreenMenu, 8 TitleMenu, 9 SplashScreenMenu, 10 SignboardMenu, 11 BirthdayMenu,
+12 InstallMenu, 13 PrivateRoomPhotoMenu, 14 SDRConfigMenu, 15 HDRConfigMenu, 16 PhotoModeMenu, 17 SaveDataLoadMenu,
+18 KeyAssignMenu (4 and 5 are members without an enum entry). The base `MenuResource` keeps its start page at `+0x90`
+and further pages in the counted list at `+0xb0/+0xb8`.
+
+**Inferred:** the name is the engine's string (a pointer to the characters, the length in the 32 bits 8 bytes before
+them, a reference count 16 bytes before them: the count is touched that way at `0x3614bf7`). The reader accepts 1..48
+letters, digits and underscores only.
+
+**Unknown:** whether the open page is null during ordinary play; what the terminal's sub-pages (its top list, Claim
+Materials, the quantity and confirm steps) are: one device page with state inside the game's own UI manager
+(`*(image+0x7c00128)`, reached through `0x30125a0`; `+0x2a8` and `+0x3a0` are touched when the pause menu opens), or
+entries of the layer lists.
+
+### The highlighted entry
+
+**Unknown.** No selected-index member was established statically. Candidates are the objects in the layer manager's two
+lists (the top dialog or panel) and what they point to; `puppet.ui dump` writes the menu, both managers and the first
+four entries of each list (0x200 bytes each, from 0x40 before the entry) to the mod log.
+
+### Live checklist (one run, one copy, Episode 3 save; `virtual_pad` on so the mod logs every change)
+
+Each step: do it with a pad script, then read the newest `UI state:` line (`puppet.ui` with `state <stamp>` forces one).
+
+1. Title screen, loading, start-up notices, first second of play: note kind, flags and page of each. Expect page
+   8:… on the title, flags with Loading while loading, `gameplay flags=- page=none` (or a constant page) in play.
+2. `tap ESC`: expect `paused flags=PauseMenu page=3:…`. `tap ESC` again: back to the step 1 play line.
+3. `key F 2000` at a terminal: expect `menu flags=TerminalOperation` and page 0. Walk Terminal Options > Claim
+   Materials > an item > quantity > confirm; after every key note flags, page and `layers=a/b`. If nothing changes
+   between sub-pages, send `dump <stamp>` before and after one DOWN on a list and diff the rows: a byte or dword that
+   moves by one is the highlighted index; record its object's vtable and offset here.
+4. Leave the terminal; press ESC during its exit scene: note the flags and page of the Continue/Skip screen (expected
+   Cutscene with PauseMenu or SystemPause, page 2 or 4).
+5. `tap I` (cargo): expect BaggageSelect. `key TAB 800` (cuff links) and the map: expect HandcuffDevice. Hold TAB at a
+   structure: note what the structure menu sets. `key 1 700` (weapon wheel): expect WeaponSelector while held.
+6. A cutscene (take or hand in an order): Cutscene / InGameCutscene / Movie. Fast travel or a reload: Loading.
+7. Run `waitui paused 5000` after `tap ESC` (expect `PAD waitui met`), and `waitui paused 1500` in play without ESC
+   (expect `PAD script FAILED: waitui paused not there after 1500 ms`).
+
+Then correct the masks in `mod/ui.h` (`LoadingMask`, `PausedMask`, `MenuMask`, `CutsceneMask`) for anything that
+differed, and replace `item=unknown` once step 3 found the index.
