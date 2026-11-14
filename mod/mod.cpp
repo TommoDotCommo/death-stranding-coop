@@ -90,6 +90,15 @@ template<class T> struct Background {
 };
 #include <vector>
 
+// Every CARGO event type has one meaning: two features on one type swallow each other's events (cart cases once took
+// the voidout's 17; the bt regression caught it).
+namespace wiretypes {
+constexpr uint8_t all[]={2,3,4,5,mod::carry::WireType,mod::gear::GearWireType,mod::outfit::WireType,mod::likes::WireType,mod::nametag::WireType,
+    mod::enemies::WireType,mod::orders::WireType,mod::bts::WireType,mod::roads::WireType,15,mod::carryplace::WireType,mod::voidout::WireType,
+    mod::carryplace::CartWireType};
+constexpr bool distinct(){for(size_t i=0;i<sizeof all;++i)for(size_t j=i+1;j<sizeof all;++j)if(all[i]==all[j])return false;return true;}
+static_assert(distinct(),"two CARGO event features share a wire type");
+}
 namespace {
 std::string error;
 std::mutex lifecycle;
@@ -131,7 +140,8 @@ uint64_t nonce() {
 #ifdef _WIN32
     if(BCryptGenRandom(nullptr,reinterpret_cast<PUCHAR>(&n),sizeof(n),BCRYPT_USE_SYSTEM_PREFERRED_RNG)!=0) throw std::runtime_error("OS entropy failed");
 #else
-    std::random_device r;n=(uint64_t(r())<<32)^r();
+    // The kernel's pool directly: std::random_device's default source returned 0 now and then under WSL (test builds).
+    for(int attempt=0;attempt<4&&!n;++attempt){std::random_device r("/dev/urandom");n=(uint64_t(r())<<32)^r();}
 #endif
     if(!n) throw std::runtime_error("zero OS nonce");
     return n;

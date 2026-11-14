@@ -15,7 +15,7 @@
 #include <vector>
 namespace mod::carryplace {
 using puppet::Transform;
-constexpr uint8_t WireType=16,CartWireType=17;   // 17: the cases on the cart the porter tows, relative to it
+constexpr uint8_t WireType=16,CartWireType=18;   // 18: the cases on the cart the porter tows, relative to it
 constexpr unsigned MaxPlaced=24;                     // cases sent (the game's back stack alone seldom passes a dozen)
 constexpr uint64_t RecordWorld=0x38;                 // the case's world transform in its record (3 f64, 9 f32)
 struct Placed { uint32_t item=0; bool variant=false; uint8_t slot=0; Transform rel; };
