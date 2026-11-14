@@ -36,6 +36,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "ride.h"
 #include "cargo_stack.h"
 #include "likes.h"
+#include "signals.h"
 #include "online.h"
 #include "vitals.h"
 #include "bts.h"
@@ -97,7 +98,7 @@ template<class T> struct Background {
 namespace wiretypes {
 constexpr uint8_t all[]={2,3,4,5,mod::carry::WireType,mod::gear::GearWireType,mod::outfit::WireType,mod::likes::WireType,mod::nametag::WireType,
     mod::enemies::WireType,mod::orders::WireType,mod::bts::WireType,mod::roads::WireType,15,mod::carryplace::WireType,mod::voidout::WireType,
-    mod::carryplace::CartWireType,mod::orderload::WireType};
+    mod::carryplace::CartWireType,mod::orderload::WireType,mod::signals::EventWireType,mod::signals::VitalsWireType};
 constexpr bool distinct(){for(size_t i=0;i<sizeof all;++i)for(size_t j=i+1;j<sizeof all;++j)if(all[i]==all[j])return false;return true;}
 static_assert(distinct(),"two CARGO event features share a wire type");
 // ... and the core delivers it: a type above its limit is refused and the ordered stream stops at that event.
@@ -305,6 +306,8 @@ struct Runtime final:ds::Transport {
                 if(config.shareOrderLoad){loadTag=mod::orderload::decode({e.item,e.ref,e.position});if(!loadTag)note("ORDERLOAD a case's tag was refused (not a standard order's case)\n");}
                 continue;}
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
+            if(e.type==mod::signals::EventWireType){signalIn.push_back(e);continue;}   // a shout or a scan (tickSignals)
+            if(e.type==mod::signals::VitalsWireType){if(!vitalsRx.feed(e))note("SIGNAL vitals refused: malformed\n");continue;}
             if(e.type==mod::likes::WireType){likeIn.push_back(e);continue;}   // a like (tickLikes, likes.h)
             if(e.type==mod::nametag::WireType){if(auto n=nameRx.feed(e)){partnerName=*n;note(("TAG partner name "+std::to_string(n->size())+" bytes\n").c_str());}continue;}   // nametag.h
             if(e.type==mod::outfit::WireType){               // the partner's art parts (tickGear, outfit.h)
@@ -556,6 +559,9 @@ struct Runtime final:ds::Transport {
             else if(text=="continue"+stamp){continueAgain=true;}      // test: load the last save again (from the title screen)
             else if(text=="tag on"+stamp){tagTest=true;}              // test: a name over the partner body
             else if(text=="tag off"+stamp){tagTest=false;}
+            else if(unsigned v=0;text.size()>stamp.size()&&text.compare(text.size()-stamp.size(),stamp.size(),stamp)==0&&std::sscanf(text.c_str(),"voice %u",&v)==1){voiceTest=int(v);}   // lab: one sentence container on the partner body
+            else if(text=="pulse"+stamp){pulseTest=true;}             // lab: the scanner pulse variables at the partner body
+            else if(text=="vitals"+stamp){vitalsTest=true;}           // lab: this porter's scan counter and status pairs, logged once
             else if(text=="stack off"+stamp){stackTest=-2;}            // test: no cases drawn
             else if(text=="stack auto"+stamp){stackTest=-1;}           // the partner's summary (the default)
             else if(text.rfind("stack ",0)==0&&text.size()>stamp.size()&&text.compare(text.size()-stamp.size(),stamp.size(),stamp)==0){
@@ -709,6 +715,72 @@ struct Runtime final:ds::Transport {
         }
         likeIn.clear();
     }
+    // --- Shout, scan and vitals for the partner (signals.h). Each key covers both directions: what this porter does
+    // is sent, and what the partner does is shown. `puppet.ride` "voice N", "pulse" and "vitals" try one piece alone.
+    std::vector<ds::CargoEvent> signalIn;mod::signals::EventSender signalTx;mod::signals::EventReceiver signalRx;
+    mod::signals::VitalsSender vitalsTx;mod::signals::VitalsReceiver vitalsRx;mod::signals::LabelPacer tagPacer;
+    std::optional<mod::signals::VoiceApi> voiceApi;std::optional<mod::signals::PulseApi> pulseApi;bool voiceTried=false,pulseTried=false;
+    Background<mod::signals::VoiceApi> voiceJob;Background<mod::signals::PulseApi> pulseJob;
+    uint64_t signalBody=0,signalReadAt=0,vitalsReadAt=0;int voiceTest=-1;bool pulseTest=false,vitalsTest=false,scanNoted=false;
+    mod::puppet::FloatVariable unbalanceVar,overVar;mod::signals::Vitals vitalsNoted;
+    bool playVoice(unsigned index,const char* why) {
+        if(!voiceApi||!signalBody){note((std::string("SHOUT not played (")+why+"): "+(voiceApi?"no partner body":"voice unavailable")+"\n").c_str());return false;}
+        bool ok=voiceApi->play(signalBody,index);
+        note((std::string(ok?"SHOUT voice asked on the partner body, container ":"SHOUT refused: not the body class, container ")+std::to_string(index)+" ("+why+")\n").c_str());return ok;
+    }
+    bool showPulse(const char* why) {
+        auto pose=signalBody?mod::puppet::readEntityPose(*sampler,signalBody):mod::Pose{};
+        if(!pulseApi||!(pose.available&&pose.coherent)){note((std::string("SCAN pulse not shown (")+why+"): "+(pulseApi?"no partner body":"pulse unavailable")+"\n").c_str());return false;}
+        // The slot this porter's own last scan did not use (the game writes slot count & 1 after counting); all the way round, 60 m (the game's own range is unread).
+        auto count=mod::signals::readScanCount(*sampler,anchorNow().entity);unsigned slot=count?((*count+1)&1):0;
+        bool ok=pulseApi->show(slot,pose.position,pose.rotation[3],pose.rotation[4],6.2831853f,60.f);
+        note((std::string(ok?"SCAN pulse variables written, slot ":"SCAN pulse refused, slot ")+std::to_string(slot)+" ("+why+")\n").c_str());return ok;
+    }
+    void tickSignals(uint64_t now) {
+        bool wantVoice=config.partnerShout||voiceTest>=0,wantPulse=config.partnerScan=="pulse"||pulseTest;
+        if(!core||!sampler){signalIn.clear();return;}
+#ifndef MOD_FAKE_NETWORK
+        if(wantVoice&&!voiceTried){auto* sp=&*sampler;if(voiceJob.ready([sp]{return mod::signals::nativeVoiceApi(*sp);})){voiceTried=true;
+            try{voiceApi=voiceJob.job.get();note("SHOUT voice on\n");}catch(const std::exception& e){note((std::string("SHOUT voice unavailable: ")+e.what()+"\n").c_str());}}}
+        if(wantPulse&&!pulseTried){auto* sp=&*sampler;if(pulseJob.ready([sp]{return mod::signals::nativePulseApi(*sp);})){pulseTried=true;
+            try{pulseApi=pulseJob.job.get();note("SCAN pulse on\n");}catch(const std::exception& e){note((std::string("SCAN pulse unavailable: ")+e.what()+"\n").c_str());}}}
+#else
+        voiceTried=pulseTried=true;
+#endif
+        bool coop=partnerMode()&&core->connected();auto anchor=anchorNow();
+        if(voiceTest>=0&&(voiceTried||!wantVoice)){playVoice(unsigned(voiceTest),"test");voiceTest=-1;}
+        if(pulseTest&&pulseTried){showPulse("test");pulseTest=false;}
+        if(vitalsTest){vitalsTest=false;auto c=mod::signals::readScanCount(*sampler,anchor.entity);auto i=mod::signals::readInfo(*sampler,sampler->base,anchor.entity);
+            auto u=mod::puppet::readFloatVariable(*sampler,anchor.entity,animatorVtable,"Unbalance_Rate",unbalanceVar);
+            std::ostringstream o;o<<"SIGNAL test: scan count "<<(c?std::to_string(*c):"unknown")<<", first pair "<<(i.first?std::to_string(*i.first):"unknown")
+                <<", second pair "<<(i.second?std::to_string(*i.second):"unknown")<<", Unbalance_Rate "<<(u?std::to_string(*u):"unknown")<<"\n";note(o.str().c_str());}
+        // This porter's shout and scan, each once.
+        if(config.partnerShout)if(auto e=signalTx.shout(now,coop,callSeen)){core->queueCargo(*e);note("SHOUT sent to the partner\n");}
+        if(config.partnerScan!="off"&&now>=signalReadAt){signalReadAt=now+100;
+            auto count=mod::signals::readScanCount(*sampler,anchor.entity);
+            if(bool(count)!=scanNoted){scanNoted=bool(count);note(count?"SCAN counter read\n":"SCAN counter not readable\n");}
+            if(auto e=signalTx.scan(now,coop,count)){core->queueCargo(*e);note("SCAN sent to the partner\n");}}
+        // This porter's vitals, read twice a second, sent only when what the partner would see changes.
+        if(config.partnerVitals&&now>=vitalsReadAt){vitalsReadAt=now+500;
+            mod::signals::Raw raw;auto info=mod::signals::readInfo(*sampler,sampler->base,anchor.entity);raw.blood=info.first;raw.stamina=info.second;
+            if(anchor.entity){
+                auto u=mod::puppet::readFloatVariable(*sampler,anchor.entity,animatorVtable,"Unbalance_Rate",unbalanceVar);raw.unsteady=u&&*u>=mod::signals::UnsteadyFrom;
+                // A bool control's byte read as a float is a denormal: the bits (as for Is_TakeABreak).
+                auto v=mod::puppet::readFloatVariable(*sampler,anchor.entity,animatorVtable,"Is_Loading_Over",overVar);uint32_t bits=0;if(v)std::memcpy(&bits,&*v,4);raw.overloaded=(bits&0xff)!=0;}
+            if(auto e=vitalsTx.tick(now,coop,raw)){core->queueCargo(*e);
+                if(vitalsTx.shown()!=vitalsNoted){vitalsNoted=vitalsTx.shown();auto& w=vitalsNoted;
+                    note(("SIGNAL vitals sent: blood "+std::to_string(w.blood)+" stamina "+std::to_string(w.stamina)+" overloaded "+std::to_string(w.overloaded)+" unsteady "+std::to_string(w.unsteady)+"\n").c_str());}}}
+        // What the partner did.
+        for(auto& e:signalIn){
+            auto kind=mod::signals::decodeEvent(e);if(!kind){note("SIGNAL refused: malformed\n");continue;}
+            bool shout=*kind==mod::signals::Kind::Shout;
+            if(!coop||inEvent||(shout?!config.partnerShout:config.partnerScan=="off")){note("SIGNAL dropped: not in play\n");continue;}
+            if(!signalRx.accept(*kind,now)){note("SIGNAL dropped: too many\n");continue;}
+            if(shout)playVoice(config.partnerShoutVoice,"the partner shouted");
+            else{note("SCAN the partner scanned\n");if(notices)notices->scan(now,true);if(config.partnerScan=="pulse")showPulse("the partner scanned");}
+        }
+        signalIn.clear();
+    }
     // --- A private online server (online.h): opt-in `online_server`. The game's sign-in address is pointed at it as
     // soon as the image is checked, and the game is asked to sign in while its login task is idle.
     std::optional<mod::online::Api> onlineApi;bool onlineTried=false,onlinePointed=false;Background<mod::online::Api> onlineJob;
@@ -781,6 +853,8 @@ struct Runtime final:ds::Transport {
         if(!shown||inEvent||!(pose.available&&pose.coherent)){nameTag->tick(false,u"",nullptr);return;}
         std::array<double,3> at=pose.position;at[2]+=2.1;   // game axes, z up: above the head
         auto name=mod::nametag::fromUtf8(partnerName);if(name.empty())name=u"Partner";
+        // With partner_vitals: his blood, stamina and state after the name (signals.h), a new text at most every 2 s.
+        if(config.partnerVitals)name=tagPacer.text(mod::nowMs(),name,vitalsRx.current(core&&core->connected()));
         nameTag->tick(true,name,&at);
     }
     std::filesystem::path markerCommand;std::unique_ptr<mod::marker::Markers> markers;std::vector<ds::CargoEvent> pingIn;
@@ -1932,6 +2006,7 @@ struct Runtime final:ds::Transport {
             return theirs?mod::gear::planFor(nodes,sp->base,*theirs):mod::gear::plan(nodes,sp->base);},at,shown);
     }
     void tickTwin(uint64_t now) {
+        signalBody=0;
         if(std::filesystem::exists(twinCommand)) {
             auto command=readConfig(twinCommand);auto stamp=" "+mod::runStamp()+"\n";
             if(!std::filesystem::remove(twinCommand))throw std::runtime_error("cannot consume double command");
@@ -2066,6 +2141,7 @@ struct Runtime final:ds::Transport {
         stages.enter("stack",mod::nowUs());
         tickStack(useOwn?ownEntity:0,anchor);
         stages.enter("tag",mod::nowUs());
+        signalBody=useOwn?ownEntity:0;
         tickTag(useOwn?ownEntity:0,anchor);
         stages.enter("ride",mod::nowUs());
         tickRide(anchor,now);
@@ -2286,6 +2362,8 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickMarkers(now);
             stage="likes";stages.enter("likes",mod::nowUs());
             if(twin&&gameContext)tickLikes(now);
+            stage="signals";stages.enter("signals",mod::nowUs());
+            if(twin&&gameContext)tickSignals(now);
             stage="online";stages.enter("online",mod::nowUs());
             if(gameContext)tickOnline(now);
             stage="notices";stages.enter("notices",mod::nowUs());

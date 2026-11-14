@@ -5413,3 +5413,77 @@ Each step: do it with a pad script, then read the newest `UI state:` line (`pupp
 
 Then correct the masks in `mod/ui.h` (`LoadingMask`, `PausedMask`, `MenuMask`, `CutsceneMask`) for anything that
 differed, and replace `item=unknown` once step 3 found the index.
+
+## Shout, scan and vitals for the partner (2026-11-14, static only, nothing called)
+
+Build 13300582. Everything here was read from the executable; no address in this section has been read or called in a
+running game yet. The mod's use of it is `mod/signals.h`.
+
+### The shout and the game's own answer to it
+
+**Established - a voice request:** the player entity's voice controller is embedded at entity `+0x4500`. The script
+export `DSPlayerSystem_sExportedPlayVoice` (`0x26e6e50` -> `0x26e98a0`) hashes a voice name (`0x190d040`), fills a
+request `{u32 hash, i32 -1, u8 0, f32 0, f32 0}` and calls can-play `0x2717f30` (`+0x4500`, `0x26a0b70`) and play
+`0x27352e0` (`+0x4500`, `0x26a6330`, third argument 1). These need a `DSPlayerEntity`; the partner body is a
+`DSPlayerAKukanEntity` (1952 bytes) and has no such controller.
+
+**Established - the echo:** the controller's handler `0x26b4620(controller, request)` compares the request's hash with
+six constants (`0x14a9f2d0`, `0x7f90124`, `0x75928227`, `0x2158e6cc`, `0x533365cf`, `0x4063963b`: the shout voices)
+and calls the echo manager (global `0x7be8668`) at `0x273a980(manager, int index, bool, player entity, bool, bool, bool,
+int kind)`. That function gathers what may answer (other players' online objects near the porter, friendly NPCs) and,
+for each, makes an entity from `DSPlayerEchoManagerConfig.EntityResource` (manager `+0x418` -> `+0x20`, virtual
+`+0x88`), adds it to the world, hides it, places it (`0x22dff80`), finds its `DSEchoComponent` (`0x22b2a60(entity +
+0x90, type 0x4c23ec0)`) and asks it to speak: `0x2bbf3a0(component, int sentence or -1, bool, float delay)`, which only
+stores the request (`+0x58` delay, `+0x60` sentence, `+0x64` state 1). At most 8 at a time (manager `+0x490`).
+`DSEchoComponentResource` holds `EchoSentenceResources` (`+0x20`, `Array<Ref<SentenceResource>>`): the other porters'
+replies. **Unknown:** the component's update that plays the stored request, and how the manager removes the entity.
+This is the game's own "another porter answers" voice; using it for the partner needs an echo entity made at the
+partner body and removed afterwards (a later experiment: the creator call is the virtual one above).
+
+**Established - a voice line from the body itself:** the export `DSPlayerEntity_sExportedPlayAkukanVoice(int)`
+(`0x2757d40`) takes the resident double and tail-calls `0x273bb10(DSPlayerAKukanEntity*, int container)`: under the
+entity's lock (`+0x790`) it reads the entity's resource (`+0x58`), `DSPlayerAKukanEntityResource.SentenceResource
+Containers` (count `+0x118`, pointers `+0x120`; a `DSSentenceContainerResource` has `SentenceResources`, count `+0x20`,
+pointers `+0x28`), returns when the container index or its sentence count is out of range, picks one sentence at random,
+builds the engine's sound message (vtable `0x3cf3a50`, helper name `JNT_C_B_008_Head`, set up by `0x22d3d90(message,
+sentence, 0, 1.0f)`) and sends it to the entity (`0x235c990(entity, message, 0)`). It has one caller (the export). The
+partner body is made from the double's resource, so it has the same containers. **Unknown:** how many containers there
+are and what each says (they are data, not in the executable), and whether any of them suits a shout. Signature
+(24 bytes, unique): `4c 8b dc 55 53 49 8d 6b a1 48 81 ec b8 00 00 00 48 8b 05 09 55 82 02 48`.
+
+**Local detection** stays the one confirmed live on 2026-11-12: `Basic_Upper_Type` 10 with `Basic_Upper_Force_Type` 4
+on the porter's animation manager; both are mirrored controls, so the body's upper layer follows the shout already.
+
+### The Odradek scan
+
+**Established - the state machine:** `0x282b530(state, dt)` runs the scan for the player's state object `S` (entity
+`+0x54c8`; the same object whose byte `+0x4c7f` bit 0 the export `DSPlayerSystem_sExportedActivateOdradek`,
+`0x26e64c0`, sets as a request). `S+0x60` is the owning entity, `S+0x4850` the scan state (u32; the function writes 0, 2, 3 and 4 and compares
+with 5; 4 is written when the pulse is fired), `S+0x486c` / `+0x4870` its timers. When the pulse fires (`0x282c528`)
+it does `inc dword [S+0x4874]`, sets `S+0x4868 = 0.8f` and state 4. **Inferred:** `S+0x4874` is a count of pulses
+fired; the mod reads it to see a scan (unverified live).
+
+**Established - what the pulse is drawn from:** right after counting, the function writes named global render
+variables with `0x22af4f0(name, float)`, `0x22af220(name, int)` and `0x22af7b0(name, bool)`: for slot `n = count & 1`,
+`OdradekSensorPositionX_n`, `OdradekSensorPositionY_n` (the porter's x and y), `OdradekSensorEmitDirectionX_n`,
+`...Y_n` (`S+0x4880`, `S+0x4884`), `OdradekSensorAngleRadian_n`, `OdradekSensorDistance_n` (the scanner's range, its
+object's `+0x2ac`), then `OdradekSensorLastIndex = n` and `OdradekSensorLastIndexValid = true` (false with no scanner).
+`0x32e3d70` (four callers in the renderer) reads the same names back into a block of six floats. **Unknown:** what
+drives the wave's sweep over time (no time value is among these variables), so whether writing a slot draws a new wave
+at that place or only moves a running one. The mod's `partner_scan: "pulse"` is that experiment.
+
+### Blood and stamina
+
+**Established - the status block:** `DSPlayerSystem_sExportedGetPlayerInfo` (`0x26e6b20` -> `0x26e9240`, about twenty out
+parameters) copies from `B = player + 0x2b0`, the player being number zero of the manager at `0x7bc7568` (`0x23c60b0`:
+`*(M+0x40)[i]` with `u32 +0x88 == 0`; its entity is `player + 0x70`). It returns `B+0x28` and `B+0x30` as they are, then
+`B+0x28 / B+0x2c` and `B+0x30 / B+0x38` as rates, then `B+0x40` and `B+0x40 / B+0x44` (at most 1), `B+0x5c` and
+`B+0x5c / B+0x58`, `B+0x64 / B+0x68`, byte `B+0xf0`, `B+0xe0` and `B+0xe0 / B+0xe4`, bit 10 of `B+0x4`, `B+0xf4 /
+B+0xf8`, and more counters. **Unknown:** the meaning of each pair; the export's parameter names are not in the
+executable. **Hypothesis used by the mod:** the first pair is blood (life) and the second stamina (the gap at `+0x34`
+would be the current ceiling of a three-value gauge). To settle it: read both rates while sprinting (stamina falls)
+and after a fall (blood falls).
+
+**Carrying too much, off balance:** the porter's own animation controls `Is_Loading_Over` (bool 16) and
+`Unbalance_Rate` (float 3), read by name from his animation manager like the other controls; the threshold for "off
+balance" (0.5) is a guess until it is watched live.

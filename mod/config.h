@@ -28,6 +28,10 @@ struct Config {
     bool shareOrders=false;    // a standard order one player takes on, completes or gives up does the same for the partner (orders.h)
     bool shareEnemies=false;   // a MULE one player puts down is down in the partner's game too (enemies.h)
     bool notices=false;        // session notices in the game's info log: partner joined / left / nobody yet (notice.h)
+    bool partnerShout=false;   // the partner's shout is a voice line from his body here (signals.h); unverified live
+    unsigned partnerShoutVoice=0; // which of the body's sentence containers a shout plays (0..15)
+    std::string partnerScan="off"; // the partner's Odradek scan: "notice" (a line in the info log) or "pulse" (also the game's scanner pulse; unverified live)
+    bool partnerVitals=false;  // blood, stamina, overloaded and off balance after the name on the partner's tag (signals.h)
     bool partnerLikes=false;   // L gives the partner a like; the partner's likes arrive as the game's likes (likes.h)
     bool partnerMarker=false; // the partner's map pin and the partner's pings from the start (marker.h); no ping key
     bool partnerGear=false;   // the porter's visible gear copied onto the partner's own body (gear.h)

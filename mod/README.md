@@ -773,6 +773,34 @@ which is why the feature is off unless asked for. Log lines start with `LIKE` (`
 partner`, `dropped: ...`). Tests: `likes_test.cpp` (mutants GAP and CAP); live, two copies: one L press raised the
 other porter's likes by one with the counter popup.
 
+## Shout, scan and vitals for the partner (`partner_shout`, `partner_scan`, `partner_vitals`, off by default)
+
+Three small things that make the partner feel alive from a distance (`signals.h`; `game_offsets.md`, "Shout, scan and
+vitals for the partner"). Each key requires `puppet_probe`, covers both directions (what this porter does is sent,
+what the partner does is shown), and should be set by both players. **None of the three has run in a game yet.**
+
+- `"partner_shout": true`: when this porter calls out (the game's shout key), the partner gets one event (CARGO type
+  19, delivered exactly once; at most one a second), and his game asks the partner body for a voice line from its
+  head with the game's own function for that body class (`0x273bb10`), sentence container `partner_shout_voice`
+  (0..15, default 0). Which container suits a shout is not known: `puppet.ride` `voice N` plays container N alone.
+  The shout pose itself comes with the mirrored animation controls. Log: `SHOUT sent to the partner`, `SHOUT voice
+  asked on the partner body, container N`.
+- `"partner_scan": "notice"`: this porter's Odradek scan (his scan counter going up, read-only) is one event of the
+  same type; the partner reads "<name> scanned the area." in the info log (with `notices`), at most once every 20 s.
+  `"pulse"` also writes the game's scanner pulse variables at the partner body (an experiment: it may draw nothing);
+  `puppet.ride` `pulse` tries that alone. Log: `SCAN counter read`, `SCAN sent to the partner`, `SCAN the partner
+  scanned`, `SCAN pulse variables written, slot N`.
+- `"partner_vitals": true` (with `partner_tag`): the porter's blood and stamina (percent, in steps of 5) and whether he
+  is overloaded or off balance go to the partner as three bytes (CARGO type 21) on every connection and then only
+  when what would be shown changes, never more often than every 2 s; the name tag reads `Name  B90 S60 heavy
+  unsteady`, its text changing at most every 2 s. Which of the two status pairs is blood and which stamina is a
+  hypothesis; `puppet.ride` `vitals` logs this porter's raw readings (`SIGNAL test: ...`) to check it.
+
+A receiver shows at most one shout and one scan every 1.5 s and twenty of each a minute, whatever arrives. The stand-in
+partner can play the other side: `--shout-every S`, `--scan-every S`, `--vitals BLOOD STAMINA BITS`. Tests:
+`signals_test.cpp` (mutants KIND, SHOUT_HELD, SCAN_LEARN, SCAN_GAP, RECEIVE_GAP, SCAN_OWNER, VITALS_RANGE, INFO_OWNER,
+INFO_RANGE, STATE_HOLD, STEP, VITALS_CHANGED, VITALS_GAP, LABEL_GAP) and the scan notice in `notice_test.cpp` (SCAN_GAP).
+
 ## The partner from the start (`partner`)
 
 `"partner": "own"` (or `"peer"`) in `mod.json` shows the partner from the start, as the `puppet.double` command `own` /
