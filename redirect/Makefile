@@ -2,7 +2,7 @@ CXX = x86_64-w64-mingw32-g++
 FLAGS = -std=c++17 -O2 -Wall -Wextra -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++
 LIBS = -lshell32 -lole32 -luuid -lws2_32 -lwinhttp -lbcrypt -lwinmm
 PROXY_SRC = path_map.cpp module_policy.cpp audit_throttle.cpp objects.cpp network_policy.cpp crash_record.cpp redirect.cpp proxy.cpp ../mod/config.cpp
-PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h startup_policy.h release_startup_win.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h virtual_pad.h virtual_kbm.h frame_cap.h iat_patch.h crash_record.h ../mod/game_thread.h ../mod/mod.h
+PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h startup_policy.h release_startup_win.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h virtual_pad.h virtual_kbm.h frame_cap.h iat_patch.h module_hold.h crash_record.h ../mod/game_thread.h ../mod/mod.h
 all: build/thread_trace_probe_module.dll build/thread_trace_probe.exe build/d3dcompiler_47.dll build/avrt.dll build/mutant-avrt-forward-broken.dll build/mutant-missing-config-closes.dll build/proxy_fixture.exe build/redirect_probe.exe build/redirect_probe_module.dll build/hooks-disabled.dll build/mutant-queries-unmapped.dll build/mutant-find-unmapped.dll build/mutant-attributes-unmapped.dll build/mutant-net-unhooked.dll build/net_probe.exe build/pad_probe.exe build/research-crash-fault.dll
 build:
 	mkdir -p build
@@ -56,6 +56,17 @@ iat-race-test: iat_patch.h iat_race_test.cpp | build
 	 for i in 1 2 3; do ./build/mutant-iat-unlocked.exe >/dev/null 2>&1; code=$$?; \
 	 if test $$code -ne 3 -a $$code -ne 1; then echo "SURVIVED IAT_UNLOCKED (exit $$code, run $$i)"; exit 1; fi; done
 .PHONY: iat-race-test
+# Native Windows (WSL interop): a DLL is loaded and freed in a loop while toolhelp snapshots are walked the way
+# patch_all walks them. The run must see listed modules gone before the read; the unheld mutant must fault on one.
+module-hold-test: module_hold.h module_hold_test.cpp | build
+	$(CXX) $(FLAGS) -DHOLD_TEST_LIBRARY -shared module_hold_test.cpp -o build/module_hold_test_module.dll
+	$(CXX) $(FLAGS) module_hold_test.cpp -o build/module-hold-test.exe
+	$(CXX) $(FLAGS) -DMUTANT_MODULE_UNHELD module_hold_test.cpp -o build/mutant-module-unheld.exe
+	@./build/module-hold-test.exe --interop-check >/dev/null 2>&1; code=$$?; if test $$code -eq 126 -o $$code -eq 127; then echo "module-hold-test: no Windows interop, skipped"; exit 0; fi; \
+	 ./build/module-hold-test.exe || exit 1; \
+	 ./build/mutant-module-unheld.exe >/dev/null 2>build/mutant-module-unheld.log; code=$$?; \
+	 if test $$code -ne 3 -a $$code -ne 4; then echo "SURVIVED MODULE_UNHELD (exit $$code)"; cat build/mutant-module-unheld.log; exit 1; fi
+.PHONY: module-hold-test
 # Native Windows (WSL interop): the avrt.dll proxy loads first, forwards, initialises the redirect; two negative controls
 # (no proxy, and a mutant with broken forwarding) must fail the same fixture.
 avrt-proxy-test: build/avrt.dll build/mutant-avrt-forward-broken.dll build/proxy_fixture.exe
@@ -86,7 +97,7 @@ crash-record-test: crash_record_test.cpp test_crash_record_windows.py build/cras
 	 for mutant in $(CRASH_WINDOWS_MUTANTS); do \
 	 if python3 -B -u test_crash_record_windows.py --exe build/mutant-crash-$$mutant.exe --work build/crash-fixture-mutant >build/mutant-crash-$$mutant.log 2>&1; then echo "SURVIVED CRASH_$$mutant"; exit 1; fi; done
 .PHONY: crash-record-test
-test: thread-trace-test iat-race-test avrt-proxy-test crash-record-test portable-test
+test: thread-trace-test iat-race-test module-hold-test avrt-proxy-test crash-record-test portable-test
 portable-test: thread-trace-test | build
 	g++ -std=c++17 -Wall -Wextra -Werror network_policy.cpp network_test.cpp -o build/network-test
 	./build/network-test
