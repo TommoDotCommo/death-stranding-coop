@@ -183,6 +183,42 @@ int main(){
     // A cancelled expectation whose copy never appears is dropped with the expectation (nothing kept for good).
     { Sync s;s.observe({},porter,0);s.expect({60,{2,0,100},333},100);s.partnerTook(333);CHECK(s.pending()==2);
       s.observe({},porter,100+Sync::ExpectFor+1);CHECK(s.pending()==0&&s.takeDoomed().empty()); }
+    {   // An order's cases share the low half of their handle (the order's id) and differ in the unit above bit 48:
+        // two units put down are two placements. Read from the table: handle, order, unit, the item's own hash, type,
+        // flags and condition.
+        const uint64_t base=0x10000000,vt=0x77,manager=base+0x100,items=base+0x80;std::vector<unsigned char> mem(0x100+0x20+0x240*600);
+        auto put=[&](uint64_t a,uint64_t v,size_t n=8){std::memcpy(mem.data()+(a-base),&v,n);};
+        mod::discovery::Sampler sm{[&](uint64_t a,void* o,size_t n){if(a<base||a-base+n>mem.size())return false;std::memcpy(o,mem.data()+(a-base),n);return true;},base};
+        put(manager,vt);put(items+0x34,0xabc,4);
+        auto lay=[&](unsigned i,uint8_t unit,uint8_t where,double x){uint64_t r=manager+0x20+0x240ull*i;put(r+0x18,0x372d7ull|uint64_t(unit)<<48);put(r+0x28,items);
+            put(r+0x20,uint32_t(where)<<8|1,4);put(r+0xc8,77,4);put(r+0xb0,0x372d7);put(r+0xdc,unit,1);put(r+0x104,2,1);put(r+0x204,0x280000,4);put(r+0x208,0x1002,4);
+            float life[2]={900,450};std::memcpy(mem.data()+(r+0x30-base),life,8);double pos[3]={x,0,100};std::memcpy(mem.data()+(r+0x38-base),pos,24);};
+        lay(3,0,OnPorter,0.2);lay(4,1,OnPorter,0.4);
+        Sync s;s.shareMissions({0x372d7});s.observe(readRecords(sm,manager,vt),porter,0);s.observe(readRecords(sm,manager,vt),porter,500);
+        lay(3,0,InWorld,0.8);lay(4,1,InWorld,1.6);
+        auto rs=readRecords(sm,manager,vt);CHECK(rs.size()==2&&rs[1].slot==(0x372d7ull|1ull<<48)&&rs[1].item==0xabc&&rs[1].type==2&&rs[1].flags==0x280000&&rs[1].flags2==0x1002&&rs[1].life[1]==450);
+        CHECK(s.observe(rs,porter,600).empty());
+        auto a=s.observe(rs,porter,1700);
+        CHECK(a.size()==2&&a[0].unit==0&&a[1].unit==1&&a[0].mission==0x372d7&&a[1].item==0xabc&&a[1].hash==77&&a[1].type==2&&a[1].flags==0x280000&&a[1].life[0]==900&&a[0].id!=a[1].id);
+    }
+    // A shared order's case is shared whatever its kind; cargo of any other order (story cargo) stays local and its
+    // placement never names an order.
+    { auto order=[](uint64_t slot,uint8_t where,uint8_t kindOf,uint64_t mission,double x){Record r=rec(uint32_t(slot),30,x,0,where);r.slot=slot;r.state=uint32_t(where)<<8|kindOf;r.mission=mission;r.unit=2;r.item=31;r.type=2;return r;};
+      Sync s;s.shareMissions({500});s.observe({order(1,OnPorter,1,500,0.3),order(2,OnPorter,5,600,0.3),order(3,OnPorter,7,600,0.3)},porter,0);
+      s.observe({order(1,OnPorter,1,500,0.3),order(2,OnPorter,5,600,0.3),order(3,OnPorter,7,600,0.3)},porter,500);
+      s.observe({order(1,InWorld,1,500,0.8),order(2,InWorld,5,600,1.2),order(3,InWorld,7,600,1.6)},porter,600);
+      auto a=s.observe({order(1,InWorld,1,500,0.8),order(2,InWorld,5,600,1.2),order(3,InWorld,7,600,1.6)},porter,1700);
+      CHECK(a.size()==2&&a[0].mission==500&&a[0].unit==2&&a[0].item==31&&a[1].mission==0&&a[1].item==0);
+      auto k=s.takeKept();CHECK(k.size()==1&&k[0].kind==5); }
+    // The cases laid out at the terminal before the order is under way are noted as not shared; once it is under way
+    // they are not announced where they lie, but one carried off and put down is.
+    { auto order=[](uint8_t where,double x){Record r=rec(1,30,x,0,where);r.state=uint32_t(where)<<8|1;r.mission=500;r.item=31;return r;};
+      Sync s;s.observe({},porter,0);s.observe({order(InWorld,1)},porter,100);CHECK(s.observe({order(InWorld,1)},porter,1300).empty());
+      CHECK(s.takeKept().size()==1);
+      s.shareMissions({500});CHECK(s.observe({order(InWorld,1)},porter,2000).empty()&&s.observe({order(InWorld,1)},porter,4000).empty());
+      s.observe({order(OnPorter,0.3)},porter,4100);s.observe({order(OnPorter,0.3)},porter,4600);
+      CHECK(s.observe({order(InWorld,0.9)},porter,4700).empty());
+      auto a=s.observe({order(InWorld,0.9)},porter,5800);CHECK(a.size()==1&&a[0].mission==500&&a[0].id); }
     if(!failures)std::puts("cargo placement, settle, held, mirror, far, pick-up, put-down and taken checks passed");
     return failures?1:0;
 }

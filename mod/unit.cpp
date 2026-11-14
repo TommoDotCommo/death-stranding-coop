@@ -66,6 +66,9 @@ int main() {
     // Notices in the game's info log: off by default; only where the game thread runs.
     assert(!mod::parseConfig(threaded).notices&&mod::parseConfig(withKeys(threaded,"\"notices\":true")).notices);
     assert(refused(withKeys(good,"\"notices\":true"))&&refused(withKeys(game,"\"notices\":true")));
+    // One shared load per order: off by default, and only with shared orders.
+    assert(!mod::parseConfig(threaded).shareOrderLoad&&mod::parseConfig(withKeys(threaded,"\"share_orders\":true,\"share_order_load\":true")).shareOrderLoad);
+    assert(refused(withKeys(threaded,"\"share_order_load\":true")));
     // The delivery-delay impairment works with the real game too (two copies on one PC standing in for an internet
     // link); injected faults stay synthetic-only.
     assert(!mod::parseConfig(threaded).impairment&&mod::parseConfig(withKeys(threaded,"\"impairment\":true")).impairment);

@@ -16,6 +16,7 @@ struct Config {
     bool partnerVehicle=false; // the partner's vehicle drawn under him while he rides (ride.h)
     bool partnerTag=false;     // the partner's name (their nickname) over the partner body (nametag.h)
     bool shareOrderUnits=false; // with share_orders: a cargo unit one player hands in is delivered for the partner too (a split delivery); not yet run with a real partial hand-in
+    bool shareOrderLoad=false;  // with share_orders: one shared load per order (orderload.h); not run live yet
     unsigned passengerKey=0x4a;      // with partner_vehicle: next to the partner's truck this key gets on and off (passenger.h); 0: off
     bool partnerAnimation=true;
     bool partnerCart=false;          // the floating carriers the partner tows, made and moved here by the game's own calls (carts.h)

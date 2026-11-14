@@ -45,6 +45,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "voidout.h"
 #include "enemies.h"
 #include "orders.h"
+#include "orderload.h"
 #include "guard_win.h"
 #include "link.h"
 #include "nametag.h"
@@ -95,9 +96,12 @@ template<class T> struct Background {
 namespace wiretypes {
 constexpr uint8_t all[]={2,3,4,5,mod::carry::WireType,mod::gear::GearWireType,mod::outfit::WireType,mod::likes::WireType,mod::nametag::WireType,
     mod::enemies::WireType,mod::orders::WireType,mod::bts::WireType,mod::roads::WireType,15,mod::carryplace::WireType,mod::voidout::WireType,
-    mod::carryplace::CartWireType};
+    mod::carryplace::CartWireType,mod::orderload::WireType};
 constexpr bool distinct(){for(size_t i=0;i<sizeof all;++i)for(size_t j=i+1;j<sizeof all;++j)if(all[i]==all[j])return false;return true;}
 static_assert(distinct(),"two CARGO event features share a wire type");
+// ... and the core delivers it: a type above its limit is refused and the ordered stream stops at that event.
+constexpr bool delivered(){for(auto t:all)if(t<1||t>ds::CargoTypeMax)return false;return true;}
+static_assert(delivered(),"a CARGO event type is above the core's CargoTypeMax");
 }
 namespace {
 std::string error;
@@ -266,6 +270,12 @@ struct Runtime final:ds::Transport {
     mod::cargo::Sync cargoSync;uint64_t cargoReadAt=0,cargoManagerSlot=0,cargoManagerVtable=0,cargoSent=0,cargoMade=0,cargoTaken=0,cargoRemoved=0;
     uint64_t cargoFullAt=0;unsigned cargoLimit=mod::cargo::FirstRecords;   // a full record scan every 4 s, quick scans up to its mark
     bool cargoIdsSet=false;
+    // One shared load per order (orderload.h): opt-in share_order_load.
+    mod::orderload::Loads orderLoads;std::optional<mod::orderload::Tag> loadTag;std::optional<mod::orderload::Case> loadSaved;
+    std::function<bool(const mod::orderload::Case&)> orderCaseCreate;bool orderCaseTried=false;uint64_t loadSent=0,loadMade=0,loadStripped=0;unsigned loadLeftNoted=0;
+    void needOrderCaseCreate(){
+        if(orderCaseTried||!sampler)return;
+        orderCaseTried=true;try{orderCaseCreate=mod::orderload::nativeCreate(*sampler);}catch(const std::exception& e){note((std::string("ORDERLOAD unavailable: ")+e.what()+"\n").c_str());}}
     void tickCargo(uint64_t now) {
         // Watch the world even while the partner is away: what is placed or taken meanwhile is queued by the core and
         // sent when the partner connects (the core keeps undelivered events across reconnects).
@@ -289,6 +299,10 @@ struct Runtime final:ds::Transport {
             if(e.type==mod::voidout::WireType){voidIn.push_back(e);continue;}            // a voidout crater (tickVoidouts)
             if(e.type==LevelWire){levelIn.push_back(e);continue;}                      // a structure reached a level (tickStructures)             // road news (tickRoads)                // BT news (tickBts)   // a MULE went down (tickEnemies)
             if(e.type==mod::orders::WireType){orderIn.push_back(e);continue;}    // an order changed (tickOrders)
+            if(e.type==mod::orderload::WireType){                                // the next placement is an order's case
+                loadTag.reset();
+                if(config.shareOrderLoad){loadTag=mod::orderload::decode({e.item,e.ref,e.position});if(!loadTag)note("ORDERLOAD a case's tag was refused (not a standard order's case)\n");}
+                continue;}
             if(e.type==5){pingIn.push_back(e);continue;}     // a ping (tickMarkers, marker.h)
             if(e.type==mod::likes::WireType){likeIn.push_back(e);continue;}   // a like (tickLikes, likes.h)
             if(e.type==mod::nametag::WireType){if(auto n=nameRx.feed(e)){partnerName=*n;note(("TAG partner name "+std::to_string(n->size())+" bytes\n").c_str());}continue;}   // nametag.h
@@ -310,6 +324,7 @@ struct Runtime final:ds::Transport {
             if(e.type==2) {
                 // The partner picked up (or used) a shared item: remove our copy if it lies in the world here.
                 std::array<double,3> at{e.position[0],e.position[2],e.position[1]};   // adapter -> game axes
+                if(orderLoads.cancel(e.ref)){note(("ORDERLOAD the partner took case "+std::to_string(e.ref)+" back before it was made here\n").c_str());continue;}
                 auto index=cargoSync.partnerTook(e.ref,e.item,at);std::ostringstream o;
                 if(index&&cargoDelete){cargoDelete(*index);++cargoRemoved;o<<"CARGO partner took "<<e.ref<<": removed record "<<*index<<"\n";}
                 else o<<"CARGO partner took "<<e.ref<<": nothing to remove here\n";
@@ -317,6 +332,11 @@ struct Runtime final:ds::Transport {
             }
             if(e.type!=1){note("CARGO unknown partner event type ignored\n");continue;}
             auto t=mod::puppet::fromState(e.position,e.yaw);
+            if(auto tag=std::exchange(loadTag,std::nullopt);tag&&mod::orderload::belongs(*tag,e.ref)){
+                // An order's case: made by tickCargo's look below once this game holds no record of that unit.
+                mod::orderload::Case c;c.tag=*tag;c.name=e.item;c.id=e.ref;c.position=t.position;c.rotation=t.rotation;orderLoads.want(c,now);
+                std::ostringstream o;o<<"ORDERLOAD partner put down unit "<<int(tag->unit)<<" of "<<std::hex<<tag->mission<<std::dec<<" ref "<<e.ref<<" at "<<t.position[0]<<","<<t.position[1]<<","<<t.position[2]<<"\n";note(o.str().c_str());
+                continue;}
             cargoSync.expect({e.item,t.position,e.ref},now);cargoCreate(e.item,t);++cargoMade;
             std::ostringstream o;o<<"CARGO created partner item "<<e.item<<" ref "<<e.ref<<" at "<<t.position[0]<<","<<t.position[1]<<","<<t.position[2]<<"\n";note(o.str().c_str());
         }
@@ -329,8 +349,31 @@ struct Runtime final:ds::Transport {
             if(!cargoFullAt||limit!=cargoLimit){std::ostringstream o;o<<"CARGO full scan: "<<records.size()<<" records in use, quick scans to "<<limit
                 <<", took "<<(mod::nowUs()-scanStart)/1000.<<" ms\n";note(o.str().c_str());}
             cargoFullAt=now;cargoLimit=limit;}
+        if(config.shareOrderLoad){
+            // The cargo this game made for an order it took on for the partner goes (never from the porter) ...
+            unsigned left=0;
+            for(auto index:orderLoads.strip(records,now,&left))if(cargoDelete){cargoDelete(index);++loadStripped;
+                note(("ORDERLOAD removed this game's own case of the partner's order (record "+std::to_string(index)+")\n").c_str());}
+            if(left!=loadLeftNoted){loadLeftNoted=left;if(left)note(("ORDERLOAD "+std::to_string(left)+" own case(s) of the partner's order are not in the world here: left alone\n").c_str());}
+            // ... and the cases the partner put down are made, each once no record of its unit is left here.
+            for(auto& c:orderLoads.due(records,now)){
+                needOrderCaseCreate();bool ok=false;
+                if(orderCaseCreate){cargoSync.expect({c.name,c.position,c.id},now);ok=orderCaseCreate(c);}
+                orderLoads.tried(c.id,ok,now);if(ok)++loadMade;
+                std::ostringstream o;o<<"ORDERLOAD unit "<<int(c.tag.unit)<<" of "<<std::hex<<c.tag.mission<<std::dec<<" ref "<<c.id<<(ok?" made here as order cargo":" refused by the game (tried again)")<<"\n";note(o.str().c_str());
+            }
+            for(auto& c:orderLoads.takeGivenUp()){std::ostringstream o;o<<"ORDERLOAD unit "<<int(c.tag.unit)<<" of "<<std::hex<<c.tag.mission<<std::dec<<" not made: this game still holds that unit\n";note(o.str().c_str());}
+            // This game's own cases of a mirrored order are never shared cargo.
+            records.erase(std::remove_if(records.begin(),records.end(),[&](auto& r){return orderLoads.own(r);}),records.end());
+        }
         for(auto& p:cargoSync.observe(records,anchor.pose.position,now)) {
             ds::CargoEvent e;e.type=1;e.item=p.hash;e.ref=p.id;e.position={p.position[0],p.position[2],p.position[1]};   // game -> adapter axes
+            if(p.mission&&config.shareOrderLoad){
+                std::ostringstream o;o<<"ORDERLOAD unit "<<int(p.unit)<<" of "<<std::hex<<p.mission<<" put down here: name 0x"<<p.hash<<" item 0x"<<p.item<<" type "<<std::dec<<int(p.type)<<std::hex<<" flags 0x"<<p.flags<<" 0x"<<p.flags2<<std::dec<<" life "<<p.life[0]<<" "<<p.life[1];
+                if(auto tag=mod::orderload::tagOf(p)){auto w=mod::orderload::encode(*tag);
+                    ds::CargoEvent te;te.type=mod::orderload::WireType;te.item=w.item;te.ref=w.ref;te.position=w.position;core->queueCargo(te);++loadSent;o<<" -> partner as order cargo\n";}
+                else o<<" -> partner as plain cargo (not a standard order's case)\n";
+                note(o.str().c_str());}
             core->queueCargo(e);++cargoSent;
             std::ostringstream o;o<<"CARGO placed item "<<p.hash<<" ref "<<p.id<<" at "<<p.position[0]<<","<<p.position[1]<<","<<p.position[2]<<" -> partner\n";note(o.str().c_str());
         }
@@ -1127,11 +1170,13 @@ struct Runtime final:ds::Transport {
             mod::orders::Change c{e.ref,uint8_t(e.item)};if(c.what<1||c.what>3)continue;
             if(!orderSync.wanted(orders,c)){std::ostringstream o;o<<"ORDER partner's "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<" does not apply here\n";note(o.str().c_str());continue;}
             bool ok=orderRequest(c.id,c.what);if(ok){orderSync.applied(c);++orderApplied;}
+            if(ok&&config.shareOrderLoad){if(c.what==mod::orders::Start)orderLoads.started(c.id,true,now);else orderLoads.ended(c.id);}
             std::ostringstream o;o<<"ORDER partner: "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<(ok?" requested":" refused by the game")<<"\n";note(o.str().c_str());
         }
         if(!orderIn.empty()){orderIn.clear();return;}   // the game runs the requests on its next update: look again then
+        std::vector<uint64_t> under;for(auto& o:orders)if(mod::orders::shareable(o)&&o.state==mod::orders::Progress)under.push_back(o.id);
+        if(config.shareOrderLoad){cargoSync.shareMissions(under);orderLoads.underWay(under,now);}   // their cases are shared cargo that stays order cargo (tickCargo)
         if(config.shareOrderUnits){
-            std::vector<uint64_t> under;for(auto& o:orders)if(mod::orders::shareable(o)&&o.state==mod::orders::Progress)under.push_back(o.id);
             for(auto& u:unitSync.observe(units,under)){
                 ds::CargoEvent e;e.type=mod::orders::WireType;e.item=uint32_t(mod::orders::UnitBase+u.unit);e.ref=u.mission;
                 // The wire keeps positions within 100 km: the packed word travels as its low half there and its high
@@ -1145,6 +1190,7 @@ struct Runtime final:ds::Transport {
         }
         for(auto& c:orderSync.observe(orders)){
             ds::CargoEvent e;e.type=mod::orders::WireType;e.item=c.what;e.ref=c.id;core->queueCargo(e);++orderSent;
+            if(config.shareOrderLoad&&c.what!=mod::orders::Start)orderLoads.ended(c.id);
             std::ostringstream o;o<<"ORDER "<<names[c.what]<<" of "<<std::hex<<c.id<<std::dec<<" here -> partner\n";note(o.str().c_str());
         }
     }
@@ -2461,6 +2507,48 @@ struct Runtime final:ds::Transport {
                         for(auto& r:mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,mod::cargo::MaxRecords))
                             if(r.mission==id&&r.unit==n){cargoDelete(r.index);++removed;}
                     std::ostringstream o;o<<"ORDER test: cargo of unit "<<int(n)<<" of "<<std::hex<<id<<std::dec<<" removed ("<<removed<<")\n";note(o.str().c_str());
+                }
+                else if(auto info=mod::puppet::parseCargoCommand(text,mod::runStamp(),"loadinfo");info) {
+                    // Test: "loadinfo <mission id>" logs every cargo record of that order as the shared load reads it, whether
+                    // the record is in the manager's list of order cargo (+0x46d330), and the order's own flag word (+0x30).
+                    uint64_t manager=0;unsigned n=0;
+                    if(cargoManagerSlot&&sampler->read(cargoManagerSlot,&manager,8)&&manager){
+                        int32_t listed=0;uint64_t list=0;sampler->read(manager+0x46d330,&listed,4);sampler->read(manager+0x46d338,&list,8);
+                        for(auto& r:mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,mod::cargo::MaxRecords)){
+                            if(r.mission!=*info)continue;
+                            uint64_t at=manager+0x20+0x240ull*r.index;bool in=false;
+                            for(int32_t i=0;i<listed&&i<8192&&!in;++i){uint64_t p=0;in=sampler->read(list+8ull*i,&p,8)&&p==at;}
+                            std::ostringstream o;o<<"ORDERLOAD info record "<<r.index<<std::hex<<" handle 0x"<<r.slot<<" unit "<<std::dec<<int(r.unit)<<" location "<<int(mod::cargo::location(r))<<" kind "<<int(mod::cargo::kind(r))
+                                <<" type "<<int(r.type)<<std::hex<<" name 0x"<<r.hash<<" item 0x"<<r.item<<" flags 0x"<<r.flags<<" 0x"<<r.flags2<<std::dec<<" life "<<r.life[0]<<" "<<r.life[1]<<" listed "<<in
+                                <<" at "<<r.position[0]<<","<<r.position[1]<<","<<r.position[2]<<"\n";note(o.str().c_str());++n;}
+                    }
+                    std::map<uint64_t,uint8_t> details;uint64_t system=0,array=0,data=0;int32_t count=0;uint32_t flags=0;bool found=false;
+                    if(sampler->read(sampler->base+0x7c0aff8,&system,8)&&system&&sampler->read(system+0x108,&array,8)&&array&&sampler->read(array,&count,4)&&sampler->read(array+8,&data,8)&&data)
+                        for(int32_t i=0;i<count&&i<8192&&!found;++i){uint64_t id=0;if(sampler->read(data+0xa0ull*i+0x38,&id,8)&&id==*info)found=sampler->read(data+0xa0ull*i+0x30,&flags,4);}
+                    uint16_t state=0;for(auto& o:mod::orders::readOrders(*sampler,sampler->base,details))if(o.id==*info)state=o.state;
+                    std::ostringstream o;o<<"ORDERLOAD info order "<<std::hex<<*info<<": "<<std::dec<<n<<" cargo record(s), state "<<state<<std::hex<<", order flags 0x"<<(found?flags:0xffffffffu)
+                        <<std::dec<<", mirrored here "<<orderLoads.mirrored(*info)<<", waiting cases "<<orderLoads.waiting()<<"\n";note(o.str().c_str());
+                }
+                else if(auto save=mod::puppet::parseCargoCommand(text,mod::runStamp(),"loadsave");save) {
+                    // Test: "loadsave <mission id * 100 + n>" remembers unit n's case of that order as a partner would be told
+                    // of it; "loadmake 0" then makes it again 2 m behind the porter (after `unitlose` removed the original).
+                    uint64_t id=*save/100;uint8_t n=uint8_t(*save%100);uint64_t manager=0;loadSaved.reset();
+                    if(cargoManagerSlot&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
+                        for(auto& r:mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,mod::cargo::MaxRecords))if(r.mission==id&&r.unit==n&&!loadSaved){
+                            mod::cargo::Placement p{r.hash,r.position,1};p.mission=r.mission;p.unit=r.unit;p.type=r.type;p.item=r.item;p.flags=r.flags;p.flags2=r.flags2;p.life[0]=r.life[0];p.life[1]=r.life[1];
+                            if(auto tag=mod::orderload::tagOf(p)){mod::orderload::Case c;c.tag=*mod::orderload::decode(mod::orderload::encode(*tag));c.name=r.hash;c.id=1;loadSaved=c;}}
+                    note(loadSaved?"ORDERLOAD test: case remembered\n":"ORDERLOAD test: no such case, or not a standard order's\n");
+                }
+                else if(auto make=mod::puppet::parseCargoCommand(text,mod::runStamp(),"loadmake");make&&anchor.pose.available) {
+                    needOrderCaseCreate();
+                    if(!loadSaved||!orderCaseCreate)note("ORDERLOAD test: nothing remembered, or the creator is unavailable\n");
+                    else{
+                        auto t=mod::puppet::transform(anchor.pose);double fx=t.rotation[3],fy=t.rotation[4],l=std::hypot(fx,fy);
+                        if(l>.5){t.position[0]-=2*fx/l;t.position[1]-=2*fy/l;}
+                        t.position[2]+=.5;t.rotation={1,0,0,0,1,0,0,0,1};
+                        auto c=*loadSaved;c.position=t.position;c.rotation=t.rotation;bool ok=orderCaseCreate(c);
+                        std::ostringstream o;o<<"ORDERLOAD test: unit "<<int(c.tag.unit)<<" of "<<std::hex<<c.tag.mission<<std::dec<<(ok?" asked of the game's creator":" refused by the game (does the unit still exist here?)")<<"\n";note(o.str().c_str());
+                    }
                 }
                 else if(auto unit=mod::puppet::parseCargoCommand(text,mod::runStamp(),"unit");unit) {
                     // Test: "unit <mission id * 10 + n>" marks unit n of that order delivered in this game (as a hand-in would).

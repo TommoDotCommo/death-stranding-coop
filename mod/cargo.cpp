@@ -27,8 +27,15 @@ std::vector<Record> readRecords(const discovery::Sampler& s,uint64_t manager,uin
         if(!s.readOnce(manager+Records+Stride*at,chunk.data(),Stride*n))break;
       for(unsigned k=0;k<n;++k){unsigned i=at+k;const uint8_t* block=chunk.data()+Stride*k;
         uint64_t item=0;std::memcpy(&item,block+0x28,8);if(!item)continue;
-        Record r;std::memcpy(&r.slot,block+0x18,4);std::memcpy(&r.state,block+0x20,4);std::memcpy(&r.hash,block+0xc8,4);
-        std::memcpy(r.position.data(),block+0x38,24);std::memcpy(&r.holder,block+0x1c,4);r.index=i;std::memcpy(&r.mission,block+0xb0,8);r.unit=block[0xdc];out.push_back(r);
+        Record r;std::memcpy(&r.slot,block+0x18,8);
+#ifdef MUTANT_CARGO_SLOT32
+        r.slot=uint32_t(r.slot);
+#endif
+std::memcpy(&r.state,block+0x20,4);std::memcpy(&r.hash,block+0xc8,4);
+        std::memcpy(r.position.data(),block+0x38,24);std::memcpy(&r.holder,block+0x1c,4);r.index=i;std::memcpy(&r.mission,block+0xb0,8);r.unit=block[0xdc];
+        if(r.mission){r.type=block[0x104];std::memcpy(&r.flags,block+0x204,4);std::memcpy(&r.flags2,block+0x208,4);std::memcpy(r.life,block+0x30,8);
+            if(!s.read(item+0x34,&r.item,4))r.item=0;}
+        out.push_back(r);
       }
     }
     return out;
@@ -86,15 +93,32 @@ std::vector<Placement> Sync::observe(const std::vector<Record>& records,const st
     // A cancelled expectation goes with its expectation (its copy never appeared: nothing to delete).
     cancelled_.erase(std::remove_if(cancelled_.begin(),cancelled_.end(),[&](uint64_t id){
         return std::none_of(expected_.begin(),expected_.end(),[&](auto& e){return e.first.id==id;});}),cancelled_.end());
-    std::map<uint32_t,Track> next;
+    std::map<uint64_t,Track> next;
     for(auto& r:records){
+        // A case of a shared order: shared whatever its kind, and its placement names the order.
+        bool order=r.mission&&std::find(missions_.begin(),missions_.end(),r.mission)!=missions_.end();
+#ifdef MUTANT_CARGO_ORDER_ANY
+        order=r.mission!=0;
+#endif
+        auto placement=[&](uint64_t id){Placement p{r.hash,r.position,id};
+            if(order){p.mission=r.mission;p.unit=r.unit;p.type=r.type;p.item=r.item;p.flags=r.flags;p.flags2=r.flags2;p.life[0]=r.life[0];p.life[1]=r.life[1];}
+            return p;};
         auto old=tracks_.find(r.slot);bool same=old!=tracks_.end()&&old->second.hash==r.hash;
         Track t=same?old->second:Track{};
         if(!same){t.hash=r.hash;t.position=r.position;t.stillSince=now;t.fresh=primed_;t.learned=!primed_&&location(r)==InWorld;
                   if(t.learned){t.resting=true;t.restAt=r.position;}}
         t.index=r.index;
+        bool wasLocal=t.local,orderKind=order;
+#ifdef MUTANT_CARGO_ORDER_KIND
+        orderKind=false;
+#endif
 #ifndef MUTANT_CARGO_LOCAL
-        t.local=kind(r)!=SharedKind;
+        t.local=kind(r)!=SharedKind&&!orderKind;
+#endif
+#ifndef MUTANT_CARGO_ORDER_STALE
+        // Its order got under way: what was only noted as not shared (the cases laid out at the terminal) is not yet
+        // announced. Lying there it is nobody's put-down (fresh is over); carried off and put down, it is.
+        if(same&&wasLocal&&!t.local&&!t.id&&!t.mirror)t.announced=false;
 #endif
         uint8_t was=t.where,where=location(r);t.where=where;
         if(where==OnPorter){t.heldAt=now;t.carriedAt=r.position;}
@@ -170,12 +194,12 @@ std::vector<Placement> Sync::observe(const std::vector<Record>& records,const st
 #endif
         if(primed_&&!t.mirror&&!t.announced&&settled&&ours&&letGo){
             if(t.local)kept_.push_back({r.hash,kind(r),false});   // not shared: noted once
-            else{t.id=nextIdNow();out.push_back({r.hash,r.position,t.id});t.resting=true;t.restAt=r.position;}
+            else{t.id=nextIdNow();out.push_back(placement(t.id));t.resting=true;t.restAt=r.position;}
             t.announced=true;t.fresh=false;t.putDown=false;}
 #ifndef MUTANT_CARGO_MOVED
         // Moved on the ground (slope, river): the partner's copy goes from the old place and comes back at the new one.
         else if(primed_&&t.resting&&!t.local&&!t.staged&&where==InWorld&&settled&&distance(r.position,t.restAt)>MoveRange){
-            taken_.push_back({t.id,t.hash,t.restAt});t.id=nextIdNow();out.push_back({r.hash,r.position,t.id});
+            taken_.push_back({t.id,t.hash,t.restAt});t.id=nextIdNow();out.push_back(placement(t.id));
             t.mirror=false;t.learned=false;t.announced=true;t.restAt=r.position;}
 #endif
         next[r.slot]=t;

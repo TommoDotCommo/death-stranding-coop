@@ -1029,6 +1029,47 @@ completed, none under way. Start of order 0x36330 (no. 414): state 4, an instanc
 cargo records with `+0xb0` = the id. Success: state 16, result 4, no instance. Fail of another: state 8, result 2.
 The same three requests in the partner's game gave the same states there.
 
+### Order cargo: how a cargo record becomes an order's (2026-11-14, static; nothing here called live yet)
+
+- A cargo record's `+0x18` is a 64-bit handle, unique among the records in use: the allocator `0x2c4dde0(manager,
+  wanted)` scans all `0x1e98` records (in use = byte `+0x21` not 0) and the pending creations for it. With 0 it
+  returns the next value of a counter (`manager+0x46d1d0`); with a wanted handle it returns that handle, or 0 when a
+  record or a pending creation already has it. An order's cargo is created with the handle `mission id | unit << 48`,
+  the same value as the unit table's key: the units of one order differ only in the high word of `+0x1c` (which is why
+  that word read as the unit), and one game cannot hold two records of one unit.
+- Every creation goes through `0x2c470e0(manager, record[0x118])`: it takes the handle (allocating one when the
+  record's `+0x40` is 0; no creation when the handle is taken) and queues the creation record at
+  `manager+0x46d1e0`. The creation record's constructor is `0x277fc90` (defaults), its name member at `+0xc8` is
+  released with `0x34abff0`. `CreateBaggage` builds the same record with only place, rotation and item hash set.
+- The manager fills the cargo record from it (`0x2c84300..`; cargo record offset <- creation record offset):
+  `+0x18` <- `+0x40` handle; `+0x21` <- `+0x6c` (1, in the world); `+0x28` <- the item looked up by the hash at
+  `+0x48` (`0x3439df0`; the item's own hash is item `+0x34`); `+0x30` <- the integer at `+0x110` as a float, or the
+  item's `+0x60` when 0; `+0x34` <- the float at `+0x114`, or the item's `+0x5c` when negative; `+0x38` place and
+  rotation <- `+0x00`, `+0x18`; `+0xb0` <- `+0x50` the mission id; `+0xb8` <- `+0x58`, or `+0x50` when 0; `+0xc0`
+  <- `+0x60`; `+0xc8` <- `+0x64`, or the item hash `+0x48` when `+0x64` is -1 (so for an order's cargo `+0xc8` is the
+  order's name hash of the case, not the item hash); `+0xcc` <- `+0x68`; `+0xc4` <- `+0x4e` (the area; 0xffff = the
+  current one); `+0xdc` and `+0xdd` <- `+0x72` the unit; `+0x104` <- `+0x4c` (1 a main or sub order's cargo, 2 a
+  standard order's); `+0x204` bit 20 <- `+0x75`, bit 21 <- `+0x76`, bit 22 <- `+0x77`, bit 23 <- `+0x78`, bit 25 <-
+  `+0x79`, bit 8 <- `+0x7f`; `+0x208` bit 0 <- `+0x70`, bit 1 <- `+0x7a`, bit 2 <- `+0x7b`, bit 3 <- `+0x7c`, bit 12
+  <- `+0x80`, bit 13 <- `+0x81`. With `+0x6e` set the record's address goes into the manager's list of order cargo
+  (`0x2c316f0`: `manager+0x46d330` count, `+0x46d338` pointers); with `+0x6f` set `+0x204` gets `0x1301` (the cases
+  laid out at a terminal before the order is accepted read `0x281301` live).
+- The mission system finds an order's cargo by walking that list and comparing `+0xb0` with the mission id (for
+  example `0x33cb8f0`: "is any of this order's cargo being delivered", `+0x204 & 0x300`). A record made by
+  `CreateBaggage` with `+0xb0` written afterwards is not in the list.
+- The mission system's own filler is `0x33a3a50(mission id, cargo entry, creation record)`: handle at `+0x40`, item
+  hash `+0x48` from the cargo resource's item (`+0x34`), `+0x4c` = 2 (1 for a main or sub order), `+0x50` the mission
+  id, `+0x64` the resource's name hash (`+0x48`), `+0x6e` = 1, `+0x72` the resource's unit (`+0x4c`), `+0x75` /
+  `+0x76` main-or-sub / standard, `+0x7a` and `+0x80` two bytes of the resource (`+0x5a`, `+0x59`), `+0xc0` = 0x13;
+  then `0x2c470e0`, then the unit's row in the table (`0x33524b0`). It is called for each cargo entry of the running
+  order by `0x336b450(instance)`, which returns at once when the order record's `+0x30` has bit 2 set and sets that
+  bit when done: "this order's cargo has been made". Setting the bit before a start would skip the cargo and the
+  unit rows with it (not tried; the mod removes the cargo afterwards instead, which keeps the rows).
+- The start request's two flags (`0x33b80a0(S, id, a, b)`): `a` sets order flag bit 9 and clears bit 10 before the
+  instance is made, `b` (or a global condition) adds a notification. Neither skips the cargo.
+- The mod's shared load (`orderload.h`, `share_order_load`) makes the partner's copy of a put-down case with
+  `0x2c470e0` and a creation record filled like the mission system's, from what the partner read off its record.
+
 ## Save sections: the game's own serialization over a memory buffer (2026-11-12, static; one section run live)
 
 The save is about 45 sections written and read in a fixed order by two straight-line functions (master save

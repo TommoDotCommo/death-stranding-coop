@@ -720,8 +720,20 @@ Each game keeps simulating its own world; these settings share the outcome of wh
   in is delivered in the partner's game too and the partner's copy of that cargo is removed, so two players can
   each carry part of an order.
 
-Log lines: `ENEMY ...`, `ORDER ...`. Test commands in `puppet.cargo` (lab only): `mule <kind>`, `order <id>`,
-`unit <id*10+n>`, `unitlose <id*10+n>`; in `puppet.ride`: `place X Y Z HEADING`.
+- `"share_order_load": true` (with `share_orders`, best with `share_order_units`; `orderload.h`; **not run live
+  yet**): one shared load per order. Only the player who took the order at the terminal keeps its cargo: the game
+  that took the order on for the partner removes the cargo it made for it (cases lying in the world only, never one
+  on the porter). A case of the order that a porter puts down goes to the partner as shared cargo with a tag naming
+  the order, the unit and the item, and the partner's game makes it with the game's own cargo creator, filled as the
+  mission system fills it, so the copy is the order's cargo there and either player can pick it up and hand it in.
+  When one picks it up the other's copy goes, as with all shared cargo. Orders both games already had under way when
+  the players met keep their two loads (the game refuses a second case of a unit it still holds). The copy gets the
+  case's two condition values as they were when it was put down.
+
+Log lines: `ENEMY ...`, `ORDER ...`, `ORDERLOAD ...`. Test commands in `puppet.cargo` (lab only): `mule <kind>`,
+`order <id>`, `unit <id*10+n>`, `unitlose <id*10+n>`, `loadinfo <id>` (every cargo record of the order as the shared
+load reads it), `loadsave <id*100+n>` and `loadmake 0` (remember a case, then make it again behind the porter with the
+creator the shared load uses); in `puppet.ride`: `place X Y Z HEADING`.
 
 ## The partner's name over his body (`partner_tag`, off by default)
 

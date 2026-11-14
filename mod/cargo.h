@@ -17,7 +17,14 @@
 #include <optional>
 #include <vector>
 namespace mod::cargo {
-struct Record { uint32_t slot=0, state=0, hash=0; std::array<double,3> position{}; uint32_t holder=0, index=0; uint64_t mission=0; uint8_t unit=0; };   // mission: +b0, the order it belongs to (0 = none); unit: +dc, which of the order's cargo units it is
+// slot: the record's 64-bit handle (+18), unique among the records in use (the game's own allocator 0x2c4dde0 scans
+// for it). Ordinary cargo gets a counter; an order's cargo gets the order's id with the unit in bits 48..53, so the
+// units of one order differ only above bit 32.
+// mission: +b0, the order it belongs to (0 = none); unit: +dc, which of the order's cargo units it is. For order cargo
+// only: item = the item's own hash (item +34; +c8 then holds the order's name for the case), type = +104 (1 main or
+// sub order, 2 standard), flags = +204, flags2 = +208, life = +30, +34 (the case's two condition values).
+struct Record { uint64_t slot=0; uint32_t state=0, hash=0; std::array<double,3> position{}; uint32_t holder=0, index=0; uint64_t mission=0; uint8_t unit=0;
+                uint32_t item=0; uint8_t type=0; uint32_t flags=0, flags2=0; float life[2]{}; };
 //   // game axes, z up;
 // holder = +1c (candidate); index = position in the manager's array (what DeleteBaggage takes)
 constexpr uint8_t InWorld=1,OnPorter=2;
@@ -34,7 +41,9 @@ constexpr unsigned MaxRecords=0x1e98, FirstRecords=511;
 std::vector<Record> readRecords(const discovery::Sampler&, uint64_t manager, uint64_t managerVtable, unsigned limit=FirstRecords);
 // How far the next quick scans must reach after a full one: past the highest record in use, never below FirstRecords.
 unsigned scanLimit(const std::vector<Record>& fullScan);
-struct Placement { uint32_t hash=0; std::array<double,3> position{}; uint64_t id=0; };   // game axes; id = shared id
+// mission and the fields after it are set only for a case of a shared order (Sync::shareMissions): orderload.h.
+struct Placement { uint32_t hash=0; std::array<double,3> position{}; uint64_t id=0;   // game axes; id = shared id
+                   uint64_t mission=0; uint8_t unit=0, type=0; uint32_t item=0, flags=0, flags2=0; float life[2]{}; };
 // A pick-up (or a shared item gone) to report: the shared id when there is one, and the item and its last place on the
 // ground, so the partner can find its copy even when the id is not known there (after a restart of either mod).
 struct Taken { uint64_t id=0; uint32_t hash=0; std::array<double,3> position{}; };
@@ -75,6 +84,9 @@ public:
     // What to send as the ref of a pick-up: its shared id, or for an item without one this run's tag (the id base: low
     // 20 bits zero, never an id), so the partner can tell items placed in this run apart (partnerTook decodes it).
     uint64_t wireRef(const Taken& t) const {return t.id?t.id:(idBase_&~uint64_t(0xfffff));}
+    // Orders whose cargo is one shared load (orderload.h): their cases are shared whatever their kind, and a placement
+    // of one names the order and the unit. Any other order's cargo (story cargo too) is handled as before.
+    void shareMissions(std::vector<uint64_t> missions){missions_=std::move(missions);}
     size_t mirrored() const;
     size_t pending() const {return expected_.size()+cancelled_.size();}   // expectations and cancellations still held
     size_t shared() const;
@@ -84,7 +96,7 @@ private:
                    double stagedPath=0; uint64_t stillSince=0, heldAt=0, id=0, downAt=0; uint8_t where=0;
                    bool fresh=false, announced=false, mirror=false, putDown=false, learned=false, removed=false, local=false,
                         staged=false, lostToPartner=false; };
-    std::map<uint32_t,Track> tracks_; bool primed_=false; uint64_t nextId_=0;
+    std::map<uint64_t,Track> tracks_; bool primed_=false; uint64_t nextId_=0; std::vector<uint64_t> missions_;
     uint64_t idBase_=0;
     uint64_t nextIdNow(){if(((++nextId_)&0xfffff)==0)++nextId_;return nextId_;}   // never a run tag
     std::vector<std::pair<Placement,uint64_t>> expected_; std::vector<Taken> taken_; std::vector<Kept> kept_;std::vector<uint64_t> cancelled_; std::vector<uint32_t> doomed_;
