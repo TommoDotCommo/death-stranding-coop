@@ -796,6 +796,89 @@ Live checklist (Episode 3 save in both copies, the crash recorder on, `share_ord
 7. A loaded save: load an older checkpoint in one copy while connected. Expect no `REWARD facility ... -> partner`
    lines from the load, and no lowering in the partner's game.
 8. After every run: the real saves are byte-identical.
+## MULEs in the same place (`share_enemy_positions`; experiment, off by default, nothing run live)
+
+With `share_enemies` each game has the same MULEs (same locator UUIDs) but moves them itself, so in a fight the two
+players see them in different places. `"share_enemy_positions": true` (needs `share_enemies` and a `role`;
+`enemy_poses.h`) makes the host's game the one that says where they are:
+
+- **Host**, five times a second: the standing MULEs within 80 m of either player, the twelve nearest, each with its
+  identity (52 bits of the locator UUID), position, heading and two flags (it has a body in the host's game; it moves
+  faster than a person, i.e. it rides). They go in the core's unreliable `ENEMIES` datagram (`core/CORE.md`), not in
+  the ordered event stream: a lost sample is replaced by the next one.
+- **Guest**, five times a second, for each of its own MULEs the host named: nothing while it is within 0.75 m of the
+  host's place; from 4 m, once that has lasted 0.3 s and not more often than every 2 s, the MULE actor's own teleport
+  to the host's pose (`game_offsets.md`, "Moving a MULE": the call the game's script teleport makes; the game puts it
+  on the navigation mesh); a MULE with no body in the guest's game (out of sight) is put there from 0.75 m, at most
+  once a second. With `"enemy_position_pull": true` an error between 0.75 m and 4 m is taken away in steps of half
+  a metre, at most two a second (each step is a short teleport; whether that looks right is not known, so it is a
+  separate key).
+- **Never moved:** a MULE that is down, dead or removed in the guest's game; one within 3 m of the guest's porter
+  (a fight hand to hand stays the guest's own, and its hits land where the guest sees them); a pose within 1.5 m of
+  the guest's porter; a MULE that rides (the host's flag, or faster than 9 m/s in the guest's game); anything when
+  the host's newest sample is over a second old or the link is down; a MULE the host did not name; an error over
+  150 m. At most two native calls per look, the largest errors first. The native call checks the actor each time
+  (committed memory, the MULE actor's vtable with the teleport in its slot, the live byte) and the functions' code
+  when it is first used (`ENEMYPOS unavailable: ...` when the image differs: then nothing is moved).
+
+What this cannot do: the guest's MULEs still chase the guest's porter and the host's chase the host's, so a MULE that
+runs at the guest is pulled back to where the host's game has it (walking somewhere else) until it is within 3 m of
+him. MULEs that fight the partner's body need the AI to know that body (`game_offsets.md`, same section; research
+only).
+
+Log lines: `ENEMYPOS host: N MULEs near the players -> partner (sample S)` (the first sample and every 300th),
+`ENEMYPOS guest: the host's first sample, ...`, `ENEMYPOS guest: MULE <key> teleported|stepped, it was E m from the
+host's, to X,Y,Z (moved M, refused R)` (the first twenty and every fiftieth). Test commands in `puppet.cargo` (lab
+only): `muleat <n> <stamp>` (read-only: the n nearest MULEs with key, id, LOD, state, position, heading, distance) and
+`mulemove <cm> <stamp>` (the nearest standing MULE moved that many centimetres east with the same native call, then
+read back: `MULEPOS test: key K lod L D m away, from ... asked ... now ... moved`). The stand-in partner sends a fixed
+pose as a host would: `coop-partner --role host ... --mule KEY X Y Z HEADING`.
+
+Game-free tests: `core/tests/enemies.cpp` (the datagram; six guards with mutants; lossy-link fuzz),
+`mod/enemy_poses_test.cpp` (selection, the correction policy, the actor checks on fake memory, and 120 fuzzed
+sessions of two diverging worlds joined by two cores over a link with loss, repeats, reordering and an outage; 16
+mutants, one per rule), the config rule in `unit.cpp` (`MUTANT_CONFIG_ENEMY_POSITIONS`).
+
+### Live checklist (nothing of this has run)
+
+A save with a MULE camp in reach (Episode 3). Positions are the game's axes. Assert from process state (the actor
+list: id, LOD, position, life state of every MULE), not from the log alone.
+
+1. **Read only, one copy.** Porter 60 m from a camp. `muleat 12`: twelve rows; positions equal to the actor list read
+   from the process; headings change when a MULE turns. No native call is made.
+2. **One teleport, one copy, out of sight.** Porter over 100 m from the camp (no MULE at LOD 2). `mulemove 500`:
+   `... lod 0 ... moved`, `now` = `asked` within 0.5 m in x and y (the navigation mesh may shift it), and the actor
+   list shows that MULE there 5 s later (the game did not put it back). Then walk to it: it stands there, alive,
+   patrols on. Crash record empty.
+3. **One teleport with a body.** Porter 30 to 40 m from a standing MULE, unseen (camp phase 0). `mulemove 500`: the
+   same checks with `lod 2`; in a screenshot series the MULE is at the new place, upright, animated, and walks on
+   (not frozen, not sunk, not in the air). Repeat with `mulemove 50` four times, 0.5 s apart: does it slide, stutter or
+   restart its animation? This decides whether `enemy_position_pull` is usable.
+4. **One teleport of an alerted MULE.** As 3 with the camp on alert (`mule 9`) and the MULE running: it keeps its
+   state, target and weapon after the move.
+5. **The whole path with the stand-in, one copy as guest.** Take a key and a position from `muleat`; start the
+   stand-in as host with `--mule KEY X+10 Y Z 0`, porter 40 m from that MULE. Expected: `ENEMYPOS guest: the host's
+   first sample, 1 MULEs`, one `teleported` line with an error near 10 m, then none while the MULE stays within 4 m
+   of the pose and a new one, not sooner than 2 s after the last, each time it has walked 4 m away; the actor list has
+   it within 4 m of the pose. Stop the stand-in: no further `ENEMYPOS guest` line after one second.
+6. **The protections, same setup.** (a) Walk the porter to within 3 m of that MULE and change the stand-in's pose to
+   20 m away: no move while he is within 3 m (distance asserted from process state); (b) put the MULE down
+   (`mule 1`): no move; (c) a pose 1 m from the porter: no move; (d) mutant run: the same scene with a mod built
+   with `-DMUTANT_ENEMYPOS_REACH` must move the MULE in (a).
+7. **Two copies.** Host and guest 30 m apart, both 40 m from the same camp, `share_enemy_positions` in both.
+   Expected in the host's log `ENEMYPOS host: N MULEs ...` with N > 0 and no `ENEMYPOS guest` line; in the guest's
+   the first sample and moves. Every 2 s for 2 minutes compare the two actor lists: each MULE the host sends (standing
+   in both, further than 3 m from the guest's porter) is within 4 m in both games (0.75 m with the pull, and for
+   MULEs without a body in the guest's game); before this feature they were up to 17 m apart. Frame time and the
+   `stages` timing of both copies unchanged (two reads of 150 actors five times a second).
+8. **A fight, the guest far from the host.** Guest 60 m or more from the host (asserted from both processes'
+   porter positions, further than any MULE weapon reaches), the host seen by the camp. The guest's MULEs must be
+   where the host's are (they run at the host's place, where the guest sees the partner's body), and none of them is
+   moved while within 3 m of the guest's porter. The guest knocks one out with his hands: it goes down in both games
+   (`share_enemies`) and is not moved afterwards. Not expected, and to be recorded as observed: whether any MULE
+   targets the guest (each game's AI knows only its own player).
+9. **Link.** The walking regression's poor link on the guest (loss and delay): moves continue, no move uses a sample
+   over a second old (log ages), and after the link is cut for 5 s nothing is moved until samples return.
 
 ## Story within a session (`share_story_orders`, `story_resync`; experiments, off by default, nothing run live)
 

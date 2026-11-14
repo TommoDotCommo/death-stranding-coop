@@ -71,6 +71,14 @@ int main() {
     assert(refused(withKeys(threaded,"\"share_order_load\":true")));
     assert(!mod::parseConfig(threaded).shareRewards&&mod::parseConfig(withKeys(threaded,"\"share_orders\":true,\"share_rewards\":true")).shareRewards);
     assert(refused(withKeys(threaded,"\"share_rewards\":true")));
+    // MULE positions: off by default; only with shared enemies and an explicit role (one game has to be the one that says).
+    assert(!mod::parseConfig(threaded).shareEnemyPositions&&!mod::parseConfig(threaded).enemyPositionPull);
+    assert(mod::parseConfig(withKeys(threaded,"\"share_enemies\":true,\"share_enemy_positions\":true")).shareEnemyPositions);
+    assert(mod::parseConfig(withKeys(threaded,"\"share_enemies\":true,\"share_enemy_positions\":true,\"enemy_position_pull\":true")).enemyPositionPull);
+    assert(refused(withKeys(threaded,"\"share_enemy_positions\":true")));
+    {auto none=threaded;none.erase(none.find("\"role\":\"host\","),14);assert(mod::parseConfig(withKeys(none,"\"share_enemies\":true")).shareEnemies);
+        assert(refused(withKeys(none,"\"share_enemies\":true,\"share_enemy_positions\":true")));}
+    assert(refused(withKeys(threaded,"\"share_enemies\":true,\"enemy_position_pull\":true")));
     // The delivery-delay impairment works with the real game too (two copies on one PC standing in for an internet
     // link); injected faults stay synthetic-only.
     assert(!mod::parseConfig(threaded).impairment&&mod::parseConfig(withKeys(threaded,"\"impairment\":true")).impairment);

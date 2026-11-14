@@ -8,6 +8,9 @@
 // set explicit handshake fixtures, --progress-mismatch warn|refuse chooses policy.
 // --environment-time HOURS requires --role host and sends a fixed [0,24) time sample every 30 s; --weather VALUE adds a
 // rain condition to it (the game's map condition, lower is wetter: -1.8 heavy rain, 1.5 clear).
+// --mule KEY X Y Z HEADING (up to 12 times, --role host): sends that MULE (KEY in hex: the 52-bit locator key the mod's
+// `muleat` test command logs) standing at that place (game axes, metres; heading in radians) five times a second, as a
+// host's game would with share_enemy_positions.
 // --where-recorded plays the walk where it was recorded (same save, same place) instead of beside the porter.
 // Prints one status line a second and every cargo event the game sends. --drop places one cargo item (the game's
 // item hash) where the partner stands, SECONDS after connecting. --take-after picks up (sends "taken" for) every item the
@@ -126,6 +129,7 @@ struct CarryPrint final:mod::carry::Sink {
 [[noreturn]] void usage(const char* why){std::fprintf(stderr,"coop-partner: %s\n(see the comment at the top of partner.cpp)\n",why);std::exit(2);}
 }
 int main(int argc,char** argv){
+    ds::EnemyPoses mules;uint64_t mulesAt=0,mulesSent=0;
     unsigned slot=1,peerSlot=0;ds::Role role=ds::Role::Client;uint64_t session=0;double seconds=3600,dropAfter=-1,takeAfter=-1,takeOwnAfter=-1,buildAfter=-1,unbuildAfter=-1;uint32_t dropItem=0,buildType=0;
     std::string replayFile,stopFile;bool withAnimation=false;Shell shell;ds::ProgressPolicy progressPolicy=ds::ProgressPolicy::Warn;std::optional<mod::carry::Summary> carrySpec;double carryDropAfter=-1;
     std::optional<ds::Environment> fixedEnvironment;double rideOn=-1,rideOff=-1,awayOn=-1,awayOff=-1,downOn=-1,downOff=-1,caughtOn=-1,caughtOff=-1,flagOn=-1,flagOff=-1;std::optional<float> fixedRain;
@@ -163,11 +167,18 @@ int main(int argc,char** argv){
         else if(a=="--vitals"){mod::signals::Vitals v;auto b=std::stoul(next()),st=std::stoul(next()),bits=std::stoul(next());
             if((b>100&&b!=255)||(st>100&&st!=255)||bits>3)usage("vitals takes BLOOD STAMINA (0..100 or 255) BITS (0..3)");
             v.blood=uint8_t(b);v.stamina=uint8_t(st);v.overloaded=bits&1;v.unsteady=bits&2;vitalsSpec=v;}
+        else if(a=="--mule"){ds::EnemyPose p;p.key=std::stoull(next(),nullptr,16);for(auto& x:p.position)x=std::stod(next());p.heading=std::stod(next());p.flags=1;
+            if(mules.count>=ds::EnemyPosesMax)usage("--mule: at most 12");mules.poses[mules.count++]=p;}
         else if(a=="--take-after")takeAfter=std::stod(next());else if(a=="--take-own-after")takeOwnAfter=std::stod(next());
         else usage(("unknown option "+a).c_str());
     }
     if(!session)usage("--session is required (the game copy's mod.json session)");
     if(fixedEnvironment&&role!=ds::Role::Host)usage("--environment-time requires --role host");
+    if(mules.count){
+        if(role!=ds::Role::Host)usage("--mule requires --role host");
+        std::sort(mules.poses.begin(),mules.poses.begin()+mules.count,[](const ds::EnemyPose& x,const ds::EnemyPose& y){return x.key<y.key;});
+        ds::Packet probe;probe.enemies=mules;try{ds::encodeEnemies(probe);}catch(const std::exception&){usage("--mule: keys must differ, be nonzero and below 2^52; places within 100 km; heading within pi");}
+    }
     if(fixedRain&&!fixedEnvironment)usage("--weather requires --environment-time");
     if(fixedRain){fixedEnvironment->haveRain=true;fixedEnvironment->rain=*fixedRain;}
     if(!replayFile.empty()){
@@ -211,6 +222,7 @@ int main(int argc,char** argv){
             if(error==ds::Error::Progress&&!progressRefused){progressRefused=true;std::puts("HANDSHAKE refused: story progress mismatch");}
         }
         core.frame(now);shell.step(now);core.tick(now);shell.animate(core,now);
+        if(mules.count&&now>=mulesAt+200&&core.sendEnemies(mules,now)){mulesAt=now;if(++mulesSent==1||mulesSent%50==0){std::printf("ENEMYPOS sent %u MULEs (sample %llu)\n",unsigned(mules.count),static_cast<unsigned long long>(mulesSent));std::fflush(stdout);}}
         if(fixedEnvironment&&core.sendEnvironment(*fixedEnvironment,now)) {
             if(fixedEnvironment->haveRain)std::printf("ENVIRONMENT sent fixed hour=%.6f rain=%.3f\n",fixedEnvironment->timeOfDayMs/3600000.,fixedEnvironment->rain);
             else std::printf("ENVIRONMENT sent fixed hour=%.6f weather=unknown\n",fixedEnvironment->timeOfDayMs/3600000.);

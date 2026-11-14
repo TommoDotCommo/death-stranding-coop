@@ -36,7 +36,7 @@ std::vector<Mule> readMules(const discovery::Sampler& s,uint64_t base){
             uint64_t locator=0;
             if(!actors[j]||!s.readOnce(actors[j],block.data(),block.size())||!block[0x20])continue;
             Mule m;m.address=actors[j];m.id=(uint32_t(i)<<13)|(first+j);std::memcpy(&m.state,block.data()+0xea0,4);std::memcpy(&m.flags,block.data()+0xea4,4);
-            std::memcpy(&m.lod,block.data()+0x24,4);std::memcpy(m.position.data(),block.data()+0x28,24);std::memcpy(&locator,block.data()+0x18,8);
+            std::memcpy(&m.lod,block.data()+0x24,4);std::memcpy(m.position.data(),block.data()+0x28,24);std::memcpy(m.rotation.data(),block.data()+0x40,36);std::memcpy(&locator,block.data()+0x18,8);
             if(!locator)continue;                                         // reinforcements have no locator: not shared
             auto known=uuids.find(locator);
             if(known==uuids.end()){std::array<uint8_t,16> u{};if(!s.read(locator+8,u.data(),16))continue;known=uuids.emplace(locator,u).first;}

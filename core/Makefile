@@ -14,7 +14,7 @@ $(BUILD)/net.o: $(FUZZ)/src/net.cpp $(FUZZ)/include/coopfuzz/net.h $(FUZZ)/inclu
 	$(CXX) $(CXXFLAGS) -I$(FUZZ)/include -c $< -o $@
 $(BUILD)/tests: tests/test.cpp core.cpp core.h build_id.h $(BUILD)/net.o | $(BUILD)
 	$(CXX) $(CXXFLAGS) -DDS_TESTING -I$(FUZZ)/include tests/test.cpp core.cpp $(BUILD)/net.o -o $@
-test: check-build $(BUILD)/core.o $(BUILD)/tests environment-test animation-test
+test: check-build $(BUILD)/core.o $(BUILD)/tests environment-test animation-test enemies-test
 	python3 tests/run.py $(BUILD)/tests
 	$(MAKE) -C ../mod test
 $(BUILD)/core-win64.o: core.cpp core.h build_id.h | $(BUILD)
@@ -40,3 +40,9 @@ $(BUILD)/animation-tests: tests/animation.cpp core.cpp core.h build_id.h $(BUILD
 animation-test: $(BUILD)/animation-tests
 	python3 tests/environment_run.py $(BUILD)/animation-tests animationRange animationOrder animationRose
 .PHONY: animation-test
+
+$(BUILD)/enemies-tests: tests/enemies.cpp core.cpp core.h build_id.h $(BUILD)/net.o | $(BUILD)
+	$(CXX) $(CXXFLAGS) -DDS_TESTING -I$(FUZZ)/include tests/enemies.cpp core.cpp $(BUILD)/net.o -o $@
+enemies-test: $(BUILD)/enemies-tests
+	python3 tests/environment_run.py $(BUILD)/enemies-tests enemiesRange enemiesRole enemiesOrder enemiesFresh enemiesStale enemiesRate
+.PHONY: enemies-test
