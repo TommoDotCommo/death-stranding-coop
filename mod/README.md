@@ -846,7 +846,8 @@ players see them in different places. `"share_enemy_positions": true` (needs `sh
   with another goal), whose AI is held still, that is nearer than 6 m to the guest's porter, or whose objects are
   not the ones read from the image; nothing is written while the last destination is still waiting to be read.
   Live, two copies 60 m from a camp for 40 s: 144 destinations taken, 4 teleports (20 in the same scenario without
-  the key), the MULEs the host sent within 0.1 to 4.6 m of the host's, no fault.
+  the key), the MULEs the host sent within 0.1 to 4.6 m of the host's, no fault. A second run, with a truck patrol
+  in range and most MULEs standing: 170 taken, 983 refused as not walking, 59 teleports, within 1.3 m.
 - **A teleport that does not move the MULE** (live: the riders of a truck patrol stay in their seats) is tried again
   later and later (4 s, 8 s, ... up to a minute) instead of every second or two; `ENEMYPOS guest: MULE <key> stayed
   where it was ...` says so.
