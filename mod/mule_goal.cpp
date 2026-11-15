@@ -121,6 +121,11 @@ std::string refusal(const discovery::Sampler& s,uint64_t base,const Chain& c,con
 #ifndef MUTANT_MULEGOAL_AI_VTABLE
     if(!c.aiVtable||*c.aiVtable!=base+AiVtable)return "AI is not a DSAIIndividual";
 #endif
+#ifndef MUTANT_MULEGOAL_RUNNING
+    // Live: the byte is 0 while the MULE's AI runs and 2 while the game holds it still (no player near): a forced
+    // destination written then is never read, and its bit stays set.
+    if(!c.state||*c.state!=AiRunning)return "AI not running";
+#endif
     if(!c.goal||!*c.goal||!c.destination||!c.destinationCopy)return "no walk goal";
 #ifndef MUTANT_MULEGOAL_WALKING
     if(!sane(*c.destination)||distance(*c.destination,*c.destinationCopy)>0.001||(first&&distance(*c.destination,mule)<MinWalkM))return "not walking";

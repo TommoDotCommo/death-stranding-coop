@@ -35,7 +35,7 @@ struct World {
         put<uint64_t>(Array,Heap+Other);put<uint64_t>(Array+8,0);put<uint64_t>(Array+16,Heap+Component);
         put<uint64_t>(Other,Image+0x3dd9750);put<uint64_t>(Other+ComponentAi,Heap+0x9000);put<uint64_t>(Other+ComponentAiAgain,Heap+0x9000);   // another component
         put<uint64_t>(Component,Image+DsComponentVtable);put<uint64_t>(Component+ComponentAi,Heap+Ai);put<uint64_t>(Component+ComponentAiAgain,Heap+Ai);
-        put<uint64_t>(Ai,Image+AiVtable);put<uint8_t>(Ai+AiState,3);
+        put<uint64_t>(Ai,Image+AiVtable);put<uint8_t>(Ai+AiState,AiRunning);
         put<uint64_t>(Ai+AiGoals,Heap+Entries);put<uint32_t>(Ai+AiGoals+0xc,16);
         // Entry 2: another goal; entry 5: the walk goal; the rest empty.
         put<uint32_t>(Entries+2*0x20,0x80000001u);put<uint64_t>(Entries+2*0x20+8,Image+0x4c91870);put<uint64_t>(Entries+2*0x20+0x10,Heap+0x60000);
@@ -53,11 +53,11 @@ void reads(){
     World w;auto s=w.sampler();
     auto c=read(s,Image,Heap+Actor);
     CHECK(c.entity&&*c.entity==Heap+Entity&&c.component&&*c.component==Heap+Component&&c.componentVtable&&*c.componentVtable==Image+DsComponentVtable);
-    CHECK(c.ai&&*c.ai==Heap+Ai&&c.agree()&&c.aiVtable&&*c.aiVtable==Image+AiVtable&&c.state&&*c.state==3);
+    CHECK(c.ai&&*c.ai==Heap+Ai&&c.agree()&&c.aiVtable&&*c.aiVtable==Image+AiVtable&&c.state&&*c.state==0);
     CHECK(c.goal&&*c.goal==Heap+Goal&&c.destination&&(*c.destination)[0]==120&&c.destinationCopy&&(*c.destinationCopy)[2]==7);
     CHECK(c.d&&*c.d==Heap+D&&c.index&&*c.index==1&&c.request&&*c.request==Heap+w.request()&&c.forced&&(*c.forced)[1]==2&&c.flags&&*c.flags==0x00010203u);
     auto line=describe(c,Image);
-    CHECK(has(line," entity 20002000 component 20004000 componentvt image+3dca218 ai50 20010000 ai80 20010000 agree yes aivt image+3e11880 state 3 walk yes goal 20070000 dest9e0 120,40,7 dest850 120,40,7"));
+    CHECK(has(line," entity 20002000 component 20004000 componentvt image+3dca218 ai50 20010000 ai80 20010000 agree yes aivt image+3e11880 state 0 walk yes goal 20070000 dest9e0 120,40,7 dest850 120,40,7"));
     CHECK(has(line," d 20080000 dvt image+3e20000 index 1 request 20080760 forced 1,2,3 flags32 10203 flags8 3")&&!has(line,"unreadable"));
     // The base class of the component is taken too; the fixed byte means block 2.
     { World v;v.put<uint64_t>(Component,Image+BaseComponentVtable);v.put<uint8_t>(D+RequestFixed,1);auto t=v.sampler();auto k=read(t,Image,Heap+Actor);
@@ -118,6 +118,7 @@ void writes(){
     refused("AI component is not a DSAIIndividualComponent",[](World& w){w.put<uint64_t>(Component,Image+BaseComponentVtable);});
     refused("the two AI pointers differ",[](World& w){w.put<uint64_t>(Component+ComponentAiAgain,Heap+0x9000);});
     refused("AI is not a DSAIIndividual",[](World& w){w.put<uint64_t>(Ai,Image+AiVtable+8);});
+    refused("AI not running",[](World& w){w.put<uint8_t>(Ai+AiState,2);});
     refused("no walk goal",[](World& w){w.put<uint64_t>(Entries+5*0x20+8,Image+0x4c91d00);});
     refused("not walking",[](World& w){w.point(Goal+GoalDestination,100.5,40,7);w.point(Goal+GoalDestinationCopy,100.5,40,7);});
     refused("not walking",[](World& w){w.point(Goal+GoalDestinationCopy,121,40,7);});

@@ -25,6 +25,7 @@ constexpr uint64_t AiVtable=0x3e11880,AiState=0x48,AiGoals=0x3720,AiRequests=0x3
 constexpr uint64_t WalkGoalKey=0x4c91610,GoalDestination=0x9e0,GoalDestinationCopy=0x850;
 constexpr uint64_t RequestIndex=0x4d20,RequestFixed=0x4d24,RequestFirst=0x520,RequestSize=0x240,RequestForced=0x78,RequestFlags=0x238;
 constexpr uint8_t ForcedBit=0x40;
+constexpr uint8_t AiRunning=0;                              // AI +0x48 while it runs (live 2026-11-15; 2 = held still)
 constexpr uint32_t MaxComponents=256,MaxGoals=4096,RequestCount=32;
 constexpr uint32_t MaxOffsetCm=5000,RepeatBase=1000000;   // mulegoto <cm>, or <cm + RepeatBase> for the repeated write
 constexpr double MinPorterM=6,MinWalkM=1,MaxReachM=200,MaxPositionM=100000;
