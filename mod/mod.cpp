@@ -1435,6 +1435,14 @@ struct Runtime final:ds::Transport {
     static std::string rewardLine(const mod::rewards::Facility& f){
         std::ostringstream o;o<<"facility "<<std::hex<<f.hash<<std::dec<<" points "<<f.points<<" level "<<f.level<<" (floor "<<f.floor<<", cap "<<f.cap<<")";return o.str();
     }
+    // What holds a level below what the points have reached: the game's level cap for the facility (readHighest).
+    static std::string rewardCap(const mod::rewards::Facility& f,int32_t points){
+        std::ostringstream o;o<<"level cap ";if(f.highest==mod::rewards::Unknown)o<<"unknown";else o<<f.highest;
+        o<<", points alone give level "<<mod::rewards::levelOf(f,points,mod::rewards::MaxLevel);return o.str();
+    }
+    std::string rewardCapNow(const mod::rewards::Facility& f,int32_t points) const {
+        std::vector<mod::rewards::Facility> one{f};mod::rewards::readHighest(*sampler,sampler->base,one);return rewardCap(one[0],points);
+    }
     void tickRewards(uint64_t now) {
         if(!core||!sampler||!config.shareRewards){rewardIn.clear();return;}
         if(!rewardTried){
@@ -1475,7 +1483,9 @@ struct Runtime final:ds::Transport {
             bool ok=rewardApi.add(local->resource,owed);
             int32_t after[2]{local->points,local->level};sampler->read(local->record+8,after,8);
             if(ok)++rewardApplied;
-            o<<owed<<(ok?" added here":" refused by the game")<<", "<<local->points<<" -> "<<after[0]<<" points, level "<<local->level<<" -> "<<after[1]<<"\n";note(o.str().c_str());
+            o<<owed<<(ok?" added here":" refused by the game")<<", "<<local->points<<" -> "<<after[0]<<" points, level "<<local->level<<" -> "<<after[1];
+            if(after[1]<n.level)o<<" ("<<rewardCapNow(*local,after[0])<<")";     // behind the partner's level: say what the game holds it to
+            o<<"\n";note(o.str().c_str());
         }
         rewardPending.clear();
     }
@@ -2928,8 +2938,9 @@ struct Runtime final:ds::Transport {
                     // likes and grade totals (read-only, whatever share_rewards says).
                     if(*what==0){
                         auto facilities=mod::rewards::readFacilities(*sampler,sampler->base);
+                        mod::rewards::readHighest(*sampler,sampler->base,facilities);
                         note(("REWARD test: "+std::to_string(facilities.size())+" facilities\n").c_str());
-                        for(size_t i=0;i<facilities.size();++i)note(("REWARD test: "+std::to_string(i)+" "+rewardLine(facilities[i])+"\n").c_str());
+                        for(size_t i=0;i<facilities.size();++i)note(("REWARD test: "+std::to_string(i)+" "+rewardLine(facilities[i])+" "+rewardCap(facilities[i],facilities[i].points)+"\n").c_str());
                     }
                     else{
                         auto p=mod::rewards::readPorter(*sampler,sampler->base);std::ostringstream o;
@@ -2950,7 +2961,7 @@ struct Runtime final:ds::Transport {
                         else{
                             auto& f=facilities[row];int32_t owed=mod::rewards::Sync::owed(f,{f.hash,f.points+points,f.level});
                             bool ok=owed>0&&api.add(f.resource,owed);int32_t after[2]{f.points,f.level};sampler->read(f.record+8,after,8);
-                            std::ostringstream o;o<<"REWARD test: "<<rewardLine(f)<<": "<<owed<<(ok?" added":" not added")<<", now points "<<after[0]<<" level "<<after[1]<<"\n";note(o.str().c_str());
+                            std::ostringstream o;o<<"REWARD test: "<<rewardLine(f)<<": "<<owed<<(ok?" added":" not added")<<", now points "<<after[0]<<" level "<<after[1]<<" ("<<rewardCapNow(f,after[0])<<")\n";note(o.str().c_str());
                         }
                     }catch(const std::exception& e){note((std::string("REWARD test unavailable: ")+e.what()+"\n").c_str());}
                 }

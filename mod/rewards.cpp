@@ -6,7 +6,7 @@
 namespace mod::rewards {
 namespace {
 template<class T> T at(const std::vector<uint8_t>& b,size_t o){T v{};std::memcpy(&v,b.data()+o,sizeof v);return v;}
-struct Resource { uint64_t address=0; uint32_t hash=0; int32_t floor=0,cap=0; };
+struct Resource { uint64_t address=0; uint32_t hash=0; int32_t floor=0,cap=0,step=0; std::array<int32_t,5> thresholds{}; };
 }
 std::vector<Facility> readFacilities(const discovery::Sampler& s,uint64_t base){
     std::vector<Facility> out;uint64_t system=0,list=0,records=0,array=0,table=0;int32_t count=0;uint32_t capacity=0;
@@ -25,10 +25,10 @@ std::vector<Facility> readFacilities(const discovery::Sampler& s,uint64_t base){
 #endif
         (void)v;
         Resource r;r.address=p;r.hash=at<uint32_t>(b,0x40);r.floor=at<int32_t>(b,0x20);
-        int32_t last=0;bool ordered=true;for(int i=0;i<5;++i){int32_t t=at<int32_t>(b,0x28+4*size_t(i));ordered=ordered&&t>=last;last=t;}
+        int32_t last=0;bool ordered=true;for(int i=0;i<5;++i){int32_t t=at<int32_t>(b,0x28+4*size_t(i));ordered=ordered&&t>=last;last=t;r.thresholds[size_t(i)]=t;}
         int32_t step=at<int32_t>(b,0x3c);
         if(!r.hash||!ordered||step<0||step>MaxPoints/94||last>MaxPoints-94*step||r.floor<0||r.floor>last)continue;
-        r.cap=last+94*step;resources.push_back(r);
+        r.cap=last+94*step;r.step=step;resources.push_back(r);
     }
     std::vector<uint8_t> blob(size_t(capacity)*0x30);
     if(resources.empty()||!s.readOnce(table,blob.data(),blob.size()))return out;
@@ -42,7 +42,7 @@ std::vector<Facility> readFacilities(const discovery::Sampler& s,uint64_t base){
         static const Resource any{0,0,0,MaxPoints};if(!own)own=&any;
 #endif
         if(!own)continue;                              // a record of something the system does not list
-        f.floor=own->floor;f.cap=own->cap;
+        f.floor=own->floor;f.cap=own->cap;f.thresholds=own->thresholds;f.step=own->step;
 #ifndef MUTANT_REWARD_RANGE
         if(f.points<0||f.points>f.cap||f.level<0||f.level>MaxLevel)continue;
 #endif
@@ -51,6 +51,62 @@ std::vector<Facility> readFacilities(const discovery::Sampler& s,uint64_t base){
     std::sort(out.begin(),out.end(),[](const Facility& a,const Facility& b){return a.hash<b.hash;});
     for(size_t i=1;i<out.size();++i)if(out[i].hash==out[i-1].hash)return {};   // one record per facility, or the table is not what it seems
     return out;
+}
+int32_t levelOf(const Facility& f,int32_t points,int32_t highest){
+    int32_t level=0;
+#ifdef MUTANT_REWARD_UNCAPPED
+    highest=MaxLevel;
+#endif
+    for(int32_t n=1;n<=highest&&n<=MaxLevel;++n){
+        int64_t need=f.thresholds[size_t(n<5?n-1:4)];if(n>5)need+=int64_t(n-5)*f.step;
+        if(need>points)break;                          // the game stops at the first threshold not reached
+        ++level;
+    }
+    return level;
+}
+void readHighest(const discovery::Sampler& s,uint64_t base,std::vector<Facility>& facilities){
+    for(auto& f:facilities)f.highest=Unknown;
+    // The database's contexts: 0x20-byte slots (hash, 16-byte key at +8, the context at +0x18).
+    uint64_t database=0,contexts=0,context=0,values=0;uint32_t slots=0,count=0;std::array<uint64_t,2> key{};
+    if(!s.read(base+0x5794720,&database,8)||!database||!s.read(base+0x7bfd980,key.data(),16))return;
+    if(!s.read(database+0x20,&contexts,8)||!contexts||!s.read(database+0x2c,&slots,4)||!slots||slots>MostFacts||(slots&(slots-1)))return;
+    std::vector<uint8_t> blob(size_t(slots)*0x20);if(!s.readOnce(contexts,blob.data(),blob.size()))return;
+    for(uint32_t i=0;i<slots&&!context;++i){
+        size_t e=size_t(i)*0x20;if(!at<uint32_t>(blob,e))continue;
+#ifndef MUTANT_REWARD_CONTEXT
+        if(at<uint64_t>(blob,e+8)!=key[0]||at<uint64_t>(blob,e+0x10)!=key[1])continue;
+#endif
+        context=at<uint64_t>(blob,e+0x18);
+    }
+    // Its integer values: 0x18-byte slots (hash, the fact's UUID at +4, the value at +0x14). No context, or an empty
+    // table: every fact has its default, as in the game.
+    bool table=false;
+    if(context){
+        if(!s.read(context+0x50,&values,8)||!s.read(context+0x5c,&count,4))return;
+        if(values){
+            if(!count||count>MostFacts||(count&(count-1)))return;
+            blob.assign(size_t(count)*0x18,0);if(!s.readOnce(values,blob.data(),blob.size()))return;
+            table=true;
+        }
+    }
+    for(auto& f:facilities){
+        uint64_t fact=0;if(!f.resource||!s.read(f.resource+0x58,&fact,8))continue;
+        if(!fact){f.highest=MaxLevel;continue;}        // no cap fact: the game takes 99
+        std::array<uint64_t,2> id{};int32_t value=0;if(!s.read(fact+8,id.data(),16)||!s.read(fact+0x30,&value,4))continue;
+        for(uint32_t i=0;table&&i<count;++i){
+            size_t e=size_t(i)*0x18;if(!at<uint32_t>(blob,e))continue;
+#ifndef MUTANT_REWARD_FACT
+            if(at<uint64_t>(blob,e+4)!=id[0]||at<uint64_t>(blob,e+0xc)!=id[1])continue;
+#else
+            if(at<uint64_t>(blob,e+4)!=id[0])continue;
+#endif
+            value=at<int32_t>(blob,e+0x14);break;
+        }
+#ifndef MUTANT_REWARD_HOLD
+        value=std::clamp(value,0,MaxLevel);
+#endif
+        f.highest=value;
+    }
 }
 uint64_t mask64(uint32_t key){
     uint64_t poly=(key&1)?0x120400002ull:0;
