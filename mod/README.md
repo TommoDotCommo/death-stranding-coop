@@ -741,8 +741,10 @@ Run live: the read, the add routine alone, and two copies (one facility's point 
 which added the shortfall with its own routine; both read the same total, nothing bounced). Adding points up to a
 facility's cap left its level at 2: static reading (`game_offsets.md`, "Why points at the cap left the level at 2")
 shows the add routine does recompute the level, but never above the facility's level cap, a fact the story
-changes; the mod reads the right field and has nothing else to call. Not run live: the cap as the mod now reads
-it, a level-up through the add routine, and a real delivery between two copies (step 4 below).
+changes; the mod reads the right field and has nothing else to call. Both were then seen live: that facility's
+level cap reads 2, and a facility below its cap (level 3, cap 5) went to level 4 with one point added and to level 5
+at its points cap, in the add call itself, without a fault. Not run live: a real delivery between two copies (step 4
+below).
 
 `"share_rewards": true` (`rewards.h`; refused without `share_orders`). A facility's connection level (the stars of a
 knot city or a prepper) is a points total and a level in the game's residents system. Each mod reads every
@@ -777,7 +779,7 @@ read), `rewards 1` (the porter's likes and grade totals), `reward_add <row*10000
 that row's facility with the game's routine and prints the same two numbers; needs `share_rewards`).
 
 Live checklist (Episode 3 save in both copies, the crash recorder on, `share_orders`, `share_order_units` and
-`share_rewards` on in both; nothing below has been run):
+`share_rewards` on in both; steps 1 and 2 have been run as written, the others not):
 
 1. Read only, one copy: `rewards 0`, then `rewards 1`. Expect `REWARD test: <n> facilities` with n above 0 and one
    row per facility; the facilities the save has delivered to show points above their floor and a level that
