@@ -1041,11 +1041,13 @@ void install_redirect(void* self,bool releaseSession) {
     modules.instance=env(L"COOP_MODULE_INSTANCE");modules.windows=env(L"SystemRoot");modules.steam=policy.steam;
     {   // The game's own folder is admitted on every path, not only for a release ticket: with the data folder
         // outside the game folder (the launcher's direct path) the game's own steam_api64.dll was refused.
+        // A release needs it and stops without it; elsewhere a path that cannot be taken in canonical form admits
+        // nothing more, as before (the proxy's own probe runs from such a path).
         wchar_t exe[32768];auto count=GetModuleFileNameW(nullptr,exe,32768);
-        if(!count||count>=32768)fatal("redirect: game path unavailable\n");
-        auto path=redirect::canonical(exe);auto slash=path.find_last_of(L'\\');
-        if(path.empty()||slash==std::wstring::npos)fatal("redirect: invalid game path\n");
-        modules.release_game=path.substr(0,slash);
+        if((!count||count>=32768)&&releaseSession)fatal("redirect: release game path unavailable\n");
+        auto path=count&&count<32768?redirect::canonical(exe):std::wstring();auto slash=path.find_last_of(L'\\');
+        if(path.empty()||slash==std::wstring::npos){if(releaseSession)fatal("redirect: invalid release game path\n");}
+        else modules.release_game=path.substr(0,slash);
     }
     if(policy.instance!=modules.instance+L"\\redirect-data" || !safe_tree(modules.instance,false)) fatal("redirect: module/redirect instance mismatch\n");
     {   // The player's extra modules for this copy (module_policy.h). No file: none. A file that cannot be read whole
