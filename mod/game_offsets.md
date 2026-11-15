@@ -5542,6 +5542,13 @@ executable. **Hypothesis used by the mod:** the first pair is blood (life) and t
 would be the current ceiling of a three-value gauge). To settle it: read both rates while sprinting (stamina falls)
 and after a fall (blood falls).
 
+**Live 2026-11-15, one copy, open ground, read once a second:** standing, both rates 1.00. In a twelve-second sprint
+the second fell steadily (0.998, 0.997, ... 0.980) and did not come back in eight seconds of rest (0.979): that is
+how stamina behaves. The first stepped once from 1.00 to 0.97 after five seconds of the sprint and was back at 1.00
+three seconds into the rest; why is not known. After a drop from 12 m the first fell from 1.00 to 0.82 and the second
+from 0.979 to 0.906, and both stayed there. So the hypothesis stands: the first pair is blood, the second stamina
+(a fall costs both). Not seen yet: blood lost to a BT or to timefall, and stamina refilled by a drink.
+
 **Carrying too much, off balance:** the porter's own animation controls `Is_Loading_Over` (bool 16) and
 `Unbalance_Rate` (float 3), read by name from his animation manager like the other controls; the threshold for "off
 balance" (0.5) is a guess until it is watched live.
