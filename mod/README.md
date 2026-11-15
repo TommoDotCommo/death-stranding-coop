@@ -817,6 +817,9 @@ one MULE stayed within 0.3 to 3.7 m of the host's. Seen and not solved: the gues
 each move (its game gives it another goal), so a MULE that the two games send different ways is put back about every
 2 s, which shows as a jump of 4 to 5 m. Position alone is not enough for those; their goal has to follow too. Outside
 the range the two worlds differ freely (the same patrol group was 100 to 296 m apart).
+What gives a MULE its goal, and the ways to make it follow the host's, are read from the code in `game_offsets.md`
+("What gives a MULE its goal"): the best supported is the game's own forced destination for a walk in progress. None
+is implemented; that section has the live checks that come first.
 
 With `share_enemies` each game has the same MULEs (same locator UUIDs) but moves them itself, so in a fight the two
 players see them in different places. `"share_enemy_positions": true` (needs `share_enemies` and a `role`;

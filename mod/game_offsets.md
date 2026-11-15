@@ -1063,6 +1063,121 @@ Whom a MULE notices (research for "the partner's body as a target"; nothing impl
   player behind it does (its attacks, the cargo theft and the camp's phase logic all read the player). The first
   experiment would be read-only: the two factions and `IsHostileTowards` both ways.
 
+### What gives a MULE its goal, and how the goal could follow the host (2026-11-15, static only, nothing called)
+
+Asked after the first live run of `share_enemy_positions`: the guest's game sends its MULE somewhere else, so it walks
+off after each teleport and is put back about every 2 s. Everything below is read from the pinned image; no address
+here has been read or written in a running game, and nothing was implemented.
+
+**Read from the code**
+
+- **A MULE is planned, not steered.** Its entity's AI (`ControlledEntity_ExportedGetAIIndividual`: `0x34f0040(entity)`
+  = the `AIIndividualComponent` (descriptor `0x4e096b0`) found with `0x22b2a60(entity+0x90, descriptor)`, then
+  component `+0x50`; the entity of an actor is `*(actor+0x68) - 0x20`) runs an HTN plan. The plan's steps are
+  primitive tasks named by symbols the image registers at `0x2eb7bd0`..: `!ds_walk` (symbol kept at image
+  `+0x7bfb6a8`), `!ds_walk_precise` (`+0x7bfb6b0`), `!ds_patrol_walk`, `!ds_smooth_move`, `!ds_wait`,
+  `!ds_force_destination` (`+0x7bfba60`), `!teleport` (about 330 such names in all). The compiled domains are in the image
+  (name tables from about `0x3fff000` to `0x40a0000`); the one with the MULE names lists the behaviours
+  `behavior_notice`, `behavior_alert`, `follow_orders`, `behavior_evasion`, `behavior_giveup`, `behavior_return`,
+  `behavior_reinforce`, `behavior_caution`, `behavior_sneak`, and the patrol (`ds_patrol_*`) and idling
+  (`DsMuleGenerateOutdoorIdlingPoint2`) parts.
+- **The walk step.** `DSAIHTNPrimitiveTaskWalkSegment` (vtable `0x3e1b028`): `+0x28` = `0x2f107a0` lists its symbols
+  (the walks), `+0x30` = `0x2f0a6c0` starts it, `+0x48` = `0x2f0f290` runs every tick. The task keeps its destination
+  at task `+0x70` (3 doubles), a mode at `+0xb4`, the AI at `+0x10`.
+- **Where the current move target is.** The AI keeps its body goals in a table at AI `+0x3670` (`0x25bd930(AI+0x3670,
+  descriptor)`: an open-addressed table at `+0xb0` of that, i.e. AI `+0x3720`: entries pointer at `+0`, capacity at
+  `+0xc`; an entry is 0x20 bytes: hash (`crc32` of the key, top bit set; 0 = empty), key at `+8`, value at `+0x10`).
+  The walk's goal is the value for `AIBodyGoalDSWalk` (descriptor `0x4c91610`; its neighbours: `AISkillDSTeleport`
+  `0x4c91550`, `AIBodyGoalDSVehicleMove` `0x4c916e0`, `AIBodyGoalDSWait` `0x4c91870`, `AISkillDSWalkBase` `0x4c91a00`,
+  `AIBodyGoalDSAction` `0x4c91b80`, `AIBodyGoalDSCover` `0x4c91d00`, `AIBodyGoalDSPatrolAction` `0x4c91dc0`). In the
+  goal: destination at `+0x9e0` and again at `+0x850` (3 doubles each), speed at `+0xa8` and `+0x868`, a second
+  position at `+0x88` valid with bit 0 of `+0xbc`. The walk skill (its goal pointer at skill `+0x60`) reads `+0x9e0`
+  (`0x2ef2faf`, `0x2ef43d0`, `0x2ef473c`).
+- **Who writes it.** Only the walk task: at start (`0x2f0bb34`..`0x2f0bb52`, and the same in a second start at
+  `0x2f0a3c2`) and every tick (`0x2f0f806`..`0x2f0f894`): when task `+0x70` differs from goal `+0x9e0` it copies the
+  task's destination into `+0x9e0` and `+0x850`, and when it moved more than 0.1 m (squared against the float 0.01 at
+  `0x3d16594`) it calls `0x2f141e0(task)`, which claims the new destination with the AI manager
+  (`0x2505a00(*(*(image+0x7be0d38)+0x28), entity, &destination)`). So a destination written into the goal from
+  outside lasts one tick: the task writes its own back.
+- **The game's own redirect: the forced destination.** The AI's `+0x3690` points to an object D with a block of
+  per-tick requests at D `+0x2a0`: request = D `+0x2a0 + 0x280 + i*0x240`, `i` = the i32 at D `+0x2a0+0x4a80`, or 2
+  when the byte at D `+0x2a0+0x4a84` is set (`0x2f0faf0`). The plan's instant steps
+  (`DSAIHTNPrimitiveTaskController`, vtable `0x3e1b348`, `+0x30` = `0x2f064b0`) write into it; `!ds_force_destination
+  (position)` (`0x2f071ab`) stores the position at request `+0x78` (3 doubles) and sets bit `0x40` of request
+  `+0x238`. The walk task's tick reads exactly that (`0x2f0f7d6`: `test byte [request+0x238], 0x40`; when set, task
+  `+0x70` = request `+0x78`), and the lines above then retarget the goal. This is the only thing found that changes
+  where a walking MULE goes without replacing its plan.
+- **What "AI suspend" is.** When a MULE's life state leaves standing, its setter (`0x2acedb0`) sends the entity
+  `MsgDSAISuspend` (vtable `0x3d06008`, descriptor `0x4b0b2e0`), and `MsgDSAIActive` (`0x3d06038`, `0x4b0b3a0`) when it
+  stands again; both are 16 bytes (vtable, a zero byte) sent with `0x235c990(entity, &message, 0)`. The
+  `DSAIIndividualComponent` handlers (`0x2bde740` suspend, `0x2bde720` active) take the object at component `+0x80`:
+  suspend removes the entity's claim from the AI manager (`0x2548980` -> `0x26011b0`) and sets the byte at `+0x39d0`;
+  active clears it. The three readers of that byte (`0x255470c`, `0x2560096`, `0x2587797`) only skip claiming a
+  place. `AINavMeshComponent` handles the pair too (`0x242e540`, `0x242e4a0`). It is bookkeeping for a body on the
+  ground, not a switch that stops the plan.
+- **The real sleep.** `MsgSleepAIIndividual` (descriptor `0x4b0af20`; handler `0x2be3270`): byte at message `+0x10`
+  set -> `0x2551cb0(AI)` (it changes the state byte at AI `+0x48`), clear -> `0x2560d90(AI)`. `Entity_ExportedSetSleeping`
+  (`0x2361e20`) sleeps the whole entity.
+- **Orders.** The script interface for AI orders is real code, not stubs: `AIDirectableAgent_ExportedHTNFactBegin`
+  `0x2562c90` (-> `0x253bb10`), `...HTNFactAddWorldPosition` `0x2562c70` (-> `0x2526e20`), `...HTNFactSubmitAsOrder`
+  `0x2562d10`, `...CancelOrders` `0x2562b60` (-> `0x251f930`). The generic order vocabulary (`order`, `has_order`,
+  `sequence_fact_move_to`, `!clear_order`, `!send_order_completed_message`) is in another domain's table (around
+  `0x409d000`); the MULE table has `follow_orders` and the `..._by_cliff_order` names.
+- **Not for a MULE:** `MsgDSMoveTo` (descriptor `0x4c62f90`) is handled by `DSHunterComponent` only (handler table at
+  `0x4c0b770`). `MsgDSControlNpc` (`0x4c64b50`) has no handler table entry. `DSMuleManager::sSetDbgMuleMoveSpeedScale`
+  is an empty function in this build. `DSMuleManager::sSetSequenceOnlyMule` (`0x2b2fa40`) sets bit 12 of actor
+  `+0x124` and `+0xea8` and calls the actor's virtuals `+0x48` and `+0x50` with 1; no function that undoes it was
+  found.
+
+**Guesses and unknowns**
+
+- That the AI the tasks hold (task `+0x10`), the component's `+0x50` and its `+0x80` are one object: all three are
+  used with the same offsets (`+0x48` state, `+0x3690`, `+0x39d0`), but no single function shows it.
+- What D is (its class), when the request block's index changes, and when the `0x40` bit is cleared (every tick, or
+  when the plan's next step starts). If it is not cleared by the game, a write from outside has to clear it itself.
+- Whether the AI runs on worker threads while the mod's game-thread tick runs (the MULE manager has a "parallel"
+  accessor): a write of three doubles and a bit could land in the middle of the task's tick.
+- Whether a redirected walk replans its path at once or finishes the old path first, and what the plan does when it
+  arrives (very likely its next step sends it off again, so the redirect has to be repeated while the error lasts).
+- What a guest's MULE is doing when it "walks off": a patrol out of step with the host's, a random idling point, or a
+  chase of the guest's porter. A MULE that stands in a wait step has no walk task: a forced destination does nothing.
+- Which order facts `follow_orders` accepts, and how a MULE's `AIDirectableAgent` is reached (`MsgGetDirectableAgent`).
+
+**The ways to make the guest's MULE follow, ranked by what the code supports**
+
+1. *Forced destination, the host's pose, written every tick into the MULE's request block* (a "go there", the
+   game's own mechanism for redirecting a walk). Best supported: writer and reader are both read, it keeps the walk
+   animation, and it needs no call into the game, only a checked write. Risks: the unknowns above (bit lifetime,
+   threads), a destination off the navigation mesh, and it only works while the MULE walks. The teleport stays for
+   large errors and for a MULE with no body.
+2. *Small corrections more often* (`enemy_position_pull`, already in the mod, not run live). No new research needed,
+   but each step is the actor teleport (placed on the mesh, lifted 0.1 m), at most 1 m/s against a MULE walking the
+   other way at more than that: it can hide a drift, not a different goal.
+3. *The guest's AI asleep and the pose driven from the host* (`MsgSleepAIIndividual` or the entity's sleep). The
+   switches exist; nothing then animates the MULE (it would slide), its attacks on the guest stop, and waking it in
+   a fight is a new problem. It needs the host's animation as well as its pose, as the partner's body does.
+4. *An order through the script interface.* The functions are there; the facts the MULE's domain accepts are not
+   known, so there is nothing to submit yet.
+5. *Writing the body goal's destination.* Refuted by the code: the walk task writes it back every tick.
+
+**Live checklist** (two copies, both porters about 60 m from a camp, `share_enemies` and `share_enemy_positions` on)
+
+1. Add a read-only test command `mulegoal <n>` beside `muleat`: for the n nearest MULEs with a body, log the AI
+   pointer by both routes (component `+0x50` and `+0x80`), the AI's state byte `+0x48`, whether the body-goal table
+   has `AIBodyGoalDSWalk`, its `+0x9e0` and `+0x850`, D, the request index and the request's `+0x78` and `+0x238`.
+   Expected: both routes give one pointer; `+0x9e0` equals `+0x850`; the destination is a point on the ground within
+   a few hundred metres and changes when the MULE turns.
+2. Run it in both games for the same MULE (same key) twice a second for a minute while the guest's copy is being put
+   back. Look at: do the two games' destinations differ (patrol out of step, or the guest's leads to the guest's
+   porter), and does bit `0x40` of `+0x238` ever show by itself (then the game clears it, and how fast).
+3. Add a test command `mulegoto <cm>` that writes a forced destination that many centimetres east of the nearest
+   walking MULE's own destination, once, and logs the goal's `+0x9e0` for the next two seconds. Expected when the
+   reading above is right: `+0x9e0` becomes the written point within a tick or two and the MULE turns towards it.
+   Then the same repeated every tick for 5 s: does it arrive, and where does it go when the writes stop.
+4. Only then a config key: the guest writes the host's pose as the forced destination for a MULE with a body whose
+   error is between the deadband and the snap distance, and keeps the teleport above it. Measure the number of
+   teleports per minute with and without (the 2026-11-15 run: about one every 2 s for a MULE sent two ways).
+
 ## Orders: the mission system (2026-11-12, static, the reads and the three requests confirmed live)
 
 `DSMissionSystem* S = *(image+0x7c0aff8)`. Static orders: `*(S+0x108)` -> {count (i32), records pointer at +8}, one
