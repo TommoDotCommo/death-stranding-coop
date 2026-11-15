@@ -1,5 +1,6 @@
 #pragma once
-// One shared load per order (orderload.cpp; config `share_order_load`, with `share_orders`). Not run live yet.
+// One shared load per order (orderload.cpp; config `share_order_load`, with `share_orders`). Run live with two copies
+// (2026-11-16: an order taken, a case put down, picked up by the partner and handed in by him).
 //
 // Without it each game makes its own cargo for a shared order, so two players carry two loads. With it only the
 // player who took the order keeps the order's cargo:

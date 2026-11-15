@@ -1261,7 +1261,7 @@ completed, none under way. Start of order 0x36330 (no. 414): state 4, an instanc
 cargo records with `+0xb0` = the id. Success: state 16, result 4, no instance. Fail of another: state 8, result 2.
 The same three requests in the partner's game gave the same states there.
 
-### Order cargo: how a cargo record becomes an order's (2026-11-14, static; nothing here called live yet)
+### Order cargo: how a cargo record becomes an order's (2026-11-14, static; the creator run live 2026-11-15 and 16)
 
 - A cargo record's `+0x18` is a 64-bit handle, unique among the records in use: the allocator `0x2c4dde0(manager,
   wanted)` scans all `0x1e98` records (in use = byte `+0x21` not 0) and the pending creations for it. With 0 it
@@ -1301,6 +1301,12 @@ The same three requests in the partner's game gave the same states there.
   instance is made, `b` (or a global condition) adds a notification. Neither skips the cargo.
 - The mod's shared load (`orderload.h`, `share_order_load`) makes the partner's copy of a put-down case with
   `0x2c470e0` and a creation record filled like the mission system's, from what the partner read off its record.
+- Live (2026-11-16, two copies, order 0x372d7): a case made that way has flags `+0x204` = `0x280000` like the
+  mission system's own untouched cases (bit 0 comes on when the porter is near; `0x300` while it is carried), is
+  drawn with the game's label and offers "Carry on Back"; picked up, its record reads exactly like the original's
+  (`0x280301`); the delivery terminal takes it and its unit goes to delivered. A handed-in case's record reads
+  `+0x204` = `0x280381` and `+0x208` bit 0 set, and it leaves the porter as a put-down does: the unit's row (state
+  2) is what tells the two apart.
 
 ## Save sections: the game's own serialization over a memory buffer (2026-11-12, static; one section run live)
 
