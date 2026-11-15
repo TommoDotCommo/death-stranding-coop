@@ -633,7 +633,7 @@ void drain_modules() {
             }
             else note(L"MODULE_UNLOADED",path,L"no live IAT");
         });
-        if(!ok && redirect::refusal(redirect::ModulePhase::loaded)==redirect::Refusal::end_process) fatal("redirect: dependency/native module refused after initialization; see MODULE_REFUSE\n");
+        if(!ok && redirect::refusal(modules.mode,redirect::ModulePhase::loaded)==redirect::Refusal::end_process) fatal("redirect: dependency/native module refused after initialization; see MODULE_REFUSE\n");
         e.ready.store(false,std::memory_order_release);
         consumed.store(++drained,std::memory_order_release);
     }
@@ -713,7 +713,7 @@ HMODULE checked_module(LPCWSTR name,HANDLE file,DWORD flags,const wchar_t* origi
             [&](bool allowed){module_audit(path,L"request",allowed);},[]{});
         if(!ok) {
             // Refused before any of its code could run: answered as a load that failed, and the game goes on.
-            if(redirect::refusal(redirect::ModulePhase::request)!=redirect::Refusal::fail_load) fatal("redirect: dynamic module refused; see MODULE_REFUSE record\n");
+            if(redirect::refusal(modules.mode,redirect::ModulePhase::request)!=redirect::Refusal::fail_load) fatal("redirect: dynamic module refused; see MODULE_REFUSE record\n");
             note(L"MODULE_LOAD_FAILED",path,L"error=5 refused by the module policy; not passed to the loader via="+std::wstring(origin)+L" tid="+std::to_wstring(GetCurrentThreadId()));
             load_origin=previous;SetLastError(ERROR_ACCESS_DENIED);return nullptr;
         }
@@ -733,7 +733,7 @@ HMODULE checked_module(LPCWSTR name,HANDLE file,DWORD flags,const wchar_t* origi
         path=n && n<32768?resolved:L"<unknown>";
         bool loaded=redirect::module_event(modules,path,module_evidence(path),existing!=nullptr,redirect::ModulePhase::loaded,
             [&](bool allowed){module_audit(path,L"loaded-after-init",allowed);},[]{if(!load_depth) patch_all();});
-        if(!loaded && redirect::refusal(redirect::ModulePhase::loaded)==redirect::Refusal::end_process) fatal("redirect: loaded module refused; see MODULE_REFUSE record\n");
+        if(!loaded && redirect::refusal(modules.mode,redirect::ModulePhase::loaded)==redirect::Refusal::end_process) fatal("redirect: loaded module refused; see MODULE_REFUSE record\n");
     } else if(!m) note(L"MODULE_LOAD_FAILED",path,L"error="+std::to_wstring(error)+L" via="+origin+L" tid="+std::to_wstring(GetCurrentThreadId()));
     load_origin=previous;SetLastError(error);return m;
 }

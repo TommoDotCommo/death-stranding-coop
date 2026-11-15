@@ -120,11 +120,13 @@ RequestAction classify_request(const ModulePolicy& c,const std::wstring& request
     return RequestAction::policy;
 #endif
 }
-Refusal refusal(ModulePhase phase) {
+Refusal refusal(ModuleMode mode,ModulePhase phase) {
 #ifdef MUTANT_MODULE_REFUSED_STAYS
-    (void)phase;return Refusal::fail_load;
+    (void)mode;(void)phase;return Refusal::fail_load;
+#elif defined(MUTANT_MODULE_STRICT_GOES_ON)
+    (void)mode;return phase==ModulePhase::request?Refusal::fail_load:Refusal::end_process;
 #else
-    return phase==ModulePhase::request?Refusal::fail_load:Refusal::end_process;
+    return mode==ModuleMode::allowlist&&phase==ModulePhase::request?Refusal::fail_load:Refusal::end_process;
 #endif
 }
 bool module_event(const ModulePolicy& c,const std::wstring& p,bool evidence,bool existing,

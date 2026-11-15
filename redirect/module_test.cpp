@@ -92,8 +92,10 @@ int main(int argc,char** argv) {
         many.clear();for(size_t i=0;i<MaxExtraModules;++i)many+="C:\\x\\m"+std::to_string(i)+".dll\n";check(parse_module_extra(many,extra)&&extra.size()==MaxExtraModules);
     }
     // A refused request fails the load and the game goes on; a module found loaded after the fact ends the process.
-    check(refusal(ModulePhase::request)==Refusal::fail_load);
-    check(refusal(ModulePhase::loaded)==Refusal::end_process&&refusal(ModulePhase::mapped)==Refusal::end_process);
+    check(refusal(ModuleMode::allowlist,ModulePhase::request)==Refusal::fail_load);
+    check(refusal(ModuleMode::allowlist,ModulePhase::loaded)==Refusal::end_process&&refusal(ModuleMode::allowlist,ModulePhase::mapped)==Refusal::end_process);
+    // strict stays as closed as it was: any refusal ends the process.
+    for(auto phase:{ModulePhase::request,ModulePhase::mapped,ModulePhase::loaded})check(refusal(ModuleMode::strict,phase)==Refusal::end_process);
     check(classify_request(c,L"c:\\lab\\s0\\x.dll",false,true)==RequestAction::policy);
     check(classify_request(c,L"x.dll",true,false)==RequestAction::policy);
     {auto s=c;s.mode=ModuleMode::strict; check(classify_request(s,L"api-ms-win-core-x-l1-1-0.dll",false,false)==RequestAction::not_found);}

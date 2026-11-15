@@ -42,8 +42,9 @@ enum class ModulePhase { request, mapped, loaded };
 // never enters the process and the game goes on without it (a third-party input method's DLL, loaded by Windows into
 // every process with a window, used to end the game). A module that is found loaded after the fact has already run
 // code here, so that still ends the process.
+// Under `strict` every refusal ends the process, as it always did.
 enum class Refusal { fail_load, end_process };
-Refusal refusal(ModulePhase phase);
+Refusal refusal(ModuleMode mode,ModulePhase phase);
 // Shared orchestration seam: audit BEFORE refusal; patch AFTER successful load.
 bool module_event(const ModulePolicy&, const std::wstring&, bool evidence,
                   bool existing, ModulePhase,
