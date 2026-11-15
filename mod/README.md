@@ -888,14 +888,16 @@ set)` without `share_enemy_positions`:
   shown, porter at X,Y,Z`, then for each of the n nearest MULEs with a body (at most 12) one line
   `MULEGOAL test: key K id I life S at X,Y,Z dist D` followed by the chain fields, always in this order:
   `entity E component C componentvt V ai50 A ai80 A agree yes|no aivt V state B walk yes|no goal G dest9e0 X,Y,Z
-  dest850 X,Y,Z d D dvt V index I request R forced X,Y,Z flags32 F flags8 F`. Addresses and flags are hexadecimal
+  dest850 X,Y,Z d D dvt V index I request R forced X,Y,Z flags32 F flags8 F parent P [parentvt V]` (the parent is
+  the entity the MULE hangs under: 0, or a rider's truck). Addresses and flags are hexadecimal
   without a prefix; a vtable is `image+OFFSET` when it lies in the game's image; a link that could not be read, and
   everything behind it, is the word `unreadable`. `component 0` = no AI component, `walk no goal 0` = the body-goal
   table holds no walk goal now.
 - `mulegoto <cm> <stamp>` (a checked write of three doubles and one bit; no call): the nearest standing MULE with a
   body that walks (a walk goal whose destination is over 1 m from it), 6 m or more from the porter, gets a forced
   destination `cm` centimetres (at most 5000) east of its own destination. `mulegoto <cm+1000000> <stamp>` repeats the
-  write every tick for 5 s. Lines: `MULEGOAL test: forced before key K cm C repeat 0|1 to X,Y,Z at X,Y,Z dist D` +
+  write every tick for 5 s; `mulegoto <cm+2000000> <stamp>` writes once for the nearest MULE that stands at its walk
+  goal and watches it for 20 s (does a standing MULE take it when it next walks? not answered yet). Lines: `MULEGOAL test: forced before key K cm C repeat 0|1 to X,Y,Z at X,Y,Z dist D` +
   chain fields; `MULEGOAL test: forced after key K result written` (or `result REFUSED: reason`) + chain fields; then
   twice a second, until 3 s after the last write, `MULEGOAL test: forced watch key K phase writing|after writes W
   refusals R last ok|reason at X,Y,Z` + chain fields; at the end `MULEGOAL test: forced end key K writes W refusals R
