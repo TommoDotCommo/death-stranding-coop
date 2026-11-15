@@ -1226,7 +1226,13 @@ both games, 368 rows; then `mulegoto` in the host's game)**
   `image+0x3e26790`, and zero for every other MULE (372 rows free, 202 rows child). In the guest's game the five
   got off during the run and their parent went to zero. A rider keeps a walk goal and state 0 while it sits; the
   actor's teleport does not move it (five riders 140 m from the host's were put there every second without effect).
-- Still open: whether a MULE that stands in a wait step takes a forced destination when it next walks; what a
+- A standing MULE (2026-11-16): with the "it must be on its way" rule taken out for one two-copy run, the refusals
+  stayed (137 "not walking" against 198 writes) and no destination was ever left waiting: the MULEs the guest could
+  not steer are the ones whose walk goal is idle (`+0x850` at `FLT_MAX`), standing in a wait step or running with
+  another goal, not ones that have just arrived. Giving such a MULE a destination would change nothing until its
+  plan walks again, and then the next look writes one anyway. What is missing for them is a way to make a waiting
+  MULE start a walk (the order interface above), not a destination. The rule was put back.
+- Still open: what a
   redirected MULE does on arriving (its plan's next step, so far as the two-copy run shows: it is sent again as
   soon as it is 0.75 m off); the threads (the write is made from the game-thread callback; nothing went wrong in
   about 600 writes).
