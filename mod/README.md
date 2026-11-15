@@ -720,8 +720,8 @@ Each game keeps simulating its own world; these settings share the outcome of wh
   in is delivered in the partner's game too and the partner's copy of that cargo is removed, so two players can
   each carry part of an order.
 
-- `"share_order_load": true` (with `share_orders`, best with `share_order_units`; `orderload.h`; **not run live
-  yet**): one shared load per order. Only the player who took the order at the terminal keeps its cargo: the game
+- `"share_order_load": true` (with `share_orders`, best with `share_order_units`; `orderload.h`; run live with two
+  copies for the taking of an order, not yet for a case put down): one shared load per order. Only the player who took the order at the terminal keeps its cargo: the game
   that took the order on for the partner removes the cargo it made for it (cases lying in the world only, never one
   on the porter). A case of the order that a porter puts down goes to the partner as shared cargo with a tag naming
   the order, the unit and the item, and the partner's game makes it with the game's own cargo creator, filled as the
@@ -1033,7 +1033,10 @@ other porter's likes by one with the counter popup.
 
 Three small things that make the partner feel alive from a distance (`signals.h`; `game_offsets.md`, "Shout, scan and
 vitals for the partner"). Each key requires `puppet_probe`, covers both directions (what this porter does is sent,
-what the partner does is shown), and should be set by both players. **None of the three has run in a game yet.**
+what the partner does is shown), and should be set by both players. Run live with one copy and the stand-in
+partner (2026-11-15): the scan counter, the call-out, the tag, the scan notice, one scan and one shout sent, and the
+voice and pulse calls without a fault; what the voice lines sound like and whether the pulse shows has not been
+judged, and two real copies have not been run.
 
 - `"partner_shout": true`: when this porter calls out (the game's shout key), the partner gets one event (CARGO type
   19, delivered exactly once; at most one a second), and his game asks the partner body for a voice line from its
@@ -1049,8 +1052,9 @@ what the partner does is shown), and should be set by both players. **None of th
 - `"partner_vitals": true` (with `partner_tag`): the porter's blood and stamina (percent, in steps of 5) and whether he
   is overloaded or off balance go to the partner as three bytes (CARGO type 21) on every connection and then only
   when what would be shown changes, never more often than every 2 s; the name tag reads `Name  B90 S60 heavy
-  unsteady`, its text changing at most every 2 s. Which of the two status pairs is blood and which stamina is a
-  hypothesis; `puppet.ride` `vitals` logs this porter's raw readings (`SIGNAL test: ...`) to check it.
+  unsteady`, its text changing at most every 2 s. The first status pair is taken for blood and the second for
+  stamina: live, the second fell steadily in a sprint and a 12 m drop took the first from 1.00 to 0.82
+  (`game_offsets.md`); `puppet.ride` `vitals` logs this porter's raw readings (`SIGNAL test: ...`).
 
 A receiver shows at most one shout and one scan every 1.5 s and twenty of each a minute, whatever arrives. The stand-in
 partner can play the other side: `--shout-every S`, `--scan-every S`, `--vitals BLOOD STAMINA BITS`. Tests:
