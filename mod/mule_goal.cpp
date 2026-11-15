@@ -20,6 +20,8 @@ Chain read(const discovery::Sampler& s,uint64_t base,uint64_t actor){
     if(!*ref){c.entity=0;return c;}
     if(!pointerLike(*ref-EntityBias))return c;
     c.entity=*ref-EntityBias;
+    c.parent=q(s,*c.entity+EntityParent);
+    if(c.parent&&*c.parent&&pointerLike(*c.parent))c.parentVtable=q(s,*c.parent);
     uint32_t n=0;auto array=q(s,*c.entity+ComponentArray);
     if(!s.read(*c.entity+ComponentCount,&n,4)||!array||!pointerLike(*array))return c;
     c.component=0;
@@ -96,10 +98,12 @@ std::string describe(const Chain& c,uint64_t base){
     hex("request",c.request);point("forced",c.forced);
     o<<" flags32 ";if(c.flags)o<<std::hex<<*c.flags<<std::dec;else o<<"unreadable";
     o<<" flags8 ";if(c.flags)o<<std::hex<<(*c.flags&0xff)<<std::dec;else o<<"unreadable";
+    hex("parent",c.parent);
+    if(c.parent&&*c.parent)offset("parentvt",c.parentVtable);
     return o.str();
 }
 std::optional<Ask> ask(uint32_t argument){
-    Ask a;a.repeat=argument>=RepeatBase;a.cm=a.repeat?argument-RepeatBase:argument;
+    Ask a;a.standing=argument>=2*RepeatBase;a.repeat=!a.standing&&argument>=RepeatBase;a.cm=a.standing?argument-2*RepeatBase:a.repeat?argument-RepeatBase:argument;
 #ifndef MUTANT_MULEGOAL_OFFSET
     if(a.cm>MaxOffsetCm)return std::nullopt;
 #endif

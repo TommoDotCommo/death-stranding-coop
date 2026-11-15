@@ -3089,6 +3089,7 @@ struct Runtime final:ds::Transport {
                     // Test, a checked write and no call (mule_goal.h): "mulegoto <cm>" gives the nearest walking MULE with a body,
                     // 6 m or more from the porter, a forced destination that many centimetres (at most 5000) east of its own, once;
                     // "mulegoto <cm+1000000>" writes it every tick for 5 s. The goal is logged twice a second, and for 3 s after.
+                    // "mulegoto <cm+2000000>": once, for the nearest MULE that stands at its walk goal, watched for 20 s.
                     auto wanted=mod::mulegoal::ask(*argument);
                     if(!config.shareEnemyPositions)note("MULEGOAL test: off (share_enemy_positions is not set)\n");
                     else if(!wanted)note("MULEGOAL test: forced refused: offset over 5000 cm\n");
@@ -3101,17 +3102,20 @@ struct Runtime final:ds::Transport {
                         for(auto& m:mules){if(m.lod!=2||mod::enemies::condition(m.state,m.flags)!=mod::enemies::Up||m.state==5)continue;
                             if(++looked>12)break;
                             chain=mod::mulegoal::read(*sampler,sampler->base,m.address);last=mod::mulegoal::refusal(*sampler,sampler->base,chain,m.position,here,writable);
+                            // "<cm+2000000>": a MULE that stands at its walk goal (everything else as for a walking one).
+                            if(wanted->standing){if(last=="not walking"&&mod::mulegoal::refusal(*sampler,sampler->base,chain,m.position,here,writable,false).empty()){best=&m;break;}
+                                if(last.empty())last="it walks";continue;}
                             if(last.empty()){best=&m;break;}}
                         if(!best)note(("MULEGOAL test: forced refused: none of the "+std::to_string(std::min(looked,12u))+" nearest can be forced, the last: "+last+"\n").c_str());
                         else{
                             auto destination=mod::mulegoal::east(*chain.destination,wanted->cm);uint64_t key=mod::enemies::key(best->uuid);
                             { std::ostringstream o;o<<"MULEGOAL test: forced before key "<<std::hex<<key<<std::dec<<" cm "<<wanted->cm<<" repeat "<<(wanted->repeat?1:0)<<" to "<<destination[0]<<","<<destination[1]<<","<<destination[2]
                                 <<" at "<<best->position[0]<<","<<best->position[1]<<","<<best->position[2]<<" dist "<<metres(*best)<<mod::mulegoal::describe(chain,sampler->base)<<"\n";note(o.str().c_str()); }
-                            auto why=mod::mulegoal::force(*sampler,sampler->base,chain,best->position,here,destination,true,writable,mod::mulegoal::nativePoke());
+                            auto why=mod::mulegoal::force(*sampler,sampler->base,chain,best->position,here,destination,!wanted->standing,writable,mod::mulegoal::nativePoke());
                             { std::ostringstream o;o<<"MULEGOAL test: forced after key "<<std::hex<<key<<std::dec<<" result "<<(why.empty()?"written":"REFUSED: "+why)
                                 <<mod::mulegoal::describe(mod::mulegoal::read(*sampler,sampler->base,best->address),sampler->base)<<"\n";note(o.str().c_str()); }
                             if(why.empty()){auto& g=muleGoto;g=MuleGoto{};g.active=true;g.first=false;g.key=key;g.chain=chain;g.destination=destination;g.writes=1;
-                                g.until=wanted->repeat?now+mod::mulegoal::RepeatMs:now;g.watchUntil=g.until+mod::mulegoal::WatchMs;g.logAt=now+mod::mulegoal::LogMs;}
+                                g.until=wanted->repeat?now+mod::mulegoal::RepeatMs:now;g.watchUntil=g.until+(wanted->standing?mod::mulegoal::StandingWatchMs:mod::mulegoal::WatchMs);g.logAt=now+mod::mulegoal::LogMs;}
                         }
                     }
                 }

@@ -19,7 +19,7 @@
 #include <optional>
 #include <string>
 namespace mod::mulegoal {
-constexpr uint64_t ActorEntity=0x68,EntityBias=0x20,ComponentCount=0x90,ComponentArray=0x98;
+constexpr uint64_t ActorEntity=0x68,EntityBias=0x20,EntityParent=0x70,ComponentCount=0x90,ComponentArray=0x98;
 constexpr uint64_t DsComponentVtable=0x3dca218,BaseComponentVtable=0x3dc9c10,ComponentAi=0x50,ComponentAiAgain=0x80;
 constexpr uint64_t AiVtable=0x3e11880,AiState=0x48,AiGoals=0x3720,AiRequests=0x3690;
 constexpr uint64_t WalkGoalKey=0x4c91610,GoalDestination=0x9e0,GoalDestinationCopy=0x850;
@@ -29,12 +29,13 @@ constexpr uint8_t AiRunning=0;                              // AI +0x48 while it
 constexpr uint32_t MaxComponents=256,MaxGoals=4096,RequestCount=32;
 constexpr uint32_t MaxOffsetCm=5000,RepeatBase=1000000;   // mulegoto <cm>, or <cm + RepeatBase> for the repeated write
 constexpr double MinPorterM=6,MinWalkM=1,MaxReachM=200,MaxPositionM=100000;
-constexpr uint64_t RepeatMs=5000,WatchMs=3000,LogMs=500;
+constexpr uint64_t RepeatMs=5000,WatchMs=3000,StandingWatchMs=20000,LogMs=500;
 using Vec3=std::array<double,3>;
 // Every link of the chain; a value is absent when its read failed or the link before it did.
 struct Chain {
     uint64_t actor=0;
     std::optional<uint64_t> entity,component,componentVtable;      // component: 0 = the entity has no AI component
+    std::optional<uint64_t> parent,parentVtable;                   // the entity's parent entity (+0x70); 0 = none. A seated porter is a child of his vehicle: is a riding MULE?
     std::optional<uint64_t> ai,aiAgain,aiVtable;                   // by component +0x50 and +0x80
     std::optional<uint8_t> state;
     std::optional<uint64_t> goal;                                  // 0 = the table was read and holds no walk goal
@@ -50,7 +51,7 @@ Chain read(const discovery::Sampler&,uint64_t base,uint64_t actor);
 // The fields of one log line after the MULE's own (key, position): fixed order, `unreadable` for an absent link.
 std::string describe(const Chain&,uint64_t base);
 // mulegoto's argument: the offset east in centimetres and whether the write repeats; nothing when over the bound.
-struct Ask { uint32_t cm=0; bool repeat=false; };
+struct Ask { uint32_t cm=0; bool repeat=false,standing=false; };   // standing (<cm + 2*RepeatBase>): one write for a MULE that stands at its walk goal, watched for StandingWatchMs
 std::optional<Ask> ask(uint32_t argument);
 using Writable=std::function<bool(uint64_t at,size_t n)>;          // plain committed read-write memory, all of it
 using Poke=std::function<void(uint64_t at,const void* from,size_t n)>;
