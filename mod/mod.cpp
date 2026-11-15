@@ -3050,7 +3050,7 @@ struct Runtime final:ds::Transport {
                     std::ostringstream o;o<<"MULEPOS test: "<<mules.size()<<" MULEs, porter at "<<here[0]<<","<<here[1]<<","<<here[2]<<"\n";
                     for(size_t i=0;i<mules.size()&&i<std::min<uint32_t>(*count,12);++i){auto& m=mules[i];
                         o<<"MULEPOS test: key "<<std::hex<<mod::enemies::key(m.uuid)<<" id "<<m.id<<std::dec<<" lod "<<m.lod<<" state "<<m.state<<" at "<<m.position[0]<<","<<m.position[1]<<","<<m.position[2]
-                         <<" heading "<<mod::enemyposes::heading(m.rotation)<<" "<<metres(m)<<" m\n";}
+                         <<" heading "<<mod::enemyposes::heading(m.rotation)<<" "<<metres(m)<<" m"<<(m.rides?" rides":"")<<"\n";}
                     note(o.str().c_str());
                 }
                 else if(auto cm=mod::puppet::parseCargoCommand(text,mod::runStamp(),"mulemove");cm&&anchor.pose.available) {

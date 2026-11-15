@@ -22,7 +22,7 @@
 namespace mod::enemyposes {
 // Wire flags (below ds::EnemyFlagMask).
 constexpr uint8_t HasBody=1;   // the host's game has an entity for it (LOD 2)
-constexpr uint8_t Fast=2;      // it moves faster than a person runs there (on a truck): not to be corrected
+constexpr uint8_t Fast=2;      // it rides (its entity hangs under a truck) or moves faster than a person runs there: not to be corrected
 constexpr double RangeM=80;          // the host sends MULEs within this of either player
 // ...and goes on sending one it already sends until it is further than this: a MULE standing near the edge (live: one
 // at 78 m) went in and out of the sample, and each time it was out the guest's copy walked its own way.

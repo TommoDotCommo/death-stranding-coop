@@ -105,6 +105,17 @@ static void units(){
     { Corrector c;std::vector<Mule> v;std::vector<ds::EnemyPose> p;for(uint8_t i=1;i<=6;++i){v.push_back(mule(i,100+10.0*i,0,0));p.push_back(pose(i,100+10.0*i,3.0+i));}
       auto h=shown(p);auto m=c.decide(v,&h,porter,1000);CHECK(m.size()==MovesPerLook&&m[0].key==keyOf(6)&&m[1].key==keyOf(5));
       m=c.decide(v,&h,porter,1250);CHECK(m.size()==MovesPerLook&&m[0].key==keyOf(4)&&m[1].key==keyOf(3)); }
+    // A MULE that rides: the host flags it like a fast one and the guest moves neither that one nor one that rides here.
+    { Mule r=mule(1,10,0);r.rides=true;Sampler s;auto a=s.select({r,mule(2,12,0)},porter,std::nullopt,1000);
+      CHECK(a.count==2);for(size_t i=0;i<a.count;++i)CHECK(bool(a.poses[i].flags&Fast)==(a.poses[i].key==keyOf(1)));
+      auto h=shown({pose(1,20,0)});Mule g=mule(1,60,0);g.rides=true;Corrector c;c.decide({g},&h,away,1000);CHECK(c.decide({g},&h,away,1400).empty());
+      std::vector<Move> steer;std::map<uint64_t,uint64_t> none;Corrector d;d.decide({g},&h,away,1000,true,&none,&steer);CHECK(steer.empty()); }
+    // The read: the entity behind the actor's +0x68 (less 0x20) has a parent at +0x70, or not; no body, no parent.
+    { std::vector<uint8_t> mem(0x200);uint64_t heap=0x500000;
+      mod::discovery::Sampler s{[&](uint64_t a,void* o,size_t n){if(a<heap||a+n>heap+mem.size())return false;std::memcpy(o,&mem[a-heap],n);return true;},0x100000};
+      uint64_t ref=heap+0x40+0x20;CHECK(!mod::enemies::rides(s,ref));
+      uint64_t truck=0x77770000;std::memcpy(&mem[0x40+0x70],&truck,8);CHECK(mod::enemies::rides(s,ref));
+      CHECK(!mod::enemies::rides(s,0)&&!mod::enemies::rides(s,heap+0x10000)&&!mod::enemies::rides(s,ref+1)); }
     // A teleport that does not move the MULE (a rider) is tried again later and later; one that takes clears that.
     { Corrector c;auto h=shown({pose(1,20,0)});
       c.decide({mule(1,60,0)},&h,away,1000);auto m=c.decide({mule(1,60,0)},&h,away,1300);CHECK(m.size()==1&&m[0].snap&&m[0].stuck==0);

@@ -1221,6 +1221,11 @@ both games, 368 rows; then `mulegoto` in the host's game)**
 - Step 4 is `enemy_position_goal` (`mod/README.md`, "MULEs in the same place"). Since the game clears the request
   when it takes it, the mod writes only while the bit is clear: a write that crossed that clearing could leave half
   a destination with the bit set.
+- Riders (2026-11-16, `mulegoal 12` in both games for 30 s): the entity's parent pointer (`entity+0x70`, as for a
+  seated porter) was set for exactly the five MULEs of the camp's truck patrol, one parent per game with the vtable
+  `image+0x3e26790`, and zero for every other MULE (372 rows free, 202 rows child). In the guest's game the five
+  got off during the run and their parent went to zero. A rider keeps a walk goal and state 0 while it sits; the
+  actor's teleport does not move it (five riders 140 m from the host's were put there every second without effect).
 - Still open: whether a MULE that stands in a wait step takes a forced destination when it next walks; what a
   redirected MULE does on arriving (its plan's next step, so far as the two-copy run shows: it is sent again as
   soon as it is 0.75 m off); the threads (the write is made from the game-thread callback; nothing went wrong in

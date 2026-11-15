@@ -41,6 +41,9 @@ ds::EnemyPoses Sampler::select(const std::vector<enemies::Mule>& mules,const std
         (void)was;
 #endif
         ds::EnemyPose p;p.key=k;p.position=m.position;p.heading=heading(m.rotation);p.flags=uint8_t((m.lod==2?HasBody:0)|(fast?Fast:0));
+#ifndef MUTANT_ENEMYPOS_RIDES_HOST
+        if(m.rides)p.flags|=Fast;                              // on a truck, however slowly: the guest leaves it alone
+#endif
         found.push_back({d,p});
     }
 #ifndef MUTANT_ENEMYPOS_NEAREST
@@ -87,6 +90,9 @@ std::vector<Move> Corrector::decide(const std::vector<enemies::Mule>& mules,cons
 #endif
 #ifndef MUTANT_ENEMYPOS_FAST
         if(fast||(h->flags&Fast)){keep(false);continue;}
+#ifndef MUTANT_ENEMYPOS_RIDES_GUEST
+        if(m.rides){keep(false);continue;}                     // it sits on a truck here: the teleport would not move it
+#endif
 #else
         (void)fast;
 #endif

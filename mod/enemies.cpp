@@ -18,6 +18,15 @@ uint8_t condition(uint32_t state,uint32_t flags){
 uint64_t key(const std::array<uint8_t,16>& uuid){
     uint64_t v=0;std::memcpy(&v,uuid.data(),8);return v&((uint64_t(1)<<52)-1);
 }
+bool rides(const discovery::Sampler& s,uint64_t entityRef){
+    uint64_t parent=0;
+    if(entityRef<0x10000||(entityRef&7)||!s.read(entityRef-0x20+0x70,&parent,8))return false;
+#ifndef MUTANT_ENEMIES_RIDES
+    return parent!=0;
+#else
+    return false;
+#endif
+}
 std::vector<Mule> readMules(const discovery::Sampler& s,uint64_t base){
     std::vector<Mule> out;uint64_t manager=0,units=0;int32_t count=0;
     if(!s.read(base+0x7bbb8c0,&manager,8)||!manager||!s.read(manager+0x440,&count,4)||!s.read(manager+0x448,&units,8)||!units||count<=0||count>256)return out;
@@ -38,6 +47,7 @@ std::vector<Mule> readMules(const discovery::Sampler& s,uint64_t base){
             Mule m;m.address=actors[j];m.id=(uint32_t(i)<<13)|(first+j);std::memcpy(&m.state,block.data()+0xea0,4);std::memcpy(&m.flags,block.data()+0xea4,4);
             std::memcpy(&m.lod,block.data()+0x24,4);std::memcpy(m.position.data(),block.data()+0x28,24);std::memcpy(m.rotation.data(),block.data()+0x40,36);std::memcpy(&locator,block.data()+0x18,8);
             if(!locator)continue;                                         // reinforcements have no locator: not shared
+            { uint64_t ref=0;std::memcpy(&ref,block.data()+0x68,8);m.rides=m.lod==2&&rides(s,ref); }
             auto known=uuids.find(locator);
             if(known==uuids.end()){std::array<uint8_t,16> u{};if(!s.read(locator+8,u.data(),16))continue;known=uuids.emplace(locator,u).first;}
             m.uuid=known->second;out.push_back(m);

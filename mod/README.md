@@ -848,12 +848,17 @@ players see them in different places. `"share_enemy_positions": true` (needs `sh
   Live, two copies 60 m from a camp for 40 s: 144 destinations taken, 4 teleports (20 in the same scenario without
   the key), the MULEs the host sent within 0.1 to 4.6 m of the host's, no fault. A second run, with a truck patrol
   in range and most MULEs standing: 170 taken, 983 refused as not walking, 59 teleports, within 1.3 m.
-- **A teleport that does not move the MULE** (live: the riders of a truck patrol stay in their seats) is tried again
-  later and later (4 s, 8 s, ... up to a minute) instead of every second or two; `ENEMYPOS guest: MULE <key> stayed
-  where it was ...` says so.
+- **Riders** (2026-11-16): a MULE on a truck is a child entity of the truck (read live: the five MULEs of a truck
+  patrol had a parent entity, the same one in each game, and no other MULE had any). The host flags such a MULE like
+  a fast one and the guest moves neither a flagged MULE nor one that rides in its own game: the actor's teleport
+  does not take a rider out of its seat. Truck patrols are therefore each game's own. `muleat` ends a rider's row
+  with `rides`.
+- **A teleport that does not move the MULE** for another reason is tried again later and later (4 s, 8 s, ... up to
+  a minute) instead of every second or two; `ENEMYPOS guest: MULE <key> stayed where it was ...` says so. (This is
+  how the riders were found: five MULEs 140 m from the host's, put there every second without effect.)
 - **Never moved:** a MULE that is down, dead or removed in the guest's game; one within 3 m of the guest's porter
   (a fight hand to hand stays the guest's own, and its hits land where the guest sees them); a pose within 1.5 m of
-  the guest's porter; a MULE that rides (the host's flag, or faster than 9 m/s in the guest's game); anything when
+  the guest's porter; a MULE that rides (the host's flag, a parent entity in the guest's game, or faster than 9 m/s there); anything when
   the host's newest sample is over a second old or the link is down; a MULE the host did not name; an error over
   150 m. At most two native calls per look, the largest errors first. The native call checks the actor each time
   (committed memory, the MULE actor's vtable with the teleport in its slot, the live byte) and the functions' code
