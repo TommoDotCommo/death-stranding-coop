@@ -45,7 +45,11 @@ Parts parse(const std::string& file) {
             if(file.size()<24)bad();
             size_t v=0,k=0;for(;k<8&&file[i*8+k];++k){char c=file[i*8+k];if(c<'0'||c>'9')bad();v=v*10+size_t(c-'0');}
             if(!k)bad();
+            // What follows the terminator is not read: the game leaves whatever was in its buffer there (live: "503",
+            // a zero, then four bytes that were not zero in two saves of five).
+#ifdef MUTANT_SAVE_PADDING
             for(;k<8;++k)if(file[i*8+k])bad();
+#endif
             size[i]=v;
         }
         if(size[0]>file.size()||size[1]>file.size()||24+size[0]+size[1]+12>file.size())bad();

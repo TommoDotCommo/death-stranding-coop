@@ -1060,7 +1060,7 @@ void install_redirect(void* self,bool releaseSession) {
             char bytes[16385];DWORD n=0;bool ok=ReadFile(f,bytes,sizeof(bytes),&n,nullptr);CloseHandle(f);
             if(!ok||n>16384||!safe_tree(list,true)) fatal("redirect: extra-modules.txt read/size failure\n");
             if(!redirect::parse_module_extra(std::string(bytes,n),modules.extra)) fatal("redirect: invalid extra-modules.txt (one full path of a .dll per line)\n");
-            for(auto& e:modules.extra) note(L"MODULE_EXTRA",e,L"admitted by the player's extra-modules.txt for this copy");
+            // Recorded once the audit log is open (below).
         }
     }
     wchar_t mode[32];DWORD mode_n=::GetEnvironmentVariableW(L"COOP_MODULE_POLICY",mode,32);
@@ -1084,6 +1084,7 @@ void install_redirect(void* self,bool releaseSession) {
     auto log=policy.instance+L"\\redirect-"+std::to_wstring(GetCurrentProcessId())+L"-"+stamp+L".log";
     log_file=real_cf(log.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
     if(log_file==INVALID_HANDLE_VALUE) fatal("redirect: cannot exclusively create log\n");
+    for(auto& e:modules.extra) note(L"MODULE_EXTRA",e,L"admitted by the player's extra-modules.txt for this copy");
 #define ADD(module,name) {auto m=GetModuleHandleW(L##module); auto o=m?real_gpa(m,#name):nullptr; if(!o) fatal("redirect: missing required API " #name "\n");entries.push_back({#name,(FARPROC)hook_##name,o});}
     ADD("kernel32.dll",CreateFileW);ADD("kernel32.dll",CreateFile2);
     ADD("kernel32.dll",CreateDirectoryW);ADD("kernel32.dll",DeleteFileW);ADD("kernel32.dll",RemoveDirectoryW);

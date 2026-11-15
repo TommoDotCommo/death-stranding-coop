@@ -56,6 +56,18 @@ int main(int argc,char** argv) {
         fs::last_write_time(account/"autosave1"/"checkpoint.dat",fs::file_time_type::clock::now()-std::chrono::hours(2));
         check(gameFolder(root/"local")==game,"finds the game's folder whatever its letter case");
         check(accounts(game)==std::vector<uint32_t>{123},"lists account folders only");
+        {   // The game leaves what was in its buffer after a size's terminator (live 2026-11-15: two autosaves of five
+            // had non-zero bytes there, and the host could not offer them). Such a file is the same checkpoint.
+            std::string junk=A;size_t z=0;while(z<8&&junk[z])++z;
+            check(z<7,"the vector's first size leaves room after its terminator");
+            for(size_t k=z+1;k<8;++k)junk[k]=char(0xf0+k);
+            bool same=false,copy=false;
+            try{auto plain=inspect(A),odd=inspect(junk);same=odd.checkpoint&&odd.title==plain.title&&odd.user==plain.user;
+                copy=resign(junk,"steam_76561198000000000")==resign(A,"steam_76561198000000000");}catch(const std::exception&){}
+            check(same,"bytes after a size's terminator are not read");check(copy,"and the copy made for the guest is the same");
+            std::string digits=A;digits[z]='7';bool refused=false;try{inspect(digits);}catch(const std::exception&){refused=true;}
+            check(refused,"a size that reads differently is still refused");
+        }
         auto n=newest(account);check(n&&n->folder=="manualsave2"&&n->bytes==big(100,2)&&n->title=="Order No. 7: \xc3\xa9t\xc3\xa9","offers the newest checkpoint");
         check(!newest(root/"nothing"),"no checkpoint, nothing to offer");
         {auto broken=game/"555";write(broken/"autosave1"/"checkpoint.dat",A);write(broken/"autosave2"/"checkpoint.dat","garbage");
