@@ -801,13 +801,20 @@ Live checklist (Episode 3 save in both copies, the crash recorder on, `share_ord
 7. A loaded save: load an older checkpoint in one copy while connected. Expect no `REWARD facility ... -> partner`
    lines from the load, and no lowering in the partner's game.
 8. After every run: the real saves are byte-identical.
-## MULEs in the same place (`share_enemy_positions`; experiment, off by default, nothing run live)
+## MULEs in the same place (`share_enemy_positions`; experiment, off by default)
+
+Run live, two copies about 60 m from a camp: the guest's game moved its MULEs to the host's places (20 moves in 40 s);
+one MULE stayed within 0.3 to 3.7 m of the host's. Seen and not solved: the guest's own MULE walks off again after
+each move (its game gives it another goal), so a MULE that the two games send different ways is put back about every
+2 s, which shows as a jump of 4 to 5 m. Position alone is not enough for those; their goal has to follow too. Outside
+the range the two worlds differ freely (the same patrol group was 100 to 296 m apart).
 
 With `share_enemies` each game has the same MULEs (same locator UUIDs) but moves them itself, so in a fight the two
 players see them in different places. `"share_enemy_positions": true` (needs `share_enemies` and a `role`;
 `enemy_poses.h`) makes the host's game the one that says where they are:
 
-- **Host**, five times a second: the standing MULEs within 80 m of either player, the twelve nearest, each with its
+- **Host**, five times a second: the standing MULEs within 80 m of either player (100 m for one it already sends, so
+  one at the edge does not go in and out), the twelve nearest, each with its
   identity (52 bits of the locator UUID), position, heading and two flags (it has a body in the host's game; it moves
   faster than a person, i.e. it rides). They go in the core's unreliable `ENEMIES` datagram (`core/CORE.md`), not in
   the ordered event stream: a lost sample is replaced by the next one.

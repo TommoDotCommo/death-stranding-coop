@@ -39,6 +39,14 @@ static void units(){
       // Two locators with the same 52 bits: one entry.
       Mule a=mule(40,5,0),b=mule(40,9,0);b.address=0x9999;b.uuid[15]=7;Sampler u;auto one=u.select({b,a},porter,std::nullopt,1000);CHECK(one.count==1&&one.poses[0].position[0]==5); }
     // Host: a MULE that covers ground faster than a person is flagged (on a truck).
+    {   // A MULE the host already sends stays in the sample to KeepRangeM; a new one must come within RangeM.
+      Sampler k;CHECK(k.select({mule(50,RangeM+10,0)},porter,std::nullopt,1000).count==0);
+      CHECK(k.select({mule(50,RangeM-2,0)},porter,std::nullopt,1200).count==1);
+      CHECK(k.select({mule(50,RangeM+10,0)},porter,std::nullopt,1400).count==1);
+      CHECK(k.select({mule(50,KeepRangeM-1,0)},porter,std::nullopt,1600).count==1);
+      CHECK(k.select({mule(50,KeepRangeM+1,0)},porter,std::nullopt,1800).count==0);
+      CHECK(k.select({mule(50,RangeM+10,0)},porter,std::nullopt,2000).count==0);   // dropped: it has to come near again
+      CHECK(k.select({mule(50,RangeM-2,0)},porter,std::nullopt,2200).count==1); }
     { Sampler s;auto a=s.select({mule(1,10,0)},porter,std::nullopt,1000);CHECK(a.count==1&&!(a.poses[0].flags&Fast));
       a=s.select({mule(1,11,0)},porter,std::nullopt,1250);CHECK(!(a.poses[0].flags&Fast));          // 4 m/s
       a=s.select({mule(1,15,0)},porter,std::nullopt,1500);CHECK(a.poses[0].flags&Fast);             // 16 m/s

@@ -24,6 +24,9 @@ namespace mod::enemyposes {
 constexpr uint8_t HasBody=1;   // the host's game has an entity for it (LOD 2)
 constexpr uint8_t Fast=2;      // it moves faster than a person runs there (on a truck): not to be corrected
 constexpr double RangeM=80;          // the host sends MULEs within this of either player
+// ...and goes on sending one it already sends until it is further than this: a MULE standing near the edge (live: one
+// at 78 m) went in and out of the sample, and each time it was out the guest's copy walked its own way.
+constexpr double KeepRangeM=100;
 constexpr double ReachM=3;           // a MULE this near the guest's porter is the guest's own to fight
 constexpr double LandM=1.5;          // no MULE is put this near the guest's porter
 constexpr double DeadbandM=0.75;     // below this error nothing is done
@@ -36,12 +39,12 @@ constexpr unsigned MovesPerLook=2;   // native calls per look, the largest error
 // Heading of a rotation (rows, the game's z up) and the upright rotation of a heading.
 double heading(const std::array<float,9>& rotation);
 std::array<float,9> upright(double heading);
-// Host: the standing MULEs within RangeM of either player, the nearest first, at most ds::EnemyPosesMax, in key order.
+// Host: the standing MULEs within RangeM of either player (KeepRangeM for one already sent), the nearest first, at most ds::EnemyPosesMax, in key order.
 class Sampler {
 public:
     ds::EnemyPoses select(const std::vector<enemies::Mule>&,const std::array<double,3>& porter,const std::optional<std::array<double,3>>& partner,uint64_t now);
 private:
-    struct Seen { std::array<double,3> position{}; uint64_t at=0; bool fast=false; };
+    struct Seen { std::array<double,3> position{}; uint64_t at=0; bool fast=false,sent=false; };
     std::map<uint64_t,Seen> seen_;
 };
 struct Move { uint64_t address=0,key=0; bool snap=false; std::array<double,3> position{}; double heading=0,error=0; };

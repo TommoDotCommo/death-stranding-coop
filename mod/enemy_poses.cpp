@@ -26,22 +26,29 @@ ds::EnemyPoses Sampler::select(const std::vector<enemies::Mule>& mules,const std
     std::vector<Candidate> found;std::map<uint64_t,Seen> next;
     for(auto& m:mules){
         uint64_t k=enemies::key(m.uuid);if(!k||!finite(m.position))continue;
-        Seen s=seen_.count(k)?seen_[k]:Seen{};bool fast=fastNow(s,m.position,now);next[k]=s;
+        Seen s=seen_.count(k)?seen_[k]:Seen{};bool fast=fastNow(s,m.position,now);bool was=s.sent;s.sent=false;next[k]=s;
 #ifndef MUTANT_ENEMYPOS_AWAKE
         if(!standing(m))continue;
 #endif
         double d=distance(m.position,porter);if(partner)d=std::min(d,distance(m.position,*partner));
 #ifndef MUTANT_ENEMYPOS_RANGE
-        if(d>RangeM)continue;
+#ifndef MUTANT_ENEMYPOS_KEEP
+        if(d>(was?KeepRangeM:RangeM))continue;
+#else
+        (void)was;if(d>RangeM)continue;
+#endif
+#else
+        (void)was;
 #endif
         ds::EnemyPose p;p.key=k;p.position=m.position;p.heading=heading(m.rotation);p.flags=uint8_t((m.lod==2?HasBody:0)|(fast?Fast:0));
         found.push_back({d,p});
     }
-    seen_.swap(next);
 #ifndef MUTANT_ENEMYPOS_NEAREST
     std::sort(found.begin(),found.end(),[](const Candidate& a,const Candidate& b){return a.d<b.d||(a.d==b.d&&a.pose.key<b.pose.key);});
 #endif
     if(found.size()>ds::EnemyPosesMax)found.resize(ds::EnemyPosesMax);
+    for(auto& f:found)next[f.pose.key].sent=true;
+    seen_.swap(next);
     // The wire wants each identity once, in increasing order (two locators that share 52 bits: the nearer one stays).
 #ifndef MUTANT_ENEMYPOS_KEYS
     std::stable_sort(found.begin(),found.end(),[](const Candidate& a,const Candidate& b){return a.pose.key<b.pose.key;});

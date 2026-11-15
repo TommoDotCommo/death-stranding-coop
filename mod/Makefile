@@ -228,7 +228,7 @@ game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderlo
 	for m in CARTS_VTABLE CARTS_ANY CARTS_ECHO CARTS_MANY; do $(CXX) $(FLAGS) -DMUTANT_$$m carts_test.cpp carts.cpp carry_place.cpp discovery.cpp -o build/carts-mutant && if ./build/carts-mutant >/dev/null 2>&1; then echo SURVIVED $$m; exit 1; else echo KILLED MUTANT_$$m; fi; done
 	./build/enemies-test
 	./build/enemy-poses-test
-	python3 -B mutants.py --sources "$(ENEMYPOS_SRC)" --prefix build/mutant-enemypos- ENEMYPOS_AWAKE ENEMYPOS_RANGE ENEMYPOS_NEAREST ENEMYPOS_KEYS ENEMYPOS_STALE ENEMYPOS_DOWN ENEMYPOS_FAST ENEMYPOS_REACH ENEMYPOS_LAND ENEMYPOS_FARCAP ENEMYPOS_DEADBAND ENEMYPOS_COOLDOWN ENEMYPOS_HOLD ENEMYPOS_BUDGET ENEMYPOS_VTABLE ENEMYPOS_LIVE && echo KILLED 16 enemy position mutants
+	python3 -B mutants.py --sources "$(ENEMYPOS_SRC)" --prefix build/mutant-enemypos- ENEMYPOS_AWAKE ENEMYPOS_RANGE ENEMYPOS_KEEP ENEMYPOS_NEAREST ENEMYPOS_KEYS ENEMYPOS_STALE ENEMYPOS_DOWN ENEMYPOS_FAST ENEMYPOS_REACH ENEMYPOS_LAND ENEMYPOS_FARCAP ENEMYPOS_DEADBAND ENEMYPOS_COOLDOWN ENEMYPOS_HOLD ENEMYPOS_BUDGET ENEMYPOS_VTABLE ENEMYPOS_LIVE && echo KILLED 16 enemy position mutants
 	./build/guard-test
 	./build/orders-test
 	./build/link-test
