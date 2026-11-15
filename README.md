@@ -20,6 +20,25 @@ session tried for real, a story that moves on for both by itself, and cutscenes 
 This repository contains only original mod code. It contains no game files, assets, saves or anything copied from
 the game, and it never will. You need your own copy of the game.
 
+## Where this is going
+
+The target changed on 2026-11-16. It is no longer "two players share one playthrough":
+
+- **Your own save, your own story.** Each player plays their own game and completes their own orders. Story and
+  order progress are not shared. How large story events such as boss fights work with visitors is undecided; the
+  wish is that players can take part in each other's games without sharing progression.
+- **A private strand server.** At least one player runs the server (`world/`), a stand-in for the game's online
+  service that is run by the players themselves. Everyone connected to it sees everything the game's social strand
+  system shares (structures, ladders, ropes, signs, lost cargo, roads), all of it rather than a selection.
+- **Co-op when you meet.** When players are near each other the real-time layer switches on: they see each other
+  and interact. For many players, not two.
+- **Linked servers.** Private servers can be connected: export and import strand objects with a choice of what goes
+  each way, and, while both are online, real-time co-op across them.
+
+The dream is Sams everywhere as you play, and ten of them helping in a boss fight. Today's code is a two-player
+real-time layer and a shared-world server that two copies sign in to; the story, order and reward sharing listed
+below stays as opt-in settings but is no longer where the work goes. See [STATUS.md](STATUS.md).
+
 ## Layout
 
 | Folder | What it is |

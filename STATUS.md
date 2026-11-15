@@ -3,6 +3,21 @@
 Target: DEATH STRANDING DIRECTOR'S CUT, Steam app 1850570, build 13300582, `ds.exe` SHA-256
 `9d5306d7eb2f5d3135c63accc3e74b8f9b029f9d76112a6aae4a38fdbb4edd2b`. Other builds are refused.
 
+## Direction (2026-11-16)
+
+The target is now: each player in their own save and story; a private strand server run by the players that shares
+everything the game's social strand system shares; the real-time co-op layer switching on when players are near
+each other, for many players; and servers that can be linked with import and export filters (README, "Where this
+is going"). Measured against that:
+
+| Part | State |
+|---|---|
+| Private strand server | `world/` exists; two copies sign in and exchange built objects (see the `online_server` rows below). Not everything is drawn or kept yet. |
+| Real-time layer | Works for exactly two players over one direct link, with one partner body. |
+| Many players | Not started: more than one partner body in a game, the link through the server, switching on by distance. |
+| Linked servers | Not started. |
+| Story, order and reward sharing | Built as opt-in settings (rows below); no longer developed. |
+
 ## Works (tested live on that build)
 
 | Step | Evidence |
