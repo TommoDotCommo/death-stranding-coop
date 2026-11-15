@@ -5718,5 +5718,80 @@ What a completed delivery does:
   delivery; the mod's `REWARD` log lines are made for that.
 
 The mod (`rewards.h`, `share_rewards`): reads the records once a second, sends a facility's points total when it
-rises, and tops the partner's record up to that total with `0x2f29f00(R, resource, short, null)`. Nothing has been
-called live yet.
+rises, and tops the partner's record up to that total with `0x2f29f00(R, resource, short, null)`. Called live on
+2026-11-15 (next section).
+
+### Why points at the cap left the level at 2: the facility's level cap (2026-11-15, static)
+
+Seen live (2026-11-15, an Episode 3 save): `0x2f29f00` from the mod's tick took facility `3cbb068` from 215 to 216
+points and then to 9450, the most its record takes, without a fault, and the record's level stayed 2. The same
+table had other rows whose level is below what their points reach (433 points at level 0, 1026 and 1041 points at
+level 2 beside 610 points at level 3) before anything was added.
+
+Read from the code:
+
+- The add routine computes the new level as `0x2f23510(R, resource, points, H)` with
+  `H = 0x2f2cd60(R, *(resource+0x58))` (`0x2f29f89..0x2f29fa4`), and compares it with the stored level
+  (`0x2f29fac`): higher runs one level-up per level gained (the loop `0x2f29fc1..0x2f2a09a` writes the record's
+  level at `0x2f29fe2`), equal does nothing, lower writes the computed level (`0x2f2a250`). There is no other
+  condition on the level in it.
+- `0x2f23510` counts thresholds reached in a row for n = 1..H: level n needs `LevelTH<n>` (`resource+0x28 + 4*(n-1)`)
+  for n up to 5 and `LevelTH5 + (n-5) * LevelTHDefault` (`+0x38`, `+0x3c`) above; it stops at the first one above
+  the points and never returns more than H. So H is a hard ceiling for the level whatever the points are.
+- `resource+0x58` is the reflected member `LevelCap : Ref<IntegerFact>` of `DSHouseholdInfoResource` (the other
+  members match the layout above: `InitialFriendship +0x20`, `InitialFriendshipLevel +0x24`, `LevelTH1..5
+  +0x28..+0x38`, `LevelTHDefault +0x3c`, `NameHash +0x40`). `IntegerFact` has `DefaultValue` at `+0x30`; a fact's
+  UUID is at `+0x08`.
+- `0x2f2cd60(R, fact)`: no fact gives 99. Otherwise, under the lock at `D+0x18` of the fact database
+  `D = *(image+0x5794720)`, it looks up a context in the table at `D+0x20` (`0x1b02fa0`: slots of 0x20 bytes, a
+  hash at `+0`, a 16-byte key at `+8`, the context at `+0x18`; capacity u32 at table `+0x0c`) by the 16-byte key at
+  image `0x7bfd980` (set at start-up from the text `dbae0685-360c-4dc9-a358-8a22dde46ed9`, `0x18a2e90`), then the
+  fact's UUID in the context's integer values at `context+0x50` (`0x1b037e0`: slots of 0x18 bytes, a hash at `+0`,
+  the UUID at `+4`, the value i32 at `+0x14`; capacity at table `+0x0c`). A value found is the answer, else the
+  fact's `DefaultValue`; the result is held to 0..99.
+- The stored level (`record+0x0c`, table entry `+0x1c`) is the one the game's scripts read:
+  `DSResidentsBasicNode_sGetFirendshipOfHousehold` (`0x2f3f760`) returns the record's points and that field. So the
+  mod reads the right field. Other exports in the same table (`0x2f16484..`): `sGetFriendshipMaxLevel` =
+  `0x2f3f810` (the cap through `0x2f2cd60`, raised to `InitialFriendshipLevel` and held to 5, plus "is 5 or more"),
+  `sCalcFriendshipLevel` = `0x2f3f640` (`0x2f23510` for given points, with the cap or with 99),
+  `sGetCalculationFriendshipLevelTH` = `0x2f3f6b0` (the threshold of a level), `sGetFloatFriendshipLevel` =
+  `0x2f3f7d0`.
+- The add clamps the points only to the record's range (`InitialFriendship` .. `LevelTH5 + 94 * LevelTHDefault`),
+  not to the capped level's threshold: points above a capped level are kept by the game itself. When the cap is
+  higher at a later add, the same comparison runs every missed level-up in that one call.
+- `0x2f386a0(R)` (one caller, `0x33b9ce8` in the mission system) walks every listed resource: a missing record is
+  made with `InitialFriendship` and `InitialFriendshipLevel`; for an existing one whose capped level from its
+  points is below the stored level, the points are raised to the stored level's threshold. It never raises a level.
+
+Conclusions, and how sure:
+
+- The add routine does recompute the level, and the mod reads the level the game uses. Both are read from the code.
+- The level stayed 2 because the game's level cap for that facility was 2 in that save. This follows from the code
+  if the cap's value was 2; the value is game data (the fact's default) or save state (the database), not in the
+  executable, so it is an inference until read live. The rows whose level is below their points before any add
+  fit it.
+- What sets the cap fact (which story step, to what) is **unknown**: facts are written by the game's logic graphs
+  through generic routines. Whether anything recomputes a facility's level at the moment its cap rises is
+  **unknown**; the only recomputation found is the one inside the add routine, at the next add.
+- There is nothing for the mod to call after the add: raising the level past the cap would be something the game
+  does not do (only the script route `0x2f410a0` writes a level as given, and it is a story tool). A partner who is
+  further in the story can have a higher level for the same points; the top-up then leaves the level where the
+  local cap puts it, and the game catches it up when the local story raises the cap and points are next added.
+
+The mod now reads the cap for its log (`rewards.h` `readHighest`, read-only, without the database's lock, so for a
+log line only; `levelOf` is `0x2f23510`): `rewards 0` and `reward_add` print `level cap <H>, points alone give level
+<n>`, and a top-up that leaves the level behind the partner's adds the same in brackets.
+
+Live checklist (one copy, the Episode 3 save, `share_rewards` on; read-only except step 3):
+
+1. `rewards 0`. Expect every row to end with `level cap <H>, points alone give level <n>` and, for every row,
+   `level == min(n, H)`; a row with `level` above that has a level the story wrote as given (`0x2f410a0`): record
+   it. Facility `3cbb068` is expected to show `level 2 ... level cap 2`. `level cap unknown` in every row means
+   the fact database's layout is not what is written above: record it, nothing else depends on it.
+2. If `3cbb068` shows a cap above 2 with `points alone give level` above 2, the explanation above is wrong: record
+   the row and stop.
+3. Pick a row with `level < level cap` and points below the next threshold (`points alone give level` equal to
+   `level`), and `reward_add` enough to pass the next threshold in steps. Expect the level to rise by one in the
+   step that crosses it, the game's level-up notice, and no `STALL` line or fault record. This is the level-up
+   path of the add routine, not run live yet (the 2026-11-15 run never crossed a threshold below the cap).
+4. Compare one row's `level cap` with the stars the map shows as reachable for that facility, if it shows them.

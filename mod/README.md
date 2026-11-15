@@ -738,16 +738,20 @@ creator the shared load uses); in `puppet.ride`: `place X Y Z HEADING`.
 ## Delivery rewards and connection levels (`share_rewards`, with `share_orders`; off by default)
 
 Run live: the read, the add routine alone, and two copies (one facility's point added in one game reached the other,
-which added the shortfall with its own routine; both read the same total, nothing bounced). Seen and not yet
-understood: adding points up to a facility's cap left its level as it was, so the level is raised somewhere else
-(or the field read is not the stars). Not run live: a real delivery between two copies (step 4 below).
+which added the shortfall with its own routine; both read the same total, nothing bounced). Adding points up to a
+facility's cap left its level at 2: static reading (`game_offsets.md`, "Why points at the cap left the level at 2")
+shows the add routine does recompute the level, but never above the facility's level cap, a fact the story
+changes; the mod reads the right field and has nothing else to call. Not run live: the cap as the mod now reads
+it, a level-up through the add routine, and a real delivery between two copies (step 4 below).
 
 `"share_rewards": true` (`rewards.h`; refused without `share_orders`). A facility's connection level (the stars of a
 knot city or a prepper) is a points total and a level in the game's residents system. Each mod reads every
 facility's record once a second. When a facility's points rise in its game (a delivery handed in there), it tells
 the partner the new total (CARGO event type 23: name hash, points, level), and the partner's game is topped up to
 that total with the game's own "add connection points" routine, the one a delivery's reward calls, which also runs
-the level-ups and what they unlock. Rules:
+the level-ups and what they unlock. The level the game gives is the number of thresholds the points have reached,
+held to the facility's level cap in that game: with a partner who is further in the story the points are equal and
+the level can stay behind until the local story raises the cap and points are next added. Rules:
 
 - totals travel, never amounts: a delivery both games rewarded is not counted twice;
 - only up: a total at or below the local one adds nothing, a total of zero is refused on the wire, and nothing is
@@ -765,10 +769,12 @@ Connection points are real, saved progress, which is why the setting is off unle
 
 Log lines: `REWARD sharing on: add armed`, `REWARD facility <hash> rose here to <points> points (level <n>) ->
 partner`, `REWARD partner's facility <hash> is at <points> points (level <n>): <k> added here, <a> -> <b> points,
-level <x> -> <y>` (or `nothing to add`, `unknown here`, `not added (add unavailable)`), `REWARD refused: malformed
+level <x> -> <y>`, followed by `(level cap <H>, points alone give level <n>)` when the level stays behind the
+partner's (or `nothing to add`, `unknown here`, `not added (add unavailable)`), `REWARD refused: malformed
 news`. Test commands in `puppet.cargo` (lab only): `rewards 0` (every facility: row, name hash, points, level, floor,
-cap), `rewards 1` (the porter's likes and grade totals), `reward_add <row*10000+points>` (adds 1..9999 points to
-that row's facility with the game's routine; needs `share_rewards`).
+cap, then `level cap <H>, points alone give level <n>`; the cap is `unknown` when the fact database cannot be
+read), `rewards 1` (the porter's likes and grade totals), `reward_add <row*10000+points>` (adds 1..9999 points to
+that row's facility with the game's routine and prints the same two numbers; needs `share_rewards`).
 
 Live checklist (Episode 3 save in both copies, the crash recorder on, `share_orders`, `share_order_units` and
 `share_rewards` on in both; nothing below has been run):
@@ -781,8 +787,9 @@ Live checklist (Episode 3 save in both copies, the crash recorder on, `share_ord
    masks are not understood: stop and record the numbers. Zero facilities means the table layout is wrong.
 2. The candidate call alone, one copy, standing in the open: `reward_add <row*10000+1>` on a facility below its cap.
    Expect `REWARD test: facility <hash> points <p> level <l> ...: 1 added, now points <p+1> level <l>` and no
-   fault record. Then an amount that crosses the next threshold (the thresholds are not printed: add in steps
-   until the level changes). Expect the level to rise by one and the game's own level-up notice; record what the
+   fault record. Then an amount that crosses the next threshold, on a row whose level is below its `level cap`
+   (a row at its cap keeps its level whatever is added; the thresholds are not printed: add in steps until the
+   level changes). Expect the level to rise by one and the game's own level-up notice; record what the
    game shows and whether anything is unlocked. A `STALL` line or a crash record means the routine
    is not safe to call from the mod's tick: stop, keep the record, leave `share_rewards` off.
 3. Save and reload that copy: `rewards 0` shows the raised numbers (they are saved state).

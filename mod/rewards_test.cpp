@@ -9,11 +9,12 @@ static int failures=0;
 struct World {
     static constexpr uint64_t Base=0x140000000ull,Heap=0x200000000ull,Vtable=Base+0x4e00000;
     static constexpr uint64_t Globals=Base+0x7bf0000;   // the part of the image that holds the three globals
-    std::vector<uint8_t> image=std::vector<uint8_t>(0x10000),heap=std::vector<uint8_t>(0x10000);
+    static constexpr uint64_t Facts=Base+0x5790000;     // and the part that holds the fact database's global
+    std::vector<uint8_t> image=std::vector<uint8_t>(0x10000),heap=std::vector<uint8_t>(0x10000),factImage=std::vector<uint8_t>(0x10000);
     mod::discovery::Sampler sampler{[this](uint64_t a,void* p,size_t n){
         auto in=[&](uint64_t b,std::vector<uint8_t>& m){if(a<b||a-b>m.size()||n>m.size()-(a-b))return false;std::memcpy(p,m.data()+(a-b),n);return true;};
-        return in(Globals,image)||in(Heap,heap);},Base};
-    template<class T> void put(uint64_t a,T v){std::memcpy((a>=Heap?heap.data()+(a-Heap):image.data()+(a-Globals)),&v,sizeof v);}
+        return in(Globals,image)||in(Heap,heap)||in(Facts,factImage);},Base};
+    template<class T> void put(uint64_t a,T v){std::memcpy((a>=Heap?heap.data()+(a-Heap):a>=Globals?image.data()+(a-Globals):factImage.data()+(a-Facts)),&v,sizeof v);}
     static constexpr uint64_t System=Heap+0x100,List=Heap+0x200,Records=Heap+0x300,Array=Heap+0x400,Table=Heap+0x1000,Likes=Heap+0x3000,Grade=Heap+0x4000;
     static uint64_t resource(int i){return Heap+0x800+uint64_t(i)*0x80;}
     static uint64_t entry(int slot){return Table+uint64_t(slot)*0x30;}
@@ -34,6 +35,24 @@ struct World {
         const unsigned ek[5]={0x8bc,0x8c0,0x8c4,0x8c8,0x8cc},lk[5][2]={{0x8c8,0x8dc},{0x8cc,0x8dc},{0x8d0,0x8dc},{0x8d4,0x8dc},{0x8e0,0x8b8}};
         for(int i=0;i<5;++i){put<uint64_t>(Grade+0x18+8*uint64_t(i),experience[i]^mask64(key(ek[i])^key(0x8d8)));put<uint32_t>(Grade+0x538+4*uint64_t(i),level[i]^key(lk[i][0])^key(lk[i][1]));}
     }
+    // The fact database: two contexts (the first one is not the residents' one) and the residents' integer values.
+    static constexpr uint64_t Database=Heap+0x5000,Contexts=Heap+0x5100,Other=Heap+0x5400,Context=Heap+0x5600,OtherValues=Heap+0x5800,Values=Heap+0x5a00;
+    static constexpr uint64_t KeyLow=0x4dc9360cdbae0685ull,KeyHigh=0xd96ee4dd228a58a3ull;
+    static uint64_t fact(int i){return Heap+0x6000+uint64_t(i)*0x40;}
+    static uint64_t factId(int i){return 0xfac70000+uint64_t(i);}
+    void value(uint64_t table,int slot,uint64_t low,uint64_t high,int32_t v){uint64_t e=table+uint64_t(slot)*0x18;put<uint32_t>(e,0x80000001u);put<uint64_t>(e+4,low);put<uint64_t>(e+0xc,high);put<int32_t>(e+0x14,v);}
+    void capFact(int i,int32_t standard){put<uint64_t>(fact(i)+8,factId(i));put<uint64_t>(fact(i)+0x10,0x77);put<int32_t>(fact(i)+0x30,standard);put<uint64_t>(resource(i)+0x58,fact(i));}
+    void facts(){
+        put<uint64_t>(Base+0x5794720,Database);put<uint64_t>(Base+0x7bfd980,KeyLow);put<uint64_t>(Base+0x7bfd988,KeyHigh);
+        put<uint64_t>(Database+0x20,Contexts);put<uint32_t>(Database+0x2c,8);
+        put<uint32_t>(Contexts+0x20,0x80000002u);put<uint64_t>(Contexts+0x28,KeyLow);put<uint64_t>(Contexts+0x30,KeyHigh+1);put<uint64_t>(Contexts+0x38,Other);
+        put<uint32_t>(Contexts+0xa0,0x80000003u);put<uint64_t>(Contexts+0xa8,KeyLow);put<uint64_t>(Contexts+0xb0,KeyHigh);put<uint64_t>(Contexts+0xb8,Context);
+        put<uint64_t>(Other+0x50,OtherValues);put<uint32_t>(Other+0x5c,8);put<uint64_t>(Context+0x50,Values);put<uint32_t>(Context+0x5c,16);
+        capFact(0,5);capFact(1,3);                                        // facility 2 has no cap fact
+        value(OtherValues,1,factId(0),0x77,4);                            // another context's value of the same fact
+        value(Values,3,factId(0),0x78,1);                                 // a fact that shares the first half of the UUID
+        value(Values,7,factId(0),0x77,2);                                 // the story holds facility 0 to level 2
+    }
     uint32_t key(unsigned offset){uint32_t k=0;std::memcpy(&k,heap.data()+(Grade-Heap)+offset,4);return k;}
 };
 static Facility facility(uint32_t hash,int32_t points,int32_t level=0,int32_t cap=48500){Facility f;f.hash=hash;f.points=points;f.level=level;f.cap=cap;f.floor=10;f.resource=0x1000+hash;return f;}
@@ -44,6 +63,24 @@ int main(){
       CHECK(f.size()==3&&f[1].hash==0x2222&&f[1].points==10&&f[2].hash==0x3333&&f[2].level==99);
       CHECK(f.size()==3&&f[0].resource==World::resource(0)&&f[0].record==World::entry(5)+0x10);
       w.put<uint64_t>(World::Base+0x7bfd948,0);CHECK(readFacilities(w.sampler,World::Base).empty()); }
+    // The level of a points total: the thresholds reached in a row, never above the level cap (the game's own count).
+    { World w;auto f=readFacilities(w.sampler,World::Base);CHECK(f.size()==3&&f[0].thresholds[0]==100&&f[0].thresholds[4]==1500&&f[0].step==500&&f[0].highest==Unknown);
+      if(f.size()==3){
+        CHECK(levelOf(f[0],99,99)==0&&levelOf(f[0],100,99)==1&&levelOf(f[0],999,99)==3&&levelOf(f[0],1500,99)==5&&levelOf(f[0],1999,99)==5&&levelOf(f[0],2000,99)==6);
+        CHECK(levelOf(f[0],48500,99)==99&&levelOf(f[0],MaxPoints,99)==99&&levelOf(f[0],48499,99)==98);
+        CHECK(levelOf(f[0],48500,2)==2&&levelOf(f[0],250,2)==1&&levelOf(f[0],48500,0)==0&&levelOf(f[0],48500,-3)==0); } }
+    // The level cap: the fact's value in the residents' context of the fact database, else its default, held to
+    // 0..99; no fact is 99; an unreadable database is unknown.
+    { World w;w.facts();auto f=readFacilities(w.sampler,World::Base);readHighest(w.sampler,World::Base,f);
+      CHECK(f.size()==3&&f[0].highest==2&&f[1].highest==3&&f[2].highest==99);
+      w.value(World::Values,9,World::factId(1),0x77,150);readHighest(w.sampler,World::Base,f);CHECK(f.size()==3&&f[1].highest==99&&f[0].highest==2);
+      w.value(World::Values,9,World::factId(1),0x77,-4);readHighest(w.sampler,World::Base,f);CHECK(f.size()==3&&f[1].highest==0);
+      w.put<uint32_t>(World::Values+9*0x18,0);readHighest(w.sampler,World::Base,f);CHECK(f.size()==3&&f[1].highest==3);          // a free slot is no value
+      w.put<uint64_t>(World::Contexts+0xb0,World::KeyHigh+2);readHighest(w.sampler,World::Base,f);CHECK(f.size()==3&&f[0].highest==5&&f[1].highest==3);   // no such context: defaults
+      w.put<uint64_t>(World::Contexts+0xb0,World::KeyHigh);w.put<uint32_t>(World::Context+0x5c,12);readHighest(w.sampler,World::Base,f);CHECK(f.size()==3&&f[0].highest==Unknown&&f[2].highest==Unknown);
+      w.put<uint32_t>(World::Context+0x5c,16);w.put<uint64_t>(World::Context+0x50,0);readHighest(w.sampler,World::Base,f);CHECK(f.size()==3&&f[0].highest==5);   // an empty table: defaults
+      w.put<uint64_t>(World::Base+0x5794720,0);readHighest(w.sampler,World::Base,f);CHECK(f.size()==3&&f[0].highest==Unknown&&f[1].highest==Unknown);
+      World v;auto g=readFacilities(v.sampler,World::Base);readHighest(v.sampler,World::Base,g);CHECK(g.size()==3&&g[0].highest==Unknown); }
     // A resource of another class is not a facility's (its record is left alone).
     { World w;w.put<uint64_t>(World::resource(1),World::Vtable+0x40);auto f=readFacilities(w.sampler,World::Base);CHECK(f.size()==2&&f[1].hash==0x3333);
       w.put<uint64_t>(World::resource(1),World::Heap+0x40);CHECK(readFacilities(w.sampler,World::Base).size()==2); }
