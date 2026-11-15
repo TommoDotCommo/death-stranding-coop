@@ -858,6 +858,35 @@ only): `muleat <n> <stamp>` (read-only: the n nearest MULEs with key, id, LOD, s
 read back: `MULEPOS test: key K lod L D m away, from ... asked ... now ... moved`). The stand-in partner sends a fixed
 pose as a host would: `coop-partner --role host ... --mule KEY X Y Z HEADING`.
 
+Two more test commands in `puppet.cargo` look at a MULE's movement goal (`mule_goal.h`; `game_offsets.md`, "What gives
+a MULE its goal"). Lab only, no config key of their own; both answer `MULEGOAL test: off (share_enemy_positions is not
+set)` without `share_enemy_positions`:
+
+- `mulegoal <n> <stamp>` (read-only, guarded reads, nothing called): a header `MULEGOAL test: M MULEs with a body, N
+  shown, porter at X,Y,Z`, then for each of the n nearest MULEs with a body (at most 12) one line
+  `MULEGOAL test: key K id I life S at X,Y,Z dist D` followed by the chain fields, always in this order:
+  `entity E component C componentvt V ai50 A ai80 A agree yes|no aivt V state B walk yes|no goal G dest9e0 X,Y,Z
+  dest850 X,Y,Z d D dvt V index I request R forced X,Y,Z flags32 F flags8 F`. Addresses and flags are hexadecimal
+  without a prefix; a vtable is `image+OFFSET` when it lies in the game's image; a link that could not be read, and
+  everything behind it, is the word `unreadable`. `component 0` = no AI component, `walk no goal 0` = the body-goal
+  table holds no walk goal now.
+- `mulegoto <cm> <stamp>` (a checked write of three doubles and one bit; no call): the nearest standing MULE with a
+  body that walks (a walk goal whose destination is over 1 m from it), 6 m or more from the porter, gets a forced
+  destination `cm` centimetres (at most 5000) east of its own destination. `mulegoto <cm+1000000> <stamp>` repeats the
+  write every tick for 5 s. Lines: `MULEGOAL test: forced before key K cm C repeat 0|1 to X,Y,Z at X,Y,Z dist D` +
+  chain fields; `MULEGOAL test: forced after key K result written` (or `result REFUSED: reason`) + chain fields; then
+  twice a second, until 3 s after the last write, `MULEGOAL test: forced watch key K phase writing|after writes W
+  refusals R last ok|reason at X,Y,Z` + chain fields; at the end `MULEGOAL test: forced end key K writes W refusals R
+  last ok|reason`. Nothing is written, and `MULEGOAL test: forced refused: reason` is logged, when the offset is over
+  5000, an earlier `mulegoto` is still watched, or none of the 12 nearest standing MULEs passes every check: a
+  `DSAIIndividualComponent` (image+0x3dca218), the AI the same by both of its pointers and a `DSAIIndividual`
+  (image+0x3e11880), a walk goal with both destinations equal and finite, the request owner's vtable in the image's
+  data, the request index 0 to 31, and plain committed read-write memory from the owner to the end of the request.
+  Each repeated write reads and checks the chain again and stops (`last reason`) when an object changed.
+
+Game-free test: `mod/mule_goal_test.cpp` (the chain on fake memory, every broken link, the write and its refusals; 14
+mutants).
+
 Game-free tests: `core/tests/enemies.cpp` (the datagram; six guards with mutants; lossy-link fuzz),
 `mod/enemy_poses_test.cpp` (selection, the correction policy, the actor checks on fake memory, and 120 fuzzed
 sessions of two diverging worlds joined by two cores over a link with loss, repeats, reordering and an outage; 16
