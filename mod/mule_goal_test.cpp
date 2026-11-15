@@ -59,6 +59,11 @@ void reads(){
     auto line=describe(c,Image);
     CHECK(has(line," entity 20002000 component 20004000 componentvt image+3dca218 ai50 20010000 ai80 20010000 agree yes aivt image+3e11880 state 0 walk yes goal 20070000 dest9e0 120,40,7 dest850 120,40,7"));
     CHECK(has(line," d 20080000 dvt image+3e20000 index 1 request 20080760 forced 1,2,3 flags32 10203 flags8 3")&&!has(line,"unreadable"));
+    // The entity's parent: none here; a parent entity is shown with its vtable (a rider's vehicle), an unreadable link says so.
+    CHECK(c.parent&&!*c.parent&&!c.parentVtable&&line.size()>8&&line.compare(line.size()-9,9," parent 0")==0);
+    { World v;v.put<uint64_t>(Entity+EntityParent,Heap+0x9000);v.put<uint64_t>(0x9000,Image+0x3d11110);auto t=v.sampler();auto k=read(t,Image,Heap+Actor);
+      CHECK(k.parent&&*k.parent==Heap+0x9000&&k.parentVtable&&*k.parentVtable==Image+0x3d11110&&has(describe(k,Image)," parent 20009000 parentvt image+3d11110")&&k.ai); }
+    { World v;v.blocked=Heap+Entity+EntityParent;auto t=v.sampler();auto k=read(t,Image,Heap+Actor);CHECK(!k.parent&&k.ai&&has(describe(k,Image)," parent unreadable")); }
     // The base class of the component is taken too; the fixed byte means block 2.
     { World v;v.put<uint64_t>(Component,Image+BaseComponentVtable);v.put<uint8_t>(D+RequestFixed,1);auto t=v.sampler();auto k=read(t,Image,Heap+Actor);
       CHECK(k.component&&*k.component==Heap+Component&&k.index&&*k.index==2&&k.request&&*k.request==Heap+v.request(2)); }
@@ -90,6 +95,7 @@ void asks(){
     CHECK(ask(MaxOffsetCm)&&ask(MaxOffsetCm)->cm==MaxOffsetCm&&!ask(MaxOffsetCm+1));
     CHECK(ask(RepeatBase+300)&&ask(RepeatBase+300)->cm==300&&ask(RepeatBase+300)->repeat);
     CHECK(!ask(RepeatBase+MaxOffsetCm+1)&&!ask(RepeatBase-1)&&!ask(0xffffffffu));
+    CHECK(ask(2*RepeatBase+700)&&ask(2*RepeatBase+700)->cm==700&&ask(2*RepeatBase+700)->standing&&!ask(2*RepeatBase+700)->repeat&&!ask(RepeatBase+300)->standing&&!ask(2*RepeatBase+MaxOffsetCm+1));
     auto e=east({1,2,3},250);CHECK(e[0]==3.5&&e[1]==2&&e[2]==3);
 }
 void writes(){
