@@ -89,7 +89,13 @@ bool parse_net_peers(const std::wstring& text, std::vector<uint32_t>& out) {
         if(item.empty()) return true;
         uint32_t a;
         if(!parse_ipv4(item, a)) return false;
-        if((a >> 24) == 127 || a == 0 || a == 0xffffffffu || (a >> 28) == 0xe) return false;
+        if(a == 0 || a == 0xffffffffu || (a >> 28) == 0xe) return false;
+        // A loopback peer (a stand-in partner on the same PC, or the launcher's solo session, whose peer is
+        // 127.0.0.1) is accepted and not listed: 127/8 is local before the list is read. It used to make the whole
+        // list invalid, which ended the game at start.
+#ifndef MUTANT_NET_PEER_LOOPBACK_LISTED
+        if((a >> 24) == 127) { item.clear(); return true; }
+#endif
         out.push_back(a); item.clear();
         return out.size() <= 16;
     };

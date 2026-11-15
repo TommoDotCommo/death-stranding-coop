@@ -67,7 +67,11 @@ int main() {
     std::vector<uint32_t> peers;
     CHECK(parse_net_peers(L"", peers) && peers.empty());
     CHECK(parse_net_peers(L"|10.0.0.2||", peers) && peers.size() == 1);
-    for(auto bad : {L"127.0.0.2", L"0.0.0.0", L"255.255.255.255", L"224.0.0.1", L"239.1.1.1", L"example.com", L"10.0.0.1|x"})
+    // A loopback peer is accepted and never listed (it is local without an entry); the rest of the list still counts.
+    CHECK(parse_net_peers(L"127.0.0.1", peers) && peers.empty());
+    CHECK(parse_net_peers(L"127.0.0.2|10.0.0.2|127.9.9.9", peers) && peers.size() == 1 && peers[0] == 0x0a000002u);
+    CHECK(!parse_net_peers(L"127.0.0.1|example.com", peers));
+    for(auto bad : {L"0.0.0.0", L"255.255.255.255", L"224.0.0.1", L"239.1.1.1", L"example.com", L"10.0.0.1|x"})
         CHECK(!parse_net_peers(bad, peers));
     std::wstring many;
     for(int i = 1; i <= 17; ++i) many += L"10.0.0." + std::to_wstring(i) + L"|";
