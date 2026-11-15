@@ -79,6 +79,9 @@ int main() {
     {auto none=threaded;none.erase(none.find("\"role\":\"host\","),14);assert(mod::parseConfig(withKeys(none,"\"share_enemies\":true")).shareEnemies);
         assert(refused(withKeys(none,"\"share_enemies\":true,\"share_enemy_positions\":true")));}
     assert(refused(withKeys(threaded,"\"share_enemies\":true,\"enemy_position_pull\":true")));
+    assert(!mod::parseConfig(threaded).enemyPositionGoal);
+    assert(mod::parseConfig(withKeys(threaded,"\"share_enemies\":true,\"share_enemy_positions\":true,\"enemy_position_goal\":true")).enemyPositionGoal);
+    assert(refused(withKeys(threaded,"\"share_enemies\":true,\"enemy_position_goal\":true")));
     // The delivery-delay impairment works with the real game too (two copies on one PC standing in for an internet
     // link); injected faults stay synthetic-only.
     assert(!mod::parseConfig(threaded).impairment&&mod::parseConfig(withKeys(threaded,"\"impairment\":true")).impairment);

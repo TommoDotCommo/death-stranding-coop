@@ -837,6 +837,19 @@ players see them in different places. `"share_enemy_positions": true` (needs `sh
   once a second. With `"enemy_position_pull": true` an error between 0.75 m and 4 m is taken away in steps of half
   a metre, at most two a second (each step is a short teleport; whether that looks right is not known, so it is a
   separate key).
+- **Guest, walking instead of jumping** (`"enemy_position_goal": true`, needs `share_enemy_positions`; live
+  2026-11-15): every look, up to six MULEs with a body that are more than 0.75 m off get the host's place as their
+  walk's destination through the game's own forced destination (`mule_goal.h`: three doubles and one bit in the
+  MULE's request block, a checked write and no call; the game's walk reads it, clears it and walks there). A MULE
+  whose write was taken in the last 1.5 s is not stepped and is teleported only from 10 m. The write is refused,
+  and the teleport rules above stay in force, for a MULE that is not walking (it stands in a wait step, or runs
+  with another goal), whose AI is held still, that is nearer than 6 m to the guest's porter, or whose objects are
+  not the ones read from the image; nothing is written while the last destination is still waiting to be read.
+  Live, two copies 60 m from a camp for 40 s: 144 destinations taken, 4 teleports (20 in the same scenario without
+  the key), the MULEs the host sent within 0.1 to 4.6 m of the host's, no fault.
+- **A teleport that does not move the MULE** (live: the riders of a truck patrol stay in their seats) is tried again
+  later and later (4 s, 8 s, ... up to a minute) instead of every second or two; `ENEMYPOS guest: MULE <key> stayed
+  where it was ...` says so.
 - **Never moved:** a MULE that is down, dead or removed in the guest's game; one within 3 m of the guest's porter
   (a fight hand to hand stays the guest's own, and its hits land where the guest sees them); a pose within 1.5 m of
   the guest's porter; a MULE that rides (the host's flag, or faster than 9 m/s in the guest's game); anything when
@@ -852,13 +865,16 @@ only).
 
 Log lines: `ENEMYPOS host: N MULEs near the players -> partner (sample S)` (the first sample and every 300th),
 `ENEMYPOS guest: the host's first sample, ...`, `ENEMYPOS guest: MULE <key> teleported|stepped, it was E m from the
-host's, to X,Y,Z (moved M, refused R)` (the first twenty and every fiftieth). Test commands in `puppet.cargo` (lab
+host's, to X,Y,Z (moved M, refused R)` (the first twenty and every fiftieth); with `enemy_position_goal`, `ENEMYGOAL guest: MULE <key>
+sent walking, it was E m from the host's, to X,Y,Z (writes W, refused R)` (the first twenty and every 200th) and every
+ten seconds `ENEMYGOAL guest: writes W refused R walking now N teleports T; <reason> <count>; ...`. Test commands in `puppet.cargo` (lab
 only): `muleat <n> <stamp>` (read-only: the n nearest MULEs with key, id, LOD, state, position, heading, distance) and
 `mulemove <cm> <stamp>` (the nearest standing MULE moved that many centimetres east with the same native call, then
 read back: `MULEPOS test: key K lod L D m away, from ... asked ... now ... moved`). The stand-in partner sends a fixed
 pose as a host would: `coop-partner --role host ... --mule KEY X Y Z HEADING`.
 
-Two more test commands in `puppet.cargo` look at a MULE's movement goal (`mule_goal.h`; `game_offsets.md`, "What gives
+Two more test commands in `puppet.cargo` look at a MULE's movement goal (both run live 2026-11-15: the chain reads as
+described in both games, and a forced destination is taken within half a second) (`mule_goal.h`; `game_offsets.md`, "What gives
 a MULE its goal"). Lab only, no config key of their own; both answer `MULEGOAL test: off (share_enemy_positions is not
 set)` without `share_enemy_positions`:
 
@@ -880,11 +896,11 @@ set)` without `share_enemy_positions`:
   last ok|reason`. Nothing is written, and `MULEGOAL test: forced refused: reason` is logged, when the offset is over
   5000, an earlier `mulegoto` is still watched, or none of the 12 nearest standing MULEs passes every check: a
   `DSAIIndividualComponent` (image+0x3dca218), the AI the same by both of its pointers and a `DSAIIndividual`
-  (image+0x3e11880), a walk goal with both destinations equal and finite, the request owner's vtable in the image's
+  (image+0x3e11880), the AI running (its state byte 0), a walk goal with both destinations equal and finite, the request owner's vtable in the image's
   data, the request index 0 to 31, and plain committed read-write memory from the owner to the end of the request.
   Each repeated write reads and checks the chain again and stops (`last reason`) when an object changed.
 
-Game-free test: `mod/mule_goal_test.cpp` (the chain on fake memory, every broken link, the write and its refusals; 14
+Game-free test: `mod/mule_goal_test.cpp` (the chain on fake memory, every broken link, the write and its refusals, the wait for a destination not yet taken; 16
 mutants).
 
 Game-free tests: `core/tests/enemies.cpp` (the datagram; six guards with mutants; lossy-link fuzz),

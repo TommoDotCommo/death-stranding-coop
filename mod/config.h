@@ -33,6 +33,7 @@ struct Config {
     bool shareEnemies=false;   // a MULE one player puts down is down in the partner's game too (enemies.h)
     bool shareEnemyPositions=false; // with share_enemies and an explicit role: the guest's MULEs are put where the host's are (enemy_poses.h); not run live yet
     bool enemyPositionPull=false;   // with share_enemy_positions: small errors are corrected too, in short steps (each one a teleport); not run live yet
+    bool enemyPositionGoal=false;   // with share_enemy_positions: a walking MULE is sent to the host's place with the game's forced destination; the teleport waits to 10 m
     bool notices=false;        // session notices in the game's info log: partner joined / left / nobody yet (notice.h)
     bool partnerShout=false;   // the partner's shout is a voice line from his body here (signals.h); unverified live
     unsigned partnerShoutVoice=0; // which of the body's sentence containers a shout plays (0..15)

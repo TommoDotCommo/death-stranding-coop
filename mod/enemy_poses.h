@@ -35,7 +35,17 @@ constexpr double PullStepM=0.5;      // a pull moves it at most this far
 constexpr double FastMps=9;          // above a sprint: a vehicle
 constexpr double MaxErrorM=150;      // an error this large is a mistake (another world, a wrong identity): ignored
 constexpr uint64_t StaleMs=ds::EnemyStaleMs,SnapHoldMs=300,SnapCooldownMs=2000,PullIntervalMs=500,UnseenCooldownMs=1000;
+// A teleport that leaves the MULE where it was (live: the riders of a parked or slow truck are not moved by it) is
+// tried again later and later: the cooldown doubles with each one that did not take, up to StuckMaxMs.
+constexpr double StuckM=0.3,StuckErrorM=1;
+constexpr uint64_t StuckMaxMs=60000;
 constexpr unsigned MovesPerLook=2;   // native calls per look, the largest errors first
+// With `enemy_position_goal`: a MULE with a body that walks is sent to the host's place with the game's own forced
+// destination (mule_goal.h) instead of being put there: it walks the error off. While that works for a MULE (a write
+// was taken within SteerHoldMs) it is only teleported from SteerSnapM, and never stepped.
+constexpr double SteerSnapM=10;
+constexpr uint64_t SteerHoldMs=1500;
+constexpr unsigned SteersPerLook=6;  // forced destinations per look, the largest errors first
 // Heading of a rotation (rows, the game's z up) and the upright rotation of a heading.
 double heading(const std::array<float,9>& rotation);
 std::array<float,9> upright(double heading);
@@ -47,16 +57,20 @@ private:
     struct Seen { std::array<double,3> position{}; uint64_t at=0; bool fast=false,sent=false; };
     std::map<uint64_t,Seen> seen_;
 };
-struct Move { uint64_t address=0,key=0; bool snap=false; std::array<double,3> position{}; double heading=0,error=0; };
+struct Move { uint64_t address=0,key=0; bool snap=false; std::array<double,3> position{}; double heading=0,error=0; std::array<double,3> from{}; unsigned stuck=0; };   // stuck: teleports in a row that did not move it
 // Guest: what to do this look. `shown` is the core's newest sample (null when there is none or it is stale).
 class Corrector {
 public:
-    std::vector<Move> decide(const std::vector<enemies::Mule>&,const ds::EnemiesShown* shown,const std::array<double,3>& porter,uint64_t now,bool pull=true);
+    // `steer` (when given) receives the MULEs to send walking to the host's place (position = the host's, from = this
+    // game's); `steered` (key -> time of the last forced destination the game's checks let through) are the ones that
+    // are walking it off.
+    std::vector<Move> decide(const std::vector<enemies::Mule>&,const ds::EnemiesShown* shown,const std::array<double,3>& porter,uint64_t now,bool pull=true,
+                             const std::map<uint64_t,uint64_t>* steered=nullptr,std::vector<Move>* steer=nullptr);
     void forget(){seen_.clear();}
     uint64_t snaps() const {return snaps_;}
     uint64_t pulls() const {return pulls_;}
 private:
-    struct Seen { std::array<double,3> position{}; uint64_t at=0,farSince=0,movedAt=0; bool fast=false,wasFar=false,moved=false; };
+    struct Seen { std::array<double,3> position{},before{}; uint64_t at=0,farSince=0,movedAt=0; bool fast=false,wasFar=false,moved=false,judged=false; unsigned stuck=0; };
     std::map<uint64_t,Seen> seen_;uint64_t snaps_=0,pulls_=0;
 };
 struct Place { std::array<double,3> position{}; std::array<float,9> rotation{}; };

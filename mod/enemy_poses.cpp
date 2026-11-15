@@ -57,8 +57,9 @@ ds::EnemyPoses Sampler::select(const std::vector<enemies::Mule>& mules,const std
     ds::EnemyPoses out;for(auto& c:found)out.poses[out.count++]=c.pose;
     return out;
 }
-std::vector<Move> Corrector::decide(const std::vector<enemies::Mule>& mules,const ds::EnemiesShown* shown,const std::array<double,3>& porter,uint64_t now,bool pull){
-    std::vector<Move> out;std::map<uint64_t,Seen> next;
+std::vector<Move> Corrector::decide(const std::vector<enemies::Mule>& mules,const ds::EnemiesShown* shown,const std::array<double,3>& porter,uint64_t now,bool pull,
+                                  const std::map<uint64_t,uint64_t>* steered,std::vector<Move>* steer){
+    std::vector<Move> out;if(steer)steer->clear();std::map<uint64_t,Seen> next;
     bool fresh=shown!=nullptr;
 #ifndef MUTANT_ENEMYPOS_STALE
     if(fresh&&shown->ageMs>StaleMs)fresh=false;
@@ -68,7 +69,14 @@ std::vector<Move> Corrector::decide(const std::vector<enemies::Mule>& mules,cons
         Seen s=seen_.count(k)?seen_[k]:Seen{};
         // A MULE this side moved at the last look did not run there: that jump is not speed.
         bool mine=s.moved;s.moved=false;
-        if(mine){s.position=m.position;s.at=now;}
+        if(mine){
+#ifndef MUTANT_ENEMYPOS_STUCK
+            // Did the last teleport take? One that left it where it was counts; one that moved it clears the count.
+            if(s.judged)s.stuck=distance(m.position,s.before)<StuckM?std::min(s.stuck+1,16u):0;
+#endif
+            s.judged=false;s.position=m.position;s.at=now;
+        }
+        uint64_t stuckMs=s.stuck?std::min<uint64_t>(StuckMaxMs,SnapCooldownMs<<s.stuck):0;
         bool fast=fastNow(s,m.position,now);
         auto keep=[&](bool away){if(!away){s.wasFar=false;s.farSince=0;}next[k]=s;};
         const ds::EnemyPose* h=nullptr;
@@ -95,27 +103,45 @@ std::vector<Move> Corrector::decide(const std::vector<enemies::Mule>& mules,cons
 #ifndef MUTANT_ENEMYPOS_DEADBAND
         if(error<DeadbandM){keep(false);continue;}
 #endif
-        Move mv;mv.address=m.address;mv.key=k;mv.error=error;
+        Move mv;mv.address=m.address;mv.key=k;mv.error=error;mv.from=m.position;mv.stuck=s.stuck;
         if(m.lod!=2){
             // No body in this game: nobody sees the move, the actor's transform is simply set.
             keep(false);
 #ifndef MUTANT_ENEMYPOS_COOLDOWN
-            if(s.movedAt&&now<s.movedAt+UnseenCooldownMs)continue;
+            if(s.movedAt&&now<s.movedAt+std::max(UnseenCooldownMs,stuckMs))continue;
 #endif
             mv.snap=true;mv.position=h->position;mv.heading=h->heading;out.push_back(mv);continue;
         }
-        if(error>=SnapM){
+        // A MULE with a body may be sent walking; one that is walking the error off is left more room before a teleport.
+        bool steering=false;
+#ifndef MUTANT_ENEMYPOS_STEERHOLD
+        if(steered){auto at=steered->find(k);steering=at!=steered->end()&&now<=at->second+SteerHoldMs;}
+#else
+        if(steered)steering=steered->count(k)!=0;
+#endif
+        if(steer){Move g=mv;g.position=h->position;g.heading=h->heading;steer->push_back(g);}
+        double snapFrom=SnapM;
+#ifndef MUTANT_ENEMYPOS_STEERROOM
+        if(steering)snapFrom=SteerSnapM;
+#endif
+#ifdef MUTANT_ENEMYPOS_STEERSNAP
+        if(steering)snapFrom=MaxErrorM*2;
+#endif
+        if(error>=snapFrom){
             if(!s.wasFar){s.wasFar=true;s.farSince=now;}
             keep(true);
 #ifndef MUTANT_ENEMYPOS_HOLD
             if(now<s.farSince+SnapHoldMs)continue;
 #endif
 #ifndef MUTANT_ENEMYPOS_COOLDOWN
-            if(s.movedAt&&now<s.movedAt+SnapCooldownMs)continue;
+            if(s.movedAt&&now<s.movedAt+std::max(SnapCooldownMs,stuckMs))continue;
 #endif
             mv.snap=true;mv.position=h->position;mv.heading=h->heading;out.push_back(mv);continue;
         }
         keep(false);
+#ifndef MUTANT_ENEMYPOS_STEERPULL
+        if(steering)continue;
+#endif
         if(!pull||(s.movedAt&&now<s.movedAt+PullIntervalMs))continue;
         double step=std::min(error,PullStepM);
         for(int i=0;i<3;++i)mv.position[size_t(i)]=m.position[size_t(i)]+(h->position[size_t(i)]-m.position[size_t(i)])*step/error;
@@ -130,7 +156,13 @@ std::vector<Move> Corrector::decide(const std::vector<enemies::Mule>& mules,cons
 #ifndef MUTANT_ENEMYPOS_BUDGET
     if(out.size()>MovesPerLook)out.resize(MovesPerLook);
 #endif
-    for(auto& mv:out){auto& s=next[mv.key];s.movedAt=now;s.moved=true;s.wasFar=false;s.farSince=0;if(mv.snap)++snaps_;else ++pulls_;}
+    if(steer){
+        std::sort(steer->begin(),steer->end(),[](const Move& a,const Move& b){return a.error>b.error||(a.error==b.error&&a.key<b.key);});
+#ifndef MUTANT_ENEMYPOS_STEERBUDGET
+        if(steer->size()>SteersPerLook)steer->resize(SteersPerLook);
+#endif
+    }
+    for(auto& mv:out){auto& s=next[mv.key];s.movedAt=now;s.moved=true;s.judged=mv.snap&&mv.error>=StuckErrorM;s.before=mv.from;s.wasFar=false;s.farSince=0;if(mv.snap)++snaps_;else ++pulls_;}
     seen_.swap(next);
     return out;
 }

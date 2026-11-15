@@ -163,6 +163,13 @@ std::string force(const discovery::Sampler& s,uint64_t base,const Chain& was,con
     poke(*now.request+RequestFlags,&flags,1);
     return "";
 }
+std::string steer(const discovery::Sampler& s,uint64_t base,const Chain& was,const Vec3& mule,const Vec3& porter,const Vec3& destination,bool first,const Writable& writable,const Poke& poke){
+#ifndef MUTANT_MULEGOAL_PENDING
+    Chain now=read(s,base,was.actor);
+    if(now.flags&&(*now.flags&ForcedBit))return Pending;
+#endif
+    return force(s,base,was,mule,porter,destination,first,writable,poke);
+}
 Writable nativeWritable(){
 #ifdef _WIN32
     return [](uint64_t at,size_t n){MEMORY_BASIC_INFORMATION info{};

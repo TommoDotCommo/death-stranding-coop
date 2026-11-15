@@ -64,7 +64,8 @@ static void units(){
       CHECK(c.decide({mule(1,30,0)},&h,porter,1000).empty());
       CHECK(c.decide({mule(1,30,0)},&h,porter,1200).empty());
       auto m=c.decide({mule(1,30,0)},&h,porter,1300);CHECK(m.size()==1&&m[0].snap&&m[0].position[0]==20&&m[0].heading==1.0&&c.snaps()==1);
-      CHECK(c.decide({mule(1,30,0)},&h,porter,1600).empty());CHECK(c.decide({mule(1,30,0)},&h,porter,3200).empty());   // moved 1300: not before 3300
+      // It was put there and walks off again: moved at 1300, not before 3300.
+      CHECK(c.decide({mule(1,20.2,0)},&h,porter,1600).empty());CHECK(c.decide({mule(1,30,0)},&h,porter,2900).empty());CHECK(c.decide({mule(1,30,0)},&h,porter,3200).empty());
       m=c.decide({mule(1,30,0)},&h,porter,3300);CHECK(m.size()==1&&m[0].snap);
       // An error that was large for one look only (a late sample) moves nothing.
       Corrector d;CHECK(d.decide({mule(1,30,0)},&h,porter,1000).empty());CHECK(d.decide({mule(1,20.2,0)},&h,porter,1250).empty());
@@ -72,7 +73,7 @@ static void units(){
     // Guest: a MULE with no body here is simply put there (nobody sees it), at most once a second.
     { Corrector c;auto h=shown({pose(1,20,0)});
       auto m=c.decide({mule(1,22,0,0)},&h,porter,1000);CHECK(m.size()==1&&m[0].snap&&m[0].position[0]==20);
-      CHECK(c.decide({mule(1,22,0,0)},&h,porter,1500).empty());CHECK(c.decide({mule(1,22,0,0)},&h,porter,2000).size()==1); }
+      CHECK(c.decide({mule(1,20.1,0,0)},&h,porter,1200).empty());CHECK(c.decide({mule(1,22,0,0)},&h,porter,1800).empty());CHECK(c.decide({mule(1,22,0,0)},&h,porter,2000).size()==1); }
     // Never: a MULE that is down or gone, one within the porter's reach, a pose on top of the porter, a vehicle, a
     // stale or missing sample, a MULE the host did not send, an absurd error.
     { auto h=shown({pose(1,20,0),pose(2,2,0),pose(3,0.5,0.5),pose(4,20,0,HasBody|Fast),pose(6,2000,0)});
@@ -104,6 +105,46 @@ static void units(){
     { Corrector c;std::vector<Mule> v;std::vector<ds::EnemyPose> p;for(uint8_t i=1;i<=6;++i){v.push_back(mule(i,100+10.0*i,0,0));p.push_back(pose(i,100+10.0*i,3.0+i));}
       auto h=shown(p);auto m=c.decide(v,&h,porter,1000);CHECK(m.size()==MovesPerLook&&m[0].key==keyOf(6)&&m[1].key==keyOf(5));
       m=c.decide(v,&h,porter,1250);CHECK(m.size()==MovesPerLook&&m[0].key==keyOf(4)&&m[1].key==keyOf(3)); }
+    // A teleport that does not move the MULE (a rider) is tried again later and later; one that takes clears that.
+    { Corrector c;auto h=shown({pose(1,20,0)});
+      c.decide({mule(1,60,0)},&h,away,1000);auto m=c.decide({mule(1,60,0)},&h,away,1300);CHECK(m.size()==1&&m[0].snap&&m[0].stuck==0);
+      CHECK(c.decide({mule(1,60,0)},&h,away,1500).empty());CHECK(c.decide({mule(1,60,0)},&h,away,3300).empty());   // it stayed: 4 s, not 2
+      CHECK(c.decide({mule(1,60,0)},&h,away,5200).empty());
+      m=c.decide({mule(1,60,0)},&h,away,5300);CHECK(m.size()==1&&m[0].snap&&m[0].stuck==1);
+      CHECK(c.decide({mule(1,60,0)},&h,away,5500).empty());CHECK(c.decide({mule(1,60,0)},&h,away,13200).empty());  // again: 8 s
+      m=c.decide({mule(1,60,0)},&h,away,13300);CHECK(m.size()==1&&m[0].stuck==2);
+      // This time it is where it was put; when it has walked off again it is an ordinary MULE.
+      CHECK(c.decide({mule(1,20.1,0)},&h,away,13500).empty());
+      auto h2=shown({pose(1,40,0)});c.decide({mule(1,20.1,0)},&h2,away,15000);
+      m=c.decide({mule(1,20.1,0)},&h2,away,15400);CHECK(m.size()==1&&m[0].snap&&m[0].stuck==0);
+      // The wait is never longer than StuckMaxMs.
+      Corrector d;uint64_t t=1000,lastMove=0,longest=0;
+      for(;t<600000;t+=200){auto r=d.decide({mule(1,60,0)},&h,away,t);if(!r.empty()){if(lastMove)longest=std::max(longest,t-lastMove);lastMove=t;}}
+      CHECK(longest>=StuckMaxMs&&longest<=StuckMaxMs+200); }
+    // Steering (enemy_position_goal): a MULE with a body beyond the deadband is offered a walk to the host's place (the
+    // one in agreement and the one without a body are not; the latter is still put there).
+    { Corrector c;auto h=shown({pose(1,20,0),pose(2,40,0),pose(3,60,0)});std::vector<Move> steer;std::map<uint64_t,uint64_t> none;
+      auto m=c.decide({mule(1,20.5,0),mule(2,42,0),mule(3,63,0,0)},&h,away,1000,false,&none,&steer);
+      CHECK(steer.size()==1&&steer[0].key==keyOf(2)&&steer[0].position[0]==40&&steer[0].from[0]==42&&std::fabs(steer[0].error-2)<1e-9);
+      CHECK(m.size()==1&&m[0].key==keyOf(3)&&m[0].snap);
+      // The list is this look's: an old one is not kept, and nothing is offered without a fresh sample.
+      c.decide({mule(1,20.5,0)},&h,away,1250,false,&none,&steer);CHECK(steer.empty());
+      steer.resize(3);c.decide({mule(2,42,0)},nullptr,away,1500,false,&none,&steer);CHECK(steer.empty()); }
+    // One that is walking it off is not stepped...
+    { auto h=shown({pose(1,20,0)});std::vector<Move> steer;std::map<uint64_t,uint64_t> on{{keyOf(1),900}};
+      Corrector a;CHECK(a.decide({mule(1,22,0)},&h,away,1000,true,&on,&steer).empty()&&steer.size()==1);
+      Corrector b;CHECK(b.decide({mule(1,22,0)},&h,away,1000,true,nullptr,nullptr).size()==1);
+      // ...is left alone at 6 m, where another would be teleported...
+      Corrector d;CHECK(d.decide({mule(1,26,0)},&h,away,1000,true,&on,&steer).empty());CHECK(d.decide({mule(1,26,0)},&h,away,1400,true,&on,&steer).empty());
+      Corrector e;e.decide({mule(1,26,0)},&h,away,1000);CHECK(e.decide({mule(1,26,0)},&h,away,1400).size()==1);
+      // ...is teleported from SteerSnapM...
+      Corrector f;f.decide({mule(1,32,0)},&h,away,1000,true,&on,&steer);auto m=f.decide({mule(1,32,0)},&h,away,1400,true,&on,&steer);CHECK(m.size()==1&&m[0].snap&&steer.size()==1);
+      // ...and is like any other once its last forced destination is older than SteerHoldMs.
+      Corrector g;g.decide({mule(1,26,0)},&h,away,900+SteerHoldMs+1,true,&on,&steer);m=g.decide({mule(1,26,0)},&h,away,900+SteerHoldMs+401,true,&on,&steer);CHECK(m.size()==1&&m[0].snap); }
+    // Budget: SteersPerLook forced destinations per look, the largest errors first.
+    { Corrector c;std::vector<Mule> v;std::vector<ds::EnemyPose> p;for(uint8_t i=1;i<=8;++i){v.push_back(mule(i,100+20.0*i+1+0.3*i,0));p.push_back(pose(i,100+20.0*i,0));}
+      auto h=shown(p);std::vector<Move> steer;std::map<uint64_t,uint64_t> none;c.decide(v,&h,away,1000,false,&none,&steer);
+      CHECK(steer.size()==SteersPerLook&&steer[0].key==keyOf(8)&&steer[SteersPerLook-1].key==keyOf(3)); }
     // The native move's checks on the actor: the MULE actor vtable with the teleport in its slot, and the live byte.
     { const uint64_t base=0x100000,heap=0x9000000;std::vector<uint8_t> image(ActorVtable+0x100),mem(0x4000);
       auto put=[&](uint64_t a,const void* v,size_t n){if(a>=heap)std::memcpy(&mem[a-heap],v,n);else std::memcpy(&image[a-base],v,n);};

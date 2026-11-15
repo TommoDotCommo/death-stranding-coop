@@ -1682,6 +1682,9 @@ struct Runtime final:ds::Transport {
     mod::enemyposes::Sampler enemyPoseSampler;mod::enemyposes::Corrector enemyPoseCorrector;
     std::function<bool(uint64_t,const mod::enemyposes::Place&)> enemyMove;bool enemyMoveTried=false;
     uint64_t enemyPoseAt=0,enemyPoseSent=0,enemyPoseMoved=0,enemyPoseRefused=0,enemyPoseSeen=0;
+    // enemy_position_goal: key -> when the game's checks last let a forced destination through for that MULE.
+    std::map<uint64_t,uint64_t> enemySteered;std::map<std::string,uint64_t> enemySteerRefusals;
+    uint64_t enemySteerWrites=0,enemySteerRefused=0,enemySteerLogAt=0;
     // Lab only (mule_goal.h): the repeated forced destination of "mulegoto", and the watch of the goal after it.
     struct MuleGoto { bool active=false,first=true; uint64_t key=0,until=0,watchUntil=0,logAt=0,writes=0,refusals=0; mod::mulegoal::Chain chain; mod::mulegoal::Vec3 destination{}; std::string stopped; } muleGoto;
     void tickMuleGoto(uint64_t now) {
@@ -1705,7 +1708,7 @@ struct Runtime final:ds::Transport {
         if(!core||!sampler||!config.shareEnemyPositions||!config.shareEnemies)return;
         if(now-enemyPoseAt<200)return;
         enemyPoseAt=now;
-        if(!core->connected()||!partnerMode()){enemyPoseCorrector.forget();return;}
+        if(!core->connected()||!partnerMode()){enemyPoseCorrector.forget();enemySteered.clear();return;}
         auto anchor=anchorNow();if(!anchor.pose.available)return;
         auto here=mod::puppet::transform(anchor.pose).position;
         if(config.role=="host"){
@@ -1723,9 +1726,35 @@ struct Runtime final:ds::Transport {
         if(!enemyMove)return;
         if(++enemyPoseSeen==1){std::ostringstream o;o<<"ENEMYPOS guest: the host's first sample, "<<int(shown->enemies.count)<<" MULEs, "<<shown->ageMs<<" ms old\n";note(o.str().c_str());}
         auto mules=mod::enemies::readMules(*sampler,sampler->base);if(mules.empty())return;
-        for(auto& mv:enemyPoseCorrector.decide(mules,&*shown,here,now,config.enemyPositionPull)){
+        std::vector<mod::enemyposes::Move> steer;bool goal=config.enemyPositionGoal;
+        for(auto at=enemySteered.begin();at!=enemySteered.end();)if(now>at->second+mod::enemyposes::SteerHoldMs)at=enemySteered.erase(at);else ++at;
+        auto moves=enemyPoseCorrector.decide(mules,&*shown,here,now,config.enemyPositionPull,goal?&enemySteered:nullptr,goal?&steer:nullptr);
+        // The walk first: the MULE's own forced destination (mule_goal.h), a checked write and no call. A MULE that
+        // does not walk, runs after someone or is held still refuses it and is corrected by the teleport as before.
+        if(!steer.empty()){
+            auto writable=mod::mulegoal::nativeWritable();auto poke=mod::mulegoal::nativePoke();
+            for(auto& g:steer){
+                auto chain=mod::mulegoal::read(*sampler,sampler->base,g.address);
+                bool first=!enemySteered.count(g.key);
+                auto why=mod::mulegoal::steer(*sampler,sampler->base,chain,g.from,here,g.position,first,writable,poke);
+                if(why==mod::mulegoal::Pending)continue;              // not counted: the walk has not come round to the last one
+                if(why.empty()){
+                    enemySteered[g.key]=now;
+                    if(++enemySteerWrites<=20||enemySteerWrites%200==0){std::ostringstream o;o<<"ENEMYGOAL guest: MULE "<<std::hex<<g.key<<std::dec<<" sent walking, it was "<<g.error<<" m from the host's, to "
+                        <<g.position[0]<<","<<g.position[1]<<","<<g.position[2]<<" (writes "<<enemySteerWrites<<", refused "<<enemySteerRefused<<")\n";note(o.str().c_str());}
+                } else {++enemySteerRefused;++enemySteerRefusals[why];}
+            }
+        }
+        if(goal&&now>=enemySteerLogAt){
+            enemySteerLogAt=now+10000;
+            std::ostringstream o;o<<"ENEMYGOAL guest: writes "<<enemySteerWrites<<" refused "<<enemySteerRefused<<" walking now "<<enemySteered.size()<<" teleports "<<enemyPoseCorrector.snaps();
+            for(auto& r:enemySteerRefusals)o<<"; "<<r.first<<" "<<r.second;
+            o<<"\n";note(o.str().c_str());
+        }
+        for(auto& mv:moves){
             mod::enemyposes::Place p;p.position=mv.position;p.rotation=mod::enemyposes::upright(mv.heading);
             bool ok=enemyMove(mv.address,p);uint64_t n=ok?++enemyPoseMoved:++enemyPoseRefused;
+            if(mv.stuck){std::ostringstream o;o<<"ENEMYPOS guest: MULE "<<std::hex<<mv.key<<std::dec<<" stayed where it was when it was put at the host's place ("<<mv.stuck<<" in a row; it may ride): the next try waits longer\n";note(o.str().c_str());}
             if(n<=20||n%50==0){std::ostringstream o;o<<"ENEMYPOS guest: MULE "<<std::hex<<mv.key<<std::dec<<(mv.snap?" teleported":" stepped")<<", it was "<<mv.error<<" m from the host's, to "
                 <<mv.position[0]<<","<<mv.position[1]<<","<<mv.position[2]<<(ok?"":" REFUSED")<<" (moved "<<enemyPoseMoved<<", refused "<<enemyPoseRefused<<")\n";note(o.str().c_str());}
         }

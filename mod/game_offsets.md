@@ -1063,7 +1063,7 @@ Whom a MULE notices (research for "the partner's body as a target"; nothing impl
   player behind it does (its attacks, the cargo theft and the camp's phase logic all read the player). The first
   experiment would be read-only: the two factions and `IsHostileTowards` both ways.
 
-### What gives a MULE its goal, and how the goal could follow the host (2026-11-15, static only, nothing called)
+### What gives a MULE its goal, and how the goal could follow the host (2026-11-15, static; the chain and the forced destination confirmed live the same day, at the end)
 
 Asked after the first live run of `share_enemy_positions`: the guest's game sends its MULE somewhere else, so it walks
 off after each teleport and is put back about every 2 s. Everything below is read from the pinned image; no address
@@ -1196,6 +1196,35 @@ log formats are in `mod/README.md`, "MULEs in the same place"). What they add to
 4. Only then a config key: the guest writes the host's pose as the forced destination for a MULE with a body whose
    error is between the deadband and the snap distance, and keeps the teleport above it. Measure the number of
    teleports per minute with and without (the 2026-11-15 run: about one every 2 s for a MULE sent two ways).
+
+**Live (2026-11-15, two copies about 60 m from the camp at 1437,216, Episode 3 save; `mulegoal 4` once a second in
+both games, 368 rows; then `mulegoto` in the host's game)**
+
+- Steps 1 and 2. Every row in both games: component vtable `image+0x3dca218`, AI vtable `image+0x3e11880`, both AI
+  pointers equal, D's vtable `image+0x3def3e0`. So a MULE's component and AI are exactly those classes.
+- `+0x9e0` is where the MULE walks: it moves towards it at 1 to 2 m/s and gets a new one every few seconds. `+0x850`
+  equals it while the walk goal is the active one, and is `FLT_MAX` three times (3.40282e+38) when it is not: at the
+  end of a walk, and while the MULE runs with another goal (the guest's MULEs running at its porter kept a stale
+  `+0x9e0` 130 m away with `+0x850` at `FLT_MAX`). "Both equal and finite" is therefore the test for "it walks".
+- The AI's byte `+0x48` is 0 while the AI runs. It was 2 for every MULE of the camp once the host's porter had been
+  knocked out and woke 366 m away: they stood still for the rest of the run. The request index is 2 while it runs (the
+  fixed byte), 0 or 2 while held.
+- The low byte of request `+0x238` showed 0 and 3 by itself (3 while a MULE stood after a walk); bit `0x40` never.
+- The two games' destinations differ as expected: each game's MULEs go for its own porter or its own patrol point.
+- Step 3, a MULE held still (state 2), 322 m from the porter: the write stayed (bit set, destination unread) for the
+  8 s watched and the MULE did not move. A held AI does not read it; the write is now refused for one.
+- Step 3, a walking MULE 71 m away (state 0): after one write `+0x9e0` was the written point (10 m east of its own)
+  at the next look half a second later, request `+0x78` was zero again and the bit clear (flags `0x1101840` ->
+  `0x1101800`): the game takes the request, clears it, and the walk keeps the destination. Written every tick for
+  5 s (76 writes), the MULE walked towards the point at about 1 m/s the whole time, 6.7 m in 6.5 s; after the last
+  write the request was cleared the same way and it walked on to the point. No fault record in four runs.
+- Step 4 is `enemy_position_goal` (`mod/README.md`, "MULEs in the same place"). Since the game clears the request
+  when it takes it, the mod writes only while the bit is clear: a write that crossed that clearing could leave half
+  a destination with the bit set.
+- Still open: whether a MULE that stands in a wait step takes a forced destination when it next walks; what a
+  redirected MULE does on arriving (its plan's next step, so far as the two-copy run shows: it is sent again as
+  soon as it is 0.75 m off); the threads (the write is made from the game-thread callback; nothing went wrong in
+  about 600 writes).
 
 ## Orders: the mission system (2026-11-12, static, the reads and the three requests confirmed live)
 

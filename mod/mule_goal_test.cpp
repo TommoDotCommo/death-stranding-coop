@@ -104,6 +104,16 @@ void writes(){
       // A repeated write goes on when the MULE has arrived (the first one would refuse a MULE that stands at its goal).
       Vec3 there{119.8,40,7};CHECK(refusal(s,Image,c,there,porter,w.writable())=="not walking");
       CHECK(force(s,Image,c,there,porter,target,false,w.writable(),w.poke()).empty()&&w.pokes==4); }
+    // A MULE kept on a moving target: the next destination waits until the game has taken the last one.
+    { World w;auto s=w.sampler();auto c=read(s,Image,Heap+Actor);
+      CHECK(steer(s,Image,c,mule,porter,Vec3{123,40,7},true,w.writable(),w.poke()).empty()&&w.pokes==2);
+      auto held=w.heap;
+      CHECK(steer(s,Image,c,mule,porter,Vec3{125,40,7},false,w.writable(),w.poke())==Pending&&w.pokes==2&&held==w.heap);
+      w.put<uint32_t>(w.request()+RequestFlags,0x00010203u);w.point(w.request()+RequestForced,0,0,0);   // the walk took it
+      CHECK(steer(s,Image,c,mule,porter,Vec3{125,40,7},false,w.writable(),w.poke()).empty()&&w.pokes==4&&w.get<double>(w.request()+RequestForced)==125);
+      // Every refusal of the write is steer's too.
+      w.put<uint32_t>(w.request()+RequestFlags,0x00010203u);
+      CHECK(steer(s,Image,c,mule,Vec3{95,40,7},Vec3{126,40,7},false,w.writable(),w.poke())=="MULE nearer than 6 m to the porter"); }
     auto refused=[&](const char* why,void(*change)(World&),Vec3 m=mule,Vec3 p=porter){
         World w;change(w);auto s=w.sampler();auto c=read(s,Image,Heap+Actor);auto before=w.heap;
         auto r=refusal(s,Image,c,m,p,w.writable());

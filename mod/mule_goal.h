@@ -65,6 +65,11 @@ Vec3 east(const Vec3& destination,uint32_t cm);
 // and has to be the same objects (`was`), and still pass `refusal`; the destination is at most MaxReachM from the
 // MULE. Returns the reason when nothing was written.
 std::string force(const discovery::Sampler&,uint64_t base,const Chain& was,const Vec3& mule,const Vec3& porter,const Vec3& destination,bool first,const Writable&,const Poke&);
+// `force` for a MULE that is kept on a moving target (enemy_position_goal): nothing is written while the last forced
+// destination is still waiting to be read (its bit is set). The game clears the destination and the bit when the
+// walk takes it; a write that crossed that clearing could leave half a destination behind with the bit set.
+constexpr const char* Pending="the last forced destination is not taken yet";
+std::string steer(const discovery::Sampler&,uint64_t base,const Chain& was,const Vec3& mule,const Vec3& porter,const Vec3& destination,bool first,const Writable&,const Poke&);
 // Windows: VirtualQuery for Writable and a copy for Poke; elsewhere they refuse and do nothing.
 Writable nativeWritable();
 Poke nativePoke();
