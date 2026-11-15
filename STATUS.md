@@ -109,6 +109,12 @@ and handoff (the guest starts from the host's save), story (the guest's catch-up
 `extra-modules.txt`, one copy) and enemypos (MULE positions from the host, two copies). The game-free suite
 (`make test`) passes on the same build with every mutant killed.
 
+Two more since (2026-11-16): enemygoal (two copies near a MULE camp with `enemy_position_goal`: the guest must send
+MULEs walking; riders are left out of the comparison) ran with the 31 above in one full pass, and orderput (two
+copies: a case of a shared order put down by the taker, made in the partner's game, picked up there, handed in at the
+Engineer's; then the taker hands in the rest: the order a success in both, the facility's connection points equal,
+no cargo of the order left) passes with input, solo, peer, share, terminal and orderload on the current build.
+
 Live regressions (2026-11-10), all driven without the window focus: both porters walking at the same time in two
 copies (each copy's partner followed the other's own track with a median error of 5 mm and at most 9 cm over 15 to
 18 m, and stood within 6 mm of the other porter at rest); the partner quitting and starting again (the body and name
