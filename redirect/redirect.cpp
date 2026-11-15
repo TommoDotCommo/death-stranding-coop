@@ -1048,6 +1048,19 @@ void install_redirect(void* self,bool releaseSession) {
         modules.release_game=path.substr(0,slash);
     }
     if(policy.instance!=modules.instance+L"\\redirect-data" || !safe_tree(modules.instance,false)) fatal("redirect: module/redirect instance mismatch\n");
+    {   // The player's extra modules for this copy (module_policy.h). No file: none. A file that cannot be read whole
+        // or holds anything but exact .dll paths refuses the start: a list that is half understood is not applied.
+        auto list=modules.instance+L"\\extra-modules.txt";
+        HANDLE f=::CreateFileW(list.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(f==INVALID_HANDLE_VALUE) {
+            if(GetLastError()!=ERROR_FILE_NOT_FOUND && GetLastError()!=ERROR_PATH_NOT_FOUND) fatal("redirect: cannot read extra-modules.txt\n");
+        } else {
+            char bytes[16385];DWORD n=0;bool ok=ReadFile(f,bytes,sizeof(bytes),&n,nullptr);CloseHandle(f);
+            if(!ok||n>16384||!safe_tree(list,true)) fatal("redirect: extra-modules.txt read/size failure\n");
+            if(!redirect::parse_module_extra(std::string(bytes,n),modules.extra)) fatal("redirect: invalid extra-modules.txt (one full path of a .dll per line)\n");
+            for(auto& e:modules.extra) note(L"MODULE_EXTRA",e,L"admitted by the player's extra-modules.txt for this copy");
+        }
+    }
     wchar_t mode[32];DWORD mode_n=::GetEnvironmentVariableW(L"COOP_MODULE_POLICY",mode,32);
     if(!mode_n) modules.mode=redirect::ModuleMode::strict;
     else if(mode_n<32 && !wcscmp(mode,L"strict")) modules.mode=redirect::ModuleMode::strict;

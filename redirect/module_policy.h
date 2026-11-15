@@ -1,6 +1,8 @@
 #pragma once
 #include "redirect.h"
 #include <functional>
+#include <string>
+#include <vector>
 namespace redirect {
 enum class ModuleMode { strict, allowlist, log_only };
 struct ModulePolicy {
@@ -9,7 +11,15 @@ struct ModulePolicy {
     // The executable's own directory (data and game files can live in different trees: a release ticket, or the
     // launcher's direct path with a separate data folder). The proxy fills it on every path; empty admits nothing.
     std::wstring release_game=L"";
+    // Exact module paths the player has added for this copy (`extra-modules.txt` in the copy's data folder): software
+    // Windows loads into every process, such as a third-party input method. Canonical; matched whole, never as a folder.
+    std::vector<std::wstring> extra={};
 };
+// The player's list: one full path of a .dll per line; blank lines and lines starting with # are skipped. False (the
+// proxy then refuses to start) for anything else: a relative path, a folder, a wildcard, a path that is not plain
+// ASCII, more than MaxExtraModules entries.
+constexpr size_t MaxExtraModules=32;
+bool parse_module_extra(const std::string& text,std::vector<std::wstring>& out);
 // Evidence means an absolute long path opened without reparse ancestors, whose
 // final DOS path equals its lexical path. Hard links are permitted for DLL reads.
 bool module_allowed(const ModulePolicy&, const std::wstring&, bool evidence);

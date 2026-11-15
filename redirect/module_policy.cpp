@@ -41,10 +41,44 @@ bool module_allowed(const ModulePolicy& c,const std::wstring& raw,bool evidence)
 #else
     {auto pd=canonical(c.program_data); if(!pd.empty() && within(p,pd)) return true;}
 #endif
-    return (dir==s || dir==s+L"\\bin" || dir==s+L"\\bin\\win64") &&
+    if((dir==s || dir==s+L"\\bin" || dir==s+L"\\bin\\win64") &&
         (base==L"steamclient64.dll" || base==L"tier0_s64.dll" || base==L"vstdlib_s64.dll" ||
-         base==L"gameoverlayrenderer64.dll");
+         base==L"gameoverlayrenderer64.dll")) return true;
+    // The player's own additions for this copy: the exact file, with the same evidence as every other module.
+#ifdef MUTANT_MODULE_EXTRA_ANY
+    if(!c.extra.empty()) return true;
 #endif
+    for(auto& e:c.extra) {
+#ifdef MUTANT_MODULE_EXTRA_FOLDER
+        if(within(p,e.substr(0,e.find_last_of(L'\\')))) return true;
+#endif
+        if(p==e) return true;
+    }
+    return false;
+#endif
+}
+bool parse_module_extra(const std::string& text,std::vector<std::wstring>& out) {
+    out.clear();size_t at=0;
+    while(at<=text.size()) {
+        auto end=text.find('\n',at);if(end==std::string::npos)end=text.size();
+        std::string line=text.substr(at,end-at);at=end+1;
+        while(!line.empty()&&(line.back()=='\r'||line.back()==' '||line.back()=='\t'))line.pop_back();
+        size_t lead=0;while(lead<line.size()&&(line[lead]==' '||line[lead]=='\t'))++lead;
+        line.erase(0,lead);
+        if(line.empty()||line[0]=='#')continue;
+        std::wstring wide;for(unsigned char ch:line){if(ch<32||ch>126)return false;wide+=wchar_t(ch);}
+        if(wide.find_first_of(L"*?\"<>|")!=std::wstring::npos)return false;
+        auto p=canonical(wide);
+#ifndef MUTANT_MODULE_EXTRA_NOT_DLL
+        if(p.size()<8||p.compare(p.size()-4,4,L".dll"))return false;
+#else
+        if(p.empty())return false;
+#endif
+        auto slash=p.find_last_of(L'\\');if(slash==std::wstring::npos||slash<3)return false;   // a file in a drive's root is not a module anyone installs
+        out.push_back(p);
+        if(out.size()>MaxExtraModules)return false;
+    }
+    return true;
 }
 bool loader_flags_allowed(const ModulePolicy& c,unsigned long flags) {
     if(c.mode==ModuleMode::log_only) return true;

@@ -72,6 +72,25 @@ int main(int argc,char** argv) {
     check(!is_api_set_name(L"c:\\x\\api-ms-win-evil.dll") && !is_api_set_name(L"api-ms-win-x/..\\y.dll") && !is_api_set_name(L"apix.dll"));
     check(classify_request(c,L"ext-ms-win-core-resourcepolicy-l1-1-0.dll",false,false)==RequestAction::api_set_forward);
     check(classify_request(c,L"hkCompatFormats.dll",false,false)==RequestAction::not_found);
+    {   // The player's extra modules for this copy: the exact file only, with evidence like any other module.
+        std::vector<std::wstring> extra;
+        check(parse_module_extra("# my input method\r\n\r\n  C:\\Program Files\\Vendor\\IME\\x64\\Ime.DLL  \r\nD:/tools/overlay/hook64.dll\n",extra));
+        check(extra.size()==2&&extra[0]==L"c:\\program files\\vendor\\ime\\x64\\ime.dll"&&extra[1]==L"d:\\tools\\overlay\\hook64.dll");
+        auto with=c;with.extra=extra;
+        const wchar_t* ime=L"C:\\Program Files\\Vendor\\IME\\x64\\ime.dll";
+        check(!module_allowed(c,ime,true));check(module_allowed(with,ime,true));check(!module_allowed(with,ime,false));
+        check(!module_allowed(with,L"c:\\program files\\vendor\\ime\\x64\\other.dll",true));
+        check(!module_allowed(with,L"c:\\program files\\vendor\\ime\\x64\\ime.dll.dll",true));
+        check(!module_allowed(with,L"c:\\program files\\vendor\\ime\\ime.dll",true));
+        check(!module_allowed(with,L"c:\\tools\\overlay\\hook64.dll",true));
+        auto strict=with;strict.mode=ModuleMode::strict;check(!module_allowed(strict,ime,true));
+        check(parse_module_extra("",extra)&&extra.empty());check(parse_module_extra("# nothing\n\n",extra)&&extra.empty());
+        for(auto bad:{"ime.dll","..\\ime.dll","C:\\Program Files\\Vendor","C:\\Program Files\\Vendor\\","C:\\Program Files\\Vendor\\*.dll","C:\\x\\ime.exe",
+                      "C:\\ime.dll","\\\\server\\share\\ime.dll","C:\\x\\..\\y\\ime.dll","C:\\x\\im\xc3\xa9.dll","C:\\x\\a.dll\nnot a path"})
+            check(!parse_module_extra(bad,extra));
+        std::string many;for(size_t i=0;i<=MaxExtraModules;++i)many+="C:\\x\\m"+std::to_string(i)+".dll\n";check(!parse_module_extra(many,extra));
+        many.clear();for(size_t i=0;i<MaxExtraModules;++i)many+="C:\\x\\m"+std::to_string(i)+".dll\n";check(parse_module_extra(many,extra)&&extra.size()==MaxExtraModules);
+    }
     // A refused request fails the load and the game goes on; a module found loaded after the fact ends the process.
     check(refusal(ModulePhase::request)==Refusal::fail_load);
     check(refusal(ModulePhase::loaded)==Refusal::end_process&&refusal(ModulePhase::mapped)==Refusal::end_process);

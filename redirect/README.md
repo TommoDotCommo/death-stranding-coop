@@ -20,6 +20,13 @@ loaded module so that the copy:
   software Windows loads into every process with a window, such as a third-party input method. A module that is only
   found after it was loaded (a dependency the loader brought in by itself) has already run code, and that still ends
   the game.
+  **Adding a module for one copy:** a player whose PC needs such software inside the game (an input method, a screen
+  reader, an overlay) lists it in `extra-modules.txt` in the copy's data folder (the folder that holds
+  `redirect-data`): one full path of a `.dll` per line, `#` for comments, at most 32. Each line admits that exact
+  file and nothing else: no folders, no wildcards, plain ASCII paths only. The audit log records every entry at start
+  (`MODULE_EXTRA`). A list the proxy cannot read whole or does not understand refuses the start. The refused path to
+  copy into the list is in the `MODULE_REFUSE` record. Everything a listed module does runs inside the game with the
+  game's rights; the network policy still applies to it.
 - **can run next to another copy.** Named kernel objects listed per copy (the game's single-instance mutex) get a
   per-copy suffix (`objects.h`).
 - **stays off the online service** (`network_policy.h`, default `enforce`). Only loopback and the co-op partners'
