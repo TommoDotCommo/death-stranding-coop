@@ -46,6 +46,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "voidout.h"
 #include "enemies.h"
 #include "enemy_poses.h"
+#include "mule_goal.h"
 #include "orders.h"
 #include "orderload.h"
 #include "story.h"
@@ -1671,6 +1672,25 @@ struct Runtime final:ds::Transport {
     mod::enemyposes::Sampler enemyPoseSampler;mod::enemyposes::Corrector enemyPoseCorrector;
     std::function<bool(uint64_t,const mod::enemyposes::Place&)> enemyMove;bool enemyMoveTried=false;
     uint64_t enemyPoseAt=0,enemyPoseSent=0,enemyPoseMoved=0,enemyPoseRefused=0,enemyPoseSeen=0;
+    // Lab only (mule_goal.h): the repeated forced destination of "mulegoto", and the watch of the goal after it.
+    struct MuleGoto { bool active=false,first=true; uint64_t key=0,until=0,watchUntil=0,logAt=0,writes=0,refusals=0; mod::mulegoal::Chain chain; mod::mulegoal::Vec3 destination{}; std::string stopped; } muleGoto;
+    void tickMuleGoto(uint64_t now) {
+        auto& g=muleGoto;if(!g.active||!sampler)return;
+        if(!config.shareEnemyPositions||now>=g.watchUntil){g.active=false;std::ostringstream o;o<<"MULEGOAL test: forced end key "<<std::hex<<g.key<<std::dec<<" writes "<<g.writes<<" refusals "<<g.refusals<<" last "<<(g.stopped.empty()?"ok":g.stopped)<<"\n";note(o.str().c_str());return;}
+        mod::mulegoal::Vec3 mule{};bool placed=sampler->read(g.chain.actor+0x28,mule.data(),24);
+        if(now<g.until){
+            auto anchor=anchorNow();std::string why="porter or MULE position unreadable";
+            if(placed&&anchor.pose.available)why=mod::mulegoal::force(*sampler,sampler->base,g.chain,mule,mod::puppet::transform(anchor.pose).position,g.destination,g.first,mod::mulegoal::nativeWritable(),mod::mulegoal::nativePoke());
+            if(why.empty()){++g.writes;g.first=false;}else ++g.refusals;
+            g.stopped=why;
+        }
+        if(now<g.logAt)return;
+        g.logAt=now+mod::mulegoal::LogMs;
+        auto c=mod::mulegoal::read(*sampler,sampler->base,g.chain.actor);
+        std::ostringstream o;o<<"MULEGOAL test: forced watch key "<<std::hex<<g.key<<std::dec<<" phase "<<(now<g.until?"writing":"after")<<" writes "<<g.writes<<" refusals "<<g.refusals<<" last "<<(g.stopped.empty()?"ok":g.stopped)<<" at ";
+        if(placed)o<<mule[0]<<","<<mule[1]<<","<<mule[2];else o<<"unreadable";
+        o<<mod::mulegoal::describe(c,sampler->base)<<"\n";note(o.str().c_str());
+    }
     void tickEnemyPositions(uint64_t now) {
         if(!core||!sampler||!config.shareEnemyPositions||!config.shareEnemies)return;
         if(now-enemyPoseAt<200)return;
@@ -2600,6 +2620,7 @@ struct Runtime final:ds::Transport {
             stage="enemies";stages.enter("enemies",mod::nowUs());
             if(twin&&gameContext)tickEnemies(now);
             if(twin&&gameContext)tickEnemyPositions(now);
+            if(gameContext)tickMuleGoto(now);
             stage="bts";stages.enter("bts",mod::nowUs());
             if(twin&&gameContext)tickBts(now);
             if(twin&&gameContext)tickVoidouts(now);
@@ -3006,6 +3027,53 @@ struct Runtime final:ds::Transport {
                             std::ostringstream o;o<<"MULEPOS test: key "<<std::hex<<mod::enemies::key(best->uuid)<<std::dec<<" lod "<<best->lod<<" "<<std::sqrt(bestD)<<" m away, from "<<best->position[0]<<","<<best->position[1]<<","<<best->position[2]
                                 <<" asked "<<p.position[0]<<","<<p.position[1]<<","<<p.position[2]<<" now "<<after[0]<<","<<after[1]<<","<<after[2]<<(ok?" moved":" REFUSED")<<"\n";note(o.str().c_str());}
                     }catch(const std::exception& e){note((std::string("MULEPOS test unavailable: ")+e.what()+"\n").c_str());}
+                }
+                else if(auto count=mod::puppet::parseCargoCommand(text,mod::runStamp(),"mulegoal");count&&anchor.pose.available) {
+                    // Test, read-only (mule_goal.h): "mulegoal <n>" logs the movement goal of the n MULEs with a body nearest to
+                    // the porter (at most 12): every link by guarded reads, `unreadable` for one that fails.
+                    if(!config.shareEnemyPositions)note("MULEGOAL test: off (share_enemy_positions is not set)\n");
+                    else{
+                        auto mules=mod::enemies::readMules(*sampler,sampler->base);auto here=mod::puppet::transform(anchor.pose).position;
+                        auto metres=[&](const mod::enemies::Mule& m){double d=0;for(int k=0;k<3;++k)d+=(m.position[k]-here[k])*(m.position[k]-here[k]);return std::sqrt(d);};
+                        mules.erase(std::remove_if(mules.begin(),mules.end(),[](const mod::enemies::Mule& m){return m.lod!=2;}),mules.end());
+                        std::sort(mules.begin(),mules.end(),[&](const mod::enemies::Mule& a,const mod::enemies::Mule& b){return metres(a)<metres(b);});
+                        size_t n=std::min<size_t>(mules.size(),std::min<uint32_t>(*count,12));
+                        std::ostringstream o;o<<"MULEGOAL test: "<<mules.size()<<" MULEs with a body, "<<n<<" shown, porter at "<<here[0]<<","<<here[1]<<","<<here[2]<<"\n";
+                        for(size_t i=0;i<n;++i){auto& m=mules[i];
+                            o<<"MULEGOAL test: key "<<std::hex<<mod::enemies::key(m.uuid)<<" id "<<m.id<<std::dec<<" life "<<m.state<<" at "<<m.position[0]<<","<<m.position[1]<<","<<m.position[2]<<" dist "<<metres(m)
+                             <<mod::mulegoal::describe(mod::mulegoal::read(*sampler,sampler->base,m.address),sampler->base)<<"\n";}
+                        note(o.str().c_str());
+                    }
+                }
+                else if(auto argument=mod::puppet::parseCargoCommand(text,mod::runStamp(),"mulegoto");argument&&anchor.pose.available) {
+                    // Test, a checked write and no call (mule_goal.h): "mulegoto <cm>" gives the nearest walking MULE with a body,
+                    // 6 m or more from the porter, a forced destination that many centimetres (at most 5000) east of its own, once;
+                    // "mulegoto <cm+1000000>" writes it every tick for 5 s. The goal is logged twice a second, and for 3 s after.
+                    auto wanted=mod::mulegoal::ask(*argument);
+                    if(!config.shareEnemyPositions)note("MULEGOAL test: off (share_enemy_positions is not set)\n");
+                    else if(!wanted)note("MULEGOAL test: forced refused: offset over 5000 cm\n");
+                    else if(muleGoto.active)note("MULEGOAL test: forced refused: the last mulegoto is still watched\n");
+                    else{
+                        auto mules=mod::enemies::readMules(*sampler,sampler->base);auto here=mod::puppet::transform(anchor.pose).position;
+                        auto metres=[&](const mod::enemies::Mule& m){double d=0;for(int k=0;k<3;++k)d+=(m.position[k]-here[k])*(m.position[k]-here[k]);return std::sqrt(d);};
+                        std::sort(mules.begin(),mules.end(),[&](const mod::enemies::Mule& a,const mod::enemies::Mule& b){return metres(a)<metres(b);});
+                        auto writable=mod::mulegoal::nativeWritable();const mod::enemies::Mule* best=nullptr;mod::mulegoal::Chain chain;std::string last="no standing MULE with a body";unsigned looked=0;
+                        for(auto& m:mules){if(m.lod!=2||mod::enemies::condition(m.state,m.flags)!=mod::enemies::Up||m.state==5)continue;
+                            if(++looked>12)break;
+                            chain=mod::mulegoal::read(*sampler,sampler->base,m.address);last=mod::mulegoal::refusal(*sampler,sampler->base,chain,m.position,here,writable);
+                            if(last.empty()){best=&m;break;}}
+                        if(!best)note(("MULEGOAL test: forced refused: none of the "+std::to_string(std::min(looked,12u))+" nearest can be forced, the last: "+last+"\n").c_str());
+                        else{
+                            auto destination=mod::mulegoal::east(*chain.destination,wanted->cm);uint64_t key=mod::enemies::key(best->uuid);
+                            { std::ostringstream o;o<<"MULEGOAL test: forced before key "<<std::hex<<key<<std::dec<<" cm "<<wanted->cm<<" repeat "<<(wanted->repeat?1:0)<<" to "<<destination[0]<<","<<destination[1]<<","<<destination[2]
+                                <<" at "<<best->position[0]<<","<<best->position[1]<<","<<best->position[2]<<" dist "<<metres(*best)<<mod::mulegoal::describe(chain,sampler->base)<<"\n";note(o.str().c_str()); }
+                            auto why=mod::mulegoal::force(*sampler,sampler->base,chain,best->position,here,destination,true,writable,mod::mulegoal::nativePoke());
+                            { std::ostringstream o;o<<"MULEGOAL test: forced after key "<<std::hex<<key<<std::dec<<" result "<<(why.empty()?"written":"REFUSED: "+why)
+                                <<mod::mulegoal::describe(mod::mulegoal::read(*sampler,sampler->base,best->address),sampler->base)<<"\n";note(o.str().c_str()); }
+                            if(why.empty()){auto& g=muleGoto;g=MuleGoto{};g.active=true;g.first=false;g.key=key;g.chain=chain;g.destination=destination;g.writes=1;
+                                g.until=wanted->repeat?now+mod::mulegoal::RepeatMs:now;g.watchUntil=g.until+mod::mulegoal::WatchMs;g.logAt=now+mod::mulegoal::LogMs;}
+                        }
+                    }
                 }
                 else if(auto mask=mod::puppet::parseCargoCommand(text,mod::runStamp(),"unbuild");mask&&unconstruct&&anchor.entity&&anchor.pose.available) {
                     // Removal experiment: "unbuild <mask> <stamp>", a 6 x 6 x 10 m box around the point 4 m in front of the

@@ -1160,9 +1160,27 @@ here has been read or written in a running game, and nothing was implemented.
    known, so there is nothing to submit yet.
 5. *Writing the body goal's destination.* Refuted by the code: the walk task writes it back every tick.
 
+**The two test commands (2026-11-15, built game-free, not run in a game yet).** `mule_goal.h` reads the chain above
+with guarded reads only and `puppet.cargo` has `mulegoal <n>` (steps 1 and 2 below) and `mulegoto <cm>` (step 3; the
+log formats are in `mod/README.md`, "MULEs in the same place"). What they add to the reading:
+
+- The game's lookup `0x25bd930` is not called. It is a pure read (`0x19076a0` hashes the key and probes), but the
+  table is walked instead: capacity at `+0xc` (refused over 4096), every entry of 0x20 bytes, the first with a hash
+  and the key `image+0x4c91610`.
+- Vtables used as checks: `DSAIIndividualComponent` `0x3dca218` (stored by the code at `0x2bc92bb`; type
+  getter `0x2bca500`), its base `AIIndividualComponent` `0x3dc9c10` (`0x34c5898`; `0x2bca1b0`), `DSAIIndividual`
+  `0x3e11880` (`0x2e50230`; getter `0x2e68870`). That a MULE's component and AI are exactly these classes and not
+  subclasses is a guess: the read-only command shows the vtables it finds (`componentvt`, `aivt`, `dvt`), the write
+  refuses any other.
+- The request block holds 32 requests (`0x4a80 - 0x280` = 32 x `0x240`), so an index of 0 to 31 is taken.
+- The write stores the destination at request `+0x78` and then the low byte of `+0x238` with bit `0x40` set (a read
+  and a write, not an interlocked one: a change the game makes to that byte between the two is lost).
+- "The MULE's own destination" is the walk goal's `+0x9e0`, not request `+0x78` (which is only meaningful after
+  a forced destination).
+
 **Live checklist** (two copies, both porters about 60 m from a camp, `share_enemies` and `share_enemy_positions` on)
 
-1. Add a read-only test command `mulegoal <n>` beside `muleat`: for the n nearest MULEs with a body, log the AI
+1. The read-only test command `mulegoal <n>` beside `muleat`: for the n nearest MULEs with a body, log the AI
    pointer by both routes (component `+0x50` and `+0x80`), the AI's state byte `+0x48`, whether the body-goal table
    has `AIBodyGoalDSWalk`, its `+0x9e0` and `+0x850`, D, the request index and the request's `+0x78` and `+0x238`.
    Expected: both routes give one pointer; `+0x9e0` equals `+0x850`; the destination is a point on the ground within
@@ -1170,10 +1188,11 @@ here has been read or written in a running game, and nothing was implemented.
 2. Run it in both games for the same MULE (same key) twice a second for a minute while the guest's copy is being put
    back. Look at: do the two games' destinations differ (patrol out of step, or the guest's leads to the guest's
    porter), and does bit `0x40` of `+0x238` ever show by itself (then the game clears it, and how fast).
-3. Add a test command `mulegoto <cm>` that writes a forced destination that many centimetres east of the nearest
-   walking MULE's own destination, once, and logs the goal's `+0x9e0` for the next two seconds. Expected when the
+3. The test command `mulegoto <cm>` writes a forced destination that many centimetres east of the nearest
+   walking MULE's own destination, once, and logs the goal's `+0x9e0` for the next three seconds. Expected when the
    reading above is right: `+0x9e0` becomes the written point within a tick or two and the MULE turns towards it.
-   Then the same repeated every tick for 5 s: does it arrive, and where does it go when the writes stop.
+   Then the same repeated every tick for 5 s (`mulegoto <cm+1000000>`): does it arrive, and where does it go when
+   the writes stop.
 4. Only then a config key: the guest writes the host's pose as the forced destination for a MULE with a body whose
    error is between the deadband and the snap distance, and keeps the teleport above it. Measure the number of
    teleports per minute with and without (the 2026-11-15 run: about one every 2 s for a MULE sent two ways).
