@@ -195,6 +195,7 @@ game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderlo
 	./build/wire-test
 	./build/rewards-test
 	./build/orderload-test
+	python3 -B mutants.py --sources "orderload_test.cpp orderload.cpp cargo.cpp discovery.cpp" --prefix build/mutant-load- LOAD_CANCEL LOAD_DECODE_RANGE LOAD_DELIVERED LOAD_DUPLICATE LOAD_ENDED LOAD_HANDED_IN LOAD_LINK LOAD_STALE LOAD_STRIP_CARRIED LOAD_STRIP_SHARED LOAD_STRIP_TAKER && echo KILLED 11 order load mutants
 	./build/game-thread-test
 	./build/puppet-test
 	./build/double-test

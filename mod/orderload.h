@@ -63,15 +63,21 @@ public:
     void want(const Case&,uint64_t now);
     // The partner took the case with this shared id before it was made here: true when it was waiting (now dropped).
     bool cancel(uint64_t id);
-    // Cases to make now: none while a record of that unit still exists here. Report each with tried().
-    std::vector<Case> due(const std::vector<cargo::Record>&,uint64_t now);
+    // Cases to make now: none while a record of that unit still exists here. Report each with tried(). `delivered`:
+    // the handles of the units this game counts as delivered; a case of one is dropped (takeDelivered()).
+    std::vector<Case> due(const std::vector<cargo::Record>&,uint64_t now,const std::set<uint64_t>& delivered={});
     void tried(uint64_t id,bool accepted,uint64_t now);
     std::vector<Case> takeGivenUp();                             // waited GiveUp: this game still had the unit
+    std::vector<Case> takeDelivered();                           // dropped: the unit is delivered here
     size_t waiting() const {return pending_.size();}
 private:
     struct Pending { Case c; uint64_t since=0,next=0; };
-    std::map<uint64_t,uint64_t> mirrored_;std::set<uint64_t> shared_;std::map<uint64_t,uint64_t> asked_;std::vector<Pending> pending_;std::vector<Case> gaveUp_;
+    std::map<uint64_t,uint64_t> mirrored_;std::set<uint64_t> shared_;std::map<uint64_t,uint64_t> asked_;std::vector<Pending> pending_;std::vector<Case> gaveUp_,delivered_;
 };
+// A case whose unit is already delivered here was handed in, not put down: handing a case in at a terminal moves its
+// record from the porter to the world exactly as a put-down does (live 2026-11-16: the partner's game made the
+// delivered unit again as a new case at the delivery terminal). Such a case is not sent, in either form.
+bool handedIn(const cargo::Placement&,const std::set<uint64_t>& delivered);
 // The game's cargo creator 0x2c470e0(manager, creation record) with the record's own constructor 0x277fc90, filled as
 // the mission system fills it for an order's cargo (0x33a3a50). Game thread. False when the game refused (the unit's
 // handle is in use, or the manager is absent).

@@ -52,6 +52,13 @@ int main(){
       l.want(made(M,2,602),0);CHECK(l.cancel(602)&&!l.cancel(602)&&l.due({},100).empty());
       l.want(made(M,3,603),0);l.want(made(M,3,604),50);auto d=l.due({},100);CHECK(d.size()==1&&d[0].id==604);
       l.want(made(M,4,605),0);l.ended(M);CHECK(l.waiting()==0); }
+    // A handed-in case is not a put-down: its unit is delivered here. And a case of a unit that is delivered in this
+    // game is not made, whatever the partner sent.
+    { cargo::Placement p;p.mission=M;p.unit=3;p.type=TypeStandard;std::set<uint64_t> done{handle(M,3)};
+      CHECK(handedIn(p,done)&&!handedIn(p,{})&&!handedIn(p,{handle(M,2)}));p.unit=2;CHECK(!handedIn(p,done));
+      cargo::Placement plain;CHECK(!handedIn(plain,done)&&!handedIn(plain,{0}));
+      Loads l;l.want(made(M,3,701),0);l.want(made(M,1,702),0);auto d=l.due({},100,done);
+      CHECK(d.size()==1&&d[0].id==702&&l.waiting()==1);auto dropped=l.takeDelivered();CHECK(dropped.size()==1&&dropped[0].id==701&&l.takeDelivered().empty()); }
     if(!failures)std::puts("order load checks passed");
     return failures?1:0;
 }

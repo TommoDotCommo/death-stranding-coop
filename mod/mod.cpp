@@ -359,25 +359,31 @@ struct Runtime final:ds::Transport {
             if(!cargoFullAt||limit!=cargoLimit){std::ostringstream o;o<<"CARGO full scan: "<<records.size()<<" records in use, quick scans to "<<limit
                 <<", took "<<(mod::nowUs()-scanStart)/1000.<<" ms\n";note(o.str().c_str());}
             cargoFullAt=now;cargoLimit=limit;}
+        std::set<uint64_t> deliveredUnits;   // share_order_load: the units this game counts as delivered (their handles)
         if(config.shareOrderLoad){
+            for(auto& u:mod::orders::readUnits(*sampler,sampler->base))if(u.state==mod::orders::Delivered)deliveredUnits.insert(mod::orderload::handle(u.mission,u.unit));
             // The cargo this game made for an order it took on for the partner goes (never from the porter) ...
             unsigned left=0;
             for(auto index:orderLoads.strip(records,now,&left))if(cargoDelete){cargoDelete(index);++loadStripped;
                 note(("ORDERLOAD removed this game's own case of the partner's order (record "+std::to_string(index)+")\n").c_str());}
             if(left!=loadLeftNoted){loadLeftNoted=left;if(left)note(("ORDERLOAD "+std::to_string(left)+" own case(s) of the partner's order are not in the world here: left alone\n").c_str());}
             // ... and the cases the partner put down are made, each once no record of its unit is left here.
-            for(auto& c:orderLoads.due(records,now)){
+            for(auto& c:orderLoads.due(records,now,deliveredUnits)){
                 needOrderCaseCreate();bool ok=false;
                 if(orderCaseCreate){cargoSync.expect({c.name,c.position,c.id},now);ok=orderCaseCreate(c);}
                 orderLoads.tried(c.id,ok,now);if(ok)++loadMade;
                 std::ostringstream o;o<<"ORDERLOAD unit "<<int(c.tag.unit)<<" of "<<std::hex<<c.tag.mission<<std::dec<<" ref "<<c.id<<(ok?" made here as order cargo":" refused by the game (tried again)")<<"\n";note(o.str().c_str());
             }
+            for(auto& c:orderLoads.takeDelivered()){std::ostringstream o;o<<"ORDERLOAD unit "<<int(c.tag.unit)<<" of "<<std::hex<<c.tag.mission<<std::dec<<" not made: it is delivered here\n";note(o.str().c_str());}
             for(auto& c:orderLoads.takeGivenUp()){std::ostringstream o;o<<"ORDERLOAD unit "<<int(c.tag.unit)<<" of "<<std::hex<<c.tag.mission<<std::dec<<" not made: this game still holds that unit\n";note(o.str().c_str());}
             // This game's own cases of a mirrored order are never shared cargo.
             records.erase(std::remove_if(records.begin(),records.end(),[&](auto& r){return orderLoads.own(r);}),records.end());
         }
         for(auto& p:cargoSync.observe(records,anchor.pose.position,now)) {
             ds::CargoEvent e;e.type=1;e.item=p.hash;e.ref=p.id;e.position={p.position[0],p.position[2],p.position[1]};   // game -> adapter axes
+            if(config.shareOrderLoad&&mod::orderload::handedIn(p,deliveredUnits)){
+                // Handed in at a terminal, not put down: the unit's delivery is what the partner is told (orders.h).
+                std::ostringstream o;o<<"ORDERLOAD unit "<<int(p.unit)<<" of "<<std::hex<<p.mission<<std::dec<<" was handed in here: its case is not sent as cargo\n";note(o.str().c_str());continue;}
             if(p.mission&&config.shareOrderLoad){
                 std::ostringstream o;o<<"ORDERLOAD unit "<<int(p.unit)<<" of "<<std::hex<<p.mission<<" put down here: name 0x"<<p.hash<<" item 0x"<<p.item<<" type "<<std::dec<<int(p.type)<<std::hex<<" flags 0x"<<p.flags<<" 0x"<<p.flags2<<std::dec<<" life "<<p.life[0]<<" "<<p.life[1];
                 if(auto tag=mod::orderload::tagOf(p)){auto w=mod::orderload::encode(*tag);

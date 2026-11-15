@@ -102,9 +102,22 @@ bool Loads::cancel(uint64_t id){
     return pending_.size()!=before;
 #endif
 }
-std::vector<Case> Loads::due(const std::vector<cargo::Record>& records,uint64_t now){
+bool handedIn(const cargo::Placement& p,const std::set<uint64_t>& delivered){
+#ifndef MUTANT_LOAD_HANDED_IN
+    return p.mission&&delivered.count(handle(p.mission,p.unit))!=0;
+#else
+    (void)p;(void)delivered;return false;
+#endif
+}
+std::vector<Case> Loads::takeDelivered(){std::vector<Case> out;out.swap(delivered_);return out;}
+std::vector<Case> Loads::due(const std::vector<cargo::Record>& records,uint64_t now,const std::set<uint64_t>& delivered){
     std::vector<Case> out;
     for(auto it=pending_.begin();it!=pending_.end();){
+#ifndef MUTANT_LOAD_DELIVERED
+        if(delivered.count(handle(it->c.tag.mission,it->c.tag.unit))){delivered_.push_back(it->c);it=pending_.erase(it);continue;}
+#else
+        (void)delivered;
+#endif
         if(now-it->since>GiveUp){gaveUp_.push_back(it->c);it=pending_.erase(it);continue;}
         bool exists=false;
 #ifndef MUTANT_LOAD_DUPLICATE
