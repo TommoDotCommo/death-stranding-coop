@@ -721,8 +721,8 @@ Each game keeps simulating its own world; these settings share the outcome of wh
   each carry part of an order.
 
 - `"share_order_load": true` (with `share_orders`, best with `share_order_units`; `orderload.h`; run live with two
-  copies, 2026-11-16: the taking of an order, a case put down, picked up by the partner and handed in by him): one
-  shared load per order. Only the player who took the order at the terminal keeps its cargo: the game
+  copies, 2026-11-16: the taking of an order, a case put down, picked up by the partner and handed in by him, the
+  rest handed in by the taker, the order a success in both): one shared load per order. Only the player who took the order at the terminal keeps its cargo: the game
   that took the order on for the partner removes the cargo it made for it (cases lying in the world only, never one
   on the porter). A case of the order that a porter puts down goes to the partner as shared cargo with a tag naming
   the order, the unit and the item, and the partner's game makes it with the game's own cargo creator, filled as the
@@ -747,8 +747,10 @@ facility's cap left its level at 2: static reading (`game_offsets.md`, "Why poin
 shows the add routine does recompute the level, but never above the facility's level cap, a fact the story
 changes; the mod reads the right field and has nothing else to call. Both were then seen live: that facility's
 level cap reads 2, and a facility below its cap (level 3, cap 5) went to level 4 with one point added and to level 5
-at its points cap, in the add call itself, without a fault. Not run live: a real delivery between two copies (step 4
-below).
+at its points cap, in the add call itself, without a fault. A real delivery between two copies ran on 2026-11-16
+(step 4 below): an order handed in in parts by both players at the Engineer's left that facility at 793 points in
+both games (the game that had paid less added 86), and nothing bounced. Each game paid its own porter for the order:
+183 likes to the one who handed in three cases, 97 to the one who handed in one.
 
 `"share_rewards": true` (`rewards.h`; refused without `share_orders`). A facility's connection level (the stars of a
 knot city or a prepper) is a points total and a level in the game's residents system. Each mod reads every
