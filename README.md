@@ -10,8 +10,12 @@ and pinned on the map. Cargo one player puts down or picks up is put down or tak
 a structure one player builds or dismantles (with the game's own construction device and structure menu, or
 ladders) is built or removed in the other's. Downed, caught by BTs or resting, the partner is shown in the game's
 own poses. Shared enemies, BT kills and voidout craters, roads, structure upgrades and order progress are synced. Timefall falls where the host stands, and the
-game's own message feed says when the partner joins, leaves or steps into a cutscene or private room. A two-PC
-session tried for real and everything about a shared story are still to do. See [STATUS.md](STATUS.md).
+game's own message feed says when the partner joins, leaves or steps into a cutscene or private room. A guest
+starts from the host's save and can catch up with the host's story during a session (the host's game writes a
+checkpoint, the guest's game loads it). Opt-in and newer: one load per shared order, connection points and levels
+that rise together, MULEs standing where the host has them, and the partner's shout, scan and vitals. A two-PC
+session tried for real, a story that moves on for both by itself, and cutscenes are still to do. See
+[STATUS.md](STATUS.md).
 
 This repository contains only original mod code. It contains no game files, assets, saves or anything copied from
 the game, and it never will. You need your own copy of the game.
