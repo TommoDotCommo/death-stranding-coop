@@ -1306,15 +1306,22 @@ struct Runtime final:ds::Transport {
             auto out=storyHost->tick(in);
             for(auto& l:out.log)note((l+"\n").c_str());
             if(out.save){if(storySave)storySave();else note("STORY save request unavailable: nothing asked\n");}
-            if(out.offer){storyOfferGeneration=out.generation;storyOfferUntil=now+5000;}
+            if(out.offer){storyOfferGeneration=out.generation;storyOfferUntil=now+20000;}
             if(storyOfferGeneration){
                 // The checkpoint the game just wrote, and no other: the newest readable one could be an older save.
-                // The game can still hold the file for a moment, so the read is tried again for five seconds.
+                // The game can still be writing the file, so the read is tried again for twenty seconds.
                 std::optional<launcher::saves::Checkpoint> c;std::string why="the save folder is not known";
                 if(storyAccount&&storyNewest)c=launcher::saves::named(storyAccount->folder,storyNewest->folder,&why);
                 if(c)storyServe.offer(config.session,storyOfferGeneration,*c);
                 if(c&&storyServe.news().what){storyOfferGeneration=0;storyTell(storyServe.news());note(("STORY offering "+c->folder+" to the partner, "+std::to_string(c->bytes.size())+" bytes\n").c_str());}
-                else if(now>=storyOfferUntil){storyOfferGeneration=0;storyHost->unreadable();note(("STORY the checkpoint could not be read ("+(c?std::string("too large or empty"):why)+"): nothing offered\n").c_str());}
+                else if(now>=storyOfferUntil){
+                    storyOfferGeneration=0;storyHost->unreadable();
+                    // What was there, for the record: the size and the first bytes (three decimal sizes lead a checkpoint).
+                    std::string seen="unknown";
+                    if(storyAccount&&storyNewest){std::error_code ec;auto file=storyAccount->folder/storyNewest->folder/"checkpoint.dat";auto size=std::filesystem::file_size(file,ec);
+                        std::ifstream f(file,std::ios::binary);char head[24]{};f.read(head,sizeof head);std::ostringstream o;o<<(ec?0:size)<<" bytes, head";
+                        for(std::streamsize i=0;i<f.gcount();++i)o<<' '<<std::hex<<std::setw(2)<<std::setfill('0')<<unsigned(static_cast<unsigned char>(head[i]));seen=o.str();}
+                    note(("STORY the checkpoint could not be read ("+(c?std::string("too large or empty"):why)+"; file "+seen+"): nothing offered\n").c_str());}
             }
         }
         if(storyGuest){
