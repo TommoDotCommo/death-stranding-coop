@@ -26,7 +26,9 @@ The target changed on 2026-11-16. It is no longer "two players share one playthr
 
 - **Your own save, your own story.** Each player plays their own game and completes their own orders. Story and
   order progress are not shared. How large story events such as boss fights work with visitors is undecided; the
-  wish is that players can take part in each other's games without sharing progression.
+  wish is that players can take part in each other's games without sharing progression. A first step is built
+  without a game: one game owns a BT area's catcher fight and other players join it as visitors
+  ([mod/README.md](mod/README.md), "Fights with visitors").
 - **A private strand server.** At least one player runs the server (`world/`), a stand-in for the game's online
   service that is run by the players themselves. Everyone connected to it sees everything the game's social strand
   system shares (structures, ladders, ropes, signs, lost cargo, roads), all of it rather than a selection.

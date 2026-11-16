@@ -180,7 +180,7 @@ for the next FRAME due, and four times a second.
 The mod speaks it with `"relay_mode": "broadcast"` (`../mod/README.md`, "The broadcast mode") and `coop-swarm` with
 `--mode broadcast`; live once on 2026-11-16 with two real games and 12 stand-ins (`../STATUS.md`, "Many players").
 
-Not done (broadcast): the shown state is not saved; the server's cap and the players' choices are not run with a
+Not done (broadcast): fights with visitors have not run with a game (the fight channel, next section but one); the shown state is not saved; the server's cap and the players' choices are not run with a
 game yet (stand-ins and players written by the tests only).
 
 ### How many players one player sees
@@ -222,6 +222,37 @@ What it holds to (`relay.cpp`, `select`):
 
 Not done: who sees a player (the choice is only whom he sees); a cap for a pairs player (one core session per player
 near: use broadcast); friends under identity none.
+
+### The fight channel (`--fight-visitors`)
+
+Fights with visitors (`../mod/README.md`, "Fights with visitors"): one broadcast player's game owns a fight and other
+players join it as visitors. The envelope is version 2's types 11 to 16 (`../core/CORE.md`, "Fight channel"): FIGHT
+(the owner opens, keeps or closes a fight: kind, place, radius, how many visitors it takes), OFFER, JOIN, STATUS,
+POST and DELIVER.
+
+```
+coop-world --port 8089 --relay-port 8090 [--fight-visitors 9]
+```
+
+- `--fight-visitors` (0..32, default 9: ten Sams): the most visitors one fight may have (the owner may ask for fewer).
+  0: this server takes no fights; an owner's FIGHT is answered with STATUS Off.
+
+| Rule | Why |
+|---|---|
+| A fight belongs to the player whose address sent its FIGHT (a FIGHT, JOIN or POST naming another player is dropped as spoofed) | nobody opens, joins or posts for somebody else |
+| It is offered (OFFER, at most once in 900 ms, so with each keep of its owner) to every broadcast player of the owner's build in the same area within its radius of its place, by the server's own record of where each player is, who owns no fight, is not its visitor yet and whose choice of whom he is shown lets the owner through (not "nobody"; "friends" only a friend) | a fight reaches the players in reach and nobody else, and a game of another build is never sent a type it does not know |
+| A JOIN is taken only for the owner's current fight, from a player of the same build in reach who owns no fight and visits none, while the fight has fewer visitors than its cap (the owner's number and `--fight-visitors`, whichever is less); the answer is STATUS Joined, or Full, Far, Busy or NoFight; a repeated JOIN is answered Joined again | the cap holds, and a lost answer costs nothing |
+| The owner's POST (its own fight, a later version) goes to its joined visitors, each as a DELIVER with the owner as its source, and the latest is kept and handed to whoever joins later | only the owner's state reaches visitors, and a late visitor sees the fight at once |
+| A joined visitor's POST (for the fight he visits, a later version than his last) goes to the owner and to nobody else, with the visitor as its source; any other POST (from a player who has not joined, for another fight, older) is dropped and counted (`fightRefused`) | only joined visitors' reports reach the owner, and a visitor cannot pass his report off as the owner's state |
+| One role at a time: an owner joins nothing (Busy), and a visitor who sends a FIGHT of his own leaves the fight he visits | a player's game is either running a fight or showing one |
+| The visitors are released with STATUS Closed when the owner closes the fight or opens another, Gone when the owner leaves, times out, restarts (HELLO stream 0) or sends no FIGHT for 3 s, and a visitor with Released when he is more than 50 m beyond the radius; a visitor who asks to leave gets Left; the owner gets STATUS Open with the number of visitors after every change | nobody keeps visiting a fight that is over, and the owner knows who is there |
+| Linked servers' players neither own nor visit fights | co-op across servers is not built |
+
+Costs: an owner sends a FIGHT a second and a POST four times a second; each POST costs one DELIVER per visitor (at
+most 32, 36 bytes plus the state, about 6 bytes for one catcher). A visitor sends a report when it changes (at most
+four a second) and once a second unchanged, one DELIVER to the owner each. The server keeps one state per fight.
+
+Tests: `fight_test.cpp` (next under "Tests").
 
 ### A swarm of stand-in players (`coop-swarm`)
 
@@ -1135,6 +1166,22 @@ near and nobody else, an update naming another player sent nowhere, a pairs play
 server that pins the build refusing another; then 100 `coop-swarm` stand-ins in one place on a server with
 `--broadcast-near 16` and on one with 0: 1600 and 9900 pairs shown and heard, and with the cap at most 26 kB a second
 to each and less than a quarter of what each receives without it.
+
+Fights with visitors: `fight_test.cpp` runs the relay with real players' sides (`ds::broadcast::Client`) and raw
+datagrams: a fight with a 50 m radius offered to the players in reach once a second, and not to one 100 m away (near
+for the relay, beyond the fight), the owner, or one who sees nobody; two joining and a third refused for a cap of 2,
+one refused for being out of reach, another fight id refused; a visitor offered no more; the owner's state to both
+visitors and nobody else; a visitor's report to the owner only, with the visitor as source; a report repeated, from a
+player who has not joined, one naming another sender, and a visitor's POST naming himself the owner: nothing anywhere;
+the latest state handed at once to a visitor who joins later; the owner joining another fight refused, a visitor who
+opens a fight of his own leaving his visit; a visitor 40 m beyond the radius kept and 60 m beyond it released; the
+fight closed, replaced, its owner silent for 3 s while still saying HELLO, its owner's BYE and timeout; a visitor
+leaving the server; a server with `fightVisitors` 0 saying Off; an owner asking for one visitor; and ten Sams: nine
+visitors each with every one of 20 states and the owner with every one of their 20 reports each. Ten mutants must
+fail it (`RELAY_FIGHT_REACH`, `RELAY_FIGHT_OWNER_GONE`, `RELAY_FIGHT_ONE_ROLE`, `RELAY_FIGHT_CAP`,
+`RELAY_FIGHT_STATE_ANY`, `RELAY_FIGHT_UNJOINED`, `RELAY_FIGHT_SOURCE`, `RELAY_FIGHT_VISITOR_STATE`,
+`RELAY_FIGHT_SILENT`, and `RELAY_BCAST_SPOOF` again). With a game's side (`../mod/fights.h`) the same server runs in
+`../mod/fights_test.cpp` (in memory) and `../mod/test_fights.py` (the built server).
 
 Presence across linked servers: `presence_test.cpp` runs two and three relays in memory, each on a clock of its own
 (up to 7 s apart), linked to each other, with real players' sides (`ds::broadcast::Client`) on each: the tag's

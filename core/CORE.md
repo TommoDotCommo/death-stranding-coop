@@ -665,6 +665,44 @@ With the server's cap what he receives stops growing with the crowd: of 100 `coo
 place, each received 40 datagrams and 25 kB a second shown 16 of them, and 140 datagrams and 157 kB a second shown all
 99.
 
+### Fight channel (types 11..16)
+
+Fights with visitors (`mod/README.md`, "Fights with visitors"): one player's game owns a fight, and up to a cap of
+other players join it as visitors. The owner's state goes to its joined visitors only and a visitor's reports to the
+owner only; the server (`world/README.md`, "The fight channel") enforces both, and the player's side checks them again.
+Same header, same rules (little endian, reserved bytes zero, at most 1200 bytes, refused whole).
+
+| Type | Direction | Size | After the 8 bytes |
+|---|---|---:|---|
+| FIGHT 11 | player to server | 44 | u64 player id; u32 fight (not 0); u8 op (1 open or keep, 2 close); u8 kind (not 0; 1 a catcher fight); u8 visitors at most (1..32); reserved; u16 radius metres (1..1000); reserved[2]; i32 x3 place (centimetres, the core's axes, within 100 km); u32 area |
+| OFFER 12 | server to player | 44 | as FIGHT, with the owner's id first and, in place of op, the number of visitors now (0..32) |
+| JOIN 13 | player to server | 32 | u64 player id; u64 owner; u32 fight; u8 op (1 join, 2 leave); reserved[3] |
+| STATUS 14 | server to player | 24 | u64 owner; u32 fight; u8 status (1 Open, 2 Joined, 3 Full, 4 NoFight, 5 Far, 6 Busy, 7 Closed, 8 Gone, 9 Released, 10 Left, 11 Off); u8 visitors now; reserved[2] |
+| POST 15 | player to server | 36 + payload | u64 player id; u64 owner (the owner himself for his state, the fight's owner for a visitor's report); u32 fight; u32 version (not 0); u16 bytes (1..1100); reserved[2]; payload |
+| DELIVER 16 | server to player | 36 + payload | as POST, with the source (the server's record of who posted it) in place of the player id |
+
+The payloads are the mod's (`mod/fights.h`: the owner's state, the visitor's report) and are covered by its wire
+identity: the server offers a fight only to players of the owner's build. **Compatibility:** a server from before
+this refuses types 11..16 as unknown (counted as malformed): an owner then never hears STATUS Open and nobody is
+offered anything, and presence goes on as before; a game from before this is never offered a fight (another build),
+and sends none. The types 1..10 are unchanged.
+
+The player's side (`ds::broadcast::Client`): `hostFight(info, now)` sends FIGHT at once and every `FightKeepMs` (1 s)
+while online, `closeFight()` once; `joinFight(owner, fight, now)` sends JOIN at once and every `FightJoinEveryMs`
+(500 ms) until a STATUS for that fight answers (refused while hosting; another visit is left first); `leaveFight()`;
+`postFight(bytes)` posts a new version as the owner (its state) or as a joined visitor (his report) and nothing in any
+other role; `fightOffers(now)` gives the offers heard in the last `FightOfferMs` (3 s); `takeFightNews()` gives the
+STATUS messages for this player's fight and each DELIVER taken. A DELIVER is taken only for the player's role: a
+visitor the state of the fight he joined from that fight's owner, an owner a report on its own fight from somebody
+else, and from each source only a later version than the last; anything else is counted (`fightRefused`). A visit
+ends (news with the status) on Full, NoFight, Far, Busy, Closed, Gone, Released or Left, and as Gone when the client
+goes offline or the server's stream changes.
+
+Why states rather than the core's reliable events: the broadcast mode has no session per pair to carry an ordered
+exactly-once stream, and one per owner and visitor would bring back the pairs mode's cost. The owner's posts are whole
+states (a lost one is replaced by the next, a late visitor gets the latest from the server at once) and a visitor's
+reports are cumulative (applied as differences), so loss, repetition and reordering change nothing.
+
 ### Tests
 
 `make -C core broadcast-test` (part of `make test`): `tests/broadcast.cpp` pins the layout byte for byte, sends every
@@ -677,9 +715,14 @@ clock, from a stranger, several sources in one FRAME, impossible motion and the 
 complete in one SHARE, a gap repaired by FETCH, empty kinds, a late older SHARE and an entry of an older generation
 (no FETCH), its own state versioned and sent again; what it publishes (rate, stamps, the presence the core's encoder
 gives, gated, the teleport flag once, animation pulses merged; the choice of who is shown in every HELLO); and
-interpolation over the lossy link above. Eighteen mutants must fail it: `BCAST_WIRE_VERSION`, `BCAST_WIRE_LENGTH`, `BCAST_WIRE_RANGE`, `BCAST_WIRE_FRAME`,
+interpolation over the lossy link above; the fight channel: every type through the wire and back, byte for byte, each
+bad field refused (a status above 11 among them), and an owner and a visitor driven by hand-made STATUS and DELIVER
+(the keep and the join repeated until answered, posts only in a role, a visitor's report taken by the owner once per
+version, another fight's state, another visitor's report and an older version not taken by a visitor, a visit ended by
+the owner, by a refusal and by silence). Twenty-one mutants must fail it: `BCAST_WIRE_VERSION`, `BCAST_WIRE_LENGTH`, `BCAST_WIRE_RANGE`, `BCAST_WIRE_FRAME`,
 `BCAST_CLIENT_STRANGER`, `BCAST_CLIENT_ORDER`, `BCAST_CLIENT_CLOCK`, `BCAST_CLIENT_GAP`, `BCAST_CLIENT_STALE_STATE`,
 `BCAST_CLIENT_TELEPORT`, `BCAST_CLIENT_SPEED`, `BCAST_CLIENT_REBASE`, `BCAST_CLIENT_RESEND`, `BCAST_CLIENT_DELAY` (it
 fails the 200 ms case without loss: p95 0.06 m, shown past the newest sample 81 % of the time), `BCAST_CLIENT_ROSE`,
-`BCAST_CLIENT_STREAM`, `BCAST_CLIENT_JUMP`, `BCAST_WIRE_SHOW`. The server's side and both sides together are tested in `world/` (README
+`BCAST_CLIENT_STREAM`, `BCAST_CLIENT_JUMP`, `BCAST_WIRE_SHOW`, `BCAST_WIRE_FIGHT`, `BCAST_CLIENT_FIGHT_SOURCE`,
+`BCAST_CLIENT_FIGHT_ORDER`. The server's side and both sides together are tested in `world/` (README
 there, "Broadcast mode").

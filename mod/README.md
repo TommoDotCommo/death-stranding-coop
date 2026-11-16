@@ -817,7 +817,8 @@ Each game keeps simulating its own world; these settings share the outcome of wh
   bar: the life a player takes off its own boss is taken off the partner's (in percent of full life, so different
   difficulties compare). The mod never takes a boss to zero itself: the game only lets a boss die on a real hit, so
   the player who lands the last hit sees the death and the partner's fight ends with the cleared area. Each game
-  still runs its own BTs: where they drift, whom they notice and what the boss does is not shared.
+  still runs its own BTs: where they drift, whom they notice and what the boss does is not shared. For more than
+  two players, where one game owns the fight and the others visit it, see "Fights with visitors" below.
 - `"share_roads": true` (`roads.h`; on in the launcher's setup): what a player delivers to an auto-paver is counted
   at the partner's paver as delivered by others, through the game's own routine for online contributions, and a road
   one player completes is completed for the partner, so both see it built. Pavers are matched by the game's own
@@ -1302,7 +1303,8 @@ loading. It is removed when the player leaves. After a load every body is made a
 riding pose without a vehicle (as the partner does without `partner_vehicle`).
 
 Nothing that changes the world exists for others: no cargo put down or picked up, structures, enemies, orders,
-story, time or rain, vehicles or carts, no map pin and no notices. What is only shown can be turned on: the gear each
+story, time or rain, vehicles or carts, no map pin and no notices. The one exception, opt-in and in broadcast mode
+only, is a catcher fight one game owns and others visit ("Fights with visitors", below). What is only shown can be turned on: the gear each
 player wears and the cases each player carries (`others_gear`, `others_carry`, the next section). Otherwise what this
 porter sends them is his pose, his name and his animation controls (not what he holds, his wheels or his carts). The
 partner path is not touched by any of it: with `others` at 0, or with no relay configured, no session exists and
@@ -1495,6 +1497,133 @@ are the `dressed` property, above). Three mutant builds must fail it (`test_othe
 still wears gear copies). `mod_status` now has
 `"others": {on, near, connected, bodies, shown, sent, received, accepted, refused, unknown, malformed}` and
 `"labels_shown"` in every build.
+
+## Fights with visitors (`host_fights`, `join_fights`; built game-free, not run live)
+
+The owner's decision: each player plays his own save and story, and in a boss fight **one game owns the fight** while
+other players join it as **visitors**. This is the first step, for the catcher fight of a BT area, over the relay's
+broadcast mode: the fight channel (`core/CORE.md`, "Fight channel"; `world/README.md`, "The fight channel") and
+`fights.h`. Config (both off by default; they need `relay_mode` "broadcast", the game provider and `game_thread`):
+`"host_fights": true` offers a catcher fight that starts in this game to the players near; `"join_fights": true` joins
+a fight this game is offered (always, for now; a prompt later). The two-player sharing below is not changed by either.
+
+### What carries over from the two-player sharing
+
+The two-player BT sharing (`share_enemies`, `bts.h`; "Shared MULEs, BTs, orders and roads" above) is symmetric: both
+games run their own fight and either one's news applies in the other's. With visitors only the owner's game decides.
+
+| Two players (`bts.h`) | Owner and visitors (`fights.h`) |
+|---|---|
+| A fight one is pulled into starts in the partner's game when he is within 300 m (`FightOn`, repeated while it runs) | The owner's fight is announced (kind, place, 300 m) and kept every second; the server offers it to the players of the same build within 300 m; a visitor who joins starts a fight in his own game with the catcher command (0) to show it: the shown copy |
+| One health bar: each game sends the percent its catcher lost; the other takes it off (`CatcherHurt`, never below the floor) | The owner sends each catcher's life (absolute, four times a second); a visitor takes his copy down to it, never up and never below the floor. A visitor sends the damage his own hits did, counted from the start of his visit; the owner takes off what is new, never below the floor. Nothing is counted twice: what the mod writes on a copy is never the visitor's damage, and a lost report is repaired by the next (every second) |
+| Either game's cleared area ends the other's fight with the cleared command (1) | Only the owner's cleared area ends the copies (command 1). A visitor whose hit killed his copy says so; the owner ends its fight with the area cleared only when its own catcher is at the floor too, else the claim is refused |
+| A gazer destroyed in either world is destroyed in the other (its record of dead gazers is saved) | A gazer a visitor destroys in his world is destroyed in the owner's. The owner's are never destroyed in a visitor's world: that record is saved and would change his world |
+| A fight lost here keeps the partner's fight news away for two minutes (`FightSync::resting`) | A visitor joins only from an offer, shows one copy a visit, and does not join a fight he left for 10 s; back in the same fight later, his counts go on from where they were, so the owner takes only what is new |
+| MULEs down, camp alarms, voidout craters, MULE positions (`enemies.h`, `voidout.h`, `enemy_poses.h`) | Not carried over: they are the world's, not the fight's |
+| Shared rain (`share_environment`, `weather.h`) makes the BT area active in both | Not carried over: the copy runs in the visitor's own weather (research below) |
+
+### Who decides, what a visitor shows and sends
+
+- **The owner** is authoritative. Its game runs the fight; only its own catcher manager says whether a fight runs,
+  how much life each catcher has and how it ended. It posts that state (format 1: phase running, cleared or lost, and
+  each catcher's life in hundredths of a percent); a visitor's report is a request it checks against its own fight.
+  When its fight ends it posts the end for a second and closes the fight.
+- **A visitor's game** shows the owner's fight with its own catcher fight (the shown copy): started by the catcher
+  command when the owner's state says the fight runs, its catchers' life taken down to the owner's, ended with the
+  cleared command only when the owner's state says cleared. Positions are not shared: where the visitor's catchers
+  and gazers are, and what his BTs do, is his game's (as in the two-player sharing).
+- **A visitor sends** (format 1, all counted since he joined): the life his own hits took off each catcher of his copy,
+  whether his hit killed it, how often he was caught (`vitals.h`; logged by the owner, nothing else yet), and the
+  gazers destroyed in his world (at most 16).
+- **A visitor never** announces a fight (not the one he shows, and not that copy after his visit), never applies
+  another visitor's report (the server sends him none, his client takes none), never destroys a gazer, and writes
+  nothing in his world but the shown copy's start, its catchers' life (down only, never below the floor) and the
+  cleared end of a fight the owner cleared.
+- While this game visits a fight or still runs the copy it showed, its catcher news are not sent to its two-player
+  partner and the partner's catcher news are not applied (gazers still are): the copy is not this world's fight.
+
+### How a visit ends
+
+| End | The visitor's game |
+|---|---|
+| The owner's fight is cleared (state "cleared") | The copy ends with the cleared command, as in the two-player sharing (a cleared sphere is left in his world: research below); the visit ends |
+| The owner's fight is lost (state "lost": he got away, died or voided out) | Nothing is written: the copy is his game's fight now, which he leaves as in the game (out of the tar). The visit ends |
+| The owner closes the fight, leaves the server, goes silent for 3 s or his game restarts (STATUS Closed or Gone) | The same: nothing more is written; his game's own state is what it has |
+| The visitor goes more than 50 m beyond the fight's radius (Released), asks to leave, or his relay goes offline | The same |
+| His copy ends by his own hit (killed) or he gets away from it | He stays a visitor until the owner's fight ends; no second copy is started in that visit |
+
+Nothing of a visit is written into the visitor's save that changes his story: no gazer, MULE, order or story state,
+and his own fights are never touched (next part). What the copy itself leaves (a catcher record while it runs, a
+cleared sphere after a cleared end) is the game's own BT-area state; whether it is saved is research below.
+
+### When a visitor's own story has the same boss
+
+Not decided (the owner's call). Today's rules keep both choices open: a game that runs a fight of its own takes no
+offer (its own comes first; counted as `own_first`); a fight of the visitor's own that starts while he visits, before
+the copy, ends his visit before anything is written to it; the server lets a player be the owner of one fight or the
+visitor of one, never both (a visitor whose game opens a fight leaves the one he visits). So the visitor's own boss
+state is untouched and he sees the owner's fight only while visiting. Shared progress (the owner's clear counting in
+the visitor's story, or a visitor's own boss joined as one fight) would be a later setting on top of this: the channel
+carries kind and place, so a story boss could be recognised as "the same" once its kind is known.
+
+### Why the channel carries states and cumulative reports
+
+The two-player sharing uses the core's reliable ordered event stream (CARGO type 13). The broadcast mode has no core
+session per pair, and building one per owner and visitor would bring back the pairs mode's cost. The fight channel
+instead carries versioned latest-wins data, like the shown state: the owner's posts are whole states (a lost one is
+replaced 250 ms later, a visitor who joins late gets the latest at once), and a visitor's reports are cumulative counts
+(applied as differences, so a lost, repeated or late report changes nothing, and the next one repairs a loss). The
+server and both clients take each source's versions only forward.
+
+Log lines: `FIGHT ready`, `FIGHT a catcher fight runs here: offered ...`, `FIGHT N visitors`, `FIGHT visitor X took
+N % off catcher ...`, `FIGHT visitor X landed the last hit ...` (or `... not taken`), `FIGHT joining the fight of
+player X`, `FIGHT visiting ...`, `FIGHT the owner's fight runs: a catcher fight is started here to show it`, `FIGHT the
+visit ends (why): nothing more is written here`, `FIGHT a fight is offered, but this game runs one of its own: not
+joined`, `FIGHT the server takes no fights`. `mod_status` has `"fights"` (`role`, `owner`, `fight`, `joined`,
+`shown`, `visitors`, and counts: `hosted`, `visits`, `released`, `states`, `reports`, `states_taken`,
+`reports_taken`, `damage_applied`, `gazers_applied`, `kills_taken`, `kills_refused`, `own_first`, `commands`,
+`writes`); the fake build also `"fake_bts"` (its catcher manager, gazers, and every command and write the mod made).
+
+Tests: `fights_test.cpp` (game-free: every player a `Fights` over a real broadcast client and a `Sandbox`, a game
+without the game, through the real server in memory: one owner and nine visitors with a tenth refused for the cap, a
+player without `join_fights` and one beyond the fight untouched; one health bar both ways; three visitors hitting at
+once; a visitor whose reports are lost for two seconds (no heal, his damage arrives with the next); a gazer; a kill
+claim refused, then the last hit taken; the owner leaving; a visitor that also hosts; a game with its own fight; the
+floor; a visitor released out of reach who joins the same fight again (nothing counted twice); the formats) with 9 mutants (FIGHT_VISITOR_HOSTS, FIGHT_OWN, FIGHT_HEAL, FIGHT_KILL, FIGHT_ECHO, FIGHT_DOUBLE,
+FIGHT_KILL_CLAIM, FIGHT_RELEASE, FIGHT_GONE_CLEARS); `test_fights.py` (five copies of the real mod in the fake world,
+each with a UDP socket to the real `coop-world --fight-visitors 2`: the fight offered and joined by two, each showing
+it, a visitor that also hosts never announcing it, one health bar, a gazer, the cap leaving a third out, a game with a
+fight of its own and one without the settings untouched, the owner's game going away and both visitors released with
+nothing more written) and its mutant builds `fake-fight-visitor-hosts.so`, `fake-fight-gone-clears.so`,
+`fake-fight-settings.so`; the config in `unit.cpp` (CONFIG_FIGHTS). The server's rules have their own tests and mutants
+(`world/fight_test.cpp`), and the client's (`core/tests/broadcast.cpp`).
+
+### What a live run must check (research for the lead)
+
+Nothing of this has run with the game. What could not be determined without it:
+
+- whether the catcher command (0) starts a fight in a visitor's game where his own world has no active BT area (no
+  rain there, a cleared sphere, another episode's map state); live it started one "with no fight running and outside
+  every cleared sphere" (`game_offsets.md`, "BTs: what destroys a gazer, and the catcher command live"), always
+  where the area was active through shared rain;
+- which catcher the visitor's game brings (its type, `+0x28`) and whether it matches the owner's (the life is shared by
+  ordinal, in the manager's record order; a fight with several catchers, or of different types, is not checked);
+- the place: the owner's fight is placed where its porter stood when it started, and offered within 300 m of that
+  (in the relay's axes); whether a fight's tar area moves away from that point is unknown;
+- whether a cleared sphere left by the cleared command in a visitor's world (saved, a countdown from 300) matters to
+  his own story, and whether a catcher record started by command 0 and left running when the owner goes is saved;
+- a visitor's own boss fight starting while he visits, at the same moment as the copy (the two cannot be told apart
+  today: a fight that rises after the copy's command is taken for the copy);
+- story bosses (scripted fights, not BT-area catchers): not recognised; the kind field has only the catcher;
+- the visitor's hit converted to percent on his difficulty and taken off the owner's catcher on the owner's: the
+  percent compares across difficulties (as in the two-player sharing), but a hit's percent differs between two
+  difficulties;
+- the delay: a visitor's hit reaches the owner and comes back as the owner's life within about 0.3 to 0.5 s on a LAN
+  (one report interval, one state interval, two trips); how that looks with ten players is unknown;
+- gazers destroyed by visitors in the owner's world, reported at most 16 per visit;
+- `vitals.h` caught and dead read in a visitor's game while his copy runs, and what being caught does to a visit (his
+  game may start a catcher fight of its own: the copy is then that fight);
+- the cost: five looks a second at the catcher manager (and the gazers while owning or visiting), on the game thread.
 
 ## The partner from the start (`partner`)
 
