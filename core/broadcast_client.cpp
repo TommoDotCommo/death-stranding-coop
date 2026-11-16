@@ -182,9 +182,10 @@ void Client::entry(const Update& u,uint64_t now){
     if(!clockValid_||(u.stamp>at?u.stamp-at:at-u.stamp)>2000){++counters_.refused;return;}
     s.haveEntry=true;s.sequence=u.sequence;
     s.stamp=u.stamp;
-    // A generation this side does not have: the state is asked for again, unless a SHARE that is on its way settles it.
+    // A later generation than this side has: the state is asked for again, unless a SHARE that is on its way settles it.
+    // An earlier one is an entry the server queued before the state changed (its SHARE went at once).
 #ifndef MUTANT_BCAST_CLIENT_GAP
-    if(u.generation!=s.generation&&!s.wantFetch){s.wantFetch=true;s.mismatchSince=now;}
+    if(later16(u.generation,s.generation)&&!s.wantFetch){s.wantFetch=true;s.mismatchSince=now;}
 #endif
     if(u.parts&HasPresence){
         ds::State state;
@@ -232,19 +233,17 @@ void Client::share(const Share& h,uint64_t now){
     auto it=sources_.find(h.source);
     if(it==sources_.end()){++counters_.unknown;return;}
     ++counters_.shares;auto& s=it->second;size_t k=size_t(h.kind)-1;auto& blob=s.blobs[k];
+    // Older than what this side holds of the kind, or than the generation it has complete: a SHARE that arrived late,
+    // which neither changes the state nor says anything about what is missing.
 #ifndef MUTANT_BCAST_CLIENT_STALE_STATE
-    bool older=blob.have&&later16(blob.generation,h.generation);
-#else
-    bool older=false;
+    if((blob.have&&later16(blob.generation,h.generation))||later16(s.generation,h.generation))return;
 #endif
-    if(!older){
-        if(!h.version){if(blob.have){uint64_t revision=blob.revision+1;blob=Blob{};blob.revision=revision;}}
-        else{
-            std::vector<uint8_t> bytes(h.payload,h.payload+h.size);
-            uint64_t revision=blob.revision;
-            if(!blob.have||blob.bytes!=bytes)++revision;
-            blob.bytes=std::move(bytes);blob.version=h.version;blob.generation=h.generation;blob.have=true;blob.revision=revision;}
-    }
+    if(!h.version){if(blob.have){uint64_t revision=blob.revision+1;blob=Blob{};blob.revision=revision;}}
+    else{
+        std::vector<uint8_t> bytes(h.payload,h.payload+h.size);
+        uint64_t revision=blob.revision;
+        if(!blob.have||blob.bytes!=bytes)++revision;
+        blob.bytes=std::move(bytes);blob.version=h.version;blob.generation=h.generation;blob.have=true;blob.revision=revision;}
     Versions held{};for(size_t i=0;i<StateKinds;++i)held[i]=s.blobs[i].have?s.blobs[i].version:0;
     if(held==h.versions){if(!later16(s.generation,h.generation))s.generation=h.generation;s.wantFetch=false;}
     else if(!s.wantFetch){s.wantFetch=true;s.mismatchSince=now;}

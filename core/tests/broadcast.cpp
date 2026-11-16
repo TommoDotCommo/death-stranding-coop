@@ -268,6 +268,11 @@ static void state(){
     // An older SHARE that arrives late changes nothing.
     t.share(2,StateKind::Gear,4,6,{1,4,0,0},{4,4});t.share(2,StateKind::Gear,3,5,{1,3,0,0},{3,3});
     CHECK(*t.client.state(2,StateKind::Gear)==std::vector<uint8_t>({4,4})&&t.client.generation(2)==6);
+    // Neither it nor an entry of an older generation (one the server had queued before the state changed) is a gap.
+    t.frame({t.entry(2,3,t.server(),walker(0),5)});
+    sent=t.take(Type::Fetch).size();for(int i=0;i<10;++i){t.now+=100;t.client.tick(t.now);}CHECK(t.take(Type::Fetch).size()==sent);
+    // A SHARE older than the generation this side has complete adds nothing, even of a kind it does not hold.
+    t.share(2,StateKind::Places,1,4,{1,2,0,1},{7});CHECK(t.client.state(2,StateKind::Places)==nullptr&&t.client.generation(2)==6);
     // A kind that is gone (the player's game started again): dropped.
     t.share(2,StateKind::Gear,0,7,{1,0,0,0},{});CHECK(t.client.state(2,StateKind::Gear)==nullptr&&t.client.generation(2)==7);
     // This porter's own state: a version per change, none for the same bytes, sent at once; again after a WELCOME that

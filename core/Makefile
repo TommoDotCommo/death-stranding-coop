@@ -14,7 +14,7 @@ $(BUILD)/net.o: $(FUZZ)/src/net.cpp $(FUZZ)/include/coopfuzz/net.h $(FUZZ)/inclu
 	$(CXX) $(CXXFLAGS) -I$(FUZZ)/include -c $< -o $@
 $(BUILD)/tests: tests/test.cpp core.cpp core.h build_id.h $(BUILD)/net.o | $(BUILD)
 	$(CXX) $(CXXFLAGS) -DDS_TESTING -I$(FUZZ)/include tests/test.cpp core.cpp $(BUILD)/net.o -o $@
-test: check-build $(BUILD)/core.o $(BUILD)/tests environment-test animation-test enemies-test relay-test
+test: check-build $(BUILD)/core.o $(BUILD)/tests environment-test animation-test enemies-test relay-test broadcast-test
 	python3 tests/run.py $(BUILD)/tests
 	$(MAKE) -C ../mod test
 $(BUILD)/core-win64.o: core.cpp core.h build_id.h | $(BUILD)
@@ -55,3 +55,14 @@ relay-test: $(BUILD)/relay-tests
 	python3 -B ../mod/mutants.py --sources tests/relay.cpp --prefix $(BUILD)/mutant- RELAY_WIRE_VERSION RELAY_WIRE_LENGTH RELAY_WIRE_RANGE RELAY_WIRE_TEXT RELAY_WIRE_PAYLOAD RELAY_CLIENT_SILENT RELAY_CLIENT_STREAM RELAY_CLIENT_ORDER RELAY_CLIENT_STRANGER RELAY_CLIENT_CLOCK
 	@echo relay mutants killed: 10
 .PHONY: relay-test
+
+# The broadcast envelope (broadcast.h, envelope version 2) and the player's side of it (broadcast_client.*): every
+# refusal and every check the player's side makes per source, each with a mutant.
+BROADCAST := tests/broadcast.cpp broadcast_client.cpp core.cpp
+$(BUILD)/broadcast-tests: $(BROADCAST) broadcast_client.h broadcast.h relay.h core.h build_id.h | $(BUILD)
+	$(CXX) $(CXXFLAGS) $(BROADCAST) -o $@
+broadcast-test: $(BUILD)/broadcast-tests
+	./$(BUILD)/broadcast-tests
+	python3 -B ../mod/mutants.py --sources "$(BROADCAST)" --prefix $(BUILD)/mutant- BCAST_WIRE_VERSION BCAST_WIRE_LENGTH BCAST_WIRE_RANGE BCAST_WIRE_FRAME BCAST_CLIENT_STRANGER BCAST_CLIENT_ORDER BCAST_CLIENT_CLOCK BCAST_CLIENT_GAP BCAST_CLIENT_STALE_STATE BCAST_CLIENT_TELEPORT BCAST_CLIENT_SPEED BCAST_CLIENT_REBASE BCAST_CLIENT_RESEND BCAST_CLIENT_DELAY BCAST_CLIENT_ROSE BCAST_CLIENT_STREAM BCAST_CLIENT_JUMP
+	@echo broadcast mutants killed: 17
+.PHONY: broadcast-test
