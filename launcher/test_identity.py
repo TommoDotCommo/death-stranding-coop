@@ -83,6 +83,13 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-identity-') as d:
         target,headers=signed(joinKey,'GET','owner/players','');check(get(target,headers)[0]==403,'a player is not the owner')
         body=json.dumps({'set':['limit=5']});target,headers=signed(hostKey,'POST','owner/policy',body);status,policy=post(target,body,headers)
         check(status==200 and [s['value'] for s in policy['settings'] if s['key']=='limit']==['5'],'the owner changes the rules on the running server')
+        # His friends, as the launcher's friends window changes them: the host added by the short form of his key, then
+        # read back; another key does not read them (the server's own test has the rest).
+        f=run('--keyed-friends',str(port),secret,one(host,'short'),'friends',joinKey)
+        check(f.get('show')==['friends'] and f.get('friend')==[one(host,'account')],'the joiner\'s friend list: the host, by his short key: %r'%f)
+        f=run('--keyed-friends',str(port),secret,'-','-',joinKey);check(f.get('friend')==[one(host,'account')] and f.get('show')==['friends'],'read back: %r'%f)
+        f=run('--keyed-friends',str(port),secret,'-','-',otherKey);check(f.get('friend') is None,'another key has his own (empty) list: %r'%f)
+        target,headers=signed(otherKey,'GET','friends?player='+acct,'');check(get(target,headers)[0]==403,'another key does not read his list')
         c.close()
         # The relay: the player's token for his own id, nothing else.
         u=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);u.settimeout(.6);u.connect(('127.0.0.1',port))

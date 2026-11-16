@@ -74,6 +74,14 @@ int main(int argc,char** argv) {
             std::cout<<"fetched "<<int(j.fetched)<<"\nstart "<<j.start<<"\nkeyed "<<j.keyed<<"\naccount "<<j.target.account<<"\nmessage "<<j.message<<'\n';
             if(j.start){if(j.keyed)st::usePasses(s,j.passes);print(s);}
             return 0;}
+        if(mode=="--keyed-friends"&&argc==7) {   // PORT SECRET ADD|- SHOW|- KEYFILE: the friends window's change as this key, then the list
+            launcher::Session me;me.name="Joiner";me.playerId=78;me.group=launcher::Group::Join;me.port=unsigned(std::stoul(argv[2]))-100;me.secret=uint32_t(std::stoul(argv[3]));
+            auto t=st::target(me,0);t.keys=&keys;st::Policy p;std::string why;
+            if(st::fetchPolicy(t,st::transport(t,2000),p)!=st::Fetch::Ok||!st::identify(t,p,int64_t(std::time(nullptr)),why)){std::cout<<"refused "<<why<<'\n';return 0;}
+            st::Friends f;std::string add=argv[4],show=argv[5];
+            bool ok=add=="-"&&show=="-"?st::fetchFriends(t,st::transport(t,2000),f,why):st::changeFriends(t,st::transport(t,2000),add=="-"?std::vector<std::string>{}:std::vector<std::string>{add},{},show=="-"?"":show,f,why);
+            if(!ok){std::cout<<"refused "<<why<<'\n';return 0;}
+            std::cout<<"show "<<f.show<<'\n';for(auto& x:f.list)std::cout<<"friend "<<x.key<<'\n';return 0;}
         if(mode=="--keyed-signed"&&argc==8) {   // PORT PREFIX METHOD CALL BODY KEYFILE: one signed call's headers, for the test to send
             st::Target t;t.address="127.0.0.1";t.port=unsigned(std::stoul(argv[2]));t.prefix=argv[3];t.keys=&keys;st::Policy p;
             check(st::fetchPolicy(t,st::transport(t,2000),p)==st::Fetch::Ok,"the policy of the keyed server");
@@ -258,6 +266,17 @@ int main(int argc,char** argv) {
         for(auto body:{std::string("garbage"),edit("\"format\":1","\"format\":3")}){Fake f;f.answers["GET /w305419896/coop/policy"]={200,body};
             auto j=st::join(t,fake(f),"",{});check(j.fetched==st::Fetch::Bad&&!j.start,"an answer this launcher cannot read: not joined");}
         {Fake f;f.answers["GET /w305419896/coop/policy"]={500,"{}"};check(st::join(t,fake(f),"",{}).fetched==st::Fetch::Bad,"a server error is not an older server");}
+        // Who he sees on the relay: his choice and his friend list, read and changed (the body the server takes).
+        {Fake f;f.answers["GET /w305419896/coop/friends?player=76561197960266962"]={200,R"({"format":1,"player":"zygo_x","known":true,"show_others":"friends","friends":[{"key":"ed25519-)"+std::string(64,'a')+R"(","id":"zygo_y","short":"aaaa aaaa aaaa aaaa","known":true,"name":"Bea"},{"key":"cy","id":"zygo_z","short":"","known":false,"name":""}]})"};
+         st::Friends got;std::string why;check(st::fetchFriends(t,fake(f),got,why)&&got.show=="friends"&&got.list.size()==2&&got.list[0].text()=="Bea  aaaa aaaa aaaa aaaa"&&got.list[1].text()=="(not seen here yet)  cy","the friend list read");
+         f.answers["POST /w305419896/coop/friends"]=f.answers["GET /w305419896/coop/friends?player=76561197960266962"];
+         check(st::changeFriends(t,fake(f),{"aaaa aaaa aaaa aaaa"},{"cy"},"nobody",got,why)&&f.sent.back()=="POST /w305419896/coop/friends {\"player\":\"76561197960266962\",\"add\":[\"aaaa aaaa aaaa aaaa\"],\"remove\":[\"cy\"],\"show_others\":\"nobody\"}","a change sent");
+         check(st::changeFriends(t,fake(f),{},{},"default",got,why)&&f.sent.back()=="POST /w305419896/coop/friends {\"player\":\"76561197960266962\",\"show_others\":\"default\"}","the choice alone");
+         f.answers["POST /w305419896/coop/friends"]={403,R"({"status":"403","code":403,"message":"no player of this world has the key aaaa aaaa aaaa aaaa"})"};
+         check(!st::changeFriends(t,fake(f),{"aaaa aaaa aaaa aaaa"},{},"",got,why)&&why=="no player of this world has the key aaaa aaaa aaaa aaaa","the server's reason");
+         f.answers["GET /w305419896/coop/friends?player=76561197960266962"]={200,R"({"format":1,"show_others":"some","friends":[]})"};check(!st::fetchFriends(t,fake(f),got,why),"a choice that is none: not read");
+         f.answers["GET /w305419896/coop/friends?player=76561197960266962"]={404,"{}"};check(!st::fetchFriends(t,fake(f),got,why)&&why.find("before them")!=std::string::npos,"an older server");
+         check(st::shortKeyText("A1B2C3D4 e5f6-a7b8")=="a1b2 c3d4 e5f6 a7b8"&&st::shortKeyText("a1b2 c3d4 e5f6 a7b")==""&&st::shortKeyText("g1b2 c3d4 e5f6 a7b8")=="","short keys as typed");}
         // What he has there, and his offer or withdrawal.
         {Fake f;f.answers["GET /w305419896/coop/mine?player=76561197960266962"]={200,R"({"format":1,"objects":[{"id":"lAAAA","type":"l","kind":"ladder","area":226,"state":"held","waiting_for":"you","held":"member","held_text":"only members build on this server","likes":0},{"id":"eBBBB","kind":"cairn","area":5,"state":"shared","likes":1}]})"};
          f.answers["GET /w305419896/coop/me?player=76561197960266962"]={200,R"({"known":true,"shared":1,"held":{"member":1,"limit":2},"likes":1})"};

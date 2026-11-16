@@ -208,13 +208,64 @@ bool agreeToServer(Session& s){
     if(j.keyed)strand::usePasses(s,j.passes);   // the game signs in with its ticket and says HELLO with its relay token
     saveNote=j.message;return true;
 }
+// "Who I see": who of the players near him in the game the server's relay shows him (everyone near, at most the
+// server's cap; only his friends; nobody; or his game's own setting) and his friend list on this server, a friend
+// added by the short form of his key. Each change is one call (strand.h changeFriends), signed under identity keys.
+void friendsView(const strand::Target& t,const strand::Transport& send){
+    enum {Info=701,Everyone,FriendsOnly,Nobody,Default,SaveChoice,List,Key,Add,Remove,Note,Close};
+    Popup pop;strand::Friends now;bool shown=false;
+    auto item=[&](int id){return GetDlgItem(pop.h,id);};
+    auto note=[&](const std::string& text){SetWindowTextW(item(Note),wtext(text).c_str());};
+    auto show=[&](const strand::Friends& f){
+        now=f;SendMessageW(item(List),LB_RESETCONTENT,0,0);
+        for(auto& x:f.list){auto w=wtext(x.text());SendMessageW(item(List),LB_ADDSTRING,0,reinterpret_cast<LPARAM>(w.c_str()));}
+        for(int id:{Everyone,FriendsOnly,Nobody,Default})SendMessageW(item(id),BM_SETCHECK,BST_UNCHECKED,0);
+        SendMessageW(item(f.show=="everyone"?Everyone:f.show=="friends"?FriendsOnly:f.show=="nobody"?Nobody:Default),BM_SETCHECK,BST_CHECKED,0);};
+    auto refresh=[&]{
+        std::string why;shown=strand::fetchFriends(t,send,now,why);
+        if(shown){show(now);note(now.list.empty()?"No friends on this server yet. Add one by the short form of his key (he finds it here too).":std::to_string(now.list.size())+" friends on this server.");}
+        else note(why);
+        for(int id:{Everyone,FriendsOnly,Nobody,Default,SaveChoice,Add,Remove})EnableWindow(item(id),shown);};
+    auto change=[&](const std::vector<std::string>& add,const std::vector<std::string>& remove,const std::string& choice,const std::string& done){
+        strand::Friends f;std::string why;
+        if(!strand::changeFriends(t,send,add,remove,choice,f,why))throw std::runtime_error("The server did not take it: "+why);
+        show(f);note(done);};
+    pop.command=[&](int id){
+        auto checked=[&](int x){return SendMessageW(item(x),BM_GETCHECK,0,0)==BST_CHECKED;};
+        if(id==SaveChoice)change({},{},checked(Everyone)?"everyone":checked(FriendsOnly)?"friends":checked(Nobody)?"nobody":"default","Saved: the server applies it from your game's next HELLO (within a second).");
+        if(id==Add){
+            wchar_t typed[80]{};GetWindowTextW(item(Key),typed,79);std::string text;for(wchar_t c:std::wstring(typed))if(c<128)text+=char(c);
+            auto key=strand::shortKeyText(text);
+            if(key.empty())throw std::runtime_error("Type the short form of your friend's key: 16 letters and digits, as \"a1b2 c3d4 e5f6 a7b8\".");
+            change({key},{},"","Added.");SetWindowTextW(item(Key),L"");}
+        if(id==Remove){
+            int at=int(SendMessageW(item(List),LB_GETCURSEL,0,0));
+            if(at<0||size_t(at)>=now.list.size())throw std::runtime_error("Select a friend first.");
+            change({},{now.list[size_t(at)].key},"","Removed.");}
+        if(id==Close)pop.done=true;};
+    runPopup(pop,L"Who I see on this server",760,640,[&](HWND h){
+        std::string mine=t.sign&&t.keys?"Your key's short form, for your friends: "+world::identity::shortText(t.keys->pub)+".":"This server has no player keys: friends are recognised on servers that do (identity keys).";
+        popupControl(h,Info,L"STATIC",wtext("Of the players near you in the game, the server shows you:\r\n"+mine).c_str(),SS_LEFT,20,16,704,44);
+        popupControl(h,Everyone,L"BUTTON",L"Everyone near (at most the server's number, your friends first, then the nearest)",BS_AUTORADIOBUTTON|WS_GROUP,40,66,690,26);
+        popupControl(h,FriendsOnly,L"BUTTON",L"Only my friends",BS_AUTORADIOBUTTON,40,94,690,26);
+        popupControl(h,Nobody,L"BUTTON",L"Nobody (they still see you)",BS_AUTORADIOBUTTON,40,122,690,26);
+        popupControl(h,Default,L"BUTTON",L"My game's own setting (show_others in its config; everyone when it has none)",BS_AUTORADIOBUTTON,40,150,690,26);
+        popupControl(h,SaveChoice,L"BUTTON",L"Save this choice",WS_GROUP,40,184,260,34);
+        popupControl(h,0,L"STATIC",L"My friends on this server:",SS_LEFT,20,232,704,24);
+        popupControl(h,List,L"LISTBOX",L"",LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|WS_VSCROLL,20,258,704,200);
+        popupControl(h,Key,L"EDIT",L"",ES_AUTOHSCROLL,20,468,300,30);
+        popupControl(h,Add,L"BUTTON",L"Add by short key",0,330,466,190,34);popupControl(h,Remove,L"BUTTON",L"Remove selected",0,530,466,194,34);
+        popupControl(h,Note,L"STATIC",L"",SS_LEFT,20,510,704,44);
+        popupControl(h,Close,L"BUTTON",L"Close",BS_DEFPUSHBUTTON,530,560,194,36);
+        refresh();});
+}
 // "My strand on this server": what the player built on the group server he last hosted or joined, its state and
 // likes; his offer and withdrawal of the selected rows or of all; his choices there.
 void strandView(){
     if(!haveStrand)throw std::runtime_error("Host or join a group server first.");
     auto t=targetOf(strandSession);
     auto send=strand::transport(t);
-    enum {Info=501,List,Note,OfferSelected,WithdrawSelected,OfferAll,WithdrawAll,Mine,Refresh,Close};
+    enum {Info=501,List,Note,OfferSelected,WithdrawSelected,OfferAll,WithdrawAll,Mine,Refresh,Close,WhoISee};
     Popup pop;strand::Policy rules;bool shown=false;strand::Me me;std::vector<strand::Object> rows;
     auto item=[&](int id){return GetDlgItem(pop.h,id);};
     auto note=[&](const std::string& text){SetWindowTextW(item(Note),wtext(text).c_str());};
@@ -229,7 +280,7 @@ void strandView(){
         if(shown&&strand::fetchMine(t,send,rows,why)){for(auto& o:rows){auto w=wtext(o.text());SendMessageW(item(List),LB_ADDSTRING,0,reinterpret_cast<LPARAM>(w.c_str()));}
             note(rows.empty()?"Nothing you built is on this server yet.":std::to_string(rows.size())+" of your objects on this server. Select rows, then Offer or Withdraw.");}
         else note(shown?why:"");
-        for(int id:{OfferSelected,WithdrawSelected,OfferAll,WithdrawAll,Mine})EnableWindow(item(id),shown);};
+        for(int id:{OfferSelected,WithdrawSelected,OfferAll,WithdrawAll,Mine,WhoISee})EnableWindow(item(id),shown);};
     auto act=[&](const char* call,bool all){
         std::vector<std::string> ids;
         if(all)ids.push_back("");
@@ -250,6 +301,7 @@ void strandView(){
         if(id==WithdrawAll)act("withdraw",true);
         if(id==Refresh)refresh();
         if(id==Close)pop.done=true;
+        if(id==WhoISee)friendsView(t,send);
         if(id==Mine){
             auto chosen=strand::remembered(readIni(),rules);
             if(me.known&&!me.offerBuilds.empty())chosen.offerBuilds=me.offerBuilds;
@@ -263,7 +315,8 @@ void strandView(){
         popupControl(h,Note,L"STATIC",L"",SS_LEFT,20,498,804,44);
         popupControl(h,OfferSelected,L"BUTTON",L"Offer selected",0,20,550,195,36);popupControl(h,WithdrawSelected,L"BUTTON",L"Withdraw selected",0,223,550,195,36);
         popupControl(h,OfferAll,L"BUTTON",L"Offer all",0,426,550,195,36);popupControl(h,WithdrawAll,L"BUTTON",L"Withdraw all",0,629,550,195,36);
-        popupControl(h,Mine,L"BUTTON",L"My choices for this server",0,20,600,395,36);popupControl(h,Refresh,L"BUTTON",L"Refresh",0,426,600,195,36);
+        popupControl(h,Mine,L"BUTTON",L"My choices for this server",0,20,600,195,36);popupControl(h,WhoISee,L"BUTTON",L"Who I see",0,223,600,195,36);
+        popupControl(h,Refresh,L"BUTTON",L"Refresh",0,426,600,195,36);
         popupControl(h,Close,L"BUTTON",L"Close",BS_DEFPUSHBUTTON,629,600,195,36);
         refresh();});
 }

@@ -86,6 +86,17 @@ struct Me {
 struct Object { std::string id,kind,state,waitingFor,held;int64_t area=0,likes=0;std::string text() const; };
 bool fetchMe(const Target&,const Transport&,Me&,std::string& why);
 bool fetchMine(const Target&,const Transport&,std::vector<Object>&,std::string& why);
+// Who he sees of the players near him on the server's relay (../world/README.md, "How many players one player sees"):
+// his choice `show` (everyone, friends, nobody; "" = his game's own setting, everyone when it has none) and his friends.
+// A friend is added by the short form of his key ("a1b2 c3d4 e5f6 a7b8", which the server finds among its players) or
+// by his whole account key, and removed the same way.
+struct Friend { std::string key,shortKey,name;bool known=false;std::string text() const; };
+struct Friends { std::string show;std::vector<Friend> list; };
+bool fetchFriends(const Target&,const Transport&,Friends&,std::string& why);
+// One change: add and remove (lists of keys), show ("" leaves it, "default" goes back to his game's). `out` is the list
+// as the server then has it; `why` the server's reason when it refuses.
+bool changeFriends(const Target&,const Transport&,const std::vector<std::string>& add,const std::vector<std::string>& remove,const std::string& show,Friends& out,std::string& why);
+std::string shortKeyText(const std::string& typed);   // "A1B2C3D4 e5f6a7b8" -> "a1b2 c3d4 e5f6 a7b8"; "" when it is no short key
 // Offer (`call` "offer") or withdraw ("withdraw") one of his objects, or all of them (`object` ""). `result` is what
 // happened, or why it was refused.
 bool act(const Target&,const Transport&,const std::string& call,const std::string& object,std::string& result);

@@ -335,6 +335,49 @@ bool fetchMine(const Target& t,const Transport& send,std::vector<Object>& list,s
     }catch(const std::exception&){why=fetchText(Fetch::Bad);return false;}
     return true;
 }
+std::string Friend::text() const {
+    return (name.empty()?std::string("(not seen here yet)"):name)+"  "+(shortKey.empty()?key:shortKey);}
+std::string shortKeyText(const std::string& typed){
+    std::string hex;
+    for(char c:typed){if(c==' '||c=='-')continue;if(!std::isxdigit(static_cast<unsigned char>(c)))return "";hex+=char(std::tolower(static_cast<unsigned char>(c)));}
+    if(hex.size()!=16)return "";
+    return hex.substr(0,4)+" "+hex.substr(4,4)+" "+hex.substr(8,4)+" "+hex.substr(12,4);}
+namespace {
+bool readFriends(const std::string& body,Friends& out){
+    try{
+        auto v=json::parseFile(body,MaxAnswer);if(!v.get("friends").isArray())return false;
+        Friends f;f.show=v.get("show_others").string();
+#ifndef MUTANT_STRAND_FRIENDS_READ
+        if(f.show!=""&&f.show!="everyone"&&f.show!="friends"&&f.show!="nobody")return false;   // shown as it is: only a choice
+#endif
+        for(auto& x:v.get("friends").items()){
+            Friend g;g.key=x.get("key").string();g.shortKey=x.get("short").string();g.name=x.get("name").string();g.known=x.get("known").boolean();
+            if(g.key.empty()||!plain(g.key+g.shortKey+g.name))return false;
+            f.list.push_back(g);}
+        out=std::move(f);return true;
+    }catch(const std::exception&){return false;}
+}
+}
+bool fetchFriends(const Target& t,const Transport& send,Friends& out,std::string& why){
+    if(t.account.empty()){why="Your Steam account is not known yet. Start Steam, then try again.";return false;}
+    Http h;if(!call(t,send,"GET",base(t)+"/coop/friends?player="+t.account,"",h)){why=fetchText(Fetch::Unreachable);return false;}
+    if(h.status==404){why="This server has no friend lists (a coop-world from before them).";return false;}
+    if(h.status!=200){why=message(h);return false;}
+    if(!readFriends(h.body,out)){why=fetchText(Fetch::Bad);return false;}
+    return true;
+}
+bool changeFriends(const Target& t,const Transport& send,const std::vector<std::string>& add,const std::vector<std::string>& remove,const std::string& show,Friends& out,std::string& why){
+    if(t.account.empty()){why="Your Steam account is not known yet. Start Steam, then try again.";return false;}
+    json::Value body=json::Value::object();body.set("player",t.account);
+    if(!add.empty()){json::Value a=json::Value::array();for(auto& x:add)a.push(x);body.set("add",a);}
+    if(!remove.empty()){json::Value r=json::Value::array();for(auto& x:remove)r.push(x);body.set("remove",r);}
+    if(!show.empty())body.set("show_others",show);
+    Http h;if(!call(t,send,"POST",base(t)+"/coop/friends",body.dump(),h)){why=fetchText(Fetch::Unreachable);return false;}
+    if(h.status==404){why="This server has no friend lists (a coop-world from before them).";return false;}
+    if(h.status!=200){why=message(h);return false;}
+    if(!readFriends(h.body,out)){why=fetchText(Fetch::Bad);return false;}
+    return true;
+}
 bool act(const Target& t,const Transport& send,const std::string& call,const std::string& object,std::string& result){
     if(call!="offer"&&call!="withdraw")throw std::runtime_error("offer or withdraw");
     if(t.account.empty()){result="Your Steam account is not known yet. Start Steam, then try again.";return false;}
