@@ -201,7 +201,7 @@ void Mirror::removeCopies(){
 void Mirror::clear(){
     removeCopies();pieces_.clear();body_=0;next_=0;candidate_.clear();stable_=0;
 }
-void Mirror::tick(uint64_t body,uint64_t world,const std::function<std::vector<Piece>()>& pieces,const puppet::Transform& at,bool shown){
+void Mirror::tick(uint64_t body,uint64_t world,const std::function<std::vector<Piece>()>& pieces,const puppet::Transform& at,bool shown,unsigned* budget){
     if(world!=world_){
         // The old world's entities went with it: forget the copies without touching them.
         if(world_&&made())log_("GEAR new world: "+std::to_string(made())+" old pieces forgotten\n");
@@ -274,6 +274,11 @@ void Mirror::tick(uint64_t body,uint64_t world,const std::function<std::vector<P
         if(!parent)continue;   // its parent was not made
         uint64_t resource=api_.resource(p.source);
         if(!resource){log_("GEAR skipped "+p.helper+": no resource\n");continue;}
+#ifndef MUTANT_GEAR_SET_BUDGET
+        if(budget){if(!*budget)break;--*budget;}   // this piece waits for a later tick (next_ stays on it)
+#else
+        (void)budget;
+#endif
         uint64_t e=api_.create(resource,at);
         if(!e){++failures_;log_("GEAR refused "+p.helper+(failures_>=MaxFailures?" (giving up)\n":"\n"));continue;}
         api_.attach(e,parent,p.helper);
@@ -285,6 +290,59 @@ void Mirror::tick(uint64_t body,uint64_t world,const std::function<std::vector<P
         api_.visible(m.entity,shown);
 #endif
         m.shown=shown;
+    }
+}
+void Mirrors::remove(uint64_t key){
+    auto it=mirrors_.find(key);if(it==mirrors_.end())return;
+    it->second->clear();mirrors_.erase(it);
+}
+void Mirrors::clear(){for(auto& [key,m]:mirrors_)m->clear();mirrors_.clear();}
+void Mirrors::tick(uint64_t world,const std::vector<Wearer>& wearers){
+    ++tick_;
+    if(world!=sharedWorld_){sharedWorld_=world;haveShared_=false;}   // a reading of another world's porter says nothing
+    const std::function<std::vector<Piece>()> none=[]{return std::vector<Piece>{};};
+    // A key that is no longer listed: as a body that went (a new world's copies are forgotten, never touched).
+#ifndef MUTANT_GEAR_SET_KEEP
+    for(auto it=mirrors_.begin();it!=mirrors_.end();){
+        bool listed=std::any_of(wearers.begin(),wearers.end(),[&](const Wearer& w){return w.key==it->first;});
+        if(listed){++it;continue;}
+        it->second->tick(0,world,none,{},false);it=mirrors_.erase(it);
+    }
+#endif
+    unsigned budget=PerTick;
+    for(size_t i=0;i<wearers.size();++i){
+#ifndef MUTANT_GEAR_SET_MIX
+        const Wearer& w=wearers[i];
+#else
+        Wearer mixed=wearers[i];mixed.body=wearers.front().body;mixed.worn=wearers.front().worn;const Wearer& w=mixed;
+#endif
+        auto it=mirrors_.find(w.key);
+        if(it==mirrors_.end()){
+            auto key=w.key;auto log=log_;
+            it=mirrors_.emplace(key,std::make_unique<Mirror>(api_,[key,log](const std::string& row){
+                if(!log)return;
+                log(key&&row.rfind("GEAR ",0)==0?"GEAR player "+std::to_string(key)+" "+row.substr(5):row);})).first;
+        }
+        auto& mirror=*it->second;
+        if(!w.body){mirror.tick(0,world,none,{},false);continue;}
+        auto site=look_?look_(w.body):std::optional<Site>{};
+#ifndef MUTANT_GEAR_SET_SITE
+        if(!site)continue;   // never make pieces at an unreadable place
+#else
+        if(!site)site=Site{true,{}};
+#endif
+        auto pieces=[&]{
+            bool fresh=w.key==0;
+#ifdef MUTANT_GEAR_SET_READS
+            fresh=true;
+#endif
+            if(fresh||!haveShared_||tick_-sharedAt_>=ReadEvery){shared_=nodes_?nodes_():std::vector<Node>{};sharedAt_=tick_;haveShared_=true;++reads_;}
+            if(w.worn)return planFor(shared_,image_,*w.worn);
+#ifndef MUTANT_GEAR_SET_LOCAL
+            if(!w.local)return std::vector<Piece>{};
+#endif
+            return plan(shared_,image_);};
+        mirror.tick(w.body,world,pieces,site->at,site->shown,&budget);
     }
 }
 Api nativeApi(discovery::Sampler& s){

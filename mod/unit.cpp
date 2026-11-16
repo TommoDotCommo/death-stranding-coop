@@ -110,6 +110,17 @@ int main() {
     assert(refused(withKeys(probe,"\"others\":33")));assert(refused(withKeys(probe,"\"others\":true")));assert(refused(withKeys(probe,"\"others\":\"4\"")));
     assert(refused(withKeys(threaded,"\"others\":4")));                                    // no puppet_probe
     assert(mod::parseConfig(withKeys(threaded,"\"others\":0")).others==0);
+    // What other players wear and carry: off by default; gear needs other players and the game provider; carried cases
+    // need the gear (they hang on the backpack's copy) and are for at most 8 players at once.
+    {std::string porter=R"({"server":"10.1.2.3","slot":0,"nickname":"test","provider":"game","session":123,"game_thread":true,"puppet_probe":true,"required":true,)"+pin+"}";
+     auto o=withKeys(porter,"\"others\":4");
+     assert(!mod::parseConfig(o).othersGear&&mod::parseConfig(o).othersCarry==0);
+     auto g=mod::parseConfig(withKeys(o,"\"others_gear\":true,\"others_carry\":4"));assert(g.othersGear&&g.othersCarry==4);
+     assert(mod::parseConfig(withKeys(o,"\"others_gear\":true")).othersCarry==0&&mod::parseConfig(withKeys(o,"\"others_gear\":true,\"others_carry\":8")).othersCarry==8);
+     assert(refused(withKeys(o,"\"others_gear\":true,\"others_carry\":9")));assert(refused(withKeys(o,"\"others_carry\":4")));
+     assert(refused(withKeys(o,"\"others_gear\":true,\"others_carry\":true")));assert(refused(withKeys(o,"\"others_gear\":1")));
+     assert(refused(withKeys(porter,"\"others_gear\":true")));                            // no other players
+     assert(mod::parseConfig(withKeys(o,"\"others_gear\":false,\"others_carry\":0")).othersCarry==0);}
     // The relay for other players: numeric address on loopback (or the partner's), a key, an id, and others on.
     {auto o=withKeys(probe,"\"others\":4");auto r=[&](const char* more){return withKeys(o,more);};
      auto c=mod::parseConfig(r("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"group-1\",\"player_id\":77"));

@@ -239,6 +239,67 @@ int main(){
         m.put<uint32_t>(e+ComponentCount,1);CHECK(carrierComponent(m.sampler,e)==0);
         m.put<uint32_t>(e+ComponentCount,100000);m.put<uint64_t>(arr+8,0);CHECK(carrierComponent(m.sampler,e)==0);
     }
+    // Several bodies (Mirrors): the partner (key 0) and other players (their ids), one Api and one budget.
+    {
+        World w;std::map<uint64_t,Site> sites;lines.clear();
+        Mirrors set(w.api(),[&](uint64_t b)->std::optional<Site>{auto it=sites.find(b);if(it==sites.end())return std::nullopt;return it->second;},
+                    [&]{return snapshot(p.m.sampler,p.porter);},Image,[](const std::string& s){lines.push_back(s);});
+        uint64_t world=p.porter;const uint64_t partner=0x60000000;
+        auto body=[](uint64_t k){return 0x61000000+k*0x1000;};
+        auto ofBody=[&](uint64_t b){unsigned n=0;for(auto& [k,v]:w.made)n+=!v.removed&&v.parent==b;return n;};
+        const WornSet pack{{helperHash("HLP_Backpack"),0}},both{{helperHash("HLP_Hcuf"),0},{helperHash("HLP_Backpack"),0}},armour{{helperHash("HLP_Waist_l_armor"),1}};
+        // The partner without a set (this porter's visible gear: cuff and backpack), six players with a set each, one
+        // player (7) who has sent none, and one (8) whose body cannot be read.
+        std::vector<Wearer> all;all.push_back({0,partner,std::nullopt,true});sites[partner]={true,{}};
+        for(uint64_t k=1;k<=6;++k){all.push_back({k,body(k),k%2?pack:both,false});sites[body(k)]={true,{}};}
+        all.push_back({7,body(7),std::nullopt,false});sites[body(7)]={true,{}};
+        all.push_back({8,body(8),pack,false});
+        auto at=[&](uint64_t key)->Wearer& {for(auto& x:all)if(x.key==key)return x;return all.front();};
+        const unsigned settle=Mirror::CheckEvery*(Mirror::StableChecks-1)+1;unsigned worst=0;
+        auto run=[&](unsigned n){for(unsigned i=0;i<n;++i){auto before=w.creates;set.tick(world,all);worst=std::max(worst,w.creates-before);}};
+        run(settle);CHECK(w.creates==0);
+        run(1);CHECK(w.creates==Mirrors::PerTick);           // nine bodies due in one tick: the budget of one
+        run(40);
+        CHECK(worst==Mirrors::PerTick);
+        CHECK(w.live()==11&&set.made()==11&&set.made(0)==2&&set.made(1)==1&&set.made(2)==2&&set.made(6)==2);
+        CHECK(ofBody(partner)==2);for(uint64_t k=1;k<=6;++k)CHECK(ofBody(body(k))==(k%2?1u:2u));   // each on its own body
+        CHECK(set.copyAt(1,"HLP_Backpack")&&w.made.at(set.copyAt(1,"HLP_Backpack")).parent==body(1)&&!set.copyAt(1,"HLP_Hcuf"));
+        CHECK(set.made(7)==0&&ofBody(body(7))==0);           // no set from that player: nothing, not this porter's gear
+        CHECK(set.made(8)==0&&ofBody(body(8))==0);           // nothing is made at a place that cannot be read
+        {bool named=false,plain=false;for(auto& l:lines){named|=l.rfind("GEAR player 1 plan:",0)==0;plain|=l.rfind("GEAR plan:",0)==0;}CHECK(named&&plain);}
+        // The porter is read once per look of the partner's mirror, and once more per ReadEvery ticks for all others.
+        {auto before=set.reads();run(200);CHECK(set.reads()-before<=2*(200/Mirror::CheckEvery)+2);CHECK(set.reads()>before);}
+        CHECK(w.creates==11&&w.removes==0);
+        // One body hidden: its copies and no others.
+        sites[body(2)].shown=false;run(1);
+        for(auto& [k,v]:w.made)CHECK(v.visible==(v.parent!=body(2)));
+        sites[body(2)].shown=true;run(1);for(auto& [k,v]:w.made)CHECK(v.visible);
+        // A body that cannot be read for a while keeps what it has; body 8 becomes readable and gets its backpack.
+        sites.erase(body(3));sites[body(8)]={true,{}};run(settle+3);
+        CHECK(set.made(3)==1&&w.removes==0&&set.made(8)==1&&ofBody(body(8))==1);
+        sites[body(3)]={true,{}};
+        // A set arrives from player 7: a piece this porter has but hides, copied from his second piece on that helper.
+        at(7).worn=armour;run(Mirror::CheckEvery*(Mirror::StableChecks+1)+3);
+        CHECK(set.made(7)==1&&set.copyAt(7,"HLP_Waist_l_armor")&&w.made.at(set.copyAt(7,"HLP_Waist_l_armor")).resource==(p.armour2^0x5000000000ULL));
+        // Player 4 takes the cuff off: only that copy goes.
+        at(4).worn=pack;run(Mirror::CheckEvery*(Mirror::StableChecks+1));
+        CHECK(set.made(4)==1&&w.removes==1&&ofBody(body(4))==1&&set.copyAt(4,"HLP_Backpack"));
+        // Player 2 leaves (no longer listed): its copies are removed and its mirror dropped; nobody else's is touched.
+        auto size=set.size();all.erase(all.begin()+2);CHECK(all[2].key==3);run(1);
+        CHECK(w.removes==3&&set.made(2)==0&&ofBody(body(2))==0&&set.size()==size-1&&set.made()==w.live()&&set.made(1)==1&&set.made(0)==2);
+        // Player 1's body is gone while he is still near: the copies go; a new body gets new ones.
+        at(1).body=0;run(1);CHECK(w.removes==4&&set.made(1)==0);
+        at(1).body=body(11);sites[body(11)]={true,{}};run(settle+3);CHECK(set.made(1)==1&&ofBody(body(11))==1);
+        // A new world: every copy is forgotten and none touched, also the copies of a player who left in that tick;
+        // the new bodies get their own.
+        auto removes=w.removes;auto live=w.live();world+=0x100000;
+        for(auto& x:all){x.body+=0x1000000;sites[x.body]={true,{}};}
+        all.pop_back();run(settle+30);
+        CHECK(w.removes==removes&&set.made()==w.live()-live&&set.made(0)==2&&set.made(8)==0&&set.made(7)==1);
+        // remove and clear: now.
+        removes=w.removes;set.remove(7);CHECK(w.removes==removes+1&&set.made(7)==0);
+        auto left=set.made();set.clear();CHECK(w.removes==removes+1+left&&set.size()==0&&set.made()==0);
+    }
     if(failures)return 1;
     std::puts("gear tests passed");
     return 0;

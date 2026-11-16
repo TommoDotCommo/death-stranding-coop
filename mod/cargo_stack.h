@@ -12,6 +12,7 @@
 #include <array>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -52,7 +53,9 @@ public:
     // the meshes are replaced.
     // placed: when given (one per item, relative to the anchor: carry_place.h), each case goes exactly there instead
     // of into the layout's columns, and up to MaxPlaced cases are drawn (hips and arms too).
-    void tick(bool permitted,const std::vector<Item>& items,const Transform* anchor,const std::vector<Transform>* placed=nullptr);
+    // budget (optional): how many more meshes the game may be asked for now; counted down for every one asked for
+    // (several stacks share one: Stacks, below).
+    void tick(bool permitted,const std::vector<Item>& items,const Transform* anchor,const std::vector<Transform>* placed=nullptr,unsigned* budget=nullptr);
     static constexpr unsigned MaxPlaced=24;
     void forget(const char* why);   // the world was replaced: the meshes went with it; never call the game
     void clear();                   // releases every mesh
@@ -63,6 +66,31 @@ private:
     struct Mesh{uint64_t mesh=0;Item item;uint8_t volume=1;};
     Api api_;std::function<void(const std::string&)> log_;std::vector<Mesh> meshes_;unsigned failures_=0;
     std::map<Item,std::optional<Case>> cases_;   // per item, for this world
+};
+// Several stacks, one per body, by key (the mod uses 0 for the partner and a player's id for another player). They share
+// one Api and one budget: the game is asked for at most PerTick new meshes a game-thread tick over all bodies, in the
+// order listed (the caller lists the partner first), so the partner alone gets what a single Stack gave him. A key that
+// is no longer listed (the player left, hides, is no longer among the nearest, put everything down) has its meshes
+// released and its stack dropped; a listed key that is not permitted has them released and keeps its stack (and with it
+// the count of refusals, so a stack that gave up stays given up). How many keys are listed is the caller's limit.
+struct Load {
+    uint64_t key=0;bool permitted=false;Transform anchor;std::vector<Item> items;
+    std::optional<std::vector<Transform>> placed;   // carry_place.h: one per item, relative to the anchor
+};
+class Stacks {
+public:
+    static constexpr unsigned PerTick=Stack::PerTick;
+    Stacks(Api api,std::function<void(const std::string&)> log):api_(std::move(api)),log_(std::move(log)){}
+    void tick(const std::vector<Load>&);
+    void forget(const char* why);    // the world was replaced: every stack forgets, none calls the game
+    void clear();                    // every mesh released, every stack dropped
+    Stack* of(uint64_t key){auto it=stacks_.find(key);return it==stacks_.end()?nullptr:it->second.get();}
+    size_t size() const {return stacks_.size();}
+    size_t shown() const {size_t n=0;for(auto& [key,s]:stacks_)n+=s->shown();return n;}   // meshes that exist, all bodies
+    size_t shown(uint64_t key) const {auto it=stacks_.find(key);return it==stacks_.end()?0:it->second->shown();}
+    Layout layout;                   // given to every stack on every tick
+private:
+    Api api_;std::function<void(const std::string&)> log_;std::map<uint64_t,std::unique_ptr<Stack>> stacks_;
 };
 // Signature-checked native calls (Windows, pinned build); throws elsewhere or when the image differs.
 Api nativeApi(discovery::Sampler&);

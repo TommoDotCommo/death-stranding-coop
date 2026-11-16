@@ -148,11 +148,90 @@ std::vector<nametag::Named> labels(const std::vector<Shown>& shown,const Bodies&
     return out;
 }
 
+std::vector<gear::Wearer> wearers(const std::vector<Shown>& shown,const Bodies& bodies){
+    std::vector<gear::Wearer> out;out.reserve(shown.size());
+    for(const auto& v:shown){
+        gear::Wearer w;w.key=v.id;w.body=bodies.entity(v.id);
+#ifndef MUTANT_OTHERS_WEAR_BODY
+        if(!w.body)continue;   // no body yet, or the game refused one
+#else
+        if(!w.body)w.body=bodies.entity(shown.front().id);
+#endif
+#ifndef MUTANT_OTHERS_WEAR_MIX
+        w.worn=v.worn;
+#else
+        w.worn=shown.front().worn;
+#endif
+        out.push_back(std::move(w));
+    }
+    return out;
+}
+std::vector<bool> Nearest::choose(const std::vector<std::pair<uint64_t,double>>& candidates,size_t limit){
+    std::vector<std::pair<double,size_t>> order;order.reserve(candidates.size());
+    for(size_t i=0;i<candidates.size();++i){
+        double d=candidates[i].second;if(!std::isfinite(d))d=1e300;
+#ifndef MUTANT_OTHERS_CARRY_FLAP
+        if(held_.count(candidates[i].first))d-=nametag::KeepMetres;
+#endif
+        order.push_back({d,i});
+    }
+    std::stable_sort(order.begin(),order.end(),[](const auto& a,const auto& b){return a.first<b.first;});
+    std::vector<bool> chosen(candidates.size(),false);held_.clear();
+#ifdef MUTANT_OTHERS_CARRY_LIMIT
+    limit=candidates.size();
+#endif
+    for(size_t k=0;k<order.size()&&k<limit;++k){chosen[order[k].second]=true;held_.insert(candidates[order[k].second].first);}
+    return chosen;
+}
+std::vector<Carrier> carriers(const std::vector<Shown>& shown,const Bodies& bodies,const std::function<uint64_t(uint64_t)>& pack,bool show,
+                              const std::array<double,3>* viewer,size_t limit,Nearest& nearest){
+    std::vector<Carrier> all;std::vector<std::pair<uint64_t,double>> candidates;
+    for(const auto& v:shown){
+#ifndef MUTANT_OTHERS_CARRY_HIDDEN
+        if(!show||!v.visible)continue;
+#else
+        (void)show;
+#endif
+        Carrier c;c.key=v.id;c.body=bodies.entity(v.id);if(!c.body)continue;
+        c.pack=pack?pack(v.id):0;
+#ifndef MUTANT_OTHERS_CARRY_PACK
+        if(!c.pack)continue;
+#endif
+#ifndef MUTANT_OTHERS_CARRY_MIX
+        const Shown& from=v;
+#else
+        const Shown& from=shown.front();
+#endif
+        if(from.places){
+            c.placed.emplace();
+            for(auto& p:*from.places){c.items.push_back({p.item,p.variant});c.placed->push_back(p.rel);}
+        }else if(from.carried){
+            for(auto& e:*from.carried)if(e.slot==1)for(unsigned i=0;i<e.count&&c.items.size()<stack::Stack::MaxCases;++i)c.items.push_back({e.hash,e.variant});   // 1: BackPack
+        }
+        if(c.items.empty())continue;
+        double d=double(candidates.size());   // without a viewer: as listed
+#ifndef MUTANT_OTHERS_CARRY_NEAREST
+        if(viewer){const auto& at=v.render.state.position;d=std::sqrt((at[0]-(*viewer)[0])*(at[0]-(*viewer)[0])+(at[1]-(*viewer)[1])*(at[1]-(*viewer)[1])+(at[2]-(*viewer)[2])*(at[2]-(*viewer)[2]));}
+#else
+        (void)viewer;
+#endif
+        candidates.push_back({c.key,d});all.push_back(std::move(c));
+    }
+    auto chosen=nearest.choose(candidates,std::min(limit,MaxCarriers));
+    std::vector<Carrier> out;for(size_t i=0;i<all.size();++i)if(chosen[i])out.push_back(std::move(all[i]));
+    return out;
+}
+
 // One other player: the core's view of this porter (StateProvider) and its way out (Transport).
 struct Others::Session final:ds::StateProvider,ds::Transport {
     Others& owner;uint64_t id;
     ds::Render remote;bool jump=false;
     nametag::Sender nameTx;nametag::Receiver nameRx;std::string name;
+    // What that player wears and carries (received), and this porter's to that player (sent).
+    gear::WornReceiver wornRx;gear::WornSender wornTx;std::optional<gear::WornSet> worn;
+    carry::Receiver carryRx;carry::Sender carryTx;std::optional<carry::Summary> carried;
+    carryplace::Receiver placeRx;carryplace::Sender placeTx;std::optional<std::vector<carryplace::Placed>> places;
+    bool wasUp=false;
     std::array<uint8_t,ds::AnimationBoolBytes> rose{};
     std::unique_ptr<ds::Core> core;   // last: it refers to this object
     Session(Others& o,uint64_t i):owner(o),id(i){}
@@ -253,11 +332,39 @@ void Others::tick(uint64_t nowMs){
         bool up=s->core->connected();
         for(auto& e:s->nameTx.tick(settings_.nickname,up))s->core->queueCargo(e);
         s->core->tick(nowMs);
-        // The core's reliable events carry one thing for others, the name; anything else was acknowledged (so their
-        // stream goes on) and is dropped here.
+#ifndef MUTANT_OTHERS_CARRY_LOST
+        // The session dropped: what that player carried is not known any more (they send it again on connecting).
+        if(s->wasUp&&!s->core->connected()){s->carried.reset();s->places.reset();s->carryRx.reset();s->placeRx.reset();s->wornRx.reset();}
+#endif
+        s->wasUp=s->core->connected();
+        // The core's reliable events carry for others the name and, when the settings say so, what is only shown: the
+        // gear a player wears (7), what a player carries (6) and where each case sits (16). Anything else (cargo put
+        // down or taken, structures, enemies, orders, ...) was acknowledged, so their stream goes on, and is dropped
+        // here: nothing of another player's changes this world.
         for(auto& e:s->core->takeCargo()){
-            if(e.type!=nametag::WireType){++counters_.events;continue;}
-            if(auto n=s->nameRx.feed(e)){if(*n!=s->name)log_("OTHERS player "+std::to_string(id)+" has a name of "+std::to_string(n->size())+" bytes\n");s->name=*n;}
+#ifndef MUTANT_OTHERS_EVENTS_OFF
+            bool gear=settings_.gear,carry=settings_.carry;
+#else
+            bool gear=true,carry=true;
+#endif
+#ifndef MUTANT_OTHERS_EVENTS_MIX
+            Session& to=*s;
+#else
+            Session& to=*sessions_.begin()->second;
+#endif
+            if(e.type==nametag::WireType){
+                if(auto n=s->nameRx.feed(e)){if(*n!=s->name)log_("OTHERS player "+std::to_string(id)+" has a name of "+std::to_string(n->size())+" bytes\n");s->name=*n;}
+            }else if(gear&&e.type==gear::GearWireType){
+                if(auto w=s->wornRx.feed(e)){++counters_.gear;
+                    if(!to.worn||*to.worn!=*w)log_("OTHERS player "+std::to_string(id)+" shows "+std::to_string(w->size())+" pieces of gear\n");
+                    to.worn=std::move(*w);}
+            }else if(carry&&e.type==carry::WireType){
+                if(auto c=s->carryRx.feed(e)){++counters_.carried;
+                    if(!to.carried||*to.carried!=*c)log_("OTHERS player "+std::to_string(id)+" carries "+std::to_string(c->size())+" entries\n");
+                    to.carried=std::move(*c);}
+            }else if(carry&&e.type==carryplace::WireType){
+                if(auto p=s->placeRx.feed(e)){++counters_.carried;to.places=std::move(*p);}
+            }else ++counters_.events;
         }
     }
 }
@@ -273,12 +380,27 @@ bool Others::animation(const ds::Animation& a,uint64_t nowMs){
     }
     return any;
 }
+size_t Others::wears(const std::optional<gear::WornSet>& read,uint64_t nowMs){
+    size_t queued=0;if(!settings_.gear)return 0;
+    for(auto& [id,s]:sessions_)for(auto& e:s->wornTx.observe(read,s->core->connected(),nowMs)){s->core->queueCargo(e);++queued;}
+    return queued;
+}
+size_t Others::carries(const std::optional<carry::Summary>& summary,const std::optional<std::vector<carryplace::Placed>>& placed,uint64_t nowMs){
+    size_t queued=0;if(!settings_.carry)return 0;
+    for(auto& [id,s]:sessions_){
+        bool up=s->core->connected();
+        for(auto& e:s->carryTx.observe(summary,up,nowMs)){s->core->queueCargo(e);++queued;}
+        for(auto& e:s->placeTx.observe(placed,up,nowMs)){s->core->queueCargo(e);++queued;}
+    }
+    return queued;
+}
 std::vector<Shown> Others::frame(uint64_t nowMs){
     std::vector<Shown> out;out.reserve(sessions_.size());
     for(auto& [id,s]:sessions_){
         s->core->frame(nowMs);
         Shown v;v.id=id;v.connected=s->core->connected();v.render=s->remote;v.visible=v.connected&&s->remote.visible;v.name=s->name;
         if(v.connected)v.animation=s->core->takeAnimation(nowMs);
+        v.worn=s->worn;v.carried=s->carried;v.places=s->places;
         out.push_back(std::move(v));
     }
     return out;

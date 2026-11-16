@@ -22,7 +22,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('body',['ANY_CLASS'],['body_test.cpp','body.cpp','discovery.cpp']),
           ('auto',['ONCE_IN_GAME'],['auto_continue_test.cpp']),
           ('marker',['LEFT','TWICE','RATE','FOREIGN','NEAR'],['marker_test.cpp','marker.cpp','discovery.cpp']),
-          ('gear',['RESOURCE','REBUILD','CARGO','HIDDEN','NESTED','STALE_WORLD','VISIBILITY','SLOTS','FLICKER','ORDINAL','MIXED','RESEND','FIELDS'],['gear_test.cpp','gear.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
+          ('gear',['RESOURCE','REBUILD','CARGO','HIDDEN','NESTED','STALE_WORLD','VISIBILITY','SLOTS','FLICKER','ORDINAL','MIXED','RESEND','FIELDS','SET_BUDGET','SET_KEEP','SET_MIX','SET_SITE','SET_READS','SET_LOCAL'],['gear_test.cpp','gear.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
           ('nametag',['MARKUP','STILL','ORDER','TAGS_KEEP','TAGS_MIX','TAGS_BODY','TAGS_EVENT','TAGS_FORGET','TAGS_LIMIT','TAGS_NEAREST','TAGS_FLAP','TAGS_FIRST'],['nametag_test.cpp','nametag.cpp','discovery.cpp','../core/core.cpp']),
           ('notice',['BOUND','LEFT','ALONE_ONCE','NAME_WAIT','WORLD','GAP','AWAY_SETTLE','BACK_PAIRED','LIKE_ICON','JOIN_HOLD','DOWN_ONCE','FREE_DOWN','CALL_GAP','LINK_HOLD','LINK_ONCE','EPISODE_ONCE','SCAN_GAP'],['notice_test.cpp','notice.cpp','nametag.cpp','discovery.cpp','../core/core.cpp']),
           ('enemy',['ALL_UP','KIND','ECHO','TWICE','HASTY','CAMP_ECHO','CAMP_TWICE'],['enemies_test.cpp','enemies.cpp','discovery.cpp']),
@@ -42,7 +42,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('link',['NO_LOSS','PRESENCE_ONLY','FLAT','ENV_WINS'],['link_test.cpp']),
           ('signals',['KIND','SHOUT_HELD','SCAN_LEARN','SCAN_GAP','RECEIVE_GAP','SCAN_OWNER','VITALS_RANGE','INFO_OWNER','INFO_RANGE','STATE_HOLD','STEP','VITALS_CHANGED','VITALS_GAP','LABEL_GAP'],['signals_test.cpp','signals.cpp','discovery.cpp','../core/core.cpp']),
           ('likes',['GAP','CAP'],['likes_test.cpp','likes.cpp','discovery.cpp','../core/core.cpp']),
-          ('stack',['PLACED_LAYOUT','EXTRA','LEAK','COLUMN'],['cargo_stack_test.cpp','cargo_stack.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
+          ('stack',['PLACED_LAYOUT','EXTRA','LEAK','COLUMN','SET_BUDGET','SET_KEEP','SET_MIX','SET_FORGET'],['cargo_stack_test.cpp','cargo_stack.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
           ('outfit',['COUNT','SKIP','RESEND','ELEMENTS'],['outfit_test.cpp','outfit.cpp','discovery.cpp']),
           ('weather',['KEEP','MARGIN','RENEW'],['weather_test.cpp','weather.cpp','discovery.cpp']),
           ('ride',['LEAK','IDENTITY','PAINT'],['ride_test.cpp','ride.cpp','providers.cpp','pose.cpp','discovery.cpp','../core/core.cpp'])]

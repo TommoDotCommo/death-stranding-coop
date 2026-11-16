@@ -21,6 +21,8 @@
 #include <optional>
 #include <cstdint>
 #include <functional>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 namespace mod::gear {
@@ -70,7 +72,9 @@ public:
     // body: the partner body (0: none); world: the porter entity (a new one means a new world, whose entities
     // replaced the old ones: the old copies are forgotten, never touched). pieces: the plan, taken when a body is
     // first seen. at: where new copies are made before they are attached. shown: the body is visible.
-    void tick(uint64_t body,uint64_t world,const std::function<std::vector<Piece>()>& pieces,const puppet::Transform& at,bool shown);
+    // budget (optional): how many more entities the game may be asked for now; counted down for every one asked for.
+    // Several mirrors share one (Mirrors, below), so many bodies arriving together do not hold the game thread.
+    void tick(uint64_t body,uint64_t world,const std::function<std::vector<Piece>()>& pieces,const puppet::Transform& at,bool shown,unsigned* budget=nullptr);
     // Removes every copy still alive (the body stays). The next tick on a body makes them again.
     void clear();
     // Test: every copy shown or hidden now (the next tick puts them back as the body is).
@@ -147,6 +151,44 @@ public:
 private:
     WornSet candidate_,sent_;uint64_t since_=0,lastSend_=0;bool haveCandidate_=false,haveSent_=false,wasConnected_=false,resend_=false;
     uint16_t generation_=0;
+};
+// Several mirrors, one per body, by key (the mod uses 0 for the partner and a player's id for another player). They
+// share one Api and one budget: the game is asked for at most PerTick new entities a game-thread tick over all bodies,
+// in the order listed (the caller lists the partner first), so the partner alone gets what a single Mirror gave him.
+// A key that is no longer listed (the player left, the setting went off) has its copies removed and its mirror dropped.
+// A listed key without a body, or whose body changed, has its copies removed as a single Mirror does. A body whose
+// place cannot be read is left exactly as it is for this tick. A new world: every mirror forgets, none touches.
+//
+// What a body wears: the set that player sent (WornSet), copied from the matching pieces of this porter. Without a set
+// `local` decides: true is the partner's rule (what this porter shows), false makes nothing until a set has arrived
+// (another player has a save of their own, so this porter's gear says nothing about theirs).
+//
+// The porter's subtree is read through `nodes`. Key 0 reads it anew for every look, as the single Mirror did; all other
+// keys share one reading, taken again when it is ReadEvery ticks old, so thirty bodies cost one read a second and not
+// thirty. A mirror looks every Mirror::CheckEvery ticks, so two looks of one mirror never see the same reading.
+struct Wearer {uint64_t key=0,body=0;std::optional<WornSet> worn;bool local=false;};
+struct Site {bool shown=false;puppet::Transform at;};
+class Mirrors {
+public:
+    static constexpr unsigned PerTick=Mirror::PerTick,ReadEvery=Mirror::CheckEvery;
+    using Look=std::function<std::optional<Site>(uint64_t body)>;   // is the body visible, and where; nothing: unreadable
+    using Nodes=std::function<std::vector<Node>()>;                  // snapshot() of this porter
+    Mirrors(Api api,Look look,Nodes nodes,uint64_t image,std::function<void(const std::string&)> log)
+        :api_(std::move(api)),look_(std::move(look)),nodes_(std::move(nodes)),image_(image),log_(std::move(log)){}
+    // One game-thread tick with everybody who should wear gear now. world: the porter entity, never 0.
+    void tick(uint64_t world,const std::vector<Wearer>&);
+    void remove(uint64_t key);       // that key's copies removed now, its mirror dropped
+    void clear();                    // every key's
+    Mirror* of(uint64_t key){auto it=mirrors_.find(key);return it==mirrors_.end()?nullptr:it->second.get();}
+    uint64_t copyAt(uint64_t key,const std::string& helper) const {auto it=mirrors_.find(key);return it==mirrors_.end()?0:it->second->copyAt(helper);}
+    size_t size() const {return mirrors_.size();}
+    size_t made() const {size_t n=0;for(auto& [key,m]:mirrors_)n+=m->made();return n;}   // copies that exist, all bodies
+    size_t made(uint64_t key) const {auto it=mirrors_.find(key);return it==mirrors_.end()?0:it->second->made();}
+    uint64_t reads() const {return reads_;}   // how often the porter's subtree was read
+private:
+    Api api_;Look look_;Nodes nodes_;uint64_t image_;std::function<void(const std::string&)> log_;
+    std::map<uint64_t,std::unique_ptr<Mirror>> mirrors_;
+    std::vector<Node> shared_;uint64_t tick_=0,sharedAt_=0,sharedWorld_=0,reads_=0;bool haveShared_=false;
 };
 // Signature-checked native calls (Windows); throws elsewhere or when the pinned image differs.
 Api nativeApi(discovery::Sampler&);

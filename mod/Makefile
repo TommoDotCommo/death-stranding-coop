@@ -54,7 +54,7 @@ test: environment-test join-test vehicle-test game-thread-test discovery-test po
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_OTHERS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-others && if ./build/unit-config-others >/dev/null 2>&1; then echo SURVIVED CONFIG_OTHERS; exit 1; else echo KILLED MUTANT_CONFIG_OTHERS; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_RELAY_ADDRESS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-relay-address && if ./build/unit-config-relay-address >/dev/null 2>&1; then echo SURVIVED CONFIG_RELAY_ADDRESS; exit 1; else echo KILLED MUTANT_CONFIG_RELAY_ADDRESS; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_RELAY_NEEDS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-relay-needs && if ./build/unit-config-relay-needs >/dev/null 2>&1; then echo SURVIVED CONFIG_RELAY_NEEDS; exit 1; else echo KILLED MUTANT_CONFIG_RELAY_NEEDS; fi
-	python3 -B mutants.py --sources "unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp" --prefix build/mutant-unit- CONFIG_GROUP CONFIG_SERVER_ANY && echo KILLED MUTANT_CONFIG_GROUP MUTANT_CONFIG_SERVER_ANY
+	python3 -B mutants.py --sources "unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp" --prefix build/mutant-unit- CONFIG_GROUP CONFIG_SERVER_ANY CONFIG_OTHERS_SHOW && echo KILLED MUTANT_CONFIG_GROUP MUTANT_CONFIG_SERVER_ANY MUTANT_CONFIG_OTHERS_SHOW
 	python3 -B test_probe.py
 	python3 -B -m unittest -q test_game_thread_api test_probe_puppet test_actor_resources test_actor_reader_windows
 	python3 -B test_actor_resource_mutants.py
@@ -157,8 +157,8 @@ build/mule-goal-test: $(MULEGOAL_SRC) mule_goal.h discovery.h | build
 	$(CXX) $(FLAGS) $(MULEGOAL_SRC) -o $@
 build/enemy-poses-test: $(ENEMYPOS_SRC) enemy_poses.h enemies.h ../core/core.h | build
 	$(CXX) $(FLAGS) $(ENEMYPOS_SRC) -o $@
-OTHERS_SRC = others_test.cpp others.cpp double.cpp puppet.cpp pose.cpp providers.cpp controls.cpp nametag.cpp discovery.cpp ../core/core.cpp
-build/others-test: $(OTHERS_SRC) others.h double.h puppet.h nametag.h controls.h providers.h ../core/core.h | build
+OTHERS_SRC = others_test.cpp others.cpp double.cpp puppet.cpp pose.cpp providers.cpp controls.cpp nametag.cpp gear.cpp carry_visual.cpp carry_place.cpp cargo_stack.cpp discovery.cpp ../core/core.cpp
+build/others-test: $(OTHERS_SRC) others.h double.h puppet.h nametag.h gear.h carry_visual.h carry_place.h cargo_stack.h controls.h providers.h ../core/core.h | build
 	$(CXX) $(FLAGS) $(OTHERS_SRC) -o $@
 build/orders-test: orders_test.cpp orders.cpp orders.h discovery.cpp | build
 	$(CXX) $(FLAGS) orders_test.cpp orders.cpp discovery.cpp -o $@
@@ -258,7 +258,7 @@ game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderlo
 	./build/mule-goal-test
 	python3 -B mutants.py --sources "$(MULEGOAL_SRC)" --prefix build/mutant-mulegoal- MULEGOAL_COMPONENT MULEGOAL_CAPACITY MULEGOAL_KEY MULEGOAL_INDEX MULEGOAL_OFFSET MULEGOAL_NEAR MULEGOAL_DSCOMPONENT MULEGOAL_AGREE MULEGOAL_AI_VTABLE MULEGOAL_WALKING MULEGOAL_D_VTABLE MULEGOAL_WRITABLE MULEGOAL_SAME MULEGOAL_REACH MULEGOAL_RUNNING MULEGOAL_PENDING && echo KILLED 16 mule goal mutants
 	./build/others-test
-	python3 -B mutants.py --sources "$(OTHERS_SRC)" --prefix build/mutant-others- OTHERS_CAP OTHERS_UNKNOWN OTHERS_BUILD OTHERS_SELF OTHERS_LEFT OTHERS_ROLE OTHERS_PAIR BODIES_ONE_NEW OTHERS_STICKY OTHERS_KINDS OTHERS_STALE BODIES_HIDE BODIES_REMOVE BODIES_ONCE BODIES_RATE BODIES_MIX OTHERS_LABEL_BODY OTHERS_LABEL_NAME && echo KILLED 18 others mutants
+	python3 -B mutants.py --sources "$(OTHERS_SRC)" --prefix build/mutant-others- OTHERS_CAP OTHERS_UNKNOWN OTHERS_BUILD OTHERS_SELF OTHERS_LEFT OTHERS_ROLE OTHERS_PAIR BODIES_ONE_NEW OTHERS_STICKY OTHERS_KINDS OTHERS_STALE BODIES_HIDE BODIES_REMOVE BODIES_ONCE BODIES_RATE BODIES_MIX OTHERS_LABEL_BODY OTHERS_LABEL_NAME OTHERS_EVENTS_OFF OTHERS_EVENTS_MIX OTHERS_WEAR_BODY OTHERS_WEAR_MIX OTHERS_CARRY_LOST OTHERS_CARRY_LIMIT OTHERS_CARRY_NEAREST OTHERS_CARRY_FLAP OTHERS_CARRY_HIDDEN OTHERS_CARRY_PACK OTHERS_CARRY_MIX && echo KILLED 29 others mutants
 	./build/guard-test
 	./build/orders-test
 	./build/link-test

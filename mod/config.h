@@ -5,6 +5,7 @@
 #include <cstdint>
 namespace mod {
 constexpr unsigned OthersMax=32;   // others.h MaxOthers
+constexpr unsigned OthersCarryMax=8;   // others.h MaxCarriers
 struct Config {
     unsigned slot=0, peerSlot=1;
     std::string role="none", progressMismatch="warn", joinMove="log", peer, nickname, provider, fault="none", bind;   // bind: local IPv4 for a non-loopback peer (empty = the route's)
@@ -22,6 +23,9 @@ struct Config {
     std::string partner="off";
     std::string relay,relayKey;uint32_t relayAddress=0;uint16_t relayPort=0;uint64_t playerId=0;   // the relay for other players (core/relay.h); empty = none
     unsigned others=0;         // the most other players shown besides the partner, presence only (others.h); 0: off
+    // What other players are shown with besides body, pose and name (others.h). Shown only: nothing of the world.
+    bool othersGear=false;     // the gear each other player wears, copied onto that player's body (gear.h, Mirrors); not run live
+    unsigned othersCarry=0;    // with others_gear: the carried cases of the nearest N other players (cargo_stack.h, Stacks); 0: off; not run live
     bool partnerVehicle=false; // the partner's vehicle drawn under him while he rides (ride.h)
     bool partnerTag=false;     // the partner's name (their nickname) over the partner body (nametag.h)
     bool shareOrderUnits=false; // with share_orders: a cargo unit one player hands in is delivered for the partner too (a split delivery); not yet run with a real partial hand-in
