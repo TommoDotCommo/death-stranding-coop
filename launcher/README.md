@@ -159,8 +159,9 @@ delete it to become a new player. The Steam id is not used there. On such a serv
 - just before the game starts the launcher takes a sign-in ticket and a relay token for it (signed calls); the game's
   `online_server` carries the ticket instead of a name, and its `relay_key` the token instead of the group's key. A
   ticket is good for 30 minutes until the game signs in, so start the game from the launcher each time;
-- the host's key is the owner's: his launcher gives it to the server (`--owner`), and the owner's actions on the
-  running server (review, members, removing a player, the rules) are calls signed with it. No window makes them yet.
+- the host's key is the owner's: his launcher gives it to the server (`--owner`, whatever the rules, not only Public),
+  and the owner's actions on the running server (review, members, removing a player, the rules) are calls signed with
+  it, made from the Server owner window (below).
 
 On a server without keys (Friends, Solo archive, or a world from before) nothing of this changes anything.
 
@@ -207,7 +208,42 @@ and Ctrl for several), then:
 - **Refresh**.
 
 Objects that came to the server from linked servers are not listed (their builder is what the other server says).
-The owner's actions (review, members, removing a player, the rules) have no screen: commands on the stopped server.
+The owner's actions are in the Server owner window (below).
+
+**Server owner.** After hosting a group server, Play also has **Server owner** beside "My strand on this server". It is
+there only for the host who holds the owner key: the server this launcher last hosted, started with this install's key
+as the owner's (`--owner`, "Player keys"); a joiner, a two-player session or another key never sees it. Every call it
+makes is signed with that key on the server's clock (`../world/README.md`, "Identity": `/coop/owner/...`), whatever the
+rules: on a Friends server too, where players' own calls are not signed. The window shows:
+
+- The server: its display name (`--name` of `coop-world`, "Builder names" in `../world/README.md`), its id, its preset
+  and how many players it has.
+- **Players**: name, key short (the first 16 hex digits in fours; `no key` for an account that is none, whose Steam id
+  is not shown), member or not, and his counts: shared, waiting, held, kept, remnants, from linked servers, and the likes
+  on what is still his. A builder known only from linked servers is listed as the game names him ("Name · Home").
+  Select one, then **Make member**, **Not a member**, **Accept all of player** (everything of his that waits for the
+  owner, and what the rules held that they now allow), **Reject all of player** (everything of his that waits for the
+  owner is kept for him alone, not removed; asks first) or **Remove all of player...**. Removal asks first with what it
+  removes (his counts), what this server's withdrawal rule means (`stay`: a player who takes back what he shared leaves
+  remnants under his name; `go`: it is removed for everyone) and that removal leaves nothing, his remnants included,
+  and that it is not a ban: his account stays and he can sign in and build again.
+- **Waiting for you, or held by the rules**: kind, area, builder and why (waits for you, held and why, or waits for its
+  builder's answer first). Select rows, then **Accept selected** (every player can be handed it) or **Reject selected**
+  (kept for its builder). What waits for its builder's answer is skipped: it is not the owner's to answer.
+- **Rules**: one row per setting with its value, the preset's value where it differs, and the server's own words
+  (`/coop/policy`). Select one, type the new value, **Set selected rule**; or choose a preset and **Use this preset**
+  (asks first: every setting becomes the preset's). A value the server does not take is refused in its words and
+  changes nothing. A change applies to uploads from then on.
+- What the last action did, in the server's words when it refused; **Refresh**, **Close**.
+
+Without the window, for tests (`--dev-direct`, no `--dev-start`; the server this launcher hosts on this PC, on the port
+of `--port`, with the key of `--dev-session N` or the kept `group_secret`): one of `--owner-list`, `--owner-member
+PLAYER yes|no`, `--owner-remove PLAYER`, `--owner-accept OBJECT`, `--owner-reject OBJECT`, `--owner-accept-player
+PLAYER`, `--owner-reject-player PLAYER`, or `--owner-preset NAME` and/or `--owner-set KEY=VALUE` (repeated), with
+`--owner-report FILE` (or `-` for standard output). It makes the call and writes one line of JSON: `ok`, `action`,
+`message` (what happened, or why not), `server`, `name`, and after the action the server's `policy`, `players` and
+`waiting` as the server sent them. Exit 0, or 3 when anything was refused (no server, not the owner, a refusal, two
+actions, no report file): then there is no dialog. `PLAYER` is the id the report lists (`zygo_...`).
 
 Without the window, for tests (`--dev-direct --dev-start`, with `--prepare-only` to write the configuration only):
 `--group-host` hosts (key: `--dev-session N`, else the kept one; `--group-policy friends|solo|public` for a new world's
@@ -220,17 +256,20 @@ choices (also with `--prepare-only`); `--strand-builds yes|no|ask` and `--strand
 with `--prepare-only`) takes the game's ticket and relay token and writes them into the config; `--group-host` with
 `--prepare-only` does so only when its server is already running (it starts none).
 
-**Not seen on a screen.** The join screen, the "My strand on this server" window and the Settings list of rules were
-built and cross-compiled, and have not been looked at or clicked. The launcher's side of the API (`strand.cpp`) is
+**Not seen on a screen.** The join screen, the "My strand on this server" window, the Server owner window and the
+Settings list of rules were built and cross-compiled, and have not been looked at or clicked. The launcher's side of the API (`strand.cpp`) is
 tested on Linux sockets (below); on Windows it ran once without a window, against `coop-world.exe` on loopback: a
 server that did not answer (report `unreachable`, exit 3) and a full solo world (the rules read, the choices refused,
 exit 3, the choices remembered in `launcher.ini`). A join that goes on to start a game, and an older server, were not
-run on Windows.
+run on Windows. The owner's flags ran once on Windows without a window (2026-11-17), against `coop-world.exe` on
+loopback with public rules and the launcher's key as the owner's: no server (exit 3), the list, a setting changed
+(`--owner-set limit=7`, report in a file), a member call for a player that does not exist (refused in the server's
+words, exit 3), and two refused flag combinations (exit 3, no dialog).
 
 Limits today: 15 other players shown per game and 16 players in the shared world (`../world/README.md`); the
 two-player features (cargo, structures made in the session, vehicles, enemies, orders, rain) are not part of group
-play; no list of who is in the group, no way to leave except closing the game, no check of the host's firewall; no
-screen for the server owner's own actions (review, members, removing a player, changing the rules).
+play; no list of who is in the group, no way to leave except closing the game, no check of the host's firewall; the
+owner's window does not refresh by itself (Refresh), and there is no ban.
 
 ## Diagnostics for a bug report
 
@@ -363,6 +402,26 @@ signing, or signed by another key refused, his own taken; the owner's calls with
 changed on the running server; and the relay answering the joiner's token for his id only, never the group's key.
 `GROUP_TICKET`, `GROUP_RELAY_TOKEN`, `STRAND_SIGN` and `KEYS_KEEP` must also fail it.
 
+Server owner (`owner.h`): `core_test.cpp` checks who sees the window (the host with the key he gave the server; not
+another key, a joiner, a two-player session or a host without an owner key), and the owner's calls against a stand-in
+server that checks every signature as the server does, with its clock 1000 s ahead and no player keys (Friends): every
+call signed by the key on the server's clock; the players' and the queue's rows; rejecting all of one player (his that
+wait for the owner, not what waits for his answer, nobody else's); member, removal, accept one, accept all of a player,
+the rules (a preset and two settings); five actions that are none (nothing sent); the report; a refusal in the
+server's words and nothing refused reported as done; no key; an older server; seven lists that are refused; the
+removal question under `stay` and `go` (what each means, nothing stays, not a ban); a rule's row. Mutants:
+`OWNER_UNSIGNED` (owner calls unsigned where players' are), `OWNER_CLOCK` (signed on the launcher's clock),
+`OWNER_REJECT_ALL` (another player's rejected too), `OWNER_REFUSAL` (a refusal taken for done), `OWNER_REMOVE_TEXT` (the
+question without what withdrawal means and that it is no ban), `OWNER_HOST_ONLY` (the window for anyone),
+`OWNER_PARSE`. `test_owner.py` (part of `make -C launcher test`) runs the same calls as the window and the flags
+(`owner::run`) against the built `coop-world` on loopback, started with the command line made for public rules and the
+host's key as the owner's: two joiners sign in with their tickets and build (held: members only); the list with keys
+short, counts and what waits with builder, kind and area; a joiner's key refused as the owner; a member made, all of
+his accepted, all of the other's rejected and not his, one object accepted, a like counted; a rule changed on the
+running server with the server's words and the preset's value, a value that is none refused; all of a player's
+objects removed with his account kept; an owner call sent twice (the same nonce) refused, and one signed by a joiner.
+`OWNER_UNSIGNED`, `OWNER_REJECT_ALL` and `OWNER_REFUSAL` must also fail it.
+
 The kit's portable suites are vendored and reused (20,000 invite and 10,000
 discovery fuzz rounds). Mutants cover config role, lobby secret, backup links and
 running-game guard, output links, missing-config exit, ticket target/expiry/network, nested release/lab save roots,
@@ -438,7 +497,7 @@ established by the portable tests or cross-build.
 
 Group play (above) is outside the standard's two-player lobby flow: it has no lobby, roster, ready state or
 discovery row, and its window parts (the Settings box and list of rules, the invite on the Host page, Join group, the
-join screen with the server's rules, My strand on this server) were built without being seen on a screen. This is a launcher foundation, not full A–K compliance. Steam friend/lobby SDK
+join screen with the server's rules, My strand on this server, Server owner) were built without being seen on a screen. This is a launcher foundation, not full A–K compliance. Steam friend/lobby SDK
 integration, UPnP/NAT-PMP, a firewall fix (the status is checked), chat/voice, controller and
 Deck navigation, update UI, save metadata/slot management, recent-host
 rename/pin/forget, automatic lobby return after game exit, and in-game discovery
