@@ -126,6 +126,7 @@ void hostIdentity(Session& s){
     auto t=targetOf(s);strand::Passes p;bool keyed=false;std::string why;
     if(!strand::hostPasses(t,strand::transport(t),options.prepareOnly?1:20,p,keyed,why)){if(options.prepareOnly)return;throw std::runtime_error(why);}
     if(keyed)strand::usePasses(s,p);
+    strand::useNoticeToken(s,p);   // what his game is told about his builds there, when the server gave a token
 }
 uint32_t groupKey(){if(!groupSecret){groupSecret=random32();writeSettings();}return groupSecret;}
 // Windows Firewall's verdict for the game's two UDP ports, read when the launcher starts and when a lobby opens.
@@ -206,6 +207,7 @@ bool agreeToServer(Session& s){
     auto j=strand::join(t,send,readIni(),chosen);atomicWrite(settingsFile,j.ini);
     if(!j.start)throw std::runtime_error(j.message);
     if(j.keyed)strand::usePasses(s,j.passes);   // the game signs in with its ticket and says HELLO with its relay token
+    strand::useNoticeToken(s,j.passes);         // and is told what becomes of his builds there
     saveNote=j.message;return true;
 }
 // "My strand on this server": what the player built on the group server he last hosted or joined, its state and

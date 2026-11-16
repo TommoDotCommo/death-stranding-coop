@@ -49,6 +49,10 @@ struct Session {
     // says HELLO with a relay token, both taken by the launcher's signed call just before the game starts (strand.h),
     // and its relay id (`playerId`) is the one made from the key. The host gives his server his key as the owner's.
     std::string signInTicket,relayToken,ownerKey;   // ownerKey: 64 hex digits
+    // What the game is told (../mod/README.md, "Strand notices"): a notice token the launcher took for this player on the
+    // group's server, under every identity; with it the game's config turns strand_notices on. Empty: none (the server
+    // is older, or did not give one), and the game starts without them.
+    std::string noticeToken;
 };
 // This install's key pair: made once and kept in `file` (player.key, beside launcher.ini). Its secret half is never
 // sent anywhere; the public half is the player on servers that take keys. A file that is there but cannot be read is

@@ -114,7 +114,11 @@ std::string config(const Session& s) {
         std::string json="{\"server\":\""+server+"\",\"slot\":"+std::to_string(slot)+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)
             +",\"required\":true,\"logging\":true,\"game_thread\":true,\"puppet_probe\":true,\"partner_tag\":true,\"others\":"+std::to_string(GroupOthers)
             +",\"relay\":\""+relayAddress(s)+"\",\"relay_key\":\""+key+"\",\"player_id\":"+std::to_string(s.playerId)
-            +",\"online_server\":\""+worldAddress(s)+"\",\"discovery_sha256\":\""+mod::discovery::PinnedHash+"\"}\n";
+            +",\"online_server\":\""+worldAddress(s)+"\""
+#ifndef MUTANT_GROUP_NOTICE_TOKEN
+            +(s.noticeToken.empty()?std::string():",\"strand_notices\":true,\"strand_token\":\""+s.noticeToken+"\"")
+#endif
+            +",\"discovery_sha256\":\""+mod::discovery::PinnedHash+"\"}\n";
         mod::parseConfig(json);
         return json;
     }
@@ -400,6 +404,14 @@ std::string redact(const std::string& in) {
             size_t p=i+2;while(p<in.size()&&digit(in[p]))++p;
             if(p-i<=12&&(p==in.size()||in[p]=='/'||in[p]=='"'||in[p]==' '||in[p]=='\n'||in[p]=='\r')){out+="/w<hidden>";i=p;continue;}
         }
+#ifndef MUTANT_DIAG_NOTICE_TOKEN
+        // A game's notice token ("strand_token":"...", ../mod/README.md "Strand notices"): it reads his builds' states.
+        if(startsNoCase(in,i,"strand_token")&&(i==0||!((in[i-1]>='a'&&in[i-1]<='z')||(in[i-1]>='A'&&in[i-1]<='Z')))) {
+            size_t p=i+12;while(p<in.size()&&(in[p]=='"'||in[p]==':'||in[p]=='='||in[p]==' '))++p;
+            size_t d=p;while(d<in.size()&&((in[d]>='a'&&in[d]<='z')||(in[d]>='A'&&in[d]<='Z')||digit(in[d])))++d;
+            if(d>p&&p>i+12){out.append(in,i,p-i);out+="<hidden>";i=d;continue;}
+        }
+#endif
         if(startsNoCase(in,i,"relay_key")&&(i==0||!((in[i-1]>='a'&&in[i-1]<='z')||(in[i-1]>='A'&&in[i-1]<='Z')))) {
             size_t p=i+9;while(p<in.size()&&(in[p]=='"'||in[p]==':'||in[p]=='='||in[p]==' '))++p;
             size_t d=p;while(d<in.size()&&((in[d]>='a'&&in[d]<='z')||(in[d]>='A'&&in[d]<='Z')||digit(in[d])||in[d]=='-'||in[d]=='_'))++d;

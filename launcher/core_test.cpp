@@ -32,7 +32,7 @@ int main(int argc,char** argv) {
             st::Choices given;if(argc==9){given.offerBuilds=argv[7];given.offerOld=argv[8];}
             auto j=st::join(t,send,ini,given);
             std::ofstream(argv[6],std::ios::binary|std::ios::trunc)<<j.ini;
-            std::cout<<"fetched "<<int(j.fetched)<<"\nstart "<<j.start<<"\nmessage "<<j.message<<"\npolicy "<<j.raw<<'\n';
+            std::cout<<"fetched "<<int(j.fetched)<<"\nstart "<<j.start<<"\nmessage "<<j.message<<"\nnotice "<<j.passes.noticeToken<<"\npolicy "<<j.raw<<'\n';
             return 0;
         }
         if(std::string(argv[1])=="--strand-mine"&&argc==6) {   // ADDRESS PORT PREFIX ACCOUNT: the strand view's rows
@@ -53,7 +53,7 @@ int main(int argc,char** argv) {
         namespace st=launcher::strand;namespace wid=world::identity;
         const std::string mode=argv[1];auto keys=launcher::playerKeys(argv[argc-1]);
         auto print=[](const launcher::Session& s){auto c=mod::parseConfig(launcher::config(s));
-            std::cout<<"online "<<c.onlineServer<<"\nrelay "<<c.relay<<"\nkey "<<c.relayKey<<"\nplayer "<<c.playerId<<'\n';};
+            std::cout<<"online "<<c.onlineServer<<"\nrelay "<<c.relay<<"\nkey "<<c.relayKey<<"\nplayer "<<c.playerId<<"\nstrand "<<c.strandNotices<<"\ntoken "<<c.strandToken<<'\n';};
         if(mode=="--keyed-keys"&&argc==3){std::cout<<"pub "<<wid::hex(keys.pub)<<"\naccount "<<wid::account(keys.pub)<<"\nrelay "<<wid::relayId(keys.pub)<<"\nshort "<<wid::shortText(keys.pub)<<'\n';return 0;}
         if((mode=="--keyed-host"||mode=="--keyed-host-config")&&argc==6) {   // PORT SECRET WORLD-FILE KEYFILE: the server's command line, or the host's game
             launcher::Session h;h.name="Host";h.port=unsigned(std::stoul(argv[2]));h.secret=uint32_t(std::stoul(argv[3]));h.group=launcher::Group::Host;h.playerId=77;h.policy="public";
@@ -62,6 +62,7 @@ int main(int argc,char** argv) {
             auto t=st::target(h,0);t.keys=&keys;st::Passes p;bool keyed=false;std::string why;   // launch_win.h: after the server starts, before the config
             if(!st::hostPasses(t,st::transport(t,2000),20,p,keyed,why)){std::cout<<"refused "<<why<<'\n';return 0;}
             if(keyed)st::usePasses(h,p);
+            st::useNoticeToken(h,p);
             std::cout<<"keyed "<<keyed<<"\naccount "<<t.account<<'\n';print(h);return 0;}
         if(mode=="--keyed-join"&&(argc==7||argc==9)) {   // ADDRESS PORT SECRET INI [BUILDS OLD] KEYFILE: the join, then the game's config
             ci_invite v{};v.secret=uint32_t(std::stoul(argv[4]));v.port=uint16_t(std::stoul(argv[3]));v.n=1;v.route[0].kind=CI_LAN;
@@ -72,7 +73,7 @@ int main(int argc,char** argv) {
             st::Choices given;if(argc==9){given.offerBuilds=argv[6];given.offerOld=argv[7];}
             auto j=st::join(t,st::transport(t,2000),ini,given);std::ofstream(argv[5],std::ios::binary|std::ios::trunc)<<j.ini;
             std::cout<<"fetched "<<int(j.fetched)<<"\nstart "<<j.start<<"\nkeyed "<<j.keyed<<"\naccount "<<j.target.account<<"\nmessage "<<j.message<<'\n';
-            if(j.start){if(j.keyed)st::usePasses(s,j.passes);print(s);}
+            if(j.start){if(j.keyed)st::usePasses(s,j.passes);st::useNoticeToken(s,j.passes);print(s);}
             return 0;}
         if(mode=="--keyed-signed"&&argc==8) {   // PORT PREFIX METHOD CALL BODY KEYFILE: one signed call's headers, for the test to send
             st::Target t;t.address="127.0.0.1";t.port=unsigned(std::stoul(argv[2]));t.prefix=argv[3];t.keys=&keys;st::Policy p;
@@ -171,6 +172,7 @@ int main(int argc,char** argv) {
          check(mod::parseConfig(launcher::config(launcher::groupJoin(local,0,me))).onlineServer=="http://127.0.0.1:49103/w305419896/k/p77/auth/ds","a joiner on the host's PC (one Steam account) signs in under its own name");}
         for(uint64_t random:{uint64_t(0),uint64_t(1),~uint64_t(0),uint64_t(0x123456789abcdefull),(uint64_t(1)<<49)-1,uint64_t(1)<<49})check(launcher::playerIdValid(launcher::playerId(random)),"a player number the mod's config takes, never 0");
         check(launcher::playerId(5)!=launcher::playerId(6)&&!launcher::playerIdValid(0)&&launcher::playerIdValid(launcher::PlayerIdMax)&&!launcher::playerIdValid(launcher::PlayerIdMax+1),"player number range");
+        check(launcher::redact("\"strand_notices\":true,\"strand_token\":\"Ab12cd34\"}")=="\"strand_notices\":true,\"strand_token\":\"<hidden>\"}","a game's notice token is hidden in diagnostics");
         check(launcher::redact("\"relay_key\":\"w305419896\",\"online_server\":\"http://127.0.0.1:49103/w305419896/k/p77/auth/ds\" "+code+" x")
               =="\"relay_key\":\"<hidden>\",\"online_server\":\"http://127.0.0.1:49103/w<hidden>/k/p77/auth/ds\" DSG-<hidden> x","the group's key is hidden in diagnostics in every form");
         check(launcher::redact("data/world/world.json /w12x /w1234567890123/ DSG-AB")=="data/world/world.json /w12x /w1234567890123/ DSG-AB","only the key's own forms change");
@@ -239,9 +241,20 @@ int main(int argc,char** argv) {
             if(!f.reach){return false;}f.sent.push_back(method+" "+path+" "+body);auto a=f.answers.find(method+" "+path);if(a==f.answers.end())return false;out=a->second;return true;});};
         t.account="76561197960266962";
         {Fake f;f.answers["GET /w305419896/coop/policy"]={200,doc};f.answers["POST /w305419896/coop/choices"]={200,"{}"};
+         f.answers["POST /w305419896/coop/notice-token"]={200,"{\"format\":1,\"token\":\"n0t1ce5\",\"expires\":1}"};
          auto j=st::join(t,fake(f),"[launcher]\nname=Porter\n",{});
          check(j.fetched==st::Fetch::Ok&&j.start&&j.choices.offerBuilds=="ask"&&j.raw==doc&&j.message.find("waits for your answer")!=std::string::npos,"the rules read, the server's defaults chosen, the game may start");
-         check(f.sent.size()==2&&f.sent[1]=="POST /w305419896/coop/choices {\"player\":\"76561197960266962\",\"offer_builds\":\"ask\",\"offer_old\":\"no\"}","the choices sent for this account");
+         check(f.sent.size()==3&&f.sent[1]=="POST /w305419896/coop/choices {\"player\":\"76561197960266962\",\"offer_builds\":\"ask\",\"offer_old\":\"no\"}","the choices sent for this account");
+         // What the game is told: a notice token for the same account, into the game's config with strand_notices.
+         check(f.sent[2]=="POST /w305419896/coop/notice-token {\"player\":\"76561197960266962\"}"&&j.passes.noticeToken=="n0t1ce5","a notice token for this account");
+         {launcher::Session g=launcher::groupJoin(v,0,me);st::useNoticeToken(g,j.passes);auto gc=mod::parseConfig(launcher::config(g));
+          check(gc.strandNotices&&gc.strandToken=="n0t1ce5"&&!gc.notices,"the game's config reads its builds' states with it");
+          auto bare=mod::parseConfig(launcher::config(launcher::groupJoin(v,0,me)));check(!bare.strandNotices&&bare.strandToken.empty(),"without a token: no strand notices");}
+         // A server that gives none (an older one, or one that refuses): the game starts all the same, without them.
+         {Fake o;o.answers=f.answers;o.answers.erase("POST /w305419896/coop/notice-token");auto k=st::join(t,fake(o),"",{});
+          check(k.start&&k.passes.noticeToken.empty()&&o.sent.size()==3,"no notice token: joined all the same");
+          Fake bad;bad.answers=f.answers;bad.answers["POST /w305419896/coop/notice-token"]={200,"{\"token\":\"a b\"}"};check(st::join(t,fake(bad),"",{}).passes.noticeToken.empty(),"a token that is none: not taken");
+          check(!st::join(t,fake(f),"",{},false).passes.noticeToken.size(),"the choices only (My strand): no new token");}
          check(st::remembered(j.ini,p).offerBuilds=="ask"&&st::iniGet(j.ini,"launcher","name")=="Porter","and remembered for this server");
          Fake g;g.answers=f.answers;auto k=st::join(t,fake(g),"[server-a1b2c3d4e5f6a7b8]\noffer_builds=no\noffer_old=yes\n",{"","no"});
          check(k.start&&k.choices.offerBuilds=="no"&&k.choices.offerOld=="no"&&g.sent[1].find("\"offer_builds\":\"no\",\"offer_old\":\"no\"")!=std::string::npos,"the remembered choices, with what is given over them");
@@ -291,13 +304,15 @@ int main(int argc,char** argv) {
             if(r==wid::Checker::Result::Bad||(sv.keysOnly&&r!=wid::Checker::Result::Ok)){out={401,"{\"message\":\"this server takes signed calls from the launcher\"}"};return true;}
             if(path.find("/coop/choices")!=std::string::npos){out={200,"{}"};return true;}
             if(path.find("/coop/ticket")!=std::string::npos){out=sv.refuseTicket?st::Http{403,"{\"message\":\"this world has all its players\"}"}:st::Http{200,"{\"format\":1,\"ticket\":\"9f8e7d6c5b4a39281706f5e4d3c2b1a0\"}"};return true;}
+            if(path.find("/coop/notice-token")!=std::string::npos){out={200,"{\"format\":1,\"token\":\"k3yedn0tice\"}"};return true;}
             if(path.find("/coop/relay-token")!=std::string::npos){out={200,"{\"format\":1,\"token\":\"0a1b2c3d4e5f6071\",\"relay_id\":"+std::to_string(wid::relayId(keys.pub)+(sv.otherRelayId?1:0))+"}"};return true;}
             return false;});};
         auto u=t;u.account="76561197960266962";u.keys=&keys;
         {Server sv;sv.answers["policy"]={200,keyedDoc()};auto j=st::join(u,server(sv),"",{});
          check(j.fetched==st::Fetch::Ok&&j.keyed&&j.start&&j.target.account==acct&&j.target.sign,"a server that takes keys: joined as the key's account");
          check(j.passes.ticket=="9f8e7d6c5b4a39281706f5e4d3c2b1a0"&&j.passes.relayToken=="0a1b2c3d4e5f6071"&&j.passes.relayId==wid::relayId(keys.pub),"the game's ticket and relay token, for the relay id of the key");
-         check(sv.sent.size()==4&&sv.signers[1]==acct&&sv.signers[2]==acct&&sv.signers[3]==acct&&sv.sent[1].find("\"player\":\""+acct+"\"")!=std::string::npos,"every call signed by the key, for its own account, on the server's clock");
+         check(sv.sent.size()==5&&sv.signers[1]==acct&&sv.signers[2]==acct&&sv.signers[3]==acct&&sv.signers[4]==acct&&sv.sent[1].find("\"player\":\""+acct+"\"")!=std::string::npos,"every call signed by the key, for its own account, on the server's clock");
+         check(j.passes.noticeToken=="k3yedn0tice"&&sv.sent[4].find("/coop/notice-token")!=std::string::npos,"and a notice token for its game, signed too");
          bool leaked=false;for(auto& x:sv.sent)leaked|=x.find(wid::hex(keys.seed))!=std::string::npos;check(!leaked,"the secret half of the key is never sent");
          check(j.policy.text().find("knows players by their keys")!=std::string::npos,"the rules say players are known by their keys");
          launcher::Session g=launcher::groupJoin(v,0,me);st::usePasses(g,j.passes);auto gc=mod::parseConfig(launcher::config(g));
@@ -310,8 +325,8 @@ int main(int argc,char** argv) {
         {Server sv;sv.answers["policy"]={200,doc};sv.keysOnly=false;auto j=st::join(u,server(sv),"",{});
          check(j.start&&!j.keyed&&j.target.account=="76561197960266962"&&!j.target.sign&&j.passes.ticket.empty()&&sv.signers[1].empty(),"a server without keys: as before, unsigned, no passes");}
         {Server sv;sv.answers["policy"]={200,keyedDoc()};st::Passes p;bool k2=false;std::string why;auto host=u;
-         check(st::hostPasses(host,server(sv),1,p,k2,why)&&k2&&p.ticket.size()==32&&host.account==acct,"the host's own game takes its passes too");
-         Server old;old.answers["policy"]={200,doc};st::Passes q;auto h2=u;check(st::hostPasses(h2,server(old),1,q,k2,why)&&!k2&&q.ticket.empty(),"a host server without keys: no passes");
+         check(st::hostPasses(host,server(sv),1,p,k2,why)&&k2&&p.ticket.size()==32&&host.account==acct&&p.noticeToken=="k3yedn0tice","the host's own game takes its passes too, and a notice token");
+         Server old;old.answers["policy"]={200,doc};old.keysOnly=false;st::Passes q;auto h2=u;check(st::hostPasses(h2,server(old),1,q,k2,why)&&!k2&&q.ticket.empty()&&q.noticeToken=="k3yedn0tice","a host server without keys: no passes, a notice token");
          Fake nobody;nobody.reach=false;auto h3=u;check(!st::hostPasses(h3,fake(nobody),2,q,k2,why)&&why.find("did not answer")!=std::string::npos,"a host server that does not start: said so");}
         // The server owner (owner.h): only the host who started the server with this key; every owner call signed with
         // it on the server's clock, also on a server without player keys; the lists, the actions and the refusals.

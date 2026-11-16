@@ -180,7 +180,7 @@ bool takePasses(const Target& t,const Transport& send,Passes& out,std::string& w
     if(b.status!=200){why=message(b)+".";return false;}
     try{
         auto ta=json::parseFile(a.body,MaxAnswer),tb=json::parseFile(b.body,MaxAnswer);
-        Passes p{ta.get("ticket").string(),tb.get("token").string(),uint64_t(tb.get("relay_id").integer())};
+        Passes p{ta.get("ticket").string(),tb.get("token").string(),uint64_t(tb.get("relay_id").integer()),{}};
         // The relay id is made from the key: a server that names another one is not the server this key talks to.
         if(!passText(p.ticket)||!passText(p.relayToken)||p.relayId!=world::identity::relayId(t.keys->pub))throw std::runtime_error("bad passes");
         out=p;
@@ -188,6 +188,17 @@ bool takePasses(const Target& t,const Transport& send,Passes& out,std::string& w
     return true;
 }
 void usePasses(Session& s,const Passes& p){s.signInTicket=p.ticket;s.relayToken=p.relayToken;s.playerId=p.relayId;}
+void useNoticeToken(Session& s,const Passes& p){s.noticeToken=p.noticeToken;}
+bool takeNoticeToken(const Target& t,const Transport& send,std::string& token,std::string& why){
+    token.clear();
+    if(t.account.empty()){why="your account on the server is not known.";return false;}
+    json::Value body=json::Value::object();body.set("player",t.account);
+    Http h;if(!call(t,send,"POST",base(t)+"/coop/notice-token",body.dump(),h)){why="the server did not answer.";return false;}
+    if(h.status!=200){why=message(h)+".";return false;}
+    try{auto v=json::parseFile(h.body,MaxAnswer);if(!passText(v.get("token").string()))throw std::runtime_error("bad token");token=v.get("token").string();}
+    catch(const std::exception&){why="its answer cannot be read.";return false;}
+    return true;
+}
 bool hostPasses(Target& t,const Transport& send,unsigned tries,Passes& out,bool& keyed,std::string& why){
     Policy p;Fetch f=Fetch::Unreachable;
     for(unsigned i=0;i<std::max(1u,tries);++i){
@@ -204,8 +215,8 @@ bool hostPasses(Target& t,const Transport& send,unsigned tries,Passes& out,bool&
     if(f!=Fetch::Ok){why=fetchText(f);return false;}
     if(!identify(t,p,int64_t(std::time(nullptr)),why))return false;
     keyed=p.keys();
-    if(!keyed)return true;
-    if(!takePasses(t,send,out,why)){why="The group server gave your game no sign-in ticket: "+why;return false;}
+    if(keyed&&!takePasses(t,send,out,why)){why="The group server gave your game no sign-in ticket: "+why;return false;}
+    std::string none;takeNoticeToken(t,send,out.noticeToken,none);   // none: the game starts without strand notices
     return true;
 }
 bool validChoices(const Choices& c){return oneOf(c.offerBuilds,{"yes","no","ask"})&&oneOf(c.offerOld,{"yes","no"});}
@@ -291,6 +302,12 @@ Join join(const Target& given0,const Transport& send,const std::string& ini,cons
         j.start=true;
 #endif
         return j;}
+    // What the game is told about his builds here: a notice token for its mod. Without one the game starts all the same.
+    if(game&&!takeNoticeToken(t,send,j.passes.noticeToken,why)){
+#ifdef MUTANT_STRAND_NOTICE_FATAL
+        j.message="The server gave your game no notice token: "+why;return j;
+#endif
+    }
     j.start=true;j.message="Your choices for this server: "+choicesText(j.choices)+".";
     return j;
 }
