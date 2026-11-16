@@ -33,6 +33,7 @@ std::u16string text(Kind kind,const std::string& partnerName){
     case Kind::StoryOffer:return name+u" has moved the story on. Press the catch-up key to load their checkpoint.";
     case Kind::StoryLoaded:return u"Loaded the checkpoint of "+name+u". You share the story again.";
     case Kind::StoryFailed:return u"The checkpoint of "+name+u" could not be loaded here.";
+    case Kind::Strand:return {};   // its line comes finished (Notifier::strand)
     }
     return {};
 }
@@ -138,10 +139,15 @@ void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& 
 #endif
     if(inWorld!=inWorld_){inWorld_=inWorld;worldSince_=now;}
     // Nobody yet: said once, after a continuous stretch in the world, never after a partner has been seen.
-#ifndef MUTANT_NOTICE_ALONE_ONCE
-    if(!aloneTold_&&!everConnected_&&inWorld&&now-worldSince_>=AloneMs){aloneTold_=true;add(Kind::Alone,{},now);}
+#ifndef MUTANT_NOTICE_GROUP_ALONE
+    const bool expected=partner_;
 #else
-    if(!everConnected_&&inWorld&&now-worldSince_>=AloneMs&&pending_.empty()){aloneTold_=true;add(Kind::Alone,{},now);}
+    const bool expected=true;
+#endif
+#ifndef MUTANT_NOTICE_ALONE_ONCE
+    if(expected&&!aloneTold_&&!everConnected_&&inWorld&&now-worldSince_>=AloneMs){aloneTold_=true;add(Kind::Alone,{},now);}
+#else
+    if(expected&&!everConnected_&&inWorld&&now-worldSince_>=AloneMs&&pending_.empty()){aloneTold_=true;add(Kind::Alone,{},now);}
 #endif
     if(pending_.empty())return;
     auto& e=pending_.front();
@@ -165,9 +171,9 @@ void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& 
 #ifndef MUTANT_NOTICE_GAP
     if(shown_&&now-lastShown_<GapMs)return;
 #endif
-    if(api_.show&&api_.show(text(e.kind,e.name),icon(e.kind))){
+    if(api_.show&&api_.show(e.kind==Kind::Strand?e.line:text(e.kind,e.name),icon(e.kind))){
         ++shown_;lastShown_=now;if(e.kind==Kind::Joined)joining_=false;
-        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call","slow","steady","episode","scan","story offer","story loaded","story failed"};static_assert(sizeof(names)/sizeof(names[0])==size_t(Kind::StoryFailed)+1,"a name for every notice");
+        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call","slow","steady","episode","scan","story offer","story loaded","story failed","strand"};static_assert(sizeof(names)/sizeof(names[0])==size_t(Kind::Strand)+1,"a name for every notice");
         log_(std::string("NOTICE shown: ")+names[unsigned(e.kind)]+"\n");
         pending_.pop_front();return;
     }

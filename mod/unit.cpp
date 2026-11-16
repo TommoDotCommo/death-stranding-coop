@@ -159,6 +159,18 @@ int main() {
      assert(mod::parseConfig(withKeys(o,"\"relay\":\"127.0.0.1:49100\",\"relay_key\":\"k\",\"player_id\":7")).relayAddress==0x7f000001u);   // the server's own PC
      assert(refused(withKeys(game,"\"online_server\":\"http://10.9.9.9:49100/w77/auth/ds\"")));
      assert(mod::parseConfig(withKeys(game,"\"online_server\":\"http://127.0.0.1:49100/w77/auth/ds\"")).group);
+     // What the game is told (strand_notices.h): with online_server and the notice token the launcher took; nothing alone.
+     {auto online=withKeys(game,"\"online_server\":\"http://10.1.2.3:49100/w77/t/T1/auth/ds\"");
+      auto told=mod::parseConfig(withKeys(online,"\"strand_notices\":true,\"strand_token\":\"abcDEF123\""));
+      assert(told.strandNotices&&told.strandToken=="abcDEF123"&&!mod::parseConfig(online).strandNotices&&!told.notices);
+      assert(refused(withKeys(game,"\"strand_notices\":true,\"strand_token\":\"abc\"")));                  // no online server
+      for(auto bad:{"\"strand_notices\":true","\"strand_notices\":true,\"strand_token\":\"\"","\"strand_notices\":true,\"strand_token\":\"a-b\"",
+                    "\"strand_notices\":true,\"strand_token\":\"abcdefghijklmnopqrstuvwxyz0123456\"","\"strand_token\":\"abc\"","\"strand_notices\":1,\"strand_token\":\"abc\""})
+          assert(refused(withKeys(online,bad)));
+      assert(refused(withKeys(withKeys(game,"\"online_server\":\"http://10.1.2.3:49100/w77/gate\""),"\"strand_notices\":true,\"strand_token\":\"abc\"")));
+      assert(mod::serverApiBase("http://10.1.2.3:49100/w77/auth/ds")==std::string("/w77")&&mod::serverApiBase("http://10.1.2.3:49100/w77/k/ann/auth/ds")==std::string("/w77"));
+      assert(mod::serverApiBase("http://10.1.2.3:49100/w77/t/T1/auth/ds")==std::string("/w77")&&mod::serverApiBase("http://1.2.3.4:80/auth/ds")==std::string()&&mod::serverApiBase("http://1.2.3.4:80/k/ann/auth/ds")==std::string());
+      for(auto bad:{"http://1.2.3.4:80/a/b/auth/ds","http://1.2.3.4:80/w77/x/y/auth/ds","http://1.2.3.4:80/w77//auth/ds","http://1.2.3.4:80/w77/auth/dsx","http://1.2.3.4:80","ftp://1.2.3.4:80/auth/ds"})assert(!mod::serverApiBase(bad));}
      assert(mod::onlineAddress("http://10.1.2.3:80/a",0x7f000001,0x0a010203)&&!mod::onlineAddress("http://10.1.2.4:80/a",0x7f000001,0x0a010203)&&!mod::onlineAddress("http://10.1.2.3:80/a",0x7f000001));
      // A partner and a server on a third PC: both addresses are listed, nothing else.
      auto both=withKeys(probe,"\"others\":4,\"server\":\"10.1.2.3\"");

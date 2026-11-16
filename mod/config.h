@@ -62,6 +62,10 @@ struct Config {
     bool carryVisual=false;   // ds3: send what the porter carries, show what the partner carries (carry_visual.h)
     std::string link="none";   // a stand-in link between two copies on one PC: "internet" or "poor" (link.h)
     std::string onlineServer;  // a private server's sign-in address for the game's online layer (online.h); empty = none
+    // What the game is told (strand_notices.h): with online_server, a line in the game's info log when something this
+    // player built is not shared on that server (held, kept, waiting) and when it becomes shared. The mod reads his
+    // own objects' states with `strand_token`, a notice token the launcher took for him (world/README.md).
+    bool strandNotices=false;std::string strandToken;
     unsigned presenceLogMaxMiB=8;
     std::string shareEnvironment="off"; // "host": the host's time and rain; "rain": its rain only (weather.h)
     discovery::Options discoveryOptions;
@@ -76,4 +80,7 @@ std::optional<uint32_t> peerAddress(const std::string&);
 // / _ - . only. Returns it unchanged, or nullopt.
 constexpr size_t OnlineAddressMax=120;
 std::optional<std::string> onlineAddress(const std::string& url,uint32_t peer,uint32_t server=0);
+// The server's API path of an online_server address: the part before the sign-in, "[/PREFIX][/k/NAME|/t/TICKET]/auth/ds",
+// without the account: "/PREFIX", or "" without a prefix. nullopt for an address of another form.
+std::optional<std::string> serverApiBase(const std::string& url);
 }

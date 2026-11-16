@@ -55,6 +55,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "link.h"
 #include "nametag.h"
 #include "notice.h"
+#include "strand_notices.h"
 #include "weather.h"
 #include "environment.h"
 #include "auto_continue.h"
@@ -1077,22 +1078,52 @@ struct Runtime final:ds::Transport {
             note(("ONLINE login task state "+std::to_string(st.taskState)+" step "+std::to_string(st.step)+" error "+std::to_string(st.error)+(st.signedIn()?" (signed in)":"")+"\n").c_str());}
         if(onlineAsk.tick(now,st))note(onlineApi->request()?"ONLINE sign-in asked\n":"ONLINE sign-in not asked: no login task\n");
     }
+    // --- What the game is told about this player's builds on the server (strand_notices.h): opt-in `strand_notices`.
+    // The server's API is read on a thread of its own with the notice token the launcher took (`strand_token`); its
+    // lines go into the notices' queue below.
+    std::unique_ptr<mod::strand::Poller> strandPoller;
+    void strandStart() {
+#ifndef MOD_MUTANT_STRAND_OFF
+        if(!config.strandNotices)return;
+#else
+        if(config.onlineServer.empty())return;   // the mutant: every game with a server reads, whatever its config says
+#endif
+        const std::string& url=config.onlineServer;const size_t colon=url.find(':',7),slash=url.find('/',7);
+        auto address=mod::peerAddress(url.substr(7,colon-7));if(!address||colon==std::string::npos||slash==std::string::npos)return;   // checked by the config
+        const uint16_t port=uint16_t(std::stoul(url.substr(colon+1,slash-colon-1)));const std::string token=config.strandToken;
+        const std::string base=mod::serverApiBase(url).value_or(std::string());
+        strandPoller=std::make_unique<mod::strand::Poller>(base,[a=*address,port,token](const std::string& target){return mod::strand::get(a,port,target,token,mod::strand::ConnectMs);});
+        note("STRAND notices on: this player's builds on the server are read every 5 s\n");
+    }
     // --- Notices (notice.h): opt-in `notices`. The partner joined / left / nobody yet, in the game's own info log.
-    // `puppet.ride` "notice" shows a test line whatever the session does.
+    // `puppet.ride` "notice" shows a test line whatever the session does. With `strand_notices` alone (group play has
+    // no partner) the same queue tells the lines about this player's builds, and nothing about a partner.
     std::unique_ptr<mod::notice::Notifier> notices;std::optional<mod::notice::Api> noticeApi;bool noticeTried=false,noticeTest=false;Background<mod::notice::Api> noticeJob;
+#ifdef MOD_FAKE_NETWORK
+    std::vector<std::u16string> fakeNotices;   // the fake world's info log: every line shown, in order
+#endif
     void tickNotices(uint64_t now) {
-        if(!config.notices&&!noticeTest)return;
+        if(!config.notices&&!noticeTest&&!config.strandNotices)return;
 #ifndef MOD_FAKE_NETWORK
         if(!noticeApi&&!noticeTried){
             auto* sp=&*sampler;if(!noticeJob.ready([sp]{return mod::notice::nativeApi(*sp);}))return;   // checked beside the game
             noticeTried=true;
             try{noticeApi=noticeJob.job.get();note("NOTICE on\n");}
             catch(const std::exception& e){note((std::string("NOTICE unavailable: ")+e.what()+"\n").c_str());}}
+#else
+        if(!noticeApi){mod::notice::Api a;a.show=[this](const std::u16string& text,uint8_t){fakeNotices.push_back(text);return true;};noticeApi=a;}
 #endif
         if(!noticeApi)return;
         if(noticeTest){noticeTest=false;note(noticeApi->show(u"Co-op mod: test notice.",mod::notice::PlainIcon)?"NOTICE test shown\n":"NOTICE test refused: no info log now\n");}
-        if(!config.notices)return;
-        if(!notices)notices=std::make_unique<mod::notice::Notifier>(*noticeApi,[this](const std::string& row){note(row.c_str());});
+#ifndef MOD_MUTANT_STRAND_PARTNER
+        if(!config.notices&&!config.strandNotices)return;
+#else
+        if(!config.notices)return;   // the mutant: strand lines only beside the partner's notices
+#endif
+        if(!notices){notices=std::make_unique<mod::notice::Notifier>(*noticeApi,[this](const std::string& row){note(row.c_str());});
+            if(config.group||!config.notices)notices->partnerless();}   // nobody is expected: no "No partner yet"
+        if(strandPoller){for(auto& row:strandPoller->logs())note(row.c_str());for(auto& line:strandPoller->lines())notices->strand(line,now);}
+        if(!config.notices){notices->tick(now,poseAvailable&&!inEvent,false,{});return;}
         bool connected=core&&core->connected();
         // Away: he reports an event or private room, or no pose of his has arrived (his game is at the title screen or
         // loading: without this a join was told at once, then "away" and "back" while he loaded).
@@ -2610,6 +2641,7 @@ struct Runtime final:ds::Transport {
         }
         #endif
         relayStart();
+        strandStart();
         ds::Config c;c.role=(config.role=="host"||(config.role=="none"&&config.slot<config.peerSlot))?ds::Role::Host:ds::Role::Client;
         c.progressPolicy=config.progressMismatch=="refuse"?ds::ProgressPolicy::Refuse:ds::ProgressPolicy::Warn;c.session=config.session;c.nonce=nonce();
         core=std::make_unique<ds::Core>(c,cache,*this);
@@ -3670,6 +3702,7 @@ struct Runtime final:ds::Transport {
         if(core && socket!=INVALID_SOCKET) {try{core->disconnect(mod::nowMs());}catch(...){}}
         if(others){try{others->clear(mod::nowMs());}catch(...){}}
         relayStop();
+        strandPoller.reset();   // its thread ends within a read's time-outs, before the sockets' library goes
         if(socket!=INVALID_SOCKET)closesocket(socket);
 #ifdef _WIN32
         if(wsa)WSACleanup();
@@ -3852,9 +3885,13 @@ unsigned mod_status(char* out,unsigned cap) {
          o<<"},\"sets\":"<<k.gear<<"},\"cases_shown\":{\"cases\":"<<(r.stacks?r.stacks->shown():0)<<",\"by\":{";
          if(r.stacks){bool first=true;for(auto key:r.stacks->keys()){o<<(first?"":",")<<"\""<<key<<"\":"<<r.stacks->shown(key);first=false;}}
          o<<"},\"sets\":"<<k.carried<<",\"dropped_events\":"<<k.events<<"}";}
+        {mod::strand::Poller::Counters k;if(r.strandPoller)k=r.strandPoller->counters();
+         o<<",\"strand\":{\"on\":"<<(r.strandPoller?"true":"false")<<",\"reads\":"<<k.reads<<",\"answers\":"<<k.answers<<",\"failures\":"<<k.failures<<",\"told\":"<<k.told
+          <<",\"known\":"<<k.known<<",\"refused\":"<<(k.refused?"true":"false")<<",\"pending\":"<<(r.notices?r.notices->pending():0)<<"}";}
 #ifdef MOD_FAKE_NETWORK
         {auto ascii=[](const std::u16string& n){std::string t;for(auto ch:n)t+=(ch>=0x20&&ch<0x7f&&ch!='"'&&ch!='\\')?char(ch):'?';return t;};
          o<<",\"label_names\":[";bool first=true;for(auto& [id,l]:r.fakeLabels){o<<(first?"":",")<<"\""<<ascii(l.name)<<"\"";first=false;}
+         o<<"],\"notices_shown\":[";first=true;for(auto& n:r.fakeNotices){o<<(first?"":",")<<"\""<<ascii(n)<<"\"";first=false;}
          o<<"],\"labels\":[";first=true;for(auto& [id,l]:r.fakeLabels){o<<(first?"":",")<<"{\"name\":\""<<ascii(l.name)<<"\",\"at\":["<<l.at[0]<<","<<l.at[1]<<","<<l.at[2]<<"]}";first=false;}
          o<<"]";
          // The fake engine's tables: every gear piece (the body it hangs on, where that body is) and every case mesh.

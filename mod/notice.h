@@ -14,7 +14,7 @@ struct Api {
     // true: queued in the game's info log; false: no HUD now. icon: PlainIcon or LikeIcon (the game's own icon numbers).
     std::function<bool(const std::u16string& text,uint8_t icon)> show;
 };
-enum class Kind : uint8_t {Joined,Left,Alone,Away,Back,Liked,Down,Up,Caught,Free,Call,Slow,Steady,Episode,Scan,StoryOffer,StoryLoaded,StoryFailed};
+enum class Kind : uint8_t {Joined,Left,Alone,Away,Back,Liked,Down,Up,Caught,Free,Call,Slow,Steady,Episode,Scan,StoryOffer,StoryLoaded,StoryFailed,Strand};
 constexpr uint8_t PlainIcon=0,LikeIcon=3;   // "20 minutes have passed." / "{1} Like(s) received from {0}."
 uint8_t icon(Kind);
 // The partner's name is cleaned like the name tag's (printable, no markup characters); "Your partner" without one.
@@ -51,17 +51,21 @@ public:
     // The two games are in different episodes (the handshake's story progress, `progress_mismatch`): told once per
     // connection, so players who meet in different parts of the story know why their worlds differ.
     void progress(uint64_t nowMs,bool connected,bool mismatch);
+    // Group play (a config without a partner): nobody is expected, so "No partner yet" is never said.
+    void partnerless(){partner_=false;}
+    // A finished line about this player's builds on the server (strand_notices.h), through the same queue.
+    void strand(const std::u16string& line,uint64_t nowMs){add(Kind::Strand,{},nowMs);pending_.back().line=line;}
     // Something the partner did that is worth a line of its own (Liked: his like has just been given to this porter).
     void event(Kind kind,const std::string& partnerName,uint64_t nowMs){add(kind,partnerName.empty()?lastName_:partnerName,nowMs);}
     size_t pending() const {return pending_.size();}
     unsigned shown() const {return shown_;}
 private:
-    struct Entry {Kind kind;std::string name;uint64_t since=0,nextTry=0;bool named=false,held=false;};
+    struct Entry {Kind kind;std::string name;std::u16string line;uint64_t since=0,nextTry=0;bool named=false,held=false;};
     void add(Kind kind,const std::string& name,uint64_t now);
     Api api_;std::function<void(const std::string&)> log_;std::deque<Entry> pending_;
     bool started_=false,connected_=false,everConnected_=false,aloneTold_=false,away_=false,awayTold_=false,joining_=false;uint64_t worldSince_=0,lastShown_=0,awaySince_=0;bool inWorld_=false;unsigned shown_=0;
     std::string lastName_;bool down_=false,caught_=false,calling_=false,callTold_=false;uint64_t lastCall_=0;
-    bool slow_=false;uint64_t linkSince_=0;bool episodeTold_=false;bool scanTold_=false;uint64_t lastScan_=0;
+    bool slow_=false;uint64_t linkSince_=0;bool episodeTold_=false;bool scanTold_=false;uint64_t lastScan_=0;bool partner_=true;
 };
 // Pinned build: the UI owner global and the UI clock global (its double at +0xd0), DSUIInfoLogHUDLogic's vtable, its
 // queue (100 entries of 0x28 bytes, count at +0xfa0) and the slim lock (SRWLOCK) the game takes around an add. A notice

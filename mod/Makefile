@@ -4,8 +4,8 @@ CXX ?= g++
 MINGW ?= $(shell command -v x86_64-w64-mingw32-g++-posix >/dev/null 2>&1 && echo x86_64-w64-mingw32-g++-posix || echo x86_64-w64-mingw32-g++)
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = others.cpp crowd.cpp ../core/broadcast_client.cpp mule_goal.cpp enemy_poses.cpp rewards.cpp signals.cpp ui.cpp orderload.cpp carts.cpp wheels.cpp controls.cpp voidout.cpp passenger.cpp carry_place.cpp roads.cpp bts.cpp enemies.cpp orders.cpp story.cpp ../launcher/saves.cpp vitals.cpp online.cpp notice.cpp nametag.cpp likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = others.h crowd.h ../core/broadcast.h ../core/broadcast_client.h ../core/relay.h mule_goal.h enemy_poses.h rewards.h signals.h ui.h orderload.h carts.h wheels.h controls.h link.h guard_win.h voidout.h passenger.h carry_place.h roads.h bts.h enemies.h orders.h story.h ../launcher/saves.h vitals.h online.h notice.h nametag.h likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = strand_notices.cpp others.cpp crowd.cpp ../core/broadcast_client.cpp mule_goal.cpp enemy_poses.cpp rewards.cpp signals.cpp ui.cpp orderload.cpp carts.cpp wheels.cpp controls.cpp voidout.cpp passenger.cpp carry_place.cpp roads.cpp bts.cpp enemies.cpp orders.cpp story.cpp ../launcher/saves.cpp vitals.cpp online.cpp notice.cpp nametag.cpp likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = strand_notices.h ../world/json.h others.h crowd.h ../core/broadcast.h ../core/broadcast_client.h ../core/relay.h mule_goal.h enemy_poses.h rewards.h signals.h ui.h orderload.h carts.h wheels.h controls.h link.h guard_win.h voidout.h passenger.h carry_place.h roads.h bts.h enemies.h orders.h story.h ../launcher/saves.h vitals.h online.h notice.h nametag.h likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -47,6 +47,14 @@ build/fake-others-undressed.so: $(SRC) $(HEADERS) | build
 # relay_mode "broadcast" ignored (test_others_broadcast.py must fail on it).
 build/fake-relay-mode.so: $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_RELAY_MODE -fPIC -shared $(SRC) -o $@
+# Strand notices with one protection taken out (test_strand_notices.py): told again for every answer, lines only beside
+# the partner's notices, and reads by a game whose config does not ask for them.
+build/fake-strand-once.so: $(SRC) $(HEADERS) | build
+	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMUTANT_STRAND_ONCE -fPIC -shared $(SRC) -o $@
+build/fake-strand-partner.so: $(SRC) $(HEADERS) | build
+	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_STRAND_PARTNER -fPIC -shared $(SRC) -o $@
+build/fake-strand-off.so: $(SRC) $(HEADERS) | build
+	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_STRAND_OFF -fPIC -shared $(SRC) -o $@
 # The real server (Linux build) for the broadcast fake-world test.
 ../world/build/coop-world: FORCE
 	$(MAKE) -C ../world build/coop-world
@@ -54,7 +62,7 @@ FORCE:
 build/unit: unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp $(HEADERS) | build
 	$(CXX) $(FLAGS) unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o $@
 host: identity build/mod.so build/mod-no-build.so build/mod-no-interpolation.so build/mod_probe build/unit
-test: environment-test join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so build/fake-others-to-partner.so build/fake-others-no-relay.so build/fake-group-sends.so build/fake-others-undressed.so build/fake-relay-mode.so build/coop-swarm ../world/build/coop-world
+test: environment-test join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so build/fake-others-to-partner.so build/fake-others-no-relay.so build/fake-group-sends.so build/fake-others-undressed.so build/fake-relay-mode.so build/fake-strand-once.so build/fake-strand-partner.so build/fake-strand-off.so build/coop-swarm ../world/build/coop-world
 	./build/unit
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_PARTNER unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-partner && if ./build/unit-config-partner >/dev/null 2>&1; then echo SURVIVED CONFIG_PARTNER; exit 1; else echo KILLED MUTANT_CONFIG_PARTNER; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_MARKER unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-marker && if ./build/unit-config-marker >/dev/null 2>&1; then echo SURVIVED CONFIG_MARKER; exit 1; else echo KILLED MUTANT_CONFIG_MARKER; fi
@@ -63,13 +71,14 @@ test: environment-test join-test vehicle-test game-thread-test discovery-test po
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_OTHERS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-others && if ./build/unit-config-others >/dev/null 2>&1; then echo SURVIVED CONFIG_OTHERS; exit 1; else echo KILLED MUTANT_CONFIG_OTHERS; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_RELAY_ADDRESS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-relay-address && if ./build/unit-config-relay-address >/dev/null 2>&1; then echo SURVIVED CONFIG_RELAY_ADDRESS; exit 1; else echo KILLED MUTANT_CONFIG_RELAY_ADDRESS; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_RELAY_NEEDS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-relay-needs && if ./build/unit-config-relay-needs >/dev/null 2>&1; then echo SURVIVED CONFIG_RELAY_NEEDS; exit 1; else echo KILLED MUTANT_CONFIG_RELAY_NEEDS; fi
-	python3 -B mutants.py --sources "unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp" --prefix build/mutant-unit- CONFIG_GROUP CONFIG_SERVER_ANY CONFIG_OTHERS_SHOW CONFIG_RELAY_MODE && echo KILLED MUTANT_CONFIG_GROUP MUTANT_CONFIG_SERVER_ANY MUTANT_CONFIG_OTHERS_SHOW MUTANT_CONFIG_RELAY_MODE
+	python3 -B mutants.py --sources "unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp" --prefix build/mutant-unit- CONFIG_GROUP CONFIG_SERVER_ANY CONFIG_OTHERS_SHOW CONFIG_RELAY_MODE CONFIG_STRAND && echo KILLED MUTANT_CONFIG_GROUP MUTANT_CONFIG_SERVER_ANY MUTANT_CONFIG_OTHERS_SHOW MUTANT_CONFIG_RELAY_MODE MUTANT_CONFIG_STRAND
 	python3 -B test_probe.py
 	python3 -B -m unittest -q test_game_thread_api test_probe_puppet test_actor_resources test_actor_reader_windows
 	python3 -B test_actor_resource_mutants.py
 	python3 -B test_others_partner.py
 	python3 -B test_others_partner_mutants.py
 	python3 -B test_others_broadcast.py ../world/build/coop-world build/coop-swarm
+	python3 -B test_strand_notices.py ../world/build/coop-world
 .PHONY: all identity host test FORCE
 
 build/vehicle-test: vehicle_test.cpp vehicle.cpp vehicle.h discovery.cpp fake_memory.h discovery_signatures.h | build
@@ -130,6 +139,8 @@ build/nametag-test: nametag_test.cpp nametag.cpp nametag.h discovery.cpp ../core
 	$(CXX) $(FLAGS) nametag_test.cpp nametag.cpp discovery.cpp ../core/core.cpp -o $@
 build/notice-test: notice_test.cpp notice.cpp notice.h nametag.cpp nametag.h discovery.cpp ../core/core.cpp | build
 	$(CXX) $(FLAGS) notice_test.cpp notice.cpp nametag.cpp discovery.cpp ../core/core.cpp -o $@
+build/strand-notices-test: strand_notices_test.cpp strand_notices.cpp strand_notices.h ../world/json.h nametag.cpp nametag.h discovery.cpp ../core/core.cpp | build
+	$(CXX) $(FLAGS) strand_notices_test.cpp strand_notices.cpp nametag.cpp discovery.cpp ../core/core.cpp -o $@
 build/link-test: link_test.cpp link.h | build
 	$(CXX) $(FLAGS) link_test.cpp -o $@
 build/wheels-test: wheels_test.cpp wheels.cpp wheels.h | build
@@ -227,7 +238,7 @@ build/wire-test: wire_test.cpp rewards.cpp rewards.h signals.cpp signals.h order
 	$(CXX) $(FLAGS) wire_test.cpp rewards.cpp signals.cpp orderload.cpp cargo.cpp discovery.cpp ../core/core.cpp -o $@
 build/rewards-test: rewards_test.cpp rewards.cpp rewards.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(CXX) $(FLAGS) rewards_test.cpp rewards.cpp discovery.cpp ../core/core.cpp -o $@
-game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/mule-goal-test build/passenger-test build/place-test build/roads-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test build/signals-test build/story-test build/enemy-poses-test build/others-test build/crowd-test
+game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/mule-goal-test build/passenger-test build/place-test build/roads-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test build/strand-notices-test build/signals-test build/story-test build/enemy-poses-test build/others-test build/crowd-test
 	./build/story-test
 	./build/wire-test
 	./build/rewards-test
@@ -280,6 +291,7 @@ game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderlo
 	./build/orders-test
 	./build/link-test
 	./build/notice-test
+	./build/strand-notices-test
 	./build/nametag-test
 	$(MAKE) gear-windows-test
 	python3 -B test_game_thread_mutants.py
