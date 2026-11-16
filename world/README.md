@@ -16,6 +16,8 @@ other (see "Not done" for what is missing).
 coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] [--log events.log] [--trace calls.log] [--idle-exit SECONDS]
 ```
 
+(The relay's options are under "The relay", the ones for other servers under "Linked servers".)
+
 - `--bind`: the address to listen on (default loopback). For a partner on another PC, the address he reaches you at.
 - `--data`: the world file, written after every change (temporary file, then rename). Without it nothing is kept.
 - `--prefix`: a secret first path element. Requests without it get 404 and change nothing. Use one whenever the
@@ -51,8 +53,10 @@ loopback, a LAN or a VPN.
 | `sendLike`, `getLikeHistory` | a like is added to the object and to its builder's history (the last 2000 likes are kept); a player reads only his own history, after the time he names |
 | `getRankingSchedules`, `getWastedBaggages`, `findMissions`, `getOrderedMissions`, … | empty lists |
 | anything else | `{}` and an `unhandled NAME` line in the log |
+| `POST …/link/pull` with `Authorization: Link KEY` | not the game's: one page of objects for a linked server ("Linked servers") |
 
-Limits: 16 players, 4000 objects per player, 4 MiB per body, 32 connections.
+Limits: 16 players, 4000 objects built here per player, 20000 objects held from each other server, 4 MiB per body,
+32 connections.
 
 ## The relay (`--relay-port`)
 
@@ -128,12 +132,221 @@ are any, the lines end `animation_out=N animation_in=N animation_in_bytes=N` (sa
 took, and their sizes together), and with `--replay` the last line says how far the first player walked
 (`walked=8.0`).
 
+## Linked servers
+
+Two groups, each with a server of its own, can hand each other what their players built: once, through a file, or
+continuously while both servers run. It is off unless asked for, and each direction has a filter. Built and tested
+without a game (2026-11-16): no game has been handed an imported object yet.
+
+### What travels, and the filters
+
+What a server stores is what can travel: the built objects (every kind the game uploads: the kind is the one letter
+in `t`), each with its builder's player id and name, its area (`q`), its last change and its like count. Players,
+sessions, account keys and the like history (who liked what) never travel. Roads, missions and cargo are not stored
+by the server yet ("Not done"), so they cannot travel either.
+
+A filter is `all`, `none`, or terms separated by `;`. A term that is left out does not narrow.
+
+| Term | Passes |
+|---|---|
+| `types=l,rope,e` | these kinds: the letter, or a name for the letters that are known: `post` p, `charger` c, `safehouse` s, `watchtower` w, `bridge` b, `shelter` n, `rope` r, `ladder` l, `bike` v, `cairn` e, `road` o, `mushroom` x, `chiralbridge` g, `jumpstand` j |
+| `owners=Ann,zygo_…` | objects of these builders, by display name or by player id (a name with `,` or `;` in it: use the id) |
+| `areas=226,227` | objects in these areas (the game's area number `q`) |
+| `max-age=30d` | objects changed within this time (`s`, `m`, `h`, `d`), by the taking side's clock against the builder's server's time |
+| `likes=no` | the objects without their like counts (default `yes`) |
+| `imported=yes` | also objects that are themselves imports (default `no`, see "No loops") |
+
+### Where an object is from
+
+Every world has a **server id** (16 random characters, made once, kept in the world file as `server_id`). An object
+that travels carries the id of the server it was **first built on** and its id there. That pair is its identity
+everywhere:
+
+- An imported object is stored with `origin`: `server` and `id` (that pair), `via` (the server it was received
+  from; the same as `server` unless it travelled onward), `name` (its builder's name over there) and `likes` (the
+  count it arrived with). An object without `origin` was built here.
+- **Its id here is a new one**, in the shape the game requires of every id (the kind's letter and 12 letters and
+  digits; the game reads the kind from the first letter). It is computed from the origin pair, so the same object
+  gets the same id on every import and on every server that takes it, also after it was forgotten and taken
+  again; if that id is taken, by anything, the next one in the sequence is used. The original id is not reused
+  because two servers do make the same ids: an id is computed from the builder's player id and a counter.
+- Taking the same object again changes nothing; taking a newer state replaces the data, time and builder name and
+  keeps the id. Likes given here stay: the count is what the origin reports plus what was given here (likes given
+  here do not travel back to the origin).
+- **The builder's player id is kept as it is.** A player id is computed from the account, so the same Steam account
+  is the same porter on every server, and, as on one server, a player is never handed objects he built himself (his
+  game has them in its save). Accounts named in the address (`/k/NAME`) are only told apart by that name: two
+  different people called `/k/ann` on two linked servers count as one porter and do not see each other's objects.
+- Nobody on the taking server can change or remove an imported object through the game (`updateObject` and
+  `deleteObject` answer 403, also for the same account): it changes when its own server changes it.
+- The builder's name is given to the game's `lookup` call; his account key is not known here.
+
+### Through a file
+
+Run these while no server has the world file open (a running server writes the whole file after every change and
+would overwrite what a command did).
+
+```
+coop-world export  --data world.json --out objects.json [--filter FILTER]     default: all
+coop-world import  --data world.json --in objects.json [--filter FILTER] [--prune]
+coop-world origins --data world.json
+coop-world forget  --data world.json --server ID
+```
+
+- `export` writes the objects built on this server that pass the filter (with `imported=yes` also its imports,
+  each under its first server). A world file from before linked servers gets its server id on the first command.
+- `import` adds what passes the filter and updates what it already has. The same file twice changes nothing.
+  With `--prune` the file is taken as everything that server shares now: objects held from it that are not in the
+  file, or no longer pass the filter, are removed. The file is checked whole first; a file that is refused (not an
+  export, an object in the wrong form or over 64 KiB, an object listed twice, more than 20000 objects from one
+  server, the server's own export) changes nothing.
+- `origins` prints this server's id and how many objects it holds from which server.
+- `forget` removes everything that was first built on, or received from, that server, and nothing else.
+
+### A live link
+
+```
+coop-world --port 8089 ... --link NAME --link-key KEY [--link-url http://ADDRESS:PORT[/PREFIX]]
+                           [--link-export FILTER] [--link-import FILTER] [--link-every SECONDS]
+```
+
+`--link NAME` starts the description of one other server (up to 16; the name is for the log) and the options after
+it belong to it:
+
+- `--link-key`: required, 8 to 64 letters, digits, `-` and `_`, the same on both servers and different for every
+  link. A server does not start with a link that has no key.
+- `--link-export`: what that server may take from here. Default `none`.
+- `--link-import`: what is taken from it. Default `none`; needs `--link-url`.
+- `--link-url`: where that server listens, with its `--prefix` if it has one; a numeric IPv4 address.
+- `--link-every`: seconds between two rounds (default 5).
+
+Objects only move because the taking side asks. A server with `--link-url` and `--link-import` asks the other one
+every few seconds (`POST /link/pull`, the key in the `Authorization` header, on a connection of its own); the other
+one finds the link by the key and answers with the objects that pass its `--link-export` for that link, at most 500
+objects or about 1 MiB a page. The asking side keeps what passes its `--link-import` and makes what it holds from
+that server equal to it: new objects appear, changed ones change, and objects that were removed there, or no longer
+pass either filter, are removed here. Each direction is configured on its own; a server that only gives needs no
+address of the other.
+
+Two servers, on a LAN or VPN, each run by one group:
+
+```
+coop-world --port 8089 --bind 10.0.0.2 --data north.json --prefix NORTHSECRET \
+    --link south --link-key one-key-for-this-pair --link-url http://10.0.0.3:8089/SOUTHSECRET \
+    --link-export "types=ladder,rope,bridge;max-age=30d" --link-import all
+
+coop-world --port 8089 --bind 10.0.0.3 --data south.json --prefix SOUTHSECRET \
+    --link north --link-key one-key-for-this-pair --link-url http://10.0.0.2:8089/NORTHSECRET \
+    --link-export "owners=Bea" --link-import "areas=226,227"
+```
+
+The southern players then find the northern ladders, ropes and bridges of the last 30 days that stand in areas 226
+and 227; the northern players find everything Bea built in the south. Nothing else crosses.
+
+What it holds to:
+
+| Rule | Why |
+|---|---|
+| No link without a key; `/link/pull` does not exist (404) on a server without links, for a key that is no link's, and for a game's session token | being able to reach the port, or being a player, does not make someone a linked server |
+| Both filters default to `none` | a link that is only named moves nothing |
+| An answer is taken whole or not at all: every page well formed, from the same server and the same state of its world | a server that changes between two pages, or sends garbage, leaves the other as it was; the next round starts again |
+| A request or an object in the wrong form is refused (unknown fields too); requests are at most 4 KiB, objects 64 KiB, pages 500 objects, 20000 objects from one server | bounded work and memory for whatever arrives |
+| After a restart of either side the first round takes everything again; otherwise a round costs one small request while nothing changed, and every ten minutes everything is compared again | catch-up needs no saved cursor, and an object that grew too old for a filter goes without anything having happened to it |
+| A linked server asking does not count as activity for `--idle-exit` | two servers started for a session would keep each other alive |
+
+### No loops
+
+- An object is never imported by the server it was first built on, by any route.
+- A server never gives an object back to the server it was built on or received from.
+- Imported objects are not given on at all unless the giving side's filter says `imported=yes`, and not taken
+  unless the taking side's filter says `imported=yes` too. With both, an object from a third server arrives under
+  its first server's identity, so the same object by two routes is still one object (the copy that came first
+  stays, a newer state replaces it). An object passed on this way goes when the server it was received from no
+  longer gives it; if it still arrives by another route it is back in the next round.
+
+### What is not protected
+
+The link key, like the prefix and the players' session tokens, travels in the clear over plain HTTP, and so do the
+objects: use loopback, a LAN or a VPN. There is no TLS and no signature: a linked server is trusted to say what was
+built on it and by whom (it can invent objects and builders, up to the caps; it cannot touch objects built here or
+taken from another server). Player ids travel with the objects; a player id is a plain hash of the account key, so
+someone who has an id can test guesses of the Steam id behind it. Whoever has the key can read everything the
+export filter passes. The server connects out only to the addresses given with `--link-url`.
+
+### Co-op across linked servers (designed, not built)
+
+The real-time layer across two servers ("players on linked servers who stand near each other see each other") is
+not built. The relay today knows only the players who say HELLO to it. The design:
+
+- **Player ids.** A player's relay id (`player_id`, 49 random bits made once by the launcher) is the same number on
+  every server and is not remapped: both games compute a pair's core session from the two ids
+  (`ds::relay::pairSession`), so both must know each other under the same number. Two different players with one
+  id is as unlikely across servers as on one; if it happens, each server keeps its own player and does not
+  announce the other's, and a HELLO for an id a remote player holds is refused as "id in use".
+- **One session number.** `pairSession` also takes the group's `session` number from each game's config. Version 1
+  of the envelope has no place to tell a game another number for one player, so two linked groups must run with
+  the same `session` (and the same build of the mod: the core refuses another wire identity). Lifting that needs a
+  per-player session in ROSTER, which is a new envelope version.
+- **Positions.** The two relays talk UDP to each other on their relay ports, the link key in a server HELLO
+  (address learned only from it, as for players). Twice a second each sends the other its local players that have
+  a position: id, area, position, nickname (about 60 bytes a player, 20 to a datagram). A server keeps the other's
+  players as remote entries that time out like players.
+- **Who is near.** Each local-remote pair is judged by one server only, the one with the lower server id, with the
+  same enter and leave distances as for local pairs; it tells the other server (a numbered, repeated event stream
+  like ROSTER), and both send their own player ENTER or LEAVE. Two judges would disagree at the edge. Two remote
+  players are never a pair here.
+- **DATA.** A player's DATA for a remote player is passed to the other server in a server envelope that carries
+  both ids (8 bytes more than RELAYED, 1276 bytes at most), and delivered there as RELAYED only when that server
+  also holds the pair as near and the source id belongs to that link. The source id is the sending server's own
+  record, as today.
+- **Cost.** One more hop for every datagram of a cross-server pair, and all of that traffic on the one path between
+  the servers: per pair the same rate as today (the relay's cap is 200 datagrams a second per pair and direction),
+  so a link needs a cap of its own. Positions cost 2 x players x 60 bytes a second each way, whether or not anybody
+  is near. A crowd split over two servers still runs one core session per pair.
+- **Not solved by this:** more than two servers in one place (a pair of remote players of two different servers
+  would need those two servers linked as well), and NAT (both relays must reach each other).
+
+It was left out because it changes the relay's state machine (remote players, a second event stream, a second
+envelope) rather than sitting behind it, and nothing in a game uses the object side yet.
+
+### Not done (linked servers)
+
+- No game has seen an imported object. Unknown until one has: whether the game accepts the remapped ids in every
+  list (roads have 23-character ids in a save, the server makes 13 for every kind), how many objects of a kind a
+  game takes per area (it asks for a number per kind and the server hands out the first that match, imports and
+  local ones alike, in id order), and what a game does when an object it activated is removed on the server.
+- A linked server can only be asked (pull). A server behind NAT that cannot be reached can take but not give.
+- No exclusion terms (`everything but ...`), no filter by position inside an area, no per-builder caps.
+- A removal is seen as "no longer listed", so `import` without `--prune` never removes, and an object that leaves
+  and re-enters a filter keeps its id.
+- The world file is written whole after every change; with tens of thousands of imported objects that is megabytes
+  per change.
+
 ## Tests
 
 `make test`: the core (`world_test.cpp`), the HTTP surface without sockets (`front_test.cpp`), the built server over a
 real socket (`test_server.py`), and a mutant for every protection (`test_mutants.py`): a call without a session, a
 change by someone who is not the builder, an object handed back to its builder, both caps, the like range, the secret
 prefix and the bearer token.
+
+Linked servers: `link_test.cpp` (every filter term on the giving and on the taking side; ids of the game's shape
+that differ from the original and are the same in every world; the same export twice; an id that collides with a
+local one; nobody changing an import; likes kept; changed and removed objects with and without prune; forgetting
+one server; the triangle of three servers with and without `imported=yes`; some thirty documents that are refused
+whole, the object over 64 KiB and the 20001st object among them; the saved world; then one server asking another
+through the two calls a socket would carry: both filters, new, changed and removed objects, the other side away, a
+restart of either side, an object that grows too old, 1200 objects in three pages, a world that changes between
+two pages, ten answers and twelve requests in the wrong form, pages bounded in bytes, and two servers that take
+everything from each other and settle). `front_test.cpp` has the key: the right one, eight wrong ones, a session
+token, and a server without links. Eighteen mutants must fail them (`LINK_KEEP_ID`, `LINK_DUPLICATE`,
+`LINK_PASS_IMPORTED`, `LINK_ECHO`, `LINK_IMPORT_OWN`, `LINK_IMPORT_OWNER`, `LINK_FILTER_TYPE`, `LINK_FILTER_OWNER`,
+`LINK_FILTER_AREA`, `LINK_FILTER_AGE`, `LINK_NO_PRUNE`, `LINK_FORGET_ANY`, `LINK_CAP`, `LINK_SIZE`, `LINK_STRICT`,
+`LINK_LIKES`, `LINK_VERSION`, `FRONT_LINK_KEY`). `test_link.py` runs the built server: links that do not start (no
+key, a short key, a name instead of an address, an import without an address), the four file commands on two world
+files (the second import leaves the file byte for byte, six files that are refused leave it too), and three
+servers on loopback: two that take from each other with filters, where objects appear, go when they are removed,
+never come back to their builder's server, and are caught up after either server was away, and one with the wrong
+key that gets nothing.
 
 The relay: `relay_test.cpp` runs it with a clock of its own and a network in memory, against real player sides
 (`ds::relay::Client`) and raw datagrams from addresses that are not players: enter at 150 m and leave past 200 m,

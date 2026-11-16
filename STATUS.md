@@ -16,7 +16,7 @@ is going"). Measured against that:
 | Real-time layer | Works for exactly two players over one direct link, with one partner body. |
 | Many players | Live (2026-11-16): two real games with no partner link found each other through the relay (a body and a name label each), and one of them showed 16 others at once: the other game and 15 stand-ins replaying a recorded walk; earlier the same day 30 stand-ins at once (rows "Many Sams in one game", "Other players through the relay" and "A group on one server" below). Not done: more than two real games, two PCs, the launcher's group flow on a screen, gear and cargo on the others, uneven ground, the cost of many sessions. |
 | Group play: config and launcher for many players on one server | The config ran live on 2026-11-16 (row "A group on one server" below). The launcher's group server and group invites (README, "A group on one server") are built game-free and not run with a game. |
-| Linked servers | Not started. |
+| Linked servers | Built without a game (2026-11-16, `world/README.md`, "Linked servers"): `coop-world` exports the built objects of a world file and imports them into another (`export`, `import`, `origins`, `forget`), and two running servers with a shared key hand each other objects continuously, each direction with a filter by kind, builder, area and age; imported objects keep the server and id they were first built with, get an id of their own, and never travel back. No game has been handed an imported object yet. Real-time co-op across two servers is designed there and not built. |
 | Story, order and reward sharing | Built as opt-in settings (rows below); no longer developed. |
 
 ## Works (tested live on that build)
