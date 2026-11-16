@@ -28,6 +28,8 @@ families=[('world_test.cpp',['world.cpp'],['WORLD_NO_TOKEN','WORLD_OWNER','WORLD
                                            'RELAY_BCAST_ANIMATION_FAR','RELAY_BCAST_TELEPORT','RELAY_BCAST_INTEREST','RELAY_BCAST_ROSE','RELAY_BCAST_BUDGET','RELAY_BCAST_ENTER_STATE',
                                            'RELAY_BCAST_STATE_OLD','RELAY_BCAST_FETCH_FAR','RELAY_NEAR_CAP','RELAY_NEAR_NEAREST','RELAY_NEAR_HYSTERESIS','RELAY_NEAR_HIDDEN',
                                            'RELAY_NEAR_FRIENDS_FIRST','RELAY_SHOW_FRIENDS','RELAY_SHOW_NOBODY','RELAY_SHOW_HELLO_FIRST']),
+          ('fight_test.cpp',['relay.cpp','../core/broadcast_client.cpp','../core/core.cpp'],['RELAY_FIGHT_REACH','RELAY_FIGHT_OWNER_GONE','RELAY_FIGHT_ONE_ROLE','RELAY_FIGHT_CAP',
+                                           'RELAY_FIGHT_STATE_ANY','RELAY_FIGHT_UNJOINED','RELAY_FIGHT_SOURCE','RELAY_FIGHT_VISITOR_STATE','RELAY_FIGHT_SILENT','RELAY_BCAST_SPOOF']),
           ('presence_test.cpp',['relay.cpp','../core/broadcast_client.cpp','../core/core.cpp'],['LINK_PRESENCE_MAC','LINK_PRESENCE_REPLAY','LINK_PRESENCE_REMAP','LINK_PRESENCE_LOCAL_FIRST',
                                            'LINK_PRESENCE_STATE_ANY','LINK_PRESENCE_BUILD','LINK_PRESENCE_NAME','LINK_PRESENCE_INTEREST','LINK_PRESENCE_BUDGET','LINK_PRESENCE_TIMEOUT',
                                            'LINK_PRESENCE_GONE','LINK_PRESENCE_REEXPORT','LINK_PRESENCE_CLOCK','RELAY_NEAR_LINKED'])]

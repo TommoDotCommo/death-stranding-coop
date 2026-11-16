@@ -39,6 +39,24 @@
 //   FETCH    9  player -> server, 24 bytes: 8 u64 player id | 16 u64 source (send me that player's state again)
 //   BYE     10  player -> server, 48 bytes: as version 1
 //
+// Fights with visitors (CORE.md, "Fight channel"): one game owns a fight and others join it as visitors. The owner's
+// state goes to its joined visitors only, and a visitor's reports go to the owner only; the server enforces both.
+//   FIGHT   11  player -> server, 44 bytes: the owner opens or keeps (op 1, every second) or closes (op 2) a fight
+//            8 u64 player id | 16 u32 fight (not 0) | 20 u8 op | 21 u8 kind (not 0) | 22 u8 visitors at most (1..32)
+//            | 23 reserved | 24 u16 radius metres (1..1000) | 26 reserved[2] | 28 i32 x3 place (cm) | 40 u32 area
+//   OFFER   12  server -> player, 44 bytes: a fight near this player: 8 u64 owner | 16 u32 fight | 20 u8 visitors now
+//            | 21 kind | 22 visitors at most | 23 reserved | 24 radius | 26 reserved[2] | 28 place | 40 area
+//   JOIN    13  player -> server, 32 bytes: 8 u64 player id | 16 u64 owner | 24 u32 fight | 28 u8 op (1 join, 2 leave)
+//            | 29 reserved[3]
+//   STATUS  14  server -> player, 24 bytes: 8 u64 owner | 16 u32 fight | 20 u8 status (FightStatus) | 21 u8 visitors now
+//            | 22 reserved[2]
+//   POST    15  player -> server: 8 u64 player id | 16 u64 owner | 24 u32 fight | 28 u32 version (not 0)
+//            | 32 u16 bytes (1..1100) | 34 reserved[2] | 36 payload. The owner's: the fight's state for its visitors; a
+//            joined visitor's: his report for the owner
+//   DELIVER 16  server -> player: as POST with the source (the server's record of the sender) in place of the player id
+// An older server refuses types 11..16 as unknown, and offers go only to players of the owner's build, so a game
+// without them is never sent one.
+//
 // presence[52] is the core's PRESENCE frame (core.cpp) bytes 60..63 (flags, action, phase) and 72..119 (position,
 // velocity, yaw, health, stamina, the BYE reason and reserved byte, the vehicle block): the receiver rebuilds the
 // 128-byte frame around it and the core's own decoder checks every value. The animation payload is the core's
@@ -60,7 +78,19 @@ constexpr size_t PublishHeader=32,FrameHeader=20,EntryHeader=28,PresenceBytes=52
 constexpr size_t AnimationMax=1100;    // the controls others are sent (held, rose, floats) are at most 1029 bytes
 constexpr size_t StateMax=1100;
 constexpr size_t StateKinds=4;
-enum class Type : uint8_t { Hello=1, Welcome, Refused, Roster, Publish, Frame, State, Share, Fetch, Bye };
+constexpr size_t FightSize=44,OfferSize=44,JoinSize=32,StatusSize=24,PostHeader=36,PostMax=1100;
+constexpr uint16_t FightRadiusMax=1000;
+constexpr uint8_t FightVisitorsMax=32;
+enum class Type : uint8_t { Hello=1, Welcome, Refused, Roster, Publish, Frame, State, Share, Fetch, Bye, Fight, Offer, Join, Status, Post, Deliver };
+constexpr uint8_t TypeLast=uint8_t(Type::Deliver);
+enum class FightOp : uint8_t { Open=1, Close=2 };
+enum class JoinOp : uint8_t { Join=1, Leave=2 };
+// What the server says of a fight (STATUS): to the owner Open (it holds the fight; how many visitors) or Off (this
+// server takes no fights); to a player who asked to join Joined, or why not (Full, NoFight, Far, Busy: he owns or visits
+// another); to a visitor the end of his visit (Closed by the owner, Gone: the owner left or went silent, Released: he
+// went out of reach, Left: he asked).
+enum class FightStatus : uint8_t { Open=1, Joined, Full, NoFight, Far, Busy, Closed, Gone, Released, Left, Off };
+constexpr uint8_t FightStatusLast=uint8_t(FightStatus::Off);
 enum class Refusal : uint8_t { None=0, Full=1, IdInUse=2, Build=3 };
 enum class StateKind : uint8_t { Name=1, Gear=2, Carry=3, Places=4 };   // state kinds
 enum Part : uint8_t { HasPresence=1, HasAnimation=2 };
@@ -82,9 +112,18 @@ struct Frame { uint64_t serverTime=0; std::vector<Update> entries; };
 struct StatePost { uint64_t player=0; StateKind kind=StateKind::Name; uint32_t version=0; const uint8_t* payload=nullptr; size_t size=0; };
 struct Share { uint64_t source=0; StateKind kind=StateKind::Name; uint32_t version=0; uint16_t generation=0; Versions versions{}; const uint8_t* payload=nullptr; size_t size=0; };
 struct Fetch { uint64_t player=0,source=0; };
+// A fight as its owner announces it and the server offers it: place in the axes of the core's State (metres).
+struct FightInfo { uint32_t fight=0; uint8_t kind=0,most=0; uint16_t radius=0; std::array<double,3> place{}; uint32_t area=0; };
+struct Fight { uint64_t player=0; FightOp op=FightOp::Open; FightInfo info; };
+struct Offer { uint64_t owner=0; uint8_t visitors=0; FightInfo info; };
+struct Join { uint64_t player=0,owner=0; uint32_t fight=0; JoinOp op=JoinOp::Join; };
+struct Status { uint64_t owner=0; uint32_t fight=0; FightStatus status=FightStatus::Open; uint8_t visitors=0; };
+// POST up (player: the sender's own id) and DELIVER down (player: the source). payload points into the datagram.
+struct Post { uint64_t player=0,owner=0; uint32_t fight=0,version=0; const uint8_t* payload=nullptr; size_t size=0; };
 struct Message {
     Type type=Type::Hello; Hello hello; Welcome welcome; Refused refused; relay::Roster roster; Update publish; Frame frame;
     StatePost state; Share share; Fetch fetch; relay::Bye bye;
+    Fight fight; Offer offer; Join join; Status status; Post post;
 };
 // The version of a datagram's envelope (0 when it is no envelope at all): the server's dispatch.
 inline uint16_t versionOf(const uint8_t* b,size_t n){
@@ -160,6 +199,40 @@ inline Buffer encode(const Share& s){
 inline Buffer encode(const Fetch& f){
     using namespace detail;need(f.player!=0&&f.source!=0,"broadcast: player id 0");
     auto b=start(Type::Fetch,FetchSize);put(b,f.player,8);put(b,f.source,8);return b;}
+namespace detail {
+inline bool fightValid(const FightInfo& f){
+    return f.fight!=0&&f.kind!=0&&f.most>=1&&f.most<=FightVisitorsMax&&f.radius>=1&&f.radius<=FightRadiusMax&&relay::positionValid(f.place);}
+// FIGHT and OFFER share their layout from byte 16: fight, a byte (op or visitors now), kind, most, radius, place, area.
+inline Buffer fightBody(Type t,uint64_t who,uint8_t third,const FightInfo& f){
+    auto b=start(t,FightSize);put(b,who,8);put(b,f.fight,4);b.push_back(third);b.push_back(f.kind);b.push_back(f.most);b.push_back(0);
+    put(b,f.radius,2);put(b,0,2);for(double x:f.place)put(b,uint32_t(int32_t(std::llround(x*100))),4);put(b,f.area,4);return b;}
+inline Error fightOf(const uint8_t* b,FightInfo& f){
+    if(b[23]||get(b+26,2))return Error::Reserved;
+    f.fight=uint32_t(get(b+16,4));f.kind=b[21];f.most=b[22];f.radius=uint16_t(get(b+24,2));f.area=uint32_t(get(b+40,4));
+    for(unsigned i=0;i<3;++i)f.place[i]=int32_t(uint32_t(get(b+28+4*i,4)))/100.;
+    return fightValid(f)?Error::None:Error::Range;}
+inline Buffer postBody(Type t,const Post& p){
+    need(p.player!=0&&p.owner!=0,"broadcast: player id 0");need(p.fight!=0&&p.version!=0,"broadcast: fight");
+    need(p.payload&&p.size>=1&&p.size<=PostMax,"broadcast: post size");
+    auto b=start(t,PostHeader+p.size);put(b,p.player,8);put(b,p.owner,8);put(b,p.fight,4);put(b,p.version,4);put(b,p.size,2);put(b,0,2);
+    b.insert(b.end(),p.payload,p.payload+p.size);return b;}
+}
+inline Buffer encode(const Fight& f){
+    using namespace detail;need(f.player!=0,"broadcast: player id 0");need(f.op==FightOp::Open||f.op==FightOp::Close,"broadcast: fight op");
+    need(fightValid(f.info),"broadcast: fight");return fightBody(Type::Fight,f.player,uint8_t(f.op),f.info);}
+inline Buffer encode(const Offer& o){
+    using namespace detail;need(o.owner!=0,"broadcast: player id 0");need(fightValid(o.info)&&o.visitors<=FightVisitorsMax,"broadcast: offer");
+    return fightBody(Type::Offer,o.owner,o.visitors,o.info);}
+inline Buffer encode(const Join& j){
+    using namespace detail;need(j.player!=0&&j.owner!=0,"broadcast: player id 0");need(j.fight!=0,"broadcast: fight");
+    need(j.op==JoinOp::Join||j.op==JoinOp::Leave,"broadcast: join op");
+    auto b=start(Type::Join,JoinSize);put(b,j.player,8);put(b,j.owner,8);put(b,j.fight,4);b.push_back(uint8_t(j.op));put(b,0,3);return b;}
+inline Buffer encode(const Status& s){
+    using namespace detail;need(s.owner!=0&&s.fight!=0,"broadcast: fight");
+    need(uint8_t(s.status)>=1&&uint8_t(s.status)<=FightStatusLast&&s.visitors<=FightVisitorsMax,"broadcast: status");
+    auto b=start(Type::Status,StatusSize);put(b,s.owner,8);put(b,s.fight,4);b.push_back(uint8_t(s.status));b.push_back(s.visitors);put(b,0,2);return b;}
+inline Buffer encodePost(const Post& p){return detail::postBody(Type::Post,p);}
+inline Buffer encodeDeliver(const Post& p){return detail::postBody(Type::Deliver,p);}
 
 // Refused whole: another magic or version, an unknown type, a nonzero reserved byte, a size that is not the type's, a
 // player id 0, a part, kind, count or length out of range, entries that do not fill a FRAME exactly.
@@ -170,7 +243,7 @@ inline Error parse(const uint8_t* b,size_t n,Message& m){
 #ifndef MUTANT_BCAST_WIRE_VERSION
     if(get(b+4,2)!=Version)return Error::Version;
 #endif
-    if(b[6]<1||b[6]>10)return Error::Type;
+    if(b[6]<1||b[6]>TypeLast)return Error::Type;
     if(b[7])return Error::Reserved;
     m.type=Type(b[6]);
     auto exact=[&](size_t size){
@@ -277,6 +350,37 @@ inline Error parse(const uint8_t* b,size_t n,Message& m){
     case Type::Bye:{
         relay::Message shared;auto e=parseShared(b,n,relay::Type::Bye,shared);if(e!=Error::None)return e;
         m.bye=std::move(shared.bye);return Error::None;}
+    case Type::Fight:{
+        if(!exact(FightSize))return Error::Length;
+        auto& f=m.fight;f.player=get(b+8,8);if(!f.player)return Error::Range;
+        if(b[20]!=uint8_t(FightOp::Open)&&b[20]!=uint8_t(FightOp::Close))return Error::Range;
+        f.op=FightOp(b[20]);return fightOf(b,f.info);}
+    case Type::Offer:{
+        if(!exact(OfferSize))return Error::Length;
+        auto& o=m.offer;o.owner=get(b+8,8);if(!o.owner)return Error::Range;
+        o.visitors=b[20];if(o.visitors>FightVisitorsMax)return Error::Range;
+        return fightOf(b,o.info);}
+    case Type::Join:{
+        if(!exact(JoinSize))return Error::Length;
+        auto& j=m.join;j.player=get(b+8,8);j.owner=get(b+16,8);j.fight=uint32_t(get(b+24,4));
+        if(get(b+29,3))return Error::Reserved;
+        if(!j.player||!j.owner||!j.fight||(b[28]!=uint8_t(JoinOp::Join)&&b[28]!=uint8_t(JoinOp::Leave)))return Error::Range;
+        j.op=JoinOp(b[28]);return Error::None;}
+    case Type::Status:{
+        if(!exact(StatusSize))return Error::Length;
+        auto& s=m.status;s.owner=get(b+8,8);s.fight=uint32_t(get(b+16,4));
+        if(get(b+22,2))return Error::Reserved;
+#ifndef MUTANT_BCAST_WIRE_FIGHT
+        if(!s.owner||!s.fight||b[20]<1||b[20]>FightStatusLast||b[21]>FightVisitorsMax)return Error::Range;
+#endif
+        s.status=FightStatus(b[20]);s.visitors=b[21];return Error::None;}
+    case Type::Post:case Type::Deliver:{
+        if(n<=PostHeader)return Error::Length;
+        auto& p=m.post;p.player=get(b+8,8);p.owner=get(b+16,8);p.fight=uint32_t(get(b+24,4));p.version=uint32_t(get(b+28,4));p.size=size_t(get(b+32,2));
+        if(get(b+34,2))return Error::Reserved;
+        if(!p.player||!p.owner||!p.fight||!p.version||p.size<1||p.size>PostMax)return Error::Range;
+        if(n!=PostHeader+p.size)return Error::Length;
+        p.payload=b+PostHeader;return Error::None;}
     }
     return Error::Type;
 }

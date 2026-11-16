@@ -75,6 +75,8 @@ void Client::tick(uint64_t now){
     if(online_&&now>lastWelcome_&&now-lastWelcome_>config_.silentMs)offline();
     if(!sentHello_||now>=nextHello_)sendHello(now);
     publish(now);
+    if(online_&&hosting_&&now>=keepAt_){sendFight(FightOp::Open);keepAt_=now+FightKeepMs;}
+    if(online_&&visiting_&&!joined_&&now>=joinAt_){sendJoin(JoinOp::Join);joinAt_=now+FightJoinEveryMs;}
     for(auto& [id,s]:sources_){
         if(!s.wantFetch||now<s.mismatchSince+FetchGraceMs||now<s.fetchAt)continue;
         Fetch f;f.player=config_.id;f.source=id;sendDatagram(encode(f));++counters_.fetches;s.fetchAt=now+FetchEveryMs;}
@@ -114,7 +116,7 @@ bool Client::answer(uint32_t sequence){
     if(int32_t(sequence-lastAnswer_)<=0||int32_t(helloSequence_-sequence)<0)return false;
     lastAnswer_=sequence;return true;}
 void Client::leaveAll(){for(auto& p:near_)events_.push_back({false,p.first,p.second});near_.clear();sources_.clear();}
-void Client::offline(){leaveAll();online_=false;stream_=0;applied_=0;clockValid_=false;pongs_.clear();lastStamp_=0;}
+void Client::offline(){leaveAll();if(visiting_)visitEnds(FightStatus::Gone);online_=false;stream_=0;applied_=0;clockValid_=false;pongs_.clear();lastStamp_=0;}
 void Client::clockSample(uint64_t t0,uint64_t serverTime,uint64_t now){
     if(now<t0||now-t0>2000)return;
     double rtt=double(now-t0),candidate=double(serverTime)-(double(t0)+double(now))/2.;
@@ -134,7 +136,7 @@ void Client::receive(const uint8_t* data,size_t size,uint64_t now){
         online_=true;lastWelcome_=now;refusal_=Refusal::None;welcome_=w;
 #ifndef MUTANT_BCAST_CLIENT_STREAM
         // Another stream: the server began again from nothing for this player (and may be another process: its clock too).
-        if(w.base.stream!=stream_){leaveAll();stream_=w.base.stream;applied_=0;clockValid_=false;pongs_.clear();lastStamp_=0;}
+        if(w.base.stream!=stream_){leaveAll();if(visiting_&&stream_)visitEnds(FightStatus::Gone);stream_=w.base.stream;applied_=0;clockValid_=false;pongs_.clear();lastStamp_=0;}
 #else
         stream_=w.base.stream;
 #endif
@@ -164,6 +166,9 @@ void Client::receive(const uint8_t* data,size_t size,uint64_t now){
         for(auto& u:m.frame.entries)entry(u,now);
         return;
     case Type::Share:share(m.share,now);return;
+    case Type::Offer:++counters_.offers;offers_[m.offer.owner]={m.offer,now};return;
+    case Type::Status:fightStatus(m.status);return;
+    case Type::Deliver:delivered(m.post);return;
     default:++counters_.malformed;return;   // the player's own message types are not for the player
     }
 }
@@ -291,4 +296,77 @@ std::optional<AnimationShown> Client::takeAnimation(uint64_t source,uint64_t now
     q.erase(q.begin(),q.begin()+long(due));
     if(target-q.front().time>1000)return {};
     return r;}
+
+// ---- Fights with visitors (CORE.md, "Fight channel") ---------------------------------------------------------------------
+void Client::sendFight(FightOp op){
+    Fight f;f.player=config_.id;f.op=op;f.info=host_;sendDatagram(encode(f));++counters_.fights;}
+void Client::sendJoin(JoinOp op){
+    Join j;j.player=config_.id;j.owner=visitOwner_;j.fight=visitFight_;j.op=op;sendDatagram(encode(j));++counters_.joins;}
+void Client::hostFight(const FightInfo& f,uint64_t now){
+    relay::detail::need(detail::fightValid(f),"broadcast: fight");
+    if(visiting_)leaveFight();
+    bool another=!hosting_||host_.fight!=f.fight;
+    host_=f;hosting_=true;
+    if(another){visitors_=0;deliveredVersion_.clear();postVersion_=0;keepAt_=now;}
+    if(online_&&now>=keepAt_){sendFight(FightOp::Open);keepAt_=now+FightKeepMs;}}
+void Client::closeFight(){
+    if(!hosting_)return;
+    if(online_)sendFight(FightOp::Close);
+    hosting_=false;visitors_=0;deliveredVersion_.clear();}
+bool Client::joinFight(uint64_t owner,uint32_t fight,uint64_t now){
+    if(hosting_||!owner||owner==config_.id||!fight)return false;
+    if(visiting_&&visitOwner_==owner&&visitFight_==fight)return true;
+    if(visiting_)leaveFight();
+    visiting_=true;joined_=false;visitOwner_=owner;visitFight_=fight;postVersion_=0;deliveredVersion_.clear();
+    joinAt_=now;if(online_){sendJoin(JoinOp::Join);joinAt_=now+FightJoinEveryMs;}
+    return true;}
+void Client::leaveFight(){
+    if(!visiting_)return;
+    if(online_)sendJoin(JoinOp::Leave);
+    visiting_=joined_=false;deliveredVersion_.clear();}
+bool Client::postFight(const std::vector<uint8_t>& bytes){
+    if(!online_||bytes.empty()||bytes.size()>PostMax)return false;
+    Post p;p.player=config_.id;p.payload=bytes.data();p.size=bytes.size();
+    if(hosting_){p.owner=config_.id;p.fight=host_.fight;}
+    else if(visiting_&&joined_){p.owner=visitOwner_;p.fight=visitFight_;}
+    else return false;
+    if(++postVersion_==0)postVersion_=1;
+    p.version=postVersion_;sendDatagram(encodePost(p));++counters_.posts;return true;}
+std::vector<Offer> Client::fightOffers(uint64_t now) const {
+    std::vector<Offer> out;
+    for(auto& [owner,o]:offers_)if(now>=o.second&&now-o.second<=FightOfferMs)out.push_back(o.first);
+    return out;}
+std::vector<FightNews> Client::takeFightNews(){auto n=std::move(fightNews_);fightNews_.clear();return n;}
+void Client::visitEnds(FightStatus why){
+    FightNews n;n.status.owner=visitOwner_;n.status.fight=visitFight_;n.status.status=why;fightNews_.push_back(std::move(n));
+    visiting_=joined_=false;deliveredVersion_.clear();}
+void Client::fightStatus(const Status& s){
+    ++counters_.statuses;
+    if(hosting_&&s.owner==config_.id&&s.fight==host_.fight){
+        if(s.status==FightStatus::Open){fightsHere_=true;visitors_=s.visitors;}
+        else if(s.status==FightStatus::Off)fightsHere_=false;
+        else{++counters_.fightRefused;return;}
+        FightNews n;n.status=s;fightNews_.push_back(std::move(n));return;}
+    if(!visiting_||s.owner!=visitOwner_||s.fight!=visitFight_||s.status==FightStatus::Open||s.status==FightStatus::Off){++counters_.fightRefused;return;}
+    if(s.status==FightStatus::Joined){
+        if(joined_)return;   // the answer to a repeated JOIN
+        joined_=true;FightNews n;n.status=s;fightNews_.push_back(std::move(n));return;}
+    visitEnds(s.status);}
+// A DELIVER is taken only for this player's role: a visitor the state of the fight he joined from its owner, the owner a
+// report on its own fight from somebody else; each source's versions only forward.
+void Client::delivered(const Post& p){
+    bool fromOwner=visiting_&&joined_&&p.owner==visitOwner_&&p.fight==visitFight_
+#ifndef MUTANT_BCAST_CLIENT_FIGHT_SOURCE
+        &&p.player==visitOwner_
+#endif
+        ;
+    bool toOwner=hosting_&&p.owner==config_.id&&p.fight==host_.fight&&p.player!=config_.id;
+    if(!fromOwner&&!toOwner){++counters_.fightRefused;return;}
+    auto it=deliveredVersion_.find(p.player);
+#ifndef MUTANT_BCAST_CLIENT_FIGHT_ORDER
+    if(it!=deliveredVersion_.end()&&!later(p.version,it->second)){++counters_.fightRefused;return;}
+#endif
+    deliveredVersion_[p.player]=p.version;++counters_.delivered;
+    FightNews n;n.delivered=true;n.source=p.player;n.version=p.version;n.status.owner=p.owner;n.status.fight=p.fight;n.bytes.assign(p.payload,p.payload+p.size);
+    fightNews_.push_back(std::move(n));}
 }

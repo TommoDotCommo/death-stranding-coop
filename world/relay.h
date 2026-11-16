@@ -30,6 +30,16 @@
 // He is told of exactly those (ENTER, LEAVE), and sent their updates and state and nothing of anyone else near: a
 // crowd beyond the cap costs him nothing. A linked server's player counts like any other.
 //
+// Fights with visitors (README.md, "The fight channel"; core/broadcast.h types 11..16): a broadcast player whose game
+// runs a fight announces it (FIGHT: kind, place, radius) and keeps it every second; the relay offers it to the players
+// of the same build in reach of its place who would be shown him, and takes a JOIN from one in reach while the fight has
+// room (its owner's number and the relay's `fightVisitors`, whichever is less). The owner's POSTs go to its joined
+// visitors and nobody else; a joined visitor's POSTs go to the owner and nobody else; any other POST is dropped. The
+// source of every DELIVER is the relay's record of the sender. One role at a time: an owner joins nothing, and a
+// visitor who opens a fight of his own leaves the one he visits. The visitors are released (STATUS) when the owner
+// closes the fight, opens another, leaves, restarts or keeps nothing for `fightSilentMs`, and a visitor when he goes
+// more than FightMarginMetres beyond the radius. A linked server's player neither owns nor visits a fight.
+//
 // Linked servers' presence (README.md, "Presence across linked servers"; the envelope is presence.h): the relays of two
 // linked servers tell each other where their broadcast players are (cells of 8 m), and each sends the other the players
 // of its own that are near one of the other's, with their updates and shown state, within a byte budget a second. A
@@ -54,6 +64,8 @@ constexpr size_t RelayPlayersMax=1024,RelayPendingMax=4096;
 constexpr uint32_t BroadcastStampAheadMs=500,BroadcastStampBehindMs=2000,BroadcastFetchEveryMs=250;
 constexpr uint32_t LinkHelloMs=500,LinkListsMs=500,LinkSilentMs=3000,LinkReportMs=5000,LinkReceiveRate=4000;
 constexpr double LinkMarginMetres=25;   // how far a place may move between two lists of cells
+constexpr double FightMarginMetres=50;  // a visitor is released this far beyond the fight's radius
+constexpr uint64_t FightOfferEveryMs=900;    // a fight is offered to one player at most this often (each keep of its owner, once a second)
 constexpr size_t LinksMax=16;
 // A linked server whose broadcast players this relay exchanges with its own.
 struct RelayLink {
@@ -99,6 +111,9 @@ struct RelayConfig {
     double nearMargin=10;                    // one shown stays until one not shown is this many metres nearer (0..1000)
     // Set: what the server holds for a broadcast player (asked at each of his HELLOs): his choice, his friends, his cap.
     std::function<RelayViewer(uint64_t id)> viewer;
+    // Fights with visitors.
+    size_t fightVisitors=9;                  // the most visitors one fight may have (0: this server takes no fights; at most 32)
+    uint32_t fightSilentMs=3000;             // an owner who keeps nothing for this long has left his fight (1000..60000)
     // Linked servers' presence.
     std::vector<RelayLink> links;            // at most LinksMax, each with a name and a key of its own
     std::string serverId;                    // this world's id (world.h), told to the linked servers; required with links
@@ -112,6 +127,9 @@ struct RelayStats {
     uint64_t entries=0,thinned=0,frames=0,frameBytes=0;   // entries sent; left out by interest; FRAMEs and their bytes
     uint64_t states=0,staleStates=0,shares=0,fetches=0;
     uint64_t unshown=0;          // updates not sent to a player near who is not shown that player (cap or choice)
+    // Fights with visitors.
+    uint64_t fights=0,offers=0,joined=0,joinsRefused=0,fightPosts=0,delivered=0,released=0;
+    uint64_t fightRefused=0;     // a POST from somebody who is neither the fight's owner nor one of its joined visitors, or older
 };
 class Relay {
 public:
@@ -131,6 +149,9 @@ public:
     bool areNear(uint64_t a,uint64_t b) const;
     bool shows(uint64_t viewer,uint64_t source) const;          // broadcast: is `viewer` shown `source` (told, sent)
     size_t shown(uint64_t viewer) const;                         // how many players `viewer` is shown
+    uint32_t fightOf(uint64_t owner) const;                      // the fight that player owns (0: none)
+    size_t visitorsOf(uint64_t owner) const;
+    uint64_t visiting(uint64_t player) const;                    // the owner whose fight he visits (0: none)
     void flush(uint64_t nowMs);       // sends every FRAME that has waited flushMs (tick does it too)
     uint64_t flushDue() const;        // when the next FRAME is due (UINT64_MAX: none waiting)
     const RelayStats& stats() const {return stats_;}
@@ -156,6 +177,11 @@ private:
         // A linked server's player: link is 1 + the link's index (0: a player of this server), theirs his id there.
         size_t link=0; uint64_t theirs=0,placedAt=0,framedAt=0,fetchAt=0; std::string name;
         bool haveTheirGeneration=false; uint16_t theirGeneration=0;
+        // Fights: the one he owns, with its visitors, its latest state and the latest report version of each visitor;
+        // and the owner whose fight he visits.
+        struct Hosted {bool on=false; ds::broadcast::FightInfo info; uint64_t keptAt=0; std::set<uint64_t> visitors;
+            uint32_t version=0; ds::relay::Buffer state; std::map<uint64_t,uint32_t> reports; std::map<uint64_t,uint64_t> offeredAt;};
+        Hosted fight; uint64_t visits=0;
     };
     // How much of a source a receiver at some distance is sent (squared metres).
     struct Reach {double full2=0,animation2=0;uint32_t intervalMs=0;};
@@ -204,6 +230,18 @@ private:
     void linkFetchFrom(Link&,Player&,uint64_t now);
     uint64_t localId(Link&,uint64_t theirs) const;
     std::string linkName(const Link&,const uint8_t* blob,size_t size,const std::string& nickname) const;
+    // Fights (relay.cpp, "Fights with visitors").
+    void fight(Player&,const ds::broadcast::Fight&,uint64_t now);
+    void join(Player&,const ds::broadcast::Join&);
+    void post(Player&,const ds::broadcast::Post&);
+    void offer(Player& owner,uint64_t now);
+    bool inReach(const Player& owner,const Player&,double extra) const;
+    bool sees(const Player& viewer,const Player& owner) const;
+    void endFight(Player& owner,ds::broadcast::FightStatus,const char* why);
+    void leaveVisit(Player& visitor,ds::broadcast::FightStatus);
+    void fightStatus(const Player& to,uint64_t owner,uint32_t fight,ds::broadcast::FightStatus,size_t visitors);
+    void deliver(const Player& to,uint64_t source,uint64_t owner,uint32_t fight,uint32_t version,const uint8_t*,size_t);
+    void fightTick(uint64_t now);
     void fetch(Player&,uint64_t source,uint64_t now);
     void share(Player& to,const Player& from,size_t kind);
     void enqueue(Player&,const ds::broadcast::Update&,uint64_t now);

@@ -4,7 +4,7 @@
 //              [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS]
 //               [--relay-players N] [--relay-rate N] [--broadcast-full METRES] [--broadcast-interval MS]
 //               [--broadcast-animation METRES] [--broadcast-budget BYTES] [--broadcast-flush MS] [--broadcast-rate N]
-//               [--broadcast-build GAME:HEX] [--broadcast-near N] [--broadcast-near-margin METRES]]
+//               [--broadcast-build GAME:HEX] [--broadcast-near N] [--broadcast-near-margin METRES] [--fight-visitors N]]
 //              [--link NAME --link-key KEY [--link-url http://ADDRESS:PORT[/PREFIX]] [--link-export FILTER] [--link-import FILTER]
 //               [--link-every SECONDS] [--link-presence yes|no [--link-relay ADDRESS:PORT] [--link-presence-budget BYTES]
 //               [--link-presence-players N]]]...
@@ -366,6 +366,7 @@ int main(int argc,char** argv){
         else if(a=="--broadcast-rate")relayConfig.broadcastRate=uint32_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));
         else if(a=="--broadcast-near"){relayConfig.nearCap=size_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));nearGiven=true;}
         else if(a=="--broadcast-near-margin")relayConfig.nearMargin=std::atof(next().c_str());
+        else if(a=="--fight-visitors")relayConfig.fightVisitors=size_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));
         else if(a=="--broadcast-build"){if(!parseBuild(next(),relayConfig)){std::cerr<<"--broadcast-build GAME:HEX (the game build and the 32 hex digits of the mod's wire identity)\n";return 2;}}
         else if(a=="--link"){links.emplace_back();links.back().name=next();presence.emplace_back();}
         else if(a=="--link-key")link(a).key=next();else if(a=="--link-url")link(a).url=next();
@@ -382,7 +383,7 @@ int main(int argc,char** argv){
                         "                  [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS] [--relay-players N] [--relay-rate N]]\n"
                         "                   [--broadcast-full METRES] [--broadcast-interval MS] [--broadcast-animation METRES] [--broadcast-budget BYTES]\n"
                         "                   [--broadcast-flush MS] [--broadcast-rate N] [--broadcast-build GAME:HEX] [--broadcast-near N]\n"
-                        "                   [--broadcast-near-margin METRES]]\n"
+                        "                   [--broadcast-near-margin METRES] [--fight-visitors N]]\n"
                         "                  [--link NAME --link-key KEY [--link-url http://ADDRESS:PORT[/PREFIX]] [--link-export FILTER] [--link-import FILTER] [--link-every SECONDS]\n"
                         "                   [--link-presence yes|no [--link-relay ADDRESS:PORT] [--link-presence-budget BYTES] [--link-presence-players N]]]...\n"
                       <<OfflineUsage;return 2;}}
@@ -474,7 +475,8 @@ int main(int argc,char** argv){
     if(relayPort)line("coop-world relay speaks pairs and broadcast (every update within "+std::to_string(int(relayConfig.fullMetres))+" m, beyond it one in "+std::to_string(relayConfig.intervalMs)+" ms, animation within "
                       +std::to_string(int(relayConfig.animationMetres))+" m, frames of "+std::to_string(relayConfig.budget)+" bytes within "+std::to_string(relayConfig.flushMs)+" ms"+(relayConfig.pinBuild?", one build":"")
                       +(nearGiven?relayConfig.nearCap?", at most "+std::to_string(relayConfig.nearCap)+" players near shown to each":", every player near shown to each"
-                                  :", at most the policy's near_cap players near shown to each ("+std::to_string(w.policy().nearCap)+" now)")+")");
+                                  :", at most the policy's near_cap players near shown to each ("+std::to_string(w.policy().nearCap)+" now)")
+                      +(relayConfig.fightVisitors?", fights with at most "+std::to_string(relayConfig.fightVisitors)+" visitors":", no fights")+")");
     line(policyText(w.policy(),false)+policyNote);
     if(!w.owner().empty())line("owner key "+w.owner().substr(8,16)+"... (signed calls of this key are the owner's)");
     if(!w.name().empty())line("server name "+w.name()+" (the home of its builders on linked servers)");

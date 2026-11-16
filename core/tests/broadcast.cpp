@@ -125,6 +125,46 @@ static void wire(){
         Fetch f;f.player=1;f.source=2;b=encode(f);CHECK(b.size()==FetchSize&&get(b,16,8)==2&&parseBuffer(b,m)==WireError::None&&m.fetch.source==2);
         v=b;std::fill(v.begin()+16,v.end(),uint8_t(0));CHECK(parseBuffer(v)==WireError::Range);
     }
+    // The fight channel: FIGHT and OFFER share a layout, JOIN, STATUS, POST and DELIVER.
+    FightInfo info;info.fight=0x01020304;info.kind=1;info.most=9;info.radius=300;info.place={1.25,-2,1000};info.area=7;
+    {
+        Fight f;f.player=0x55;f.op=FightOp::Open;f.info=info;auto b=encode(f);
+        CHECK(b.size()==FightSize&&FightSize==44&&b[4]==2&&b[6]==11&&get(b,8,8)==0x55&&get(b,16,4)==0x01020304&&b[20]==1&&b[21]==1&&b[22]==9&&b[23]==0);
+        CHECK(get(b,24,2)==300&&get(b,26,2)==0&&int32_t(get(b,28,4))==125&&int32_t(uint32_t(get(b,32,4)))==-200&&get(b,36,4)==100000&&get(b,40,4)==7);
+        Message m;CHECK(parseBuffer(b,m)==WireError::None&&m.type==Type::Fight&&m.fight.player==0x55&&m.fight.op==FightOp::Open&&m.fight.info.fight==info.fight);
+        CHECK(m.fight.info.kind==1&&m.fight.info.most==9&&m.fight.info.radius==300&&m.fight.info.place==info.place&&m.fight.info.area==7);
+        f.op=FightOp::Close;CHECK(parseBuffer(encode(f),m)==WireError::None&&m.fight.op==FightOp::Close);
+        auto v=b;v[20]=3;CHECK(parseBuffer(v)==WireError::Range);v=b;v[21]=0;CHECK(parseBuffer(v)==WireError::Range);
+        v=b;v[22]=0;CHECK(parseBuffer(v)==WireError::Range);v=b;v[22]=33;CHECK(parseBuffer(v)==WireError::Range);
+        v=b;v[24]=0;v[25]=0;CHECK(parseBuffer(v)==WireError::Range);v=b;v[24]=0xe9;v[25]=3;CHECK(parseBuffer(v)==WireError::Range);   // 1001 m
+        v=b;std::fill(v.begin()+16,v.begin()+20,uint8_t(0));CHECK(parseBuffer(v)==WireError::Range);
+        v=b;v[23]=1;CHECK(parseBuffer(v)==WireError::Reserved);v=b;v[27]=1;CHECK(parseBuffer(v)==WireError::Reserved);
+        v=b;v[31]=0x7f;CHECK(parseBuffer(v)==WireError::Range);   // a place beyond 100 km
+        info.most=0;f.info=info;CHECK(throws([&]{encode(f);}));info.most=9;
+        f.info=info;f.op=FightOp(3);CHECK(throws([&]{encode(f);}));
+        Offer o;o.owner=0x55;o.visitors=4;o.info=info;b=encode(o);
+        CHECK(b.size()==OfferSize&&b[6]==12&&b[20]==4&&b[21]==1&&b[22]==9&&parseBuffer(b,m)==WireError::None&&m.type==Type::Offer&&m.offer.owner==0x55&&m.offer.visitors==4&&m.offer.info.radius==300);
+        v=b;v[20]=33;CHECK(parseBuffer(v)==WireError::Range);
+        Join j;j.player=0x66;j.owner=0x55;j.fight=info.fight;j.op=JoinOp::Join;b=encode(j);
+        CHECK(b.size()==JoinSize&&JoinSize==32&&b[6]==13&&get(b,8,8)==0x66&&get(b,16,8)==0x55&&get(b,24,4)==info.fight&&b[28]==1);
+        CHECK(parseBuffer(b,m)==WireError::None&&m.type==Type::Join&&m.join.owner==0x55&&m.join.op==JoinOp::Join);
+        v=b;v[28]=3;CHECK(parseBuffer(v)==WireError::Range);v=b;v[29]=1;CHECK(parseBuffer(v)==WireError::Reserved);
+        v=b;std::fill(v.begin()+16,v.begin()+24,uint8_t(0));CHECK(parseBuffer(v)==WireError::Range);
+        Status st;st.owner=0x55;st.fight=info.fight;st.status=FightStatus::Released;st.visitors=9;b=encode(st);
+        CHECK(b.size()==StatusSize&&b[6]==14&&b[20]==9&&b[21]==9&&parseBuffer(b,m)==WireError::None&&m.type==Type::Status&&m.status.status==FightStatus::Released);
+        v=b;v[20]=12;CHECK(parseBuffer(v)==WireError::Range);v=b;v[20]=0;CHECK(parseBuffer(v)==WireError::Range);v=b;v[21]=33;CHECK(parseBuffer(v)==WireError::Range);
+        v=b;v[22]=1;CHECK(parseBuffer(v)==WireError::Reserved);
+        st.status=FightStatus(12);CHECK(throws([&]{encode(st);}));
+        std::vector<uint8_t> payload(200,7);Post p;p.player=0x66;p.owner=0x55;p.fight=info.fight;p.version=3;p.payload=payload.data();p.size=payload.size();
+        b=encodePost(p);CHECK(b.size()==PostHeader+200&&b[6]==15&&get(b,8,8)==0x66&&get(b,16,8)==0x55&&get(b,24,4)==info.fight&&get(b,28,4)==3&&get(b,32,2)==200&&b[36]==7);
+        CHECK(parseBuffer(b,m)==WireError::None&&m.type==Type::Post&&m.post.player==0x66&&m.post.size==200&&m.post.payload==b.data()+36);
+        auto d=encodeDeliver(p);CHECK(d[6]==16&&std::equal(d.begin()+7,d.end(),b.begin()+7)&&parseBuffer(d,m)==WireError::None&&m.type==Type::Deliver);
+        v=b;v.pop_back();CHECK(parseBuffer(v)==WireError::Length);v=b;std::fill(v.begin()+28,v.begin()+32,uint8_t(0));CHECK(parseBuffer(v)==WireError::Range);
+        v=b;v[34]=1;CHECK(parseBuffer(v)==WireError::Reserved);
+        p.size=PostMax+1;std::vector<uint8_t> huge(PostMax+1);p.payload=huge.data();CHECK(throws([&]{encodePost(p);}));
+        // A server or a game from before the channel refuses the types (version 1's parser here stands for it).
+        relay::Message m1;CHECK(relay::parse(b.data(),b.size(),m1)!=WireError::None);
+    }
     // Every sample cut short at any length, one byte longer, another magic, type or reserved byte: refused.
     std::vector<Buffer> samples;
     {Welcome w;w.base.id=5;Refused r;r.id=5;r.reason=Refusal::Full;relay::Bye y;y.id=5;Fetch f;f.player=1;f.source=2;
@@ -132,12 +172,15 @@ static void wire(){
      Share h;h.source=9;h.version=1;h.versions={1,0,0,0};h.payload=payload.data();h.size=10;
      Buffer frame;beginFrame(frame);Update a;a.player=1;a.parts=HasPresence;a.presence=block.data();appendEntry(frame,a);finishFrame(frame,1);
      Update p=a;p.parts=HasPresence|HasAnimation;p.animation=animation.data();p.animationSize=animation.size();
-     samples={encode(sampleHello()),encode(w),encode(r),encodeBye(y),encode(f),encode(s),encode(h),frame,encodePublish(p)};}
+     samples={encode(sampleHello()),encode(w),encode(r),encodeBye(y),encode(f),encode(s),encode(h),frame,encodePublish(p)};
+     Fight g;g.player=3;g.info=info;Offer o;o.owner=3;o.info=info;Join j;j.player=4;j.owner=3;j.fight=1;Status st;st.owner=3;st.fight=1;
+     Post q;q.player=4;q.owner=3;q.fight=1;q.version=1;q.payload=payload.data();q.size=10;
+     for(auto x:{encode(g),encode(o),encode(j),encode(st),encodePost(q),encodeDeliver(q)})samples.push_back(x);}
     for(auto& s:samples){
         for(size_t n=0;n<s.size();++n){Message m;CHECK(parse(s.data(),n,m)!=WireError::None);}
         auto more=s;more.push_back(0);CHECK(parseBuffer(more)!=WireError::None);
         auto v=s;v[0]='X';CHECK(parseBuffer(v)==WireError::Magic);v=s;v[7]=1;CHECK(parseBuffer(v)==WireError::Reserved);
-        v=s;v[6]=0;CHECK(parseBuffer(v)==WireError::Type);v[6]=11;CHECK(parseBuffer(v)==WireError::Type);
+        v=s;v[6]=0;CHECK(parseBuffer(v)==WireError::Type);v[6]=17;CHECK(parseBuffer(v)==WireError::Type);
         v=s;v[4]=1;CHECK(parseBuffer(v)==WireError::Version);}
     {Message m;CHECK(parse(nullptr,0,m)==WireError::Length);Buffer big(MaxDatagram+1,0);std::memcpy(big.data(),"DSR1\x02\x00\x06\x00",8);CHECK(parseBuffer(big)==WireError::Length);}
     // Damaged datagrams: never accepted with a wrong shape, never a crash.
@@ -386,8 +429,58 @@ static void interpolation(){
     }
 }
 
+// The fight channel on the player's side: the owner keeps its fight and posts; a visitor joins until answered, posts
+// only once joined, and takes the state of its own fight from its owner only, each version once; offline ends a visit.
+static void fights(){
+    FightInfo info;info.fight=21;info.kind=1;info.most=9;info.radius=300;info.place={10,0,10};
+    auto status=[](Bench& t,uint64_t owner,uint32_t fight,FightStatus s,uint8_t visitors=0){Status x;x.owner=owner;x.fight=fight;x.status=s;x.visitors=visitors;auto b=encode(x);t.client.receive(b.data(),b.size(),t.now);};
+    auto deliver=[](Bench& t,uint64_t source,uint64_t owner,uint32_t fight,uint32_t version,std::vector<uint8_t> bytes){
+        Post p;p.player=source;p.owner=owner;p.fight=fight;p.version=version;p.payload=bytes.data();p.size=bytes.size();auto b=encodeDeliver(p);t.client.receive(b.data(),b.size(),t.now);};
+    {   // The owner.
+        Bench t;t.online();CHECK(!t.client.postFight({1}));
+        t.client.hostFight(info,t.now);auto f=t.take(Type::Fight);CHECK(f.size()==1&&f[0].fight.op==FightOp::Open&&f[0].fight.info.fight==21&&f[0].fight.player==1);
+        for(int i=0;i<25;++i){t.now+=100;t.client.tick(t.now);}
+        CHECK(t.take(Type::Fight).size()==3&&!t.client.fightsHere());
+        status(t,1,21,FightStatus::Open,2);CHECK(t.client.fightsHere()&&t.client.visitors()==2&&t.client.hosting()==21);
+        CHECK(t.client.postFight({1,2,3})&&t.client.postFight({4}));auto p=t.take(Type::Post);
+        CHECK(p.size()==2&&p[0].post.owner==1&&p[0].post.fight==21&&p[0].post.version==1&&p[1].post.version==2);
+        // Reports from a visitor, each version once; nothing of another fight, of this player himself, or for another owner.
+        deliver(t,7,1,21,1,{9});deliver(t,7,1,21,1,{9});deliver(t,7,1,21,2,{8});deliver(t,8,1,21,1,{5});
+        deliver(t,7,1,22,3,{9});deliver(t,1,1,21,9,{9});deliver(t,7,5,21,4,{9});
+        auto news=t.client.takeFightNews();size_t taken=0;for(auto& n:news)taken+=n.delivered;
+        CHECK(taken==3&&t.client.counters().fightRefused==4);
+        // Joining while hosting: refused; closing: one FIGHT close, nothing posts any more.
+        CHECK(!t.client.joinFight(9,1,t.now));t.client.closeFight();f=t.take(Type::Fight);CHECK(f.back().fight.op==FightOp::Close&&!t.client.hosting()&&!t.client.postFight({1}));
+    }
+    {   // A visitor.
+        Bench t;t.online();
+        {Offer o;o.owner=5;o.visitors=1;o.info=info;auto b=encode(o);t.client.receive(b.data(),b.size(),t.now);}
+        CHECK(t.client.fightOffers(t.now).size()==1&&t.client.fightOffers(t.now)[0].owner==5);
+        CHECK(t.client.fightOffers(t.now+FightOfferMs+1).empty());
+        CHECK(t.client.joinFight(5,21,t.now)&&!t.client.joined()&&!t.client.postFight({1}));
+        for(int i=0;i<12;++i){t.now+=100;t.client.tick(t.now);}
+        auto j=t.take(Type::Join);CHECK(j.size()==3&&j[0].join.owner==5&&j[0].join.fight==21&&j[0].join.op==JoinOp::Join);
+        status(t,5,22,FightStatus::Joined);CHECK(!t.client.joined());   // another fight's answer
+        status(t,5,21,FightStatus::Joined);CHECK(t.client.joined()&&t.client.visitingOwner()==5);
+        for(int i=0;i<12;++i){t.now+=100;t.client.tick(t.now);}CHECK(t.take(Type::Join).size()==3);   // answered: no more
+        CHECK(t.client.postFight({6,6}));auto p=t.take(Type::Post);CHECK(p.size()==1&&p[0].post.owner==5&&p[0].post.fight==21&&p[0].post.player==1);
+        // The owner's state: taken in order; another visitor's report, another fight's state and an older version: not.
+        deliver(t,5,5,21,1,{1});deliver(t,6,5,21,2,{2});deliver(t,5,5,22,2,{2});deliver(t,5,5,21,1,{1});deliver(t,5,5,21,3,{3});
+        auto news=t.client.takeFightNews();std::vector<uint32_t> versions;for(auto& n:news)if(n.delivered){versions.push_back(n.version);CHECK(n.source==5);}
+        CHECK((versions==std::vector<uint32_t>{1,3}));
+        // The owner closes: the visit ends; nothing more is taken from it.
+        status(t,5,21,FightStatus::Closed);news=t.client.takeFightNews();CHECK(news.size()==1&&news[0].status.status==FightStatus::Closed&&!t.client.visitingOwner());
+        deliver(t,5,5,21,4,{4});CHECK(t.client.takeFightNews().empty());
+        // Refused (full): the visit ends too. Joined again, then silence: offline ends it as Gone.
+        t.client.joinFight(5,23,t.now);status(t,5,23,FightStatus::Full);CHECK(!t.client.visitingOwner()&&t.client.takeFightNews().back().status.status==FightStatus::Full);
+        t.client.joinFight(5,23,t.now);status(t,5,23,FightStatus::Joined);t.client.takeFightNews();
+        for(int i=0;i<12;++i){t.now+=500;t.client.tick(t.now);}
+        news=t.client.takeFightNews();CHECK(!t.client.online()&&news.size()==1&&news[0].status.status==FightStatus::Gone&&!t.client.joined());
+    }
+}
+
 int main(){
-    wire();clockAndRoster();entries();state();publishing();interpolation();
+    wire();clockAndRoster();entries();state();publishing();interpolation();fights();
     if(failures)return 1;
     std::puts("broadcast tests passed");return 0;
 }

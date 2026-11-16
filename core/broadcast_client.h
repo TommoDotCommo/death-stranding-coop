@@ -15,6 +15,11 @@
 // The checks the core makes on a session's presence are made here per source: the core's decoder for every value,
 // order and freshness, impossible motion (with a fresh baseline after a second of it, where the core would have
 // reconnected) and one teleport every five seconds.
+//
+// Fights (CORE.md, "Fight channel"): as an owner it keeps its fight (FIGHT every second) and posts the fight's state; as
+// a visitor it joins (JOIN until answered) and posts its reports. It takes a DELIVER only for its own role: a visitor the
+// state of the fight it joined from that fight's owner, an owner a report on its fight from someone else, each source's
+// versions only forward; the server checks the same before anything is sent.
 #include "broadcast.h"
 #include "core.h"
 #include <deque>
@@ -43,6 +48,17 @@ struct Counters {
     uint64_t malformed=0;      // a datagram or an entry the decoders refused
     uint64_t refused=0;        // an entry refused for its order, time, motion or teleport rate
     uint64_t rebased=0;        // a source taken from a fresh baseline after a second of impossible motion
+    // Fights with visitors.
+    uint64_t fights=0,joins=0,posts=0;                  // FIGHT, JOIN and POST sent
+    uint64_t offers=0,statuses=0,delivered=0;           // OFFER, STATUS and DELIVER taken
+    uint64_t fightRefused=0;   // a DELIVER or STATUS that is not for this player's fight, its role or its source, or older
+};
+// The fight channel's timing on the player's side.
+constexpr uint64_t FightKeepMs=1000,FightJoinEveryMs=500,FightOfferMs=3000;
+// What the fight channel brought: a STATUS for this player's fight, or a DELIVER taken (a visitor: the owner's state;
+// the owner: a visitor's report; source is the server's record of who posted it).
+struct FightNews {
+    bool delivered=false; Status status; uint64_t source=0; uint32_t version=0; std::vector<uint8_t> bytes;
 };
 class Client {
 public:
@@ -85,6 +101,25 @@ public:
     uint16_t generation(uint64_t source) const;               // the state generation this side has complete
     const Counters& counters() const {return counters_;}
     Versions versions() const {return mine_;}                 // this porter's own state versions
+    // Fights with visitors (CORE.md, "Fight channel"). One role at a time: the owner of one fight or the visitor of one.
+    // hostFight: this player's game runs a fight; FIGHT now and every FightKeepMs while online (another id is another
+    // fight; a visit is left first). closeFight: FIGHT close, once (the server's silence rule covers its loss).
+    void hostFight(const FightInfo&,uint64_t now);
+    void closeFight();
+    // joinFight: JOIN now and every FightJoinEveryMs until the server answers; false while hosting. leaveFight: JOIN leave.
+    bool joinFight(uint64_t owner,uint32_t fight,uint64_t now);
+    void leaveFight();
+    // The owner: its fight's state for the visitors; a joined visitor: his report for the owner. A new version each
+    // call; false (nothing sent) in any other role, offline, or for bytes the wire cannot carry.
+    bool postFight(const std::vector<uint8_t>&);
+    std::vector<Offer> fightOffers(uint64_t now) const;       // the offers heard within FightOfferMs, one per owner
+    std::vector<FightNews> takeFightNews();
+    uint32_t hosting() const {return hosting_?host_.fight:0;}
+    uint64_t visitingOwner() const {return visiting_?visitOwner_:0;}
+    uint32_t visitingFight() const {return visiting_?visitFight_:0;}
+    bool joined() const {return visiting_&&joined_;}
+    bool fightsHere() const {return fightsHere_;}            // the server said Open to this player's FIGHT
+    uint8_t visitors() const {return hosting_?visitors_:0;}   // the owner's visitors, as the server last said
 private:
     struct Blob {std::vector<uint8_t> bytes;uint32_t version=0;uint16_t generation=0;bool have=false;uint64_t revision=0;};
     struct AnimationSample {Animation animation;uint64_t time=0;uint32_t sequence=0;};
@@ -119,5 +154,14 @@ private:
     bool havePublished_=false,haveSentPresence_=false;uint32_t sequence_=0;uint64_t lastStamp_=0,lastPresenceAt_=0,lastSample_=0;ds::State sentState_{};
     std::optional<Animation> pendingAnimation_;Animation sentAnimation_{};bool sentAnimationOnce_=false;uint64_t animationAt_=0;
     std::array<std::vector<uint8_t>,StateKinds> state_{};Versions mine_{};
+    // Fights.
+    void sendFight(FightOp);
+    void sendJoin(JoinOp);
+    void fightStatus(const Status&);
+    void delivered(const Post&);
+    void visitEnds(FightStatus);
+    bool hosting_=false,visiting_=false,joined_=false,fightsHere_=false;FightInfo host_{};uint64_t keepAt_=0,joinAt_=0;uint8_t visitors_=0;
+    uint64_t visitOwner_=0;uint32_t visitFight_=0,postVersion_=0;std::map<uint64_t,uint32_t> deliveredVersion_;
+    std::map<uint64_t,std::pair<Offer,uint64_t>> offers_;std::vector<FightNews> fightNews_;
 };
 }

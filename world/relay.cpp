@@ -29,6 +29,8 @@ Relay::Relay(RelayConfig c,Send send):config_(std::move(c)),send_(std::move(send
     if(config_.broadcastRate<10||config_.broadcastRate>100000)throw std::invalid_argument("broadcast rate: 10..100000 datagrams a second");
     if(config_.nearCap>RelayPlayersMax)throw std::invalid_argument("broadcast near: 0..1024 players");
     if(!(config_.nearMargin>=0&&config_.nearMargin<=1000))throw std::invalid_argument("broadcast near margin: 0..1000 metres");
+    if(config_.fightVisitors>bc::FightVisitorsMax)throw std::invalid_argument("fight visitors: 0..32");
+    if(config_.fightSilentMs<1000||config_.fightSilentMs>60000)throw std::invalid_argument("fight silence: 1..60 seconds");
     if(config_.links.size()>LinksMax)throw std::invalid_argument("relay links: at most 16");
     if(!config_.links.empty()){
         bool id=config_.serverId.size()>=4&&config_.serverId.size()<=presence::ServerIdBytes;
@@ -50,6 +52,9 @@ Relay::Relay(RelayConfig c,Send send):config_(std::move(c)),send_(std::move(send
 bool Relay::areNear(uint64_t a,uint64_t b) const {auto it=players_.find(a);return it!=players_.end()&&it->second.nearby.count(b)!=0;}
 bool Relay::shows(uint64_t a,uint64_t b) const {auto it=players_.find(a);return it!=players_.end()&&it->second.shown.count(b)!=0;}
 size_t Relay::shown(uint64_t a) const {auto it=players_.find(a);return it==players_.end()?0:it->second.shown.size();}
+uint32_t Relay::fightOf(uint64_t a) const {auto it=players_.find(a);return it!=players_.end()&&it->second.fight.on?it->second.fight.info.fight:0;}
+size_t Relay::visitorsOf(uint64_t a) const {auto it=players_.find(a);return it!=players_.end()&&it->second.fight.on?it->second.fight.visitors.size():0;}
+uint64_t Relay::visiting(uint64_t a) const {auto it=players_.find(a);return it==players_.end()?0:it->second.visits;}
 // The same time for any token: no early exit on the first wrong byte.
 bool Relay::rightToken(const std::string& t,uint64_t id) const {
 #ifndef MUTANT_RELAY_ADMIT
@@ -194,6 +199,8 @@ void Relay::hello(const RelayAddress& from,const Hello& h,uint64_t now,const bc:
             // A broadcast player that knows nobody is a game that started again: what it showed is gone too, and
             // everyone near is handed out to it again.
             if(p.mode==bc::Version){p.states={};++p.generation;p.havePublish=false;p.haveAt=false;p.feeds.clear();
+                if(p.fight.on)endFight(p,bc::FightStatus::Gone,"its game started again");
+                if(p.visits)leaveVisit(p,bc::FightStatus::Gone);
                 for(auto id:p.shown)entered_.push_back({p.id,id});}
         }
         else if(h.stream==p.stream&&uint32_t(h.ack-p.acked)<=p.pending.size()){
@@ -335,6 +342,12 @@ void Relay::select(Player& r){
 }
 void Relay::remove(uint64_t id,const char* why){
     auto it=players_.find(id);if(it==players_.end())return;
+    // His fight ends for its visitors (the fight is his game's), and he is no longer a visitor of another.
+#ifndef MUTANT_RELAY_FIGHT_OWNER_GONE
+    if(it->second.fight.on)endFight(it->second,bc::FightStatus::Gone,"its owner left");
+#endif
+    if(it->second.visits)leaveVisit(it->second,bc::FightStatus::Gone);
+    for(auto& [other,q]:players_)q.fight.offeredAt.erase(id);
     Player gone=std::move(it->second);players_.erase(it);
     if(gone.link){--remotes_;auto& l=links_[gone.link-1];l.remote.erase(gone.theirs);++l.stats.left;}
     else{byAddress_.erase(gone.address);for(auto& l:links_)if(l.exported.erase(id))l.presentDue=true;}
@@ -361,6 +374,7 @@ void Relay::tick(uint64_t now){
 #else
     (void)now;
 #endif
+    fightTick(now);
     for(size_t i=0;i<links_.size();++i)linkTick(links_[i],i,now);
     flush(now);
 }
@@ -385,6 +399,9 @@ void Relay::receiveBroadcast(const RelayAddress& from,Player* sender,const uint8
     case bc::Type::Publish:if(auto* p=from2(m.publish.player))publish(*p,m.publish,now);return;
     case bc::Type::State:if(auto* p=from2(m.state.player))state(*p,m.state);return;
     case bc::Type::Fetch:if(auto* p=from2(m.fetch.player))fetch(*p,m.fetch.source,now);return;
+    case bc::Type::Fight:if(auto* p=from2(m.fight.player))fight(*p,m.fight,now);return;
+    case bc::Type::Join:if(auto* p=from2(m.join.player))join(*p,m.join);return;
+    case bc::Type::Post:if(auto* p=from2(m.post.player))post(*p,m.post);return;
     case bc::Type::Bye:
         if(sender&&sender->id==m.bye.id&&rightToken(m.bye.token,m.bye.id))remove(sender->id,"left");
         return;
@@ -529,6 +546,138 @@ void Relay::share(Player& to,const Player& from,size_t k){
     for(size_t i=0;i<bc::StateKinds;++i)h.versions[i]=from.states[i].version;
     h.payload=from.states[k].bytes.data();h.size=h.version?from.states[k].bytes.size():0;
     auto b=bc::encode(h);send_(to.address,b.data(),b.size());++stats_.shares;
+}
+
+// ---- Fights with visitors (README.md, "The fight channel") ------------------------------------------------------------
+// Within reach of the owner's fight: the same area, a known place, at most the radius (and `extra`) from the fight's place.
+bool Relay::inReach(const Player& o,const Player& q,double extra) const {
+#ifndef MUTANT_RELAY_FIGHT_REACH
+    if(!q.have||q.area!=o.fight.info.area)return false;
+    double r=double(o.fight.info.radius)+extra;
+    return distance2(where(q),o.fight.info.place)<=r*r;
+#else
+    (void)o;(void)q;(void)extra;return true;
+#endif
+}
+// A player is offered (and may join) only the fights of players his own choice of who he is shown lets through.
+bool Relay::sees(const Player& r,const Player& o) const {
+    if(r.show==bc::Show::Nobody)return false;
+    return r.show!=bc::Show::Friends||r.friends.count(o.id)!=0;
+}
+void Relay::fightStatus(const Player& to,uint64_t owner,uint32_t fight,bc::FightStatus s,size_t visitors){
+    if(to.link)return;
+    bc::Status x;x.owner=owner;x.fight=fight;x.status=s;x.visitors=uint8_t(std::min<size_t>(visitors,bc::FightVisitorsMax));
+    auto b=bc::encode(x);send_(to.address,b.data(),b.size());}
+void Relay::deliver(const Player& to,uint64_t source,uint64_t owner,uint32_t fight,uint32_t version,const uint8_t* bytes,size_t size){
+    if(to.link)return;
+    bc::Post p;p.player=source;p.owner=owner;p.fight=fight;p.version=version;p.payload=bytes;p.size=size;
+    auto b=bc::encodeDeliver(p);send_(to.address,b.data(),b.size());++stats_.delivered;}
+void Relay::fight(Player& o,const bc::Fight& f,uint64_t now){
+    if(o.link)return;
+    if(!config_.fightVisitors){fightStatus(o,o.id,f.info.fight,bc::FightStatus::Off,0);return;}
+    if(f.op==bc::FightOp::Close){if(o.fight.on&&o.fight.info.fight==f.info.fight)endFight(o,bc::FightStatus::Closed,"closed by its owner");return;}
+    // One role at a time: a visitor whose own game starts a fight leaves the one he visits.
+    if(o.visits)leaveVisit(o,bc::FightStatus::Left);
+    if(o.fight.on&&o.fight.info.fight!=f.info.fight)endFight(o,bc::FightStatus::Closed,"replaced by another");
+    if(!o.fight.on){o.fight=Player::Hosted{};o.fight.on=true;++stats_.fights;
+        note("relay: player "+hex(o.id)+" owns fight "+std::to_string(f.info.fight)+" (kind "+std::to_string(f.info.kind)+", "+std::to_string(f.info.radius)+" m)");}
+    o.fight.info=f.info;o.fight.keptAt=now;
+    fightStatus(o,o.id,f.info.fight,bc::FightStatus::Open,o.fight.visitors.size());
+    offer(o,now);
+}
+// The fight to every player of the same build in reach who would be shown its owner, owns no fight and is not its
+// visitor yet, at most once a FightOfferEveryMs each.
+void Relay::offer(Player& o,uint64_t now){
+    bc::Offer x;x.owner=o.id;x.info=o.fight.info;x.visitors=uint8_t(std::min<size_t>(o.fight.visitors.size(),bc::FightVisitorsMax));
+    Buffer b;
+    for(auto& [id,q]:players_){
+        if(id==o.id||q.link||q.mode!=bc::Version||!compatible(o,q)||q.fight.on||q.visits==o.id||!sees(q,o)||!inReach(o,q,0))continue;
+        auto& at=o.fight.offeredAt[id];if(at&&now<at+FightOfferEveryMs)continue;
+        at=now;if(b.empty())b=bc::encode(x);
+        send_(q.address,b.data(),b.size());++stats_.offers;}
+}
+void Relay::join(Player& v,const bc::Join& j){
+    if(v.link)return;
+    auto it=players_.find(j.owner);
+    if(j.op==bc::JoinOp::Leave){
+        if(v.visits&&v.visits==j.owner&&it!=players_.end()&&it->second.fight.info.fight==j.fight)leaveVisit(v,bc::FightStatus::Left);
+        return;}
+    auto refuse=[&](bc::FightStatus why){++stats_.joinsRefused;fightStatus(v,j.owner,j.fight,why,0);};
+    if(it==players_.end()||j.owner==v.id||it->second.link||!it->second.fight.on||it->second.fight.info.fight!=j.fight||!compatible(v,it->second)||!sees(v,it->second)){
+        refuse(bc::FightStatus::NoFight);return;}
+    Player& o=it->second;
+    if(v.visits==o.id){fightStatus(v,o.id,j.fight,bc::FightStatus::Joined,o.fight.visitors.size());return;}   // a JOIN whose answer was lost
+#ifndef MUTANT_RELAY_FIGHT_ONE_ROLE
+    if(v.fight.on||v.visits){refuse(bc::FightStatus::Busy);return;}
+#endif
+    if(!inReach(o,v,0)){refuse(bc::FightStatus::Far);return;}
+#ifndef MUTANT_RELAY_FIGHT_CAP
+    if(o.fight.visitors.size()>=std::min<size_t>(config_.fightVisitors,o.fight.info.most)){refuse(bc::FightStatus::Full);return;}
+#endif
+    o.fight.visitors.insert(v.id);v.visits=o.id;++stats_.joined;
+    note("relay: player "+hex(v.id)+" visits the fight of "+hex(o.id)+" ("+std::to_string(o.fight.visitors.size())+" visitors)");
+    fightStatus(v,o.id,j.fight,bc::FightStatus::Joined,o.fight.visitors.size());
+    fightStatus(o,o.id,j.fight,bc::FightStatus::Open,o.fight.visitors.size());
+    // What he joins: the owner's latest state at once.
+    if(o.fight.version)deliver(v,o.id,o.id,j.fight,o.fight.version,o.fight.state.data(),o.fight.state.size());
+}
+// The owner's POST goes to its joined visitors only; a joined visitor's to the owner only; nothing else goes anywhere.
+void Relay::post(Player& s,const bc::Post& p){
+    ++stats_.fightPosts;
+    if(s.fight.on&&p.owner==s.id&&p.fight==s.fight.info.fight){
+        if(s.fight.version&&!bc::later(p.version,s.fight.version)){++stats_.fightRefused;return;}
+        s.fight.version=p.version;s.fight.state.assign(p.payload,p.payload+p.size);
+#ifndef MUTANT_RELAY_FIGHT_STATE_ANY
+        for(auto id:s.fight.visitors)deliver(players_.at(id),s.id,s.id,p.fight,p.version,p.payload,p.size);
+#else
+        for(auto id:s.nearby)deliver(players_.at(id),s.id,s.id,p.fight,p.version,p.payload,p.size);
+#endif
+        return;}
+    auto it=players_.find(p.owner);
+#ifndef MUTANT_RELAY_FIGHT_UNJOINED
+    bool visitor=s.visits&&s.visits==p.owner&&it!=players_.end()&&it->second.fight.on&&it->second.fight.info.fight==p.fight&&it->second.fight.visitors.count(s.id);
+#else
+    bool visitor=it!=players_.end()&&it->first!=s.id&&it->second.fight.on&&it->second.fight.info.fight==p.fight;
+#endif
+    if(!visitor){++stats_.fightRefused;return;}
+    Player& o=it->second;auto& last=o.fight.reports[s.id];
+    if(last&&!bc::later(p.version,last)){++stats_.fightRefused;return;}
+    last=p.version;
+#ifndef MUTANT_RELAY_FIGHT_SOURCE
+    deliver(o,s.id,o.id,p.fight,p.version,p.payload,p.size);
+#else
+    deliver(o,p.owner,o.id,p.fight,p.version,p.payload,p.size);
+#endif
+#ifdef MUTANT_RELAY_FIGHT_VISITOR_STATE
+    for(auto id:o.fight.visitors)if(id!=s.id)deliver(players_.at(id),s.id,o.id,p.fight,p.version,p.payload,p.size);
+#endif
+}
+void Relay::endFight(Player& o,bc::FightStatus why,const char* text){
+    if(!o.fight.on)return;
+    auto visitors=std::move(o.fight.visitors);uint32_t id=o.fight.info.fight;o.fight=Player::Hosted{};
+    for(auto v:visitors){auto it=players_.find(v);if(it==players_.end())continue;it->second.visits=0;++stats_.released;fightStatus(it->second,o.id,id,why,0);}
+    note("relay: fight "+std::to_string(id)+" of "+hex(o.id)+" "+text+", "+std::to_string(visitors.size())+" visitors released");
+}
+void Relay::leaveVisit(Player& v,bc::FightStatus why){
+    auto it=players_.find(v.visits);v.visits=0;
+    if(it==players_.end()||!it->second.fight.on)return;
+    Player& o=it->second;o.fight.visitors.erase(v.id);o.fight.reports.erase(v.id);++stats_.released;
+    fightStatus(v,o.id,o.fight.info.fight,why,o.fight.visitors.size());
+    fightStatus(o,o.id,o.fight.info.fight,bc::FightStatus::Open,o.fight.visitors.size());
+}
+// Owners who kept nothing for fightSilentMs have left their fights; visitors out of reach are released.
+void Relay::fightTick(uint64_t now){
+    std::vector<uint64_t> silent;
+    for(auto& [id,o]:players_){
+        if(!o.fight.on)continue;
+#ifndef MUTANT_RELAY_FIGHT_SILENT
+        if(now>o.fight.keptAt&&now-o.fight.keptAt>config_.fightSilentMs){silent.push_back(id);continue;}
+#endif
+        std::vector<uint64_t> away;
+        for(auto v:o.fight.visitors){auto& q=players_.at(v);if(q.have&&!inReach(o,q,FightMarginMetres))away.push_back(v);}
+        for(auto v:away)leaveVisit(players_.at(v),bc::FightStatus::Released);
+    }
+    for(auto id:silent)endFight(players_.at(id),bc::FightStatus::Gone,"went silent");
 }
 
 // ---- Linked servers' presence (README.md, "Presence across linked servers"; presence.h) --------------------------------

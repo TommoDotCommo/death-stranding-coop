@@ -40,6 +40,9 @@ build/relay-test: relay_test.cpp $(RELAY) | build
 PLAYER := ../core/broadcast_client.cpp ../core/broadcast_client.h ../core/core.cpp ../core/core.h ../core/build_id.h
 build/broadcast-test: broadcast_test.cpp $(RELAY) $(PLAYER) | build
 	$(CXX) $(FLAGS) broadcast_test.cpp relay.cpp ../core/broadcast_client.cpp ../core/core.cpp -o $@
+# Fights with visitors: the fight channel against real players' sides.
+build/fight-test: fight_test.cpp $(RELAY) $(PLAYER) | build
+	$(CXX) $(FLAGS) fight_test.cpp relay.cpp ../core/broadcast_client.cpp ../core/core.cpp -o $@
 # Linked servers' presence: two and three relays in memory with real players' sides.
 build/presence-test: presence_test.cpp $(RELAY) $(PLAYER) | build
 	$(CXX) $(FLAGS) presence_test.cpp relay.cpp ../core/broadcast_client.cpp ../core/core.cpp -o $@
@@ -51,7 +54,7 @@ build/coop-world.exe: main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.
 ../mod/build/coop-swarm: FORCE
 	$(MAKE) -C ../mod build/coop-swarm
 FORCE:
-test: build/identity-test build/world-test build/policy-test build/curate-test build/names-test build/link-test build/front-test build/api-test build/notices-test build/keys-test build/relay-test build/broadcast-test build/presence-test build/coop-world ../mod/build/coop-swarm
+test: build/identity-test build/world-test build/policy-test build/curate-test build/names-test build/link-test build/front-test build/api-test build/notices-test build/keys-test build/relay-test build/broadcast-test build/fight-test build/presence-test build/coop-world ../mod/build/coop-swarm
 	./build/identity-test
 	./build/world-test
 	./build/policy-test
@@ -64,6 +67,7 @@ test: build/identity-test build/world-test build/policy-test build/curate-test b
 	./build/keys-test
 	./build/relay-test
 	./build/broadcast-test
+	./build/fight-test
 	./build/presence-test
 	python3 -B test_server.py build/coop-world
 	python3 -B test_link.py build/coop-world
