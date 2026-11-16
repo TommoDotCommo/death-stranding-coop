@@ -67,6 +67,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "outfit.h"
 #include "structures.h"
 #include "others.h"
+#include "crowd.h"
 #include "../core/relay.h"
 #ifdef MOD_FAKE_NETWORK
 #include "fake_memory.h"
@@ -265,14 +266,17 @@ struct Runtime final:ds::Transport {
     std::function<mod::others::BodyParts()> bodyParts;
     std::unique_ptr<mod::others::Bodies> crowdBodies,otherBodies;size_t crowdWanted=0;
     uint64_t crowdNotedAt=0,crowdWorstUs=0,crowdSumUs=0,crowdTicks=0,crowdTickAt=0,crowdGapWorstMs=0;
-    // Other players (others.h), presence only: a core session and a body each, besides the one partner. Config `others`
-    // is the most there may be (0 = off).
-    std::unique_ptr<mod::others::Others> others;mod::others::Plan othersPlan;uint64_t othersNotedAt=0;std::array<size_t,4> othersNoted{{~size_t(0),0,0,0}};
+    // Other players (others.h), presence only: a body each, besides the one partner. Config `others` is the most there
+    // may be (0 = off). By the relay's pairs mode (`pairs`: a core session each) or its broadcast mode (`crowd`, crowd.h:
+    // one client for everybody); `others` is whichever of the two runs, and everything past the transport uses it.
+    std::unique_ptr<mod::others::Players> others;mod::others::Others* pairs=nullptr;mod::crowd::Crowd* crowd=nullptr;mod::others::Plan othersPlan;uint64_t othersNotedAt=0;std::array<size_t,4> othersNoted{{~size_t(0),0,0,0}};
     std::vector<mod::others::Shown> othersShown;   // the other players as of this tick's tickOthers (their labels use it)
     mod::controls::Gather othersGather;std::atomic<bool> othersControls{false};   // this porter's controls for them (under controlsLock)
     // ---- SEAM: the transport for other players. ---------------------------------------------------------------------
-    // Whatever carries the datagrams between players calls these five, always under `mutex`: the relay (relayStart,
-    // relayPoll below, from the network thread's loop()), and in the fake world the test (mod_test_others_*):
+    // Pairs mode: whatever carries the datagrams between players calls these five, always under `mutex`: the relay
+    // (relayStart, relayPoll below, from the network thread's loop()), and in the fake world the test (mod_test_others_*).
+    // Broadcast mode has one client (crowdStart): relayPoll hands it the relay's datagrams, and in the fake world the test
+    // carries them (mod_test_relay_*).
     //   othersStart(self, link)            this player's id on the link is known; link.send(to, data, size) sends one datagram
     //   othersEntered(id, now), othersLeft(id, now)  who is near
     //   othersReceived(from, data, size, now)        one datagram from that player, as it was sent
@@ -281,19 +285,30 @@ struct Runtime final:ds::Transport {
         if(!config.others||!self)return;
         mod::others::Settings s;s.self=self;s.session=config.session;s.cap=config.others;s.build=mod::WireBuild;s.nickname=config.nickname;
         s.gear=config.othersGear;s.carry=config.othersCarry!=0;   // what is only shown; everything else of theirs is dropped
-        others=std::make_unique<mod::others::Others>(s,std::move(link),[]{return nonce();},[this](const std::string& row){note(row.c_str());});
+        auto made=std::make_unique<mod::others::Others>(s,std::move(link),[]{return nonce();},[this](const std::string& row){note(row.c_str());});
+        pairs=made.get();others=std::move(made);
         note(("OTHERS ready: up to "+std::to_string(config.others)+" other players"+(otherBodies?"\n":" (no bodies in this build)\n")).c_str());
     }
-    void othersStop(){if(!others)return;others->clear(mod::nowMs());others.reset();note("OTHERS stopped\n");}
+    // Broadcast mode: send(data, size) is one datagram to the relay.
+    void crowdStart(uint64_t self,ds::broadcast::Client::Send send){
+        if(!config.others||!self)return;
+        mod::others::Settings s;s.self=self;s.session=config.session;s.cap=config.others;s.build=mod::WireBuild;s.nickname=config.nickname;
+        s.gear=config.othersGear;s.carry=config.othersCarry!=0;
+        ds::broadcast::ClientConfig c;c.token=config.relayKey;c.nickname=ds::relay::nicknameText(config.nickname)?config.nickname:std::string();
+        auto made=std::make_unique<mod::crowd::Crowd>(s,c,std::move(send),[this](const std::string& row){note(row.c_str());});
+        crowd=made.get();others=std::move(made);
+        note(("OTHERS ready (broadcast): up to "+std::to_string(config.others)+" other players"+(otherBodies?"\n":" (no bodies in this build)\n")).c_str());
+    }
+    void othersStop(){if(!others)return;others->clear(mod::nowMs());pairs=nullptr;crowd=nullptr;others.reset();note("OTHERS stopped\n");}
     // `now` is the network loop's time for this pass, the one its tick is given. A later reading here put a session's
     // last receive after the tick's time, and the core's timeout (then an unsigned difference) fired at once (live
     // 2026-11-16: sessions dropped and reconnected all the time). The core no longer does that (CORE.md, "times out
     // of order"); one clock per pass stays the rule, so that lateness and delay are measured on one reading.
-    void othersEntered(uint64_t id,uint64_t now){if(others)others->entered(id,now);}
-    void othersLeft(uint64_t id,uint64_t now){if(others)others->left(id,now);}
+    void othersEntered(uint64_t id,uint64_t now){if(pairs)pairs->entered(id,now);}
+    void othersLeft(uint64_t id,uint64_t now){if(pairs)pairs->left(id,now);}
     ds::Error othersLastError=ds::Error::None;
     void othersReceived(uint64_t from,const uint8_t* data,size_t size,uint64_t now){
-        if(others){auto e=others->received(from,data,size,now);if(e!=ds::Error::None)othersLastError=e;}
+        if(pairs){auto e=pairs->received(from,data,size,now);if(e!=ds::Error::None)othersLastError=e;}
 #ifdef MOD_MUTANT_OTHERS_TO_PARTNER
         if(size==ds::WireSize&&pending.size()<256)pending.push_back({mod::nowUs(),now,std::vector<uint8_t>(data,data+size),size});   // mutant: one route for everybody
 #endif
@@ -305,10 +320,19 @@ struct Runtime final:ds::Transport {
 #endif
     std::unique_ptr<ds::relay::Client> relayClient;bool relayOnline=false;uint64_t relayIn=0,relayOut=0,relayNotedAt=0;
 #ifdef MOD_FAKE_NETWORK
-    // The fake world has no relay socket: the test is the relay. It reads what the sessions send from here and hands
-    // the roster and the datagrams over through the seam (mod_test_others_*).
-    struct OthersOut {uint64_t to;std::vector<uint8_t> bytes;};std::deque<OthersOut> othersOutgoing;
+    // The fake world has no relay socket. Pairs mode: the test is the relay; it reads what the sessions send from here
+    // and hands the roster and the datagrams over through the seam (mod_test_others_*). Broadcast mode: the test is the
+    // socket; it takes the client's datagrams for the relay from relayOutgoing and hands over the relay's
+    // (mod_test_relay_*).
+    struct OthersOut {uint64_t to;std::vector<uint8_t> bytes;};std::deque<OthersOut> othersOutgoing;std::deque<std::vector<uint8_t>> relayOutgoing;
 #endif
+    bool broadcastMode() const {
+#ifndef MOD_MUTANT_RELAY_MODE
+        return config.relayMode=="broadcast";
+#else
+        return false;
+#endif
+    }
     // Other players need a relay: `others` alone starts no session and sends nothing.
     bool relayWanted() const {
 #ifndef MOD_MUTANT_OTHERS_NO_RELAY
@@ -320,6 +344,7 @@ struct Runtime final:ds::Transport {
     void relayStart(){
         if(!relayWanted())return;
 #ifdef MOD_FAKE_NETWORK
+        if(broadcastMode()){crowdStart(config.playerId?config.playerId:1,[this](const uint8_t* d,size_t n){++relayOut;if(relayOutgoing.size()<4096)relayOutgoing.emplace_back(d,d+n);});return;}
         mod::others::Link link;link.send=[this](uint64_t to2,const uint8_t* d,size_t n){++relayOut;if(othersOutgoing.size()<4096)othersOutgoing.push_back({to2,std::vector<uint8_t>(d,d+n)});};
         othersStart(config.playerId?config.playerId:1,std::move(link));
 #else
@@ -332,6 +357,9 @@ struct Runtime final:ds::Transport {
 #else
         if(fcntl(relaySocket,F_SETFL,O_NONBLOCK)<0)throw std::runtime_error("nonblocking relay UDP failed");
 #endif
+        if(broadcastMode()){
+            crowdStart(config.playerId,[this](const uint8_t* d,size_t n){++relayOut;::send(relaySocket,reinterpret_cast<const char*>(d),int(n),0);});
+            note(("RELAY "+config.relay+" as player "+std::to_string(config.playerId)+" (broadcast)\n").c_str());return;}
         ds::relay::ClientConfig rc;rc.id=config.playerId;rc.token=config.relayKey;rc.nickname=ds::relay::nicknameText(config.nickname)?config.nickname:std::string();
         relayClient=std::make_unique<ds::relay::Client>(rc,[this](const uint8_t* d,size_t n){::send(relaySocket,reinterpret_cast<const char*>(d),int(n),0);});
         mod::others::Link link;link.send=[this](uint64_t to2,const uint8_t* d,size_t n){if(relayClient&&relayClient->sendTo(to2,d,n))++relayOut;};
@@ -339,7 +367,28 @@ struct Runtime final:ds::Transport {
         note(("RELAY "+config.relay+" as player "+std::to_string(config.playerId)+"\n").c_str());
 #endif
     }
+    // Broadcast mode: the relay's datagrams for the client (the client itself ticks in crowd->tick, after this), and the
+    // notes. Where this porter is goes to the server from Crowd::local.
+    void crowdPoll(uint64_t now){
+#ifndef MOD_FAKE_NETWORK
+        for(unsigned budget=0;budget<256;++budget){
+            char raw[2048];int n=recv(relaySocket,raw,sizeof(raw),0);if(n<=0)break;
+            ++relayIn;crowd->receive(reinterpret_cast<const uint8_t*>(raw),size_t(n),now);
+        }
+#endif
+        auto& client=crowd->client();
+        if(client.online()!=relayOnline){relayOnline=client.online();
+            note(relayOnline?"RELAY online (broadcast)\n":client.refusal()==ds::broadcast::Refusal::Build?"RELAY refused this player: the server wants another build\n"
+                :client.refusal()!=ds::broadcast::Refusal::None?"RELAY refused this player\n":"RELAY offline: everybody near has left\n");}
+        if(now-relayNotedAt>=10000){relayNotedAt=now;auto& k=client.counters();std::ostringstream o;
+            o<<"RELAY broadcast "<<(relayOnline?"online":"offline")<<" near "<<client.nearby().size()<<" taken "<<crowd->size()<<" in "<<k.received<<" ("<<k.receivedBytes<<" bytes) out "<<k.sent<<" ("<<k.sentBytes
+             <<" bytes) frames "<<k.frames<<" accepted "<<k.accepted<<" refused "<<k.refused<<" unknown "<<k.unknown<<" malformed "<<k.malformed<<" fetches "<<k.fetches
+             <<" clock offset "<<std::lround(client.offsetMs())<<" ms rtt "<<std::lround(client.rttMs())<<" ms";
+            if(client.welcome().otherBuild)o<<" near with another build "<<client.welcome().otherBuild;
+            o<<"\n";note(o.str().c_str());}
+    }
     void relayPoll(uint64_t now){
+        if(crowd){crowdPoll(now);return;}
 #ifndef MOD_FAKE_NETWORK
         if(!relayClient)return;
         // Where this porter is: the relay decides from it who is near. No place while there is no pose (loading, cutscene).
@@ -363,6 +412,7 @@ struct Runtime final:ds::Transport {
 #endif
     }
     void relayStop(){
+        if(crowd){try{crowd->bye();}catch(...){}}
 #ifndef MOD_FAKE_NETWORK
         if(relayClient){try{relayClient->bye();}catch(...){}relayClient.reset();}
         if(relaySocket!=INVALID_SOCKET){closesocket(relaySocket);relaySocket=INVALID_SOCKET;}
@@ -3685,6 +3735,23 @@ MOD_API void mod_test_others_deliver(uint64_t from,const unsigned char* bytes,un
     auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
     r.othersReceived(from,bytes,size,mod::nowMs());
 }
+// Broadcast mode (crowd.h): the test is the relay socket. One datagram from the relay for the client, and the client's
+// next datagram for the relay (returns its size, 0 when there is nothing).
+MOD_API void mod_test_relay_deliver(const unsigned char* bytes,unsigned size) {
+    std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return;
+    auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
+    if(r.crowd&&bytes){++r.relayIn;r.crowd->receive(bytes,size,mod::nowMs());}
+}
+MOD_API unsigned mod_test_relay_drain(unsigned char* bytes,unsigned capacity) {
+    std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return 0;
+    auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
+    while(!r.relayOutgoing.empty()){
+        auto d=std::move(r.relayOutgoing.front());r.relayOutgoing.pop_front();
+        if(d.empty()||d.size()>capacity)continue;
+        memcpy(bytes,d.data(),d.size());return unsigned(d.size());
+    }
+    return 0;
+}
 MOD_API unsigned mod_test_others_drain(uint64_t* to,unsigned char* bytes,unsigned capacity) {
     std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return 0;
     auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
@@ -3775,7 +3842,7 @@ unsigned mod_status(char* out,unsigned cap) {
         o<<",\"pad\":{\"enabled\":"<<(r.config.virtualPad?"true":"false")<<",\"running\":"<<(r.padRunning?"true":"false")<<",\"calls\":"<<padShared.calls.load()<<",\"active_calls\":"<<padShared.active.load()<<"}";
         o<<",\"event\":"<<(r.inEvent?"true":"false")<<",\"cargo\":{\"sent\":"<<r.cargoSent<<",\"created\":"<<r.cargoMade<<",\"taken\":"<<r.cargoTaken<<",\"removed\":"<<r.cargoRemoved<<",\"shared\":"<<r.cargoSync.shared()<<",\"mirrored\":"<<r.cargoSync.mirrored()<<",\"structures_sent\":"<<r.structSent<<",\"structures_created\":"<<r.structMade<<",\"pending\":"<<(r.core?r.core->cargoPending():0)<<"}";
         {mod::others::Counters k;if(r.others)k=r.others->counters();
-         o<<",\"others\":{\"on\":"<<(r.others?"true":"false")<<",\"near\":"<<(r.others?r.others->size():0)<<",\"connected\":"<<(r.others?r.others->connected():0)
+         o<<",\"others\":{\"on\":"<<(r.others?"true":"false")<<",\"mode\":\""<<(r.crowd?"broadcast":"pairs")<<"\",\"near\":"<<(r.others?r.others->size():0)<<",\"connected\":"<<(r.others?r.others->connected():0)
           <<",\"bodies\":"<<(r.otherBodies?r.otherBodies->made():0)<<",\"shown\":"<<(r.otherBodies?r.otherBodies->driving():0)
           <<",\"sent\":"<<k.sent<<",\"received\":"<<k.received<<",\"accepted\":"<<k.accepted<<",\"refused\":"<<k.refused<<",\"unknown\":"<<k.unknown<<",\"malformed\":"<<k.malformed<<"}";
          o<<",\"labels_shown\":"<<(r.nameTags?r.nameTags->shown():0);

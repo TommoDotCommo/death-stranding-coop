@@ -22,6 +22,10 @@ struct Config {
     // double) or "own" (a Sam the mod makes; the double until it exists). Requires puppet_probe and an explicit role.
     std::string partner="off";
     std::string relay,relayKey;uint32_t relayAddress=0;uint16_t relayPort=0;uint64_t playerId=0;   // the relay for other players (core/relay.h); empty = none
+    // How other players travel through the relay: "pairs" (a presence-core session per player, the relay passing each
+    // pair's datagrams on: others.h) or "broadcast" (one client, the server copying each update to everybody near:
+    // core/broadcast.h, crowd.h). The server speaks both and never puts players of different modes near each other.
+    std::string relayMode="pairs";
     unsigned others=0;         // the most other players shown besides the partner, presence only (others.h); 0: off
     // What other players are shown with besides body, pose and name (others.h). Shown only: nothing of the world.
     bool othersGear=false;     // the gear each other player wears, copied onto that player's body (gear.h, Mirrors); not run live

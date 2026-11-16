@@ -8,7 +8,8 @@
 //
 // Three parts, all game-free:
 //   Body, Bodies   one more Sam and a keyed set of them (also what the lab command `crowd N` uses);
-//   Others         the sessions: who is here, what each one's core says, what to send them;
+//   Others         the sessions: who is here, what each one's core says, what to send them (the relay's pairs mode;
+//                  Players is what the mod asks of it, and of Crowd, crowd.h, the broadcast mode);
 //   wearers, carriers   who wears what and whose cases are drawn, for gear::Mirrors and stack::Stacks;
 //   MemoryHub      a link in memory that joins several Others, for tests.
 // Nothing here opens a socket. The datagrams travel through a Link the caller supplies (CORE.md, "Several peers").
@@ -170,10 +171,35 @@ struct Counters {
     uint64_t events=0;         // reliable events others do not take: acknowledged and dropped
     uint64_t gear=0,carried=0; // complete sets taken: what a player wears; what a player carries or where it sits
 };
-class Others {
+// What the mod asks of the other players, whichever way their datagrams travel: Others (below: the relay's pairs mode,
+// one presence-core session per player) or Crowd (crowd.h: the relay's broadcast mode, one client for everybody). The
+// bodies, labels, gear and cases (Bodies, plan, labels, wearers, carriers) take the Shown either one gives.
+class Players {
+public:
+    virtual ~Players()=default;
+    // local: before tick and frame of the same game-thread tick. tick: the network thread's pass. animation: this
+    // porter's controls (rose = the pulses since the previous call); true when any was sent. frame: every player as
+    // shown now, by id.
+    virtual void local(const Local&)=0;
+    virtual void tick(uint64_t nowMs)=0;
+    virtual bool animation(const ds::Animation&,uint64_t nowMs)=0;
+    // What this porter wears and carries, whenever the mod has read it again (nothing: the read failed); `placed` only
+    // on the passes that measured the places. Without Settings::gear / Settings::carry nothing is sent. Returns the
+    // events queued.
+    virtual size_t wears(const std::optional<gear::WornSet>&,uint64_t nowMs)=0;
+    virtual size_t carries(const std::optional<carry::Summary>&,const std::optional<std::vector<carryplace::Placed>>&,uint64_t nowMs)=0;
+    virtual std::optional<std::array<double,3>> here() const=0;   // this porter (wire axes)
+    virtual std::vector<Shown> frame(uint64_t nowMs)=0;
+    virtual void clear(uint64_t nowMs)=0;   // everybody leaves (the link went away)
+    virtual size_t size() const=0;          // the players taken (at most Settings::cap)
+    virtual size_t connected() const=0;     // of those, the ones heard from now
+    virtual const Counters& counters() const=0;
+    virtual const Settings& settings() const=0;
+};
+class Others final:public Players {
 public:
     Others(Settings,Link,std::function<uint64_t()> nonce,std::function<void(const std::string&)> log);
-    ~Others();
+    ~Others() override;
     Others(const Others&)=delete;Others& operator=(const Others&)=delete;
     // From the link. entered: false when refused (off, zero, this player's own id, already here, or full; a player
     // refused because it was full is taken when somebody leaves).
@@ -183,24 +209,24 @@ public:
     // From the mod. local: before tick and frame of the same game-thread tick. tick: handshakes, pings, presence and
     // names for every session. animation: this porter's controls (rose = the pulses since the previous call) to every
     // connected session at the core's rate; true when any was sent. frame: every player as shown now, by id.
-    void local(const Local&);
-    void tick(uint64_t nowMs);
-    bool animation(const ds::Animation&,uint64_t nowMs);
+    void local(const Local&) override;
+    void tick(uint64_t nowMs) override;
+    bool animation(const ds::Animation&,uint64_t nowMs) override;
     // What this porter wears and carries, whenever the mod has read it again (nothing: the read failed). Each session
     // sends it by the partner path's own rules (gear.h WornSender, carry_visual.h Sender, carry_place.h Sender: once
     // it has held still, on every new connection, not too often), as the same events. Without Settings::gear /
     // Settings::carry nothing is sent. `placed` is given on the passes that measured the places (nothing: not this
     // pass). Returns the events queued.
-    size_t wears(const std::optional<gear::WornSet>&,uint64_t nowMs);
-    size_t carries(const std::optional<carry::Summary>&,const std::optional<std::vector<carryplace::Placed>>&,uint64_t nowMs);
-    std::optional<std::array<double,3>> here() const {if(!local_.available)return std::nullopt;return local_.state.position;}   // this porter (wire axes)
-    std::vector<Shown> frame(uint64_t nowMs);
-    void clear(uint64_t nowMs);          // everybody leaves (the link went away)
-    size_t size() const {return sessions_.size();}
-    size_t connected() const;
+    size_t wears(const std::optional<gear::WornSet>&,uint64_t nowMs) override;
+    size_t carries(const std::optional<carry::Summary>&,const std::optional<std::vector<carryplace::Placed>>&,uint64_t nowMs) override;
+    std::optional<std::array<double,3>> here() const override {if(!local_.available)return std::nullopt;return local_.state.position;}   // this porter (wire axes)
+    std::vector<Shown> frame(uint64_t nowMs) override;
+    void clear(uint64_t nowMs) override; // everybody leaves (the link went away)
+    size_t size() const override {return sessions_.size();}
+    size_t connected() const override;
     bool here(uint64_t id) const {return sessions_.count(id)!=0;}
-    const Counters& counters() const {return counters_;}
-    const Settings& settings() const {return settings_;}
+    const Counters& counters() const override {return counters_;}
+    const Settings& settings() const override {return settings_;}
 private:
     struct Session;
     Settings settings_;Link link_;std::function<uint64_t()> nonce_;std::function<void(const std::string&)> log_;

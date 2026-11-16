@@ -132,6 +132,11 @@ int main() {
      assert(refused(r("\"relay\":\"127.0.0.1:8090\",\"player_id\":77")));                            // no key
      assert(refused(r("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"a b\",\"player_id\":77")));
      assert(refused(r("\"relay_key\":\"k\"")));
+     // How other players travel: pairs by default, or broadcast; nothing else, and only with a relay.
+     assert(c.relayMode=="pairs"&&mod::parseConfig(r("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":7,\"relay_mode\":\"pairs\"")).relayMode=="pairs");
+     assert(mod::parseConfig(r("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":7,\"relay_mode\":\"broadcast\"")).relayMode=="broadcast");
+     for(auto bad:{"\"fanout\"","\"Broadcast\"","\"\"","true","2"})assert(refused(r((std::string("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":7,\"relay_mode\":")+bad).c_str())));
+     assert(refused(r("\"relay_mode\":\"broadcast\"")));                                         // no relay
      assert(refused(withKeys(probe,"\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":77")));}   // others off
     // Group play: a config without `peer` has no partner; the players' own server is listed as `server`, and only a
     // listed address (or loopback, or the partner's) may be the relay or the online server.
