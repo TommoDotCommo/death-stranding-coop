@@ -63,8 +63,8 @@ Limits: 16 players, 4000 objects built here per player, 20000 objects held from 
 The real-time layer (players seeing and touching each other) is the presence core in `core/`. For more than two
 players its datagrams go through this server instead of over one direct link: every game says where its player is,
 the server works out who is near whom, tells both, and passes the core's datagrams on between players who are near
-each other and nobody else. It is off unless `--relay-port` is given. The game mod does not use it yet; the stand-in
-swarm below does.
+each other and nobody else. It is off unless `--relay-port` is given. The game mod uses it for group play (`relay`, `relay_mode` in
+`../mod/README.md`), and so does the stand-in swarm below.
 
 ```
 coop-world --port 8089 --relay-port 8090 [--relay-key TEXT] [--relay-enter 150] [--relay-leave 200]
@@ -95,7 +95,7 @@ the server holds to (`relay.h`):
 | ENTER and LEAVE are numbered and repeated until acknowledged | a lost ENTER would leave two players near each other unseen |
 | Caps: players, datagram size (1268 bytes), rate per player | one datagram in makes at most one DATA datagram out, and nothing to a sender without the key |
 
-Not done: the mod does not speak to the relay yet; the key travels in the clear (use loopback, a LAN or a VPN, as for
+Not done: the key travels in the clear (use loopback, a LAN or a VPN, as for
 the HTTP side); there is no cap on how many players may be near one player, so a crowd in one place means every pair
 exchanges datagrams; the relay and the HTTP side do not know each other's players (the player id in HELLO is whatever
 the game sends); IPv4 only.
@@ -153,7 +153,10 @@ datagrams); over loopback (`test_broadcast.py`) a player in a group of 16 with 8
 datagrams and 32 kB a second with a 600-byte budget. The relay stays one thread: it wakes for a datagram, for the next
 FRAME due, and four times a second.
 
-Not done (broadcast): the mod and `coop-swarm` do not speak it yet; nothing caps how many players are near one player,
+The mod speaks it with `"relay_mode": "broadcast"` (`../mod/README.md`, "The broadcast mode") and `coop-swarm` with
+`--mode broadcast`; live once on 2026-11-16 with two real games and 12 stand-ins (`../STATUS.md`, "Many players").
+
+Not done (broadcast): nothing caps how many players are near one player,
 so in a crowd within the full distance every player still receives every other's 20 updates a second (in fewer,
 larger datagrams); the shown state is not saved.
 

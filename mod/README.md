@@ -1243,7 +1243,7 @@ porter sends them is his pose, his name and his animation controls (not what he 
 partner path is not touched by any of it: with `others` at 0, or with no relay configured, no session exists and
 nothing is sent.
 
-### The broadcast mode (`relay_mode`; built and tested game-free, not run live)
+### The broadcast mode (`relay_mode`; live once, 2026-11-16)
 
 With `"relay_mode": "broadcast"` the same players reach each other through the server's broadcast mode (envelope
 version 2: `core/broadcast.h` and `core/broadcast_client.h`; the server's side is `world/relay.h`). The mod then runs no session
