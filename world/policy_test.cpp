@@ -219,7 +219,7 @@ static void saved(){
     {bool member=false,old=false;for(auto& i:r.playerList()){if(i.id==Bob)member=i.member;if(i.id==Ann)old=i.offerOld=="yes"&&i.offerBuilds=="no";}CHECK(member&&old);}
     // A world file from before the policy: friends, every object shared.
     {auto old=doc;old.set("format",1);old.erase("policy");json::Value objects=json::Value::array();
-     for(auto o:doc.get("objects").items()){o.erase("share");o.erase("remnant");o.erase("name");objects.push(o);}old.set("objects",objects);
+     for(auto o:doc.get("objects").items()){o.erase("share");o.erase("kept");o.erase("remnant");o.erase("name");objects.push(o);}old.set("objects",objects);
      World o([]{return std::string("fresh");});o.restore(old);
      CHECK(policyItems(o.policy())==policyItems(presetPolicy("friends"))&&o.policy().preset=="friends");
      CHECK(json::parse(o.call(bob,"findQpidObjects","{\"q\":226}",1).body).get("n").get("oa").items().size()==3);}
