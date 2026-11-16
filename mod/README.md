@@ -71,7 +71,7 @@ config names the server instead:
 | `relay_key` | the group's key, the one the server was started with; on a server that takes player keys, this player's relay token, which the launcher takes from the server just before the game starts (the same field, at most 32 letters and digits) |
 | `online_server` (group) | `http://SERVER:PORT/KEY/auth/ds`; on a server that takes player keys `http://SERVER:PORT/KEY/t/TICKET/auth/ds`, with the sign-in ticket the launcher took (good for 30 minutes until the game signs in). The mod passes the address on as it is |
 | `strand_notices`, `strand_token` | with `online_server`: lines in the game's info log about this player's builds on the server, read with the notice token the launcher took ("Strand notices", below); the launcher writes both |
-| `build_received` | with `online_server`: other players' structures that server hands the game are built at once, without the game's range and placement checks ("Received structures built", below); off by default, not run live in the mod |
+| `build_received` | with `online_server`: other players' structures that server hands the game are built at once, without the game's range and placement checks ("Received structures built", below); off by default; the scan built a served bridge live, the change to the game's request builder that keeps rain shelters is not run live yet |
 | `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
 | `show_others` | `"everyone"` (default), `"friends"` or `"nobody"`: who of the players near this player the server shows him (broadcast only, sent in every HELLO; `world/README.md`, "How many players one player sees"). The server's own record of his choice, set from the launcher, comes first; `friends` needs a server with player keys. Requires `relay_mode` `"broadcast"`. A server from before this refuses a HELLO with anything but everyone |
 | `slot` | still required (0..15), but no port is bound from it |
@@ -1974,7 +1974,7 @@ The mod then does three things in the game (`online.h`; addresses in `game_offse
 The log says `ONLINE server …`, `ONLINE sign-in asked` and each change of the login task, with `(signed in)` at the
 end. Game-free tests: the address rules and the asking logic, five mutants (`online_test.cpp`).
 
-### Received structures built (`build_received`, off by default; built without a game, not run live in the mod)
+### Received structures built (`build_received`, off by default; the scan live once, the request change not run live)
 
 The game makes another player's structure from the server's answer as a pending Net record and then holds it back:
 a bridge, safe house or jump stand is built only while the porter is at least 1 km from it, and every received
@@ -1982,42 +1982,60 @@ structure must pass the game's placement check, which (read statically) holds ot
 spacing than the porter's own. Live (2026-11-17, `game_offsets.md`, "Received structures built"): a served 30 m bridge stayed unbuilt
 with the porter 9 m and 1378 m from it, and served rain shelters were taken down within 1 to 3 s.
 
-With `"build_received": true` (needs `online_server`), while the game is signed in to the server the config names,
-the mod looks at the construction records on the game thread at every tick (at most 20 times a second) and, for each
-record the game has just made from that server's answer, writes one byte: object `+0xaa` gets 0x10 (skip the range
-test) and loses 0x20 (skip the placement check). The game then builds it itself. Live, the same byte written by a
-reader outside the game made a served bridge stand at once, with the flags of the received bridges the save already
-had.
+With `"build_received": true` (needs `online_server`) the mod does two things:
+
+- **The request change** (from the first frame; `game_offsets.md`, "Received structures kept from their first
+  frame"). Right after it points the game's sign-in address at the server, before it asks the game to sign in, the
+  mod changes two bytes of the game's code that builds a request for each object of a server's answer: the request
+  then keeps the defaults that make the record skip the range test (object `+0xaa` 0x10) and the placement check (no
+  0x20). The record is made with those flags and built in the frame it is made, like the save's received
+  structures. Needed because the game makes, walks and refuses a received rain shelter inside one frame, before any
+  tick of the mod. The mod checks the code is this build's before it writes (the builder's first bytes and the 0x28
+  bytes around the two), reads it back, puts it back if a write fails, and leaves it so for the run (answers only come
+  from the server the config names). Only requests built from an answer are affected: the porter's builds, the save,
+  the mod's copies of a partner's structures and roads come from other code.
+- **The scan.** While the game is signed in to that server, the mod looks at the construction records on the game
+  thread at every tick (at most 20 times a second) and, for each record the game has just made from that server's
+  answer, writes one byte: object `+0xaa` gets 0x10 (skip the range test) and loses 0x20 (skip the placement check).
+  The game then builds it itself. With the request change in place it finds nothing to do; it does the work alone when
+  the code differs. Live with the mod (2026-11-17, before the request change): the scan caught a served 30 m bridge
+  in state 0 and the game built it at once (state 2), unloaded it at 1.3 km and built it again on the way back; it
+  never saw a served rain shelter.
 
 **The trade-off.** The game's own placement check is skipped for received structures, so one may overlap a structure
 in your world: one of yours, one of the game's, or one another player built that your save already has. The server
 already spreads what it hands a game: two objects of one kind in one answer are at least `spread` metres apart (20
 by default; `../world/README.md`, "Which objects a game is handed"). It cannot know what stands in your world.
 
-What is changed: only records owned by another player (Net), in state 0, with `+0xaa` 0x20 set and 0x10 clear, not
+What the scan changes: only records owned by another player (Net), in state 0, with `+0xaa` 0x20 set and 0x10 clear, not
 marked for removal (`+0xaa` 0x40, `+0xab` bit 0) and with an online id. Left alone: the porter's own (Player) and the
 game's (Stage) records, the records of the save (they carry 0x10 already), what the game has refused or built, and
 the Net copies the mod makes of a partner's structures (no online id). Each record once, by record id and online id.
 The two flag bytes are read again just before the write, and nothing is written if they changed. Nothing without
 the option, without `online_server` or before the game is signed in.
 
-Log: `RECEIVED on` (and `RECEIVED off` when the sign-in goes), one `RECEIVED building <kind> <online id> (range and
-placement checks skipped): record N, type T, +0xaa 20 -> 10` per record, and `RECEIVED first scan: X ms` once.
-`mod_status` has `"received_structures": {on, built, skipped}` (skipped: chosen, then not written because the bytes had changed
-or the write failed).
+Log: `RECEIVED answer requests changed: ...` once (or `already changed`, or `not changed: the game's code differs` /
+`a write failed`, then `(the scan alone)`), `RECEIVED on` (and `RECEIVED off` when the sign-in goes), one `RECEIVED
+building <kind> <online id> (range and placement checks skipped): record N, type T, +0xaa 20 -> 10` per record the
+scan changes, and `RECEIVED first scan: X ms` once. `mod_status` has `"received_structures": {on, answers, built,
+skipped}` (answers: `patched`, `already`, `differs`, `failed` or `off`; skipped: chosen, then not written because the
+bytes had changed or the write failed).
 
 Cost: each tick copies the construction table once (640 slots of 0x710 bytes, about 1.1 MB, the copy the structure
 sync makes every 500 ms), reads 0x18 bytes of each record in state 0 and the online id of each candidate. Not
-measured in a game; the tick profiler logs the stage `received` when it takes over 1 ms.
+measured in a game; the tick profiler logs the stage `received` when it takes over 1 ms. The request change costs
+nothing per frame.
 
-Not known yet: whether the tick sees a served rain shelter before the walker refuses it (the tick runs at the message
-pump between the game's frames, so it never runs between the answer that makes a record and a walk in that same
-frame); whether a structure built this way stays after a load; what the game does with one that overlaps.
+Not known yet: whether a served rain shelter stands with the request change (the live check: a bridge and a shelter
+served with the option, both records in state 2, no `RECEIVED building` line); whether a structure built this way
+stays after a load; what the game does with one that overlaps.
 
 Tests: `received_test.cpp` over a fake process memory (the scan, what is changed and left alone, the one byte, once
-per record, a slot reused for another object, the bytes changed between the scan and the write, a failed write),
-mutants OPTION, SERVER, BUILT, PLAYER, SAVED, REMOVAL, ONLINE, ONCE, RECHECK (`test_game_thread_mutants.py
-received`); the config in `unit.cpp` (mutant CONFIG_RECEIVED).
+per record, a slot reused for another object, the bytes changed between the scan and the write, a failed write; the
+request change: the two bytes and nothing else, what the builder's stores then do to a request, run from the bytes
+themselves, already changed, code that differs, a failed or silent write put back), mutants OPTION, SERVER, BUILT,
+PLAYER, SAVED, REMOVAL, ONLINE, ONCE, RECHECK and EARLY_OPTION, PLACEMENT, RANGE, HOLD, IDENTITY, AGAIN, READBACK,
+ROLLBACK (`test_game_thread_mutants.py received`); the config in `unit.cpp` (mutant CONFIG_RECEIVED).
 
 ### The player's own strand (`own_strand.h`; a reader, not wired into the mod)
 

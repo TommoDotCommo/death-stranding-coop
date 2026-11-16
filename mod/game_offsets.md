@@ -5776,6 +5776,90 @@ such records on the game thread. Not yet run with the mod: whether its tick (up 
 pump between frames) sees a served rain shelter before the walker refuses it; whether a structure built this way
 stays after a load; what the game does with one that overlaps another structure.
 
+Later the same day, live with the mod: the tick caught a served 30 m bridge in state 0 and wrote the byte; it was
+built at once (state 2), unloaded at 1.3 km and built again on the way back. A served rain shelter, 200 m from any
+other shelter, was never seen by the tick nor by a reader outside the game polling every 50 ms: it was made and
+removed before either looked. The next section is why, and what the mod does about it.
+
+### Received structures kept from their first frame (2026-11-17, static)
+
+Read from the executable only (instruction by instruction; confidence high for the loads, stores and branches named).
+
+**Why no tick can get in first.** The construction manager's update (around `0x2cbac30`) calls, back to back,
+`0x2c88270`, the queue processor `0x2c85ce0` and the pending-list walker `0x2c87f20`. The queue processor makes a
+record from each queued request and right away (`0x2c8652e..0x2c86555`) asks `0x2c35fb0(object, 1, 0)`; when that
+passes it builds the record there (`0x2c6acf0(manager, object, 1, 0)`, state 1), otherwise the record goes to the
+pending list and the walker takes it in the same frame. So a received rain shelter (range threshold 50 m) is made,
+walked, refused by the placement check and marked for removal inside one frame whenever the porter is 50 m or more
+from it. A bridge survives to the next frame only because its range test (1000 m) holds it back, which is why the
+tick could catch the bridge and never the shelter.
+
+**Where the flags come from.** The builder of requests for a `findQpidObjects` answer is `0x2c5f850` (the slot at
+`0x3e094d8` of the construction manager's vtable that also holds the upload answer `0x2cce670`; one request per
+accepted object; the request is at `rbp-0x70`). It starts from the request constructor `0x277fde0`, whose defaults
+include `+0x625` = 1, `+0x629` = 0, `+0x62d` = 0 and `+0x63d` = 1, and then, at `0x2c601c0`:
+
+| Address | Bytes | Does |
+|---|---|---|
+| `0x2c601c0` | `c6 85 b3 05 00 00 00` | request `+0x623` = 0 |
+| `0x2c601c7` | `c6 85 b5 05 00 00 01` | request `+0x625` = 1 |
+| `0x2c601ce` | `c6 85 bd 05 00 00 01` | request `+0x62d` = 1 |
+| `0x2c601d5` | `0f b6 81 10 01 00 00` | `eax` = the answer's byte `+0x110` (0 for a download) |
+| `0x2c601dc` | `88 85 b9 05 00 00` | request `+0x629` = that byte |
+| `0x2c601e2` | `88 85 cd 05 00 00` | request `+0x63d` = that byte |
+
+Nothing after these, in the builder or in `0x2c32410` and the queue push `0x2c2acf0`, writes those request bytes. The
+record init `0x2c32760` turns them into object bits: `+0x625` into `+0xa9` bit 7 (`0x2c3295a`), `+0x63d` into `+0xaa`
+0x10 (`0x2c32996`), `+0x629` into `+0xaf` bit 7 (`0x2c329af`), `+0x62d` into `+0xaa` 0x20 (`0x2c32a7e`; cleared again
+for owner 0). `0x2c35fb0` refuses while `+0xaf` bit 7 is set (`cmp byte [rcx+0xaf],0; jl`, `0x2c36019`). The one place in the construction code (`0x2c20000..0x2d40000`) that
+clears it is `0x2c2a130`, the construction manager's vtable slot at `0x3e09550` (next to the answer builder's), which
+also adds the record's creator user id (`+0xb4`) to a list at manager `+0x410`/`+0x418`; when the online layer calls
+it was not read. The save loader (`0x2c9a149`)
+sets request `+0x63d` to 1 for the save's structures except one case, which is where the save's received structures
+get their 0x10.
+
+**What the three candidates would do.**
+
+- (a) Change the request: the two stores of the builder decide it, so two bytes of its code do it (below). Setting
+  the answer's byte `+0x110` instead (the answer check `0x34828dd..0x3482921` never does) would set `+0x629` with
+  `+0x63d`: the record would get `+0xaf` bit 7 and stay unbuilt until `0x2c2a130` clears it (when, unknown).
+- (b) Make the placement check `0x2c3ecb0` pass for Net records: it is shared with every placement (the walker for
+  all owners, and the build checks), so it needs new code to tell a server's record apart. Not taken.
+- (c) Run the mod's scan between the queue processor and the walker: a call-site hook at `0x2cbac43` (`call
+  0x2c87f20`) with a trampoline within 2 GB of the image, and mod code in the game's frame. The mod has no such hook;
+  it also comes too late for a record the queue processor builds or refuses itself. Not taken.
+
+**The change (mod option `build_received`, `mod/received.h`).** Two bytes, nothing else:
+
+- `0x2c601d4`: `01` -> `00`. Request `+0x62d` = 0: no `+0xaa` 0x20, no online placement check.
+- `0x2c601e4`: `cd` -> `b9`. The answer's byte is stored to `+0x629` a second time instead of to `+0x63d`, which keeps
+  the constructor's 1: `+0xaa` 0x10, no range test. `+0x629` keeps the answer's byte (0).
+
+The record is then made with `+0xaa` 0x10 set and 0x20 clear (the flags the live probe wrote from outside and the
+mod's scan writes), passes `0x2c35fb0(object, 1, 0)` in the queue processor on everything these bytes reach, and is
+built in the frame it is made, as the game builds the save's records of other players. The same request defaults
+are those of `CreateConstruction`, whose Net post, rain shelter, watchtower, zipline and 30 m bridge were built at
+once with `+0x645` clear ("What completes a structure"); the builder does not set `+0x645`. What else it affects:
+every request built from a `findQpidObjects` answer, and only those, so also a Player variant if a server ever handed
+the player his own object (live, the game failed those before making a record, and `world/` never hands them). Not
+affected: the porter's builds, `CreateConstruction` (the mod's copies of a partner's structures), the save's records,
+roads. Skipped for received structures, as for the save's: the spacing and the other placement rules, the walker's
+exclusion boxes and the "not in view" wait during a load; the walker's `+0xad |= 1`, `+0xaf &= ~4` for a Net record
+that passed the check does not happen, which leaves the bytes the save's received bridges have. Still applied: the
+answer check (counts, area, block list), the record limits, and the other conditions of `0x2c35fb0` (durability,
+`+0xae`, `+0xad`, the game-state bits, the Net safe house rule).
+
+Each byte is a single write, and either one alone gives a state the game makes itself (`+0x62d` 0 alone: no placement
+check, the range test waits; `+0x63d` 1 alone: the range test skipped, the placement check runs). The mod checks the
+builder's first nine bytes and the 0x28 bytes from `0x2c601c0` (unique in the executable) before it writes, reads them
+back after, and puts back what it wrote if a write fails. It writes them once, right after it points the sign-in
+address at the server and before it asks the game to sign in, so no answer is processed while they change.
+
+**Live probe still needed:** with the option, serve a 30 m bridge and a rain shelter near the porter: both records in
+state 2 within a second of the answer, `+0xaa` 0x10 without 0x20, `+0xaf` bit 7 clear, the elements Activated (state 2)
+in the area's first list, the log line `RECEIVED answer requests changed`, no `RECEIVED building` lines (the scan finds
+nothing to do), and the bytes at `0x2c601d4`/`0x2c601e4` read `00`/`b9`. Then out of range and back, and after a load.
+
 ### How an area's per-kind counts (`ct`) are made (2026-11-17, static)
 
 The count the game asks for, per kind and area, is `0x3497c50(manager 0x7c1abf0, area, kind, flag)` (the find
