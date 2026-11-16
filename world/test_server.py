@@ -104,7 +104,7 @@ with tempfile.TemporaryDirectory() as d:
         c.close()
     finally:
         p.kill();p.wait()
-    # Which objects a game is handed: the asked number, the newest first, none closer than 8 m to another of its kind, and
+    # Which objects a game is handed: the asked number, the newest first, none closer than 20 m to another of its kind, and
     # the same ones again when newer ones come, also after a restart (kept in the world file).
     curated=os.path.join(d,'curated.json');port=free_port();p=start(port,path=curated)
     try:
@@ -114,9 +114,9 @@ with tempfile.TemporaryDirectory() as d:
         grid=[build((i%4)*400,(i//4)*400) for i in range(16)]   # a 4 m grid, in centimetres
         time.sleep(1.1);newer=[build(100000,0),build(110000,0)]
         def ask():
-            answer=gate(bob,'findQpidObjects',{'q':226,'o':{'ct':{'e':4,'l':2}}})[1]['n']['oa'];return [o['id'] for o in answer],{o['id']:o['l'] for o in answer}
-        first,places=ask();assert len(first)==4 and set(newer)<=set(first) and len(set(first)&set(grid))==2,(first,newer)
-        assert all(math.dist(places[a],places[b])>=800 for a in first for b in first if a!=b),places
+            answer=gate(bob,'findQpidObjects',{'q':226,'o':{'ct':{'e':3,'l':2}}})[1]['n']['oa'];return [o['id'] for o in answer],{o['id']:o['l'] for o in answer}
+        first,places=ask();assert len(first)==3 and set(newer)<=set(first) and len(set(first)&set(grid))==1,(first,newer)   # one of a 12 m grid
+        assert all(math.dist(places[a],places[b])>=2000 for a in first for b in first if a!=b),places
         time.sleep(1.1);later=[build(200000,0),build(210000,0)]
         assert ask()[0]==first and not set(later)&set(ask()[0])
         c.close()
@@ -128,7 +128,7 @@ with tempfile.TemporaryDirectory() as d:
         c=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
         assert ask()[0]==first
         assert gate(ann,'deleteObject',{'id':first[0]})[0]==200
-        again=ask()[0];assert again[:3]==first[1:] and first[0] not in again and again[3] in later,again
+        again=ask()[0];assert again[:2]==first[1:] and first[0] not in again and again[2] in later,again
         c.close()
     finally:
         p.kill();p.wait()

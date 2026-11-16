@@ -63,18 +63,21 @@ static void builders(){
     CHECK(!has(pick(all,{{"e",8}},policy("friends")),id('e',20)));                         // newest first, no cap: Ann's
 }
 static void spread(){
-    // 40 cairns on a 4 m grid (what was seen live: the game failed the close ones); 8 m apart at least.
+    // What was measured live: the game asks for 5 cairns; of cairns on a 4 m grid it placed 1 in 5, 20 m apart 4 in 5.
+    // 40 cairns on a 4 m grid (28 x 16 m): two are handed, 20 m apart at least; three on a 4 m grid: one.
     std::vector<Candidate> all;
     for(int i=0;i<40;++i)all.push_back(object(id('e',i),"e",Ann,1000-i,0,(i%8)*4.0,(i/8)*4.0));
-    auto p=policy("friends");CHECK(p.spread==8);
-    auto got=pick(all,{{"e",5}},p);CHECK(got.size()==5);
+    auto p=policy("friends");CHECK(p.spread==20);
+    auto got=pick(all,{{"e",5}},p);CHECK(got.size()==2);
     std::map<std::string,const Candidate*> at;for(auto& c:all)at[c.id]=&c;
     double least=1e9;for(auto& a:got)for(auto& b:got)if(a!=b)least=std::min(least,std::hypot(at[a]->x-at[b]->x,at[a]->z-at[b]->z));
-    CHECK(least>=8);
+    CHECK(least>=20);
     CHECK(pick(all,{{"e",5}},policy("friends",{"spread=0"}))==(std::vector<std::string>{id('e',0),id('e',1),id('e',2),id('e',3),id('e',4)}));
-    CHECK(pick(all,{{"e",40}},p).size()==12);                                               // what a 28 x 16 m grid holds 8 m apart
+    CHECK(pick(all,{{"e",40}},p).size()==2&&pick(all,{{"e",40}},policy("friends",{"spread=8"})).size()==12);   // 12 fit 8 m apart
+    {std::vector<Candidate> three(all.begin(),all.begin()+3);CHECK(pick(three,{{"e",5}},p).size()==1);
+     std::vector<Candidate> apart;for(int i=0;i<5;++i)apart.push_back(object(id('e',i),"e",Ann,100+i,0,i*20.0));CHECK(pick(apart,{{"e",5}},p).size()==5);}
     // Exactly the spread apart is far enough; another kind beside it does not count; a place unknown is never too close.
-    std::vector<Candidate> few{object(id('e',1),"e",Ann,9,0,0),object(id('e',2),"e",Ann,8,0,8),object(id('e',3),"e",Ann,7,0,7.9),
+    std::vector<Candidate> few{object(id('e',1),"e",Ann,9,0,0),object(id('e',2),"e",Ann,8,0,20),object(id('e',3),"e",Ann,7,0,19.9),
                                object(id('l',1),"l",Ann,9,0,0.5),object(id('e',4),"e",Ann,6,0,0,0,false),object(id('e',5),"e",Ann,5,0,0,0,false)};
     CHECK((pick(few,{{"e",9},{"l",9}},p)==std::vector<std::string>{id('e',1),id('l',1),id('e',2),id('e',4),id('e',5)}));
 }
@@ -99,7 +102,7 @@ static void stable(){
     // Not handed twice, never more than asked, an id that is not there is dropped, and what is remembered is bounded.
     CHECK((pick(all,{{"e",1}},p,{id('e',0),id('e',0),id('x',5)})==std::vector<std::string>{id('e',0)}));
     {std::vector<Candidate> many;std::vector<std::string> before;
-     for(int i=0;i<int(MaxPicksPerArea)+50;++i){many.push_back(object(id('e',i),"e",Ann,i,0,i*10.0));before.push_back(id('e',i));}
+     for(int i=0;i<int(MaxPicksPerArea)+50;++i){many.push_back(object(id('e',i),"e",Ann,i,0,i*20.0));before.push_back(id('e',i));}
      auto r=curate(Me,226,nullptr,many,before,p);CHECK(r.handed.size()==MaxPicksPerArea+50&&r.remember.size()==MaxPicksPerArea&&r.remember[0]==id('e',0));}
 }
 // The same through the server: the game's call, the saved world, a world file from before, the bound per player.
@@ -118,11 +121,11 @@ struct Server {
 };
 static void server(){
     Server s;auto ann=s.signIn("steam-a","Ann"),bob=s.signIn("steam-b","Bob");
-    auto a1=s.make(ann,"e",0,100),a2=s.make(ann,"e",2000,101),a3=s.make(ann,"e",4000,102);
-    auto mine=s.make(bob,"e",6000,103);
+    auto a1=s.make(ann,"e",0,100),a2=s.make(ann,"e",5000,101),a3=s.make(ann,"e",10000,102);   // 50 m apart
+    auto mine=s.make(bob,"e",15000,103);
     auto first=s.found(bob,"{\"e\":2}");CHECK((first==std::vector<std::string>{a3,a2}));
     CHECK((s.found(ann,"{\"e\":5}")==std::vector<std::string>{mine}));
-    auto a4=s.make(ann,"e",8000,200),a5=s.make(ann,"e",2100,201);                          // newer: far away, and 1 m from a2
+    auto a4=s.make(ann,"e",20000,200),a5=s.make(ann,"e",5100,201);                          // newer: far away, and 1 m from a2
     CHECK(s.found(bob,"{\"e\":2}")==first);                                                  // the same two again
     CHECK((s.found(bob,"{\"e\":3}")==std::vector<std::string>{a3,a2,a4}));                   // the newest is too close to a2
     CHECK(s.w.call(ann,"deleteObject","{\"id\":\""+a2+"\"}",300).status==200);
@@ -130,7 +133,7 @@ static void server(){
     // Saved with the world, and the same answer after a restore; a world file from before has none and loads.
     auto doc=s.w.snapshot();CHECK(doc.get("picks").items().size()==2);
     {World r([]{return std::string("fresh");});r.restore(json::parse(doc.dump()));CHECK(r.snapshot().dump()==doc.dump());
-     CHECK(r.call(ann,"createObject","{\"t\":\"e\",\"q\":226,\"px\":20000,\"py\":0,\"pz\":0}",400).status==200);   // the newest, far away
+     CHECK(r.call(ann,"createObject","{\"t\":\"e\",\"q\":226,\"px\":30000,\"py\":0,\"pz\":0}",400).status==200);   // the newest, far away
      CHECK(s.found(r,bob,"{\"e\":3}")==after);}
     {auto old=json::parse(doc.dump());old.erase("picks");World o([]{return std::string("fresh");});CHECK(!throws([&]{o.restore(old);}));CHECK(o.snapshot().get("picks").items().empty());}
     auto broken=[&](const char* picks){auto d=json::parse(doc.dump());d.set("picks",json::parse(picks));World o([]{return std::string("fresh");});return throws([&]{o.restore(d);});};

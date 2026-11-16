@@ -519,7 +519,7 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `offer_old` | `yes`, `no` | no | no | no |
 | `order` | `newest`, `liked` | newest | newest | liked |
 | `per_builder` | objects of one builder per kind in one answer, 0 for none (up to 1000) | 0 | 0 | 3 |
-| `spread` | metres, 0 for off (up to 1000) | 8 | 8 | 8 |
+| `spread` | metres, 0 for off (up to 1000) | 20 | 20 | 20 |
 | `identity` | `none`, `keys` | none | none | keys |
 
 - `join`: recorded and shown, nothing more yet (there are no invitations).
@@ -787,8 +787,20 @@ held or waiting ("Server policy"). In this order:
    the game is handed objects it can place rather than ones it fails (0: off). An object without a position is never
    too close. A skipped object is not handed in that answer, even when nothing else is left.
 
-The right `spread` is not measured yet. The default, 8 m, comes from the one live result above (4 m apart: one of five
-placed); the game's own rule (per kind or not, the distance to the save's own structures, the ground) is unknown.
+Measured (2026-11-17, one real game, an Episode 3 save, area 226, where the game asks for 5 cairns; `coop-world` on
+loopback, a second player serving cairns on a grid, the game's own lists read from the process):
+
+| Cairns on the server | Handed | Activated | Fail |
+|---|---|---|---|
+| 40 on a 4 m grid (the server's `spread` 8) | 5 | 1 | 4 |
+| 3 on a 4 m grid | 1 (the server's spread left out the others) | | |
+| 5, 20 m apart | 5 | 4 | 1 |
+| 5, 40 m apart | | 4 | 1 |
+
+So the game fails cairns closer than somewhere between 8 and 20 m to each other, and `spread` is 20 m in every preset.
+One of five failed at 20 m and at 40 m alike; why is unknown (the ground there, or the save's own cairns, are
+candidates). Only cairns were measured; whether other kinds keep the same distance is unknown. A world file saved
+before keeps the value it was saved with (8): `coop-world policy --set spread=20` changes it.
 
 What a player was handed is remembered per player and area: what the answer held, then what was remembered before and
 is still there (a kind not asked this time, or the part of a kind beyond a smaller number, comes first again when it
@@ -844,18 +856,18 @@ player finds it.
 Which objects a game is handed: `curate_test.cpp` (the asked number of each kind for none, one, three and more than
 there are, a kind not asked, a negative number, no numbers at all; the asker's own, a kept one and another area left
 out; newest first, likes then newest, a friend first, and no friend first with `newest`; a builder capped at three
-while another builder fills the rest, and no cap; 40 cairns on a 4 m grid of which five are handed at least 8 m apart
-and twelve fit, `spread=0`, exactly 8 m, another kind beside one, objects without a position; the same objects again
+while another builder fills the rest, and no cap; 40 cairns on a 4 m grid of which two are handed, 20 m apart at least
+(twelve with `spread=8`), three on a 4 m grid of which one, five 20 m apart all five, `spread=0`, exactly 20 m, another kind beside one, objects without a position; the same objects again
 after newer and more liked ones came, one removed and one no longer shared replaced, fewer asked and a kind not asked
 still remembered, an id twice, 1050 objects with 1000 remembered; then through the server's calls: the same answer
 again, an object too close to a chosen one, a removed one replaced, the picks saved and the same answer from a
 restored world after a newer object came, a world file without picks, five that are refused, 148 areas of which the
 last 128 are kept). Nine mutants must fail it (`CURATE_OWN`, `CURATE_UNSHARED`, `CURATE_ORDER`, `CURATE_COUNTS`,
 `CURATE_UNSTABLE`, `CURATE_BUILDER_CAP`, `CURATE_SPREAD`, `CURATE_SAVE_LOST`, `CURATE_UNBOUNDED`). `test_server.py`
-builds 16 cairns on a 4 m grid and, a second later, two far away on a server on loopback: asked for four, the other
-player gets the two newer ones and two of the grid at least 8 m apart; two newer ones still do not change his answer,
-nor does a restart (the picks are in the world file); after one of the four is removed the other three stay and the
-newest takes its place.
+builds 16 cairns on a 4 m grid and, a second later, two far away on a server on loopback: asked for three, the other
+player gets the two newer ones and one of the grid, at least 20 m apart; two newer ones still do not change his
+answer, nor does a restart (the picks are in the world file); after one of the three is removed the other two stay and
+the newest takes its place.
 The launcher's API: `api_test.cpp` through the HTTP surface (the policy in words for the three presets and a changed
 setting; a key that has not signed in, made a player by its choices before its sign-in and the same player after it;
 fourteen bodies and six keys that are refused and leave the world as it was; a full world; a player's objects in every

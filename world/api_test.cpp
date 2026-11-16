@@ -43,7 +43,7 @@ static void policy(){
     Server solo("solo");solo.signIn("a","A");auto r=solo.doc(solo.get("policy"));
     CHECK(r.get("players").get("count").integer()==1&&r.get("players").get("limit").integer()==1&&r.get("settings").items()[5].get("text").string()=="One player only: a personal archive. It has 1 now.");
     for(const char* k:{"join","build","accept_offers","limit","withdrawal","players","offer_builds","offer_old","order","per_builder","spread","identity"})CHECK(settingText(k,"x",0).size()>20);
-    CHECK(qs[8].get("text").string().find("most liked")!=std::string::npos&&qs[9].get("text").string().find("At most 3 ")==0&&settings[10].get("text").string().find("8 m")!=std::string::npos);
+    CHECK(qs[8].get("text").string().find("most liked")!=std::string::npos&&qs[9].get("text").string().find("At most 3 ")==0&&settings[10].get("text").string().find("20 m")!=std::string::npos);
 }
 static void choices(){
     Server s("friends");

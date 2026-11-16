@@ -36,7 +36,7 @@ static void presets(){
     CHECK(f.build=="everyone"&&f.acceptOffers=="auto"&&f.limit==0&&f.withdrawal=="go"&&f.players==int64_t(MaxPlayers)&&f.offerBuilds=="yes"&&f.offerOld=="no");
     CHECK(s.build=="everyone"&&s.acceptOffers=="auto"&&s.limit==0&&s.withdrawal=="go"&&s.players==1);
     CHECK(p.build=="members"&&p.acceptOffers=="review"&&p.limit==200&&p.withdrawal=="stay"&&p.join=="open"&&p.offerOld=="no");
-    CHECK(f.order=="newest"&&f.perBuilder==0&&f.spread==8&&s.order=="newest"&&s.perBuilder==0&&s.spread==8&&p.order=="liked"&&p.perBuilder==3&&p.spread==8);
+    CHECK(f.order=="newest"&&f.perBuilder==0&&f.spread==20&&s.order=="newest"&&s.perBuilder==0&&s.spread==20&&p.order=="liked"&&p.perBuilder==3&&p.spread==20);
     {Policy c=f;for(const char* good:{"order=liked","per_builder=1000","spread=0","spread=1000"})CHECK(!throws([&]{setPolicy(c,good);}));
      CHECK(c.order=="liked"&&c.perBuilder==1000&&c.spread==1000);
      for(const char* wrong:{"order=best","order=","per_builder=-1","per_builder=1001","spread=-1","spread=1001","spread=8m"}){Policy before=c;CHECK(throws([&]{setPolicy(c,wrong);}));CHECK(policyItems(c)==policyItems(before));}}

@@ -5533,6 +5533,13 @@ Observed:
   placement rules failed them is unknown; how close they stood is the candidate. After the server deleted the
   activated cairn, the game kept it for at least 90 s: it asks for an area only when the area loads, and nothing
   tells it of a removal. What the server makes of this: `world/README.md`, "Which objects a game is handed".
+- How far apart (2026-11-17, live, one real game, Episode 3 save, area 226, the game asks `e` 5). Method: `coop-world`
+  on loopback, a second player serving cairns on a grid, the game's own lists of online objects read from the process
+  (the manager at `0x7c1abf0`, above). 40 cairns on a 4 m grid with the server's `spread` 8: 5 handed, 1 Activated, 4 Fail (as on 2026-11-16).
+  3 cairns on a 4 m grid: the server's spread handed only 1. 5 cairns 20 m apart: 5 handed, 4 Activated, 1 Fail.
+  5 cairns 40 m apart: 4 Activated, 1 Fail. Derived: the game fails cairns closer to each other than somewhere
+  between 8 and 20 m; the server's `spread` is now 20 m. Unknown: why one of five failed at 20 m and at 40 m alike
+  (the ground, or the save's own cairns nearby, are candidates), and whether other kinds keep the same distance.
 
 Derived: a served object does persist, and the game uploads what is built with the flag; ladders and cairns work
 both ways. Rain shelters are taken down by the receiving game after it has made them, with genuine upload data too;
