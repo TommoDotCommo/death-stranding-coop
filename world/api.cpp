@@ -34,11 +34,14 @@ std::string settingText(const std::string& key,const std::string& value,size_t p
                                  "At most "+value+" objects of one builder of each kind in what a game is handed at once.";
     if(key=="spread")return value=="0"?"Objects are handed however close together they stand.":
                             "An object closer than "+value+" m to one of its kind already handed is left out of that answer.";
+    if(key=="identity")return value=="keys"?"Players are known by the key their launcher made: nobody signs in, builds or withdraws in another player's name (the traffic is not encrypted).":
+                              "No player keys: whoever has the group's key can sign in or act as any player. For friends only.";
     return key+" "+value;
 }
-json::Value World::apiPolicy() const {
+json::Value World::apiPolicy(int64_t now) const {
     std::lock_guard<std::mutex> g(lock_);
     Value out=Value::object();out.set("format",1);out.set("server",serverId_);out.set("preset",policy_.preset);
+    out.set("time",now);out.set("owner",!owner_.empty());   // the server's clock, for a launcher whose clock is off
     Value players=Value::object();players.set("count",int64_t(players_.size()));players.set("limit",int64_t(std::min<int64_t>(int64_t(MaxPlayers),policy_.players)));out.set("players",players);
     auto items=policyItems(policy_),preset=policyItems(presetPolicy(policy_.preset));Value settings=Value::array();
     for(size_t i=0;i<items.size();++i){
@@ -84,6 +87,19 @@ json::Value World::apiMine(const std::string& key) const {
         list.push(v);}
     Value out=Value::object();out.set("format",1);out.set("player",id);out.set("objects",list);return out;
 }
+json::Value World::apiPlayers() const {
+    auto list=playerList();Value players=Value::array();
+    for(auto& i:list){Value v=Value::object();v.set("id",i.id);v.set("name",i.name);v.set("known",i.known);v.set("member",i.member);
+        v.set("offer_builds",i.offerBuilds);v.set("offer_old",i.offerOld);v.set("shared",int64_t(i.shared));v.set("waiting",int64_t(i.pending));
+        v.set("kept",int64_t(i.kept));v.set("held",int64_t(i.held));v.set("remnants",int64_t(i.remnants));v.set("imported",int64_t(i.imported));players.push(v);}
+    Value out=Value::object();out.set("format",1);out.set("players",players);return out;
+}
+json::Value World::apiWaiting() const {
+    auto list=waiting();Value items=Value::array();
+    for(auto& o:list){Value v=Value::object();v.set("id",o.id);v.set("creator",o.creator);v.set("name",o.name);v.set("type",o.type);v.set("kind",typeName(o.type));
+        v.set("area",o.area);v.set("updated",o.updated);v.set("held",o.held);v.set("waiting_for",o.forBuilder?"builder":"owner");items.push(v);}
+    Value out=Value::object();out.set("format",1);out.set("waiting",items);return out;
+}
 void World::apiChoices(const std::string& key,const std::string& offerBuilds,const std::string& offerOld){
 #ifndef MUTANT_API_STRICT
     if(!oneOf(offerBuilds,{"","yes","no","ask","default"}))bad("offer_builds is yes, no, ask or default");
@@ -104,36 +120,111 @@ void World::apiChoices(const std::string& key,const std::string& offerBuilds,con
     if(!offerOld.empty())p.offerOld=offerOld=="default"?"":offerOld;
     dirty_=true;++changes_;note("choices of "+p.id+": offer_builds "+(p.offerBuilds.empty()?"(server)":p.offerBuilds)+", offer_old "+(p.offerOld.empty()?"(server)":p.offerOld));
 }
-Reply launcherApi(World& w,const std::string& method,const std::string& call,const std::string& player,const std::string& body){
-    const bool read=call=="policy"||call=="me"||call=="mine",change=call=="choices"||call=="offer"||call=="withdraw";
-#ifndef MUTANT_API_METHOD
-    if((read&&method!="GET")||(change&&method!="POST")||(!read&&!change))return answer(404,"not found");   // a change is never a GET
-#else
+namespace {
+// One JSON object with exactly these fields, each text (or `flags` true, `lists` an array of text): checked before
+// anything changes. Empty `why`: the body is good.
+Value body(const std::string& text,const std::vector<std::string>& fields,std::string& why,const std::vector<std::string>& flags={},const std::vector<std::string>& lists={}){
+    Value in;
+    try{if(text.size()>MaxApiBody)bad("too long");in=json::parse(text);if(!in.isObject())bad("not an object");}
+    catch(const std::exception&){why="the body is a JSON object";return {};}
+    auto has=[](const std::vector<std::string>& v,const std::string& s){return std::find(v.begin(),v.end(),s)!=v.end();};
+    for(auto& m:in.members()){
+        if(!has(fields,m.first)&&!has(flags,m.first)&&!has(lists,m.first)){why="unknown field "+m.first;return {};}
+        if(has(flags,m.first)?m.second.kind()!=Value::Bool||!m.second.boolean():has(lists,m.first)?!m.second.isArray():!m.second.isString()){why=m.first+" is in the wrong form";return {};}
+        if(has(lists,m.first))for(auto& i:m.second.items())if(!i.isString()){why=m.first+" is a list of text";return {};}}
+    return in;
+}
+// The owner's calls (api.h): only with the owner's key.
+Reply ownerApi(World& w,const std::string& method,const std::string& call,const std::string& text,const std::string& signer){
+    const bool read=method=="GET"&&(call=="players"||call=="review"),change=method=="POST"&&(call=="review"||call=="remove-player"||call=="member"||call=="policy");
     if(!read&&!change)return answer(404,"not found");
+    if(signer.empty())return answer(401,"the owner's calls are signed with the owner's key");
+#ifndef MUTANT_API_OWNER
+    if(w.owner().empty()||signer!=w.owner())return answer(403,"only the owner's key does this");
 #endif
-    if(call=="policy")return ok(w.apiPolicy());
+    if(read)return ok(call=="players"?w.apiPlayers():w.apiWaiting());
+    std::string why;
+    try{
+        Value out=Value::object();
+        if(call=="review"){
+            Value in=body(text,{"accept","reject","accept_player"},why);if(!why.empty())return answer(400,why);
+            if(in.members().size()!=1)return answer(400,"name one: accept, reject or accept_player");
+            const auto& m=in.members().front();
+            if(m.first=="accept_player")out.set("accepted",int64_t(w.reviewPlayer(m.second.string())));
+            else out.set(m.first=="accept"?"accepted":"rejected",int64_t(w.review(m.second.string(),m.first=="accept")));
+            out.set("waiting",w.apiWaiting().get("waiting"));return ok(out);}
+        if(call=="remove-player"){
+            Value in=body(text,{"player"},why);if(!why.empty())return answer(400,why);
+            if(in.get("player").string().empty())return answer(400,"player: a player id");
+            out.set("removed",int64_t(w.removePlayer(in.get("player").string())));return ok(out);}
+        if(call=="member"){
+            Value in=body(text,{"player","member"},why);if(!why.empty())return answer(400,why);
+            const std::string member=in.get("member").string();
+            if(in.get("player").string().empty()||(member!="yes"&&member!="no"))return answer(400,"player and member (yes or no)");
+            w.setPlayer(in.get("player").string(),"member="+member);out.set("players",w.apiPlayers().get("players"));return ok(out);}
+        Value in=body(text,{"preset"},why,{},{"set"});if(!why.empty())return answer(400,why);
+        if(!in.has("preset")&&!in.has("set"))return answer(400,"name a preset, settings to set, or both");
+        Policy p;
+        try{p=in.has("preset")?presetPolicy(in.get("preset").string()):w.policy();for(auto& s:in.get("set").items())setPolicy(p,s.string());}
+        catch(const std::exception& e){return answer(400,e.what());}
+        w.setPolicy(p);return ok(w.apiPolicy());
+    }catch(const std::exception& e){return answer(403,e.what());}
+}
+}
+Reply launcherApi(World& w,const std::string& method,const std::string& call,const std::string& player,const std::string& text,const std::string& signer,int64_t now){
+    if(call.compare(0,6,"owner/")==0)return ownerApi(w,method,call.substr(6),text,signer);
+    const bool read=call=="policy"||call=="me"||call=="mine",change=call=="choices"||call=="offer"||call=="withdraw",pass=call=="ticket"||call=="relay-token";
+#ifndef MUTANT_API_METHOD
+    if((read&&method!="GET")||((change||pass)&&method!="POST")||(!read&&!change&&!pass))return answer(404,"not found");   // a change is never a GET
+#else
+    if(!read&&!change&&!pass)return answer(404,"not found");
+#endif
+    if(call=="policy")return ok(w.apiPolicy(now));
+    const bool keys=w.policy().identity=="keys";
+    // Who may act for `key`: under identity keys, or for a ticket or relay token, only a call signed with that key; a
+    // signed call only for its signer; an account of a key never by an unsigned call.
+    auto actor=[&](const std::string& key)->int{
+#ifndef MUTANT_API_UNSIGNED
+        if((keys||pass)&&signer.empty())return 401;
+#else
+        if(pass&&signer.empty())return 401;
+#endif
+#ifndef MUTANT_API_SIGNER_PLAYER
+        if(!signer.empty()&&key!=signer)return 403;
+#endif
+#ifndef MUTANT_IDENTITY_KEY_NAME
+        if(signer.empty()&&identity::accountIsKey(key))return 403;
+#endif
+        return 0;};
+    auto refusal=[&](int status){return answer(status,status==401?"this server takes signed calls from the launcher (identity keys)":"a call acts only for the player whose key signed it");};
     if(read){
 #ifndef MUTANT_API_KEY
         if(!accountKeyText(player))return answer(400,"player: the account key his game signs in with");
 #endif
+        if(int r=actor(player))return refusal(r);
         return ok(call=="me"?w.apiMe(player):w.apiMine(player));}
     // A change: one JSON object with exactly the fields of this call, all of them checked before anything changes.
     Value in;
-    try{if(body.size()>MaxApiBody)bad("too long");in=json::parse(body);if(!in.isObject())bad("not an object");}
+    try{if(text.size()>MaxApiBody)bad("too long");in=json::parse(text);if(!in.isObject())bad("not an object");}
     catch(const std::exception&){return answer(400,"the body is a JSON object");}
     const std::vector<std::string> fields=call=="choices"?std::vector<std::string>{"player","offer_builds","offer_old"}:
-                                          call=="offer"?std::vector<std::string>{"player","object","all","answer"}:std::vector<std::string>{"player","object","all"};
+                                          call=="offer"?std::vector<std::string>{"player","object","all","answer"}:pass?std::vector<std::string>{"player"}:std::vector<std::string>{"player","object","all"};
     for(auto& m:in.members()){
 #ifdef MUTANT_API_CHOICES_MEMBER
         if(m.first=="member")continue;
 #endif
-        if(std::find(fields.begin(),fields.end(),m.first)==fields.end())return answer(400,"unknown field "+m.first+" (member and the policy are the owner's: coop-world player-set, policy)");
+        if(std::find(fields.begin(),fields.end(),m.first)==fields.end())return answer(400,"unknown field "+m.first+" (member and the policy are the owner's: coop-world player-set, policy, or the owner's calls)");
         if(m.first=="all"?m.second.kind()!=Value::Bool||!m.second.boolean():!m.second.isString())return answer(400,m.first+(m.first=="all"?" is true":" is text"));}
     const std::string key=in.get("player").string();
 #ifndef MUTANT_API_KEY
     if(!accountKeyText(key))return answer(400,"player: the account key his game signs in with");
 #endif
+    if(int r=actor(key))return refusal(r);
     try{
+        if(pass){
+            if(call=="ticket")return ok(w.apiTicket(key,now));
+            identity::PublicKey k{};if(!identity::keyOf(key,k))return answer(403,"a relay token is for a player's key");
+            return ok(w.apiRelayToken(key,identity::relayId(k),now));}
         if(call=="choices"){
             w.apiChoices(key,in.get("offer_builds").string(),in.get("offer_old").string());
 #ifdef MUTANT_API_CHOICES_MEMBER

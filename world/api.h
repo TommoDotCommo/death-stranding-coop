@@ -7,14 +7,22 @@
 //   POST [/PREFIX]/coop/choices   {"player":KEY,"offer_builds":"yes|no|ask|default","offer_old":"yes|no|default"}
 //   POST [/PREFIX]/coop/offer     {"player":KEY,"object":ID} or {"player":KEY,"all":true}, and "answer":"no" to keep
 //   POST [/PREFIX]/coop/withdraw  {"player":KEY,"object":ID} or {"player":KEY,"all":true}
-// KEY is the account key his game signs in with: the NAME of a /k/NAME address, or the 64-bit Steam id. There is no
-// identity: whoever has the prefix can act for any player here, as he can sign in as any player today. The owner's
-// actions (policy, review, remove-player, member) are not here: they stay commands on the stopped server.
+//   POST [/PREFIX]/coop/ticket       {"player":KEY}   signed, identity keys: a sign-in ticket for his game (world.h)
+//   POST [/PREFIX]/coop/relay-token  {"player":KEY}   signed, identity keys: a relay token for his relay id (identity.h)
+// The owner's calls, signed with the owner's key (World::owner):
+//   GET  [/PREFIX]/coop/owner/players | owner/review                    every player; what waits or is held
+//   POST [/PREFIX]/coop/owner/review  {"accept":ID} | {"reject":ID} | {"accept_player":PLAYER-ID}
+//   POST [/PREFIX]/coop/owner/remove-player {"player":PLAYER-ID}     POST [/PREFIX]/coop/owner/member {"player":PLAYER-ID,"member":"yes|no"}
+//   POST [/PREFIX]/coop/owner/policy  {"preset":"friends|solo|public","set":["KEY=VALUE",...]} (one or both)
+// KEY is the account key his game signs in with: the NAME of a /k/NAME address, the 64-bit Steam id, or under identity
+// keys the account of his key (identity.h). Under identity none an unsigned call may act for any player (there is no
+// identity). A signed call (identity.h) acts for its signer only; under identity keys every call but the policy is
+// signed. `signer` is the account of the verified key ("" for an unsigned call; Front checks the signature).
 #include "world.h"
 namespace world {
 bool accountKeyText(const std::string&);    // 1..MaxKeyBytes letters, digits, '_', '-', '.'
 // `call` is what follows /coop/ ("policy"); `player` is the address's ?player= (decoded), for the two GET calls.
-Reply launcherApi(World&,const std::string& method,const std::string& call,const std::string& player,const std::string& body);
+Reply launcherApi(World&,const std::string& method,const std::string& call,const std::string& player,const std::string& body,const std::string& signer={},int64_t now=0);
 // One setting's value in words, for a player deciding whether to join (`players`: how many the world has now).
 std::string settingText(const std::string& key,const std::string& value,size_t players);
 }

@@ -25,7 +25,12 @@ Relay::Relay(RelayConfig c,Send send):config_(std::move(c)),send_(std::move(send
 }
 bool Relay::areNear(uint64_t a,uint64_t b) const {auto it=players_.find(a);return it!=players_.end()&&it->second.nearby.count(b)!=0;}
 // The same time for any token: no early exit on the first wrong byte.
-bool Relay::rightToken(const std::string& t) const {
+bool Relay::rightToken(const std::string& t,uint64_t id) const {
+#ifndef MUTANT_RELAY_ADMIT
+    if(config_.admit)return config_.admit(id,t);
+#else
+    (void)id;
+#endif
 #ifndef MUTANT_RELAY_NO_TOKEN
     unsigned char diff=0;
     for(size_t i=0;i<TokenBytes;++i)diff|=static_cast<unsigned char>((i<t.size()?t[i]:0)^(i<config_.token.size()?config_.token[i]:0));
@@ -79,7 +84,7 @@ void Relay::receive(const RelayAddress& from,const uint8_t* data,size_t size,uin
 #endif
         send_(d->second.address,out_.data(),out_.size());++stats_.forwarded;return;}
     case Type::Bye:
-        if(sender&&sender->id==m.bye.id&&rightToken(m.bye.token))remove(sender->id,"left");
+        if(sender&&sender->id==m.bye.id&&rightToken(m.bye.token,m.bye.id))remove(sender->id,"left");
         return;
     default:++stats_.malformed;return;   // the server's own message types are not for the server
     }
@@ -101,7 +106,7 @@ bool Relay::compatible(const Player& p,const Player& q) const {
     return true;
 }
 void Relay::hello(const RelayAddress& from,const Hello& h,uint64_t now,const bc::Hello* v2){
-    if(!rightToken(h.token)){++stats_.badToken;return;}
+    if(!rightToken(h.token,h.id)){++stats_.badToken;return;}
     uint16_t mode=v2?bc::Version:1;
     entered_.clear();
     auto it=players_.find(h.id);
@@ -265,7 +270,7 @@ void Relay::receiveBroadcast(const RelayAddress& from,Player* sender,const uint8
     case bc::Type::State:if(auto* p=from2(m.state.player))state(*p,m.state);return;
     case bc::Type::Fetch:if(auto* p=from2(m.fetch.player))fetch(*p,m.fetch.source,now);return;
     case bc::Type::Bye:
-        if(sender&&sender->id==m.bye.id&&rightToken(m.bye.token))remove(sender->id,"left");
+        if(sender&&sender->id==m.bye.id&&rightToken(m.bye.token,m.bye.id))remove(sender->id,"left");
         return;
     default:++stats_.malformed;return;   // the server's own message types are not for the server
     }

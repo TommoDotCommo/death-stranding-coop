@@ -15,11 +15,18 @@ build/curate-test: curate_test.cpp world.cpp world.h json.h | build
 LINK := link.cpp link.h
 build/link-test: link_test.cpp $(LINK) world.cpp world.h json.h | build
 	$(CXX) $(FLAGS) link_test.cpp link.cpp world.cpp -o $@
-API := api.cpp api.h
+# Players' keys (identity.h): Ed25519 and SHA-512 from the vendored Monocypher (../vendor/monocypher).
+MONO := ../vendor/monocypher/monocypher.c ../vendor/monocypher/monocypher-ed25519.c
+KEYS := identity.cpp identity.h signatures.cpp signatures.h $(MONO) ../vendor/monocypher/monocypher.h ../vendor/monocypher/monocypher-ed25519.h
+build/identity-test: identity_test.cpp $(KEYS) | build
+	$(CXX) $(FLAGS) identity_test.cpp identity.cpp signatures.cpp $(MONO) -o $@
+API := api.cpp api.h $(KEYS)
 build/front-test: front_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h | build
-	$(CXX) $(FLAGS) front_test.cpp front.cpp api.cpp link.cpp world.cpp -o $@
+	$(CXX) $(FLAGS) front_test.cpp front.cpp api.cpp link.cpp world.cpp identity.cpp signatures.cpp $(MONO) -o $@
 build/api-test: api_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h | build
-	$(CXX) $(FLAGS) api_test.cpp front.cpp api.cpp link.cpp world.cpp -o $@
+	$(CXX) $(FLAGS) api_test.cpp front.cpp api.cpp link.cpp world.cpp identity.cpp signatures.cpp $(MONO) -o $@
+build/keys-test: keys_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
+	$(CXX) $(FLAGS) keys_test.cpp front.cpp api.cpp link.cpp world.cpp identity.cpp signatures.cpp relay.cpp $(MONO) -o $@
 RELAY := relay.cpp relay.h ../core/relay.h ../core/broadcast.h
 build/relay-test: relay_test.cpp $(RELAY) | build
 	$(CXX) $(FLAGS) relay_test.cpp relay.cpp -o $@
@@ -28,20 +35,22 @@ PLAYER := ../core/broadcast_client.cpp ../core/broadcast_client.h ../core/core.c
 build/broadcast-test: broadcast_test.cpp $(RELAY) $(PLAYER) | build
 	$(CXX) $(FLAGS) broadcast_test.cpp relay.cpp ../core/broadcast_client.cpp ../core/core.cpp -o $@
 build/coop-world: main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
-	$(CXX) $(FLAGS) main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp -o $@
+	$(CXX) $(FLAGS) main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp identity.cpp signatures.cpp $(MONO) -o $@
 build/coop-world.exe: main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
-	$(MINGW) $(WINFLAGS) main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp -o $@ -lws2_32
+	$(MINGW) $(WINFLAGS) main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp identity.cpp signatures.cpp $(MONO) -o $@ -lws2_32 -lbcrypt
 # The swarm of stand-in players (mod/swarm.cpp) talks to the built server over real sockets.
 ../mod/build/coop-swarm: FORCE
 	$(MAKE) -C ../mod build/coop-swarm
 FORCE:
-test: build/world-test build/policy-test build/curate-test build/link-test build/front-test build/api-test build/relay-test build/broadcast-test build/coop-world ../mod/build/coop-swarm
+test: build/identity-test build/world-test build/policy-test build/curate-test build/link-test build/front-test build/api-test build/keys-test build/relay-test build/broadcast-test build/coop-world ../mod/build/coop-swarm
+	./build/identity-test
 	./build/world-test
 	./build/policy-test
 	./build/curate-test
 	./build/link-test
 	./build/front-test
 	./build/api-test
+	./build/keys-test
 	./build/relay-test
 	./build/broadcast-test
 	python3 -B test_server.py build/coop-world

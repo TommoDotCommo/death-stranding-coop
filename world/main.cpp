@@ -1,6 +1,6 @@
 // coop-world: the players' own server for the game's shared world (README.md). One process, one world file.
 //   coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] [--log events.log] [--trace calls.log]
-//              [--idle-exit SECONDS]
+//              [--idle-exit SECONDS] [--owner KEY]
 //              [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS]
 //               [--relay-players N] [--relay-rate N] [--broadcast-full METRES] [--broadcast-interval MS]
 //               [--broadcast-animation METRES] [--broadcast-budget BYTES] [--broadcast-flush MS] [--broadcast-rate N]
@@ -91,8 +91,10 @@ void serve(sock_t s,world::Front& front,world::World& w){
         catch(const std::exception& e){reply.status=500;reply.body="{}";line(std::string("error: ")+e.what());}
         save(w);
         if(!tracePath.empty()){
-            // Research aid: every call with its body. The sign-in ticket is left out; bodies can name other accounts.
+            // Research aid: every call with its body. The Steam ticket and a launcher's sign-in ticket are left out; bodies can
+            // name other accounts.
             auto target=r.target;if(auto code=target.find("code=");code!=std::string::npos)target.resize(code+5);
+            if(auto t=target.find("/t/");t!=std::string::npos){auto end=target.find('/',t+3);target.replace(t+3,(end==std::string::npos?target.size():end)-t-3,"<ticket>");}
             std::lock_guard<std::mutex> g(outLock);std::ofstream f(tracePath,std::ios::app);
             f<<nowSeconds()<<' '<<r.method<<' '<<target<<' '<<r.body.substr(0,4000)<<" -> "<<reply.status<<' '<<reply.body.substr(0,600)<<'\n';}
         std::string out="HTTP/1.1 "+std::to_string(reply.status)+" "+reason(reply.status)+"\r\nContent-Type: application/json\r\nContent-Length: "+std::to_string(reply.body.size())+"\r\n"+(close?"Connection: close\r\n":"")+"\r\n"+reply.body;
@@ -326,7 +328,7 @@ int main(int argc,char** argv){
     if(argc>1&&argv[1][0]!='-')return offline(argc,argv);
     std::string bind="127.0.0.1",prefix,relayKey;int port=0,relayPort=0;long idleExit=0;bool haveRelayKey=false;world::RelayConfig relayConfig;
     std::vector<world::LinkConfig> links;
-    std::string policyPreset;std::vector<std::string> policySets;
+    std::string policyPreset,owner;std::vector<std::string> policySets;
     auto link=[&](const std::string& option)->world::LinkConfig&{if(links.empty()){std::cerr<<option<<" comes after --link NAME\n";std::exit(2);}return links.back();};
     auto filter=[](const std::string& option,const std::string& text){
         try{return world::parseFilter(text);}catch(const std::exception& e){std::cerr<<option<<": "<<e.what()<<"\n";std::exit(2);}};
@@ -350,7 +352,8 @@ int main(int argc,char** argv){
         else if(a=="--link-export")link(a).exportFilter=filter(a,next());else if(a=="--link-import")link(a).importFilter=filter(a,next());
         else if(a=="--link-every")link(a).everySeconds=std::atoi(next().c_str());
         else if(a=="--policy")policyPreset=next();else if(a=="--policy-set")policySets.push_back(next());
-        else{std::cerr<<"usage: coop-world --port N [--bind ADDRESS] [--data FILE] [--prefix SECRET] [--log FILE] [--trace FILE] [--idle-exit SECONDS]\n"
+        else if(a=="--owner"){owner=world::identity::AccountPrefix+next();if(!world::identity::accountIsKey(owner)){std::cerr<<"--owner: the owner's public key, 64 hex digits\n";return 2;}}
+        else{std::cerr<<"usage: coop-world --port N [--bind ADDRESS] [--data FILE] [--prefix SECRET] [--log FILE] [--trace FILE] [--idle-exit SECONDS] [--owner KEY]\n"
                         "                  [--policy friends|solo|public] [--policy-set KEY=VALUE]...\n"
                         "                  [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS] [--relay-players N] [--relay-rate N]]\n"
                         "                   [--broadcast-full METRES] [--broadcast-interval MS] [--broadcast-animation METRES] [--broadcast-budget BYTES]\n"
@@ -384,6 +387,9 @@ int main(int argc,char** argv){
         if(existed)line("world loaded: "+std::to_string(w.objects())+" objects");
         if(!links.empty())save(w);}   // the id other servers know this world by is on disk before any of them hears it
     std::string policyNote;if(int r=startPolicy(w,policyPreset,policySets,newWorld,policyNote))return r;
+    // The owner's key (the host's launcher gives its own): his signed calls are the owner's actions (README, "Identity").
+    // Whoever starts the server with the world file is its owner, so a new key replaces the one the world had.
+    if(!owner.empty()&&owner!=w.owner()){w.setOwner(owner);save(w);}
     world::Front front(w,prefix,links);
     sockaddr_in address{};address.sin_family=AF_INET;address.sin_port=htons(uint16_t(port));
     if(inet_pton(AF_INET,bind.c_str(),&address.sin_addr)!=1){std::cerr<<"--bind needs a numeric IPv4 address\n";return 2;}
@@ -394,6 +400,8 @@ int main(int argc,char** argv){
         relayConfig.token=haveRelayKey?relayKey:prefix;
         if(relayConfig.token.empty()&&(ntohl(address.sin_addr.s_addr)>>24)!=127){std::cerr<<"the relay needs --relay-key (or --prefix) when it listens beyond loopback\n";return 2;}
         relayConfig.seed=std::random_device{}();
+        // Who may say HELLO for a player id: the group's key, or under identity keys a relay token of that player.
+        relayConfig.admit=[&w,key=relayConfig.token](uint64_t id,const std::string& token){return w.relayAdmit(id,token,key,nowSeconds());};
         try{world::Relay check(relayConfig,[](const world::RelayAddress&,const uint8_t*,size_t){});}
         catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 2;}
         sockaddr_in relayAddress=address;relayAddress.sin_port=htons(uint16_t(relayPort));
@@ -423,6 +431,7 @@ int main(int argc,char** argv){
     if(relayPort)line("coop-world relay speaks pairs and broadcast (every update within "+std::to_string(int(relayConfig.fullMetres))+" m, beyond it one in "+std::to_string(relayConfig.intervalMs)+" ms, animation within "
                       +std::to_string(int(relayConfig.animationMetres))+" m, frames of "+std::to_string(relayConfig.budget)+" bytes within "+std::to_string(relayConfig.flushMs)+" ms"+(relayConfig.pinBuild?", one build":"")+")");
     line(policyText(w.policy(),false)+policyNote);
+    if(!w.owner().empty())line("owner key "+w.owner().substr(8,16)+"... (signed calls of this key are the owner's)");
     while(true){
         sock_t s=accept(listener,nullptr,nullptr);
 #ifdef _WIN32

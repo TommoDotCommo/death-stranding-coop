@@ -11,7 +11,8 @@ static bool throws(const std::function<void()>& f){try{f();}catch(const std::exc
 struct Server {
     World w;
     explicit Server(const char* preset="friends",std::vector<const char*> settings={}):w([]{return "tok"+std::to_string(++counter);}){
-        Policy p=presetPolicy(preset);for(auto s:settings)setPolicy(p,s);w.setPolicy(p);}
+        // The sharing rules only: identity keys (the public preset's) is keys_test.cpp's.
+        Policy p=presetPolicy(preset);p.identity="none";for(auto s:settings)setPolicy(p,s);w.setPolicy(p);}
     std::string signIn(const std::string& key,const std::string& name){return json::parse(w.signIn(key,name,"g").body).get("session").get("token").string();}
     unsigned placed=0;   // every object 100 m from the others, so the spread setting leaves them all
     Reply build(const std::string& token,const char* type="l",int area=226,int64_t now=100){
@@ -46,7 +47,9 @@ static void presets(){
     CHECK(q.build=="members"&&q.join=="open"&&q.acceptOffers=="never"&&q.limit==4000&&q.players==16&&q.offerBuilds=="ask"&&q.offerOld=="yes");
     for(const char* wrong:{"","build","build=","build=all","limit=-1","limit=4001","limit=x","players=0","players=17","offer_builds=maybe","offer_old=ask","withdraw=go","colour=red","accept_offers=Auto"}){
         Policy before=q;CHECK(throws([&]{setPolicy(q,wrong);}));CHECK(policyItems(q)==policyItems(before));}
-    auto items=policyItems(p);CHECK(items.size()==11&&items[0].first=="join"&&items[3]==std::make_pair(std::string("limit"),std::string("200")));
+    auto items=policyItems(p);CHECK(items.size()==12&&items[0].first=="join"&&items[3]==std::make_pair(std::string("limit"),std::string("200"))&&items[11]==std::make_pair(std::string("identity"),std::string("keys")));
+    CHECK(f.identity=="none"&&s.identity=="none"&&p.identity=="keys");
+    {Policy c=f;CHECK(!throws([&]{setPolicy(c,"identity=keys");})&&c.identity=="keys");for(const char* wrong:{"identity=","identity=yes","identity=Keys"})CHECK(throws([&]{setPolicy(c,wrong);})&&c.identity=="keys");}
     CHECK(Server().w.policy().preset=="friends");
 }
 static void building(){

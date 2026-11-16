@@ -11,7 +11,8 @@ static unsigned counter=0;
 struct Server {
     World w;Front f;
     explicit Server(const char* preset="friends",std::vector<const char*> settings={}):w([]{return "tok"+std::to_string(++counter);}),f(w,"s3cret"){
-        Policy p=presetPolicy(preset);for(auto s:settings)setPolicy(p,s);w.setPolicy(p);}
+        // Identity none (the public preset's keys are keys_test.cpp's): unsigned calls act for any player.
+        Policy p=presetPolicy(preset);p.identity="none";for(auto s:settings)setPolicy(p,s);w.setPolicy(p);}
     Reply raw(const char* method,const std::string& target,const std::string& body=""){Request r;r.method=method;r.target=target;r.body=body;r.headers["host"]="10.0.0.2:8089";return f.handle(r,1);}
     Reply get(const std::string& call,const std::string& key=""){return raw("GET","/s3cret/coop/"+call+(key.empty()?"":"?player="+key));}
     Reply post(const std::string& call,const std::string& body){return raw("POST","/s3cret/coop/"+call,body);}
@@ -32,16 +33,16 @@ static void policy(){
     auto p=s.doc(s.get("policy"));
     CHECK(p.get("format").integer()==1&&p.get("server").string()==s.w.serverId()&&p.get("preset").string()=="friends");
     CHECK(p.get("players").get("count").integer()==0&&p.get("players").get("limit").integer()==16);
-    auto& settings=p.get("settings").items();CHECK(settings.size()==11);
+    auto& settings=p.get("settings").items();CHECK(settings.size()==12);
     for(auto& item:settings)CHECK(item.get("text").string().size()>20&&item.get("value").string()==item.get("preset").string());
-    CHECK(settings.size()==11&&settings[1].get("key").string()=="build"&&settings[1].get("text").string()=="What any player builds here may be shared with the others.");
+    CHECK(settings.size()==12&&settings[1].get("key").string()=="build"&&settings[1].get("text").string()=="What any player builds here may be shared with the others.");
     Server pub("public",{"limit=50"});
     auto q=pub.doc(pub.get("policy"));auto& qs=q.get("settings").items();
-    CHECK(q.get("preset").string()=="public"&&qs.size()==11&&qs[1].get("value").string()=="members"&&qs[3].get("value").string()=="50"&&qs[3].get("preset").string()=="200");
-    CHECK(qs.size()==11&&qs[3].get("text").string().find("At most 50 of your objects")==0&&qs[2].get("text").string().find("owner's review")!=std::string::npos&&qs[4].get("text").string().find("remnant")!=std::string::npos);
+    CHECK(q.get("preset").string()=="public"&&qs.size()==12&&qs[1].get("value").string()=="members"&&qs[3].get("value").string()=="50"&&qs[3].get("preset").string()=="200");
+    CHECK(qs.size()==12&&qs[3].get("text").string().find("At most 50 of your objects")==0&&qs[2].get("text").string().find("owner's review")!=std::string::npos&&qs[4].get("text").string().find("remnant")!=std::string::npos);
     Server solo("solo");solo.signIn("a","A");auto r=solo.doc(solo.get("policy"));
     CHECK(r.get("players").get("count").integer()==1&&r.get("players").get("limit").integer()==1&&r.get("settings").items()[5].get("text").string()=="One player only: a personal archive. It has 1 now.");
-    for(const char* k:{"join","build","accept_offers","limit","withdrawal","players","offer_builds","offer_old","order","per_builder","spread"})CHECK(settingText(k,"x",0).size()>20);
+    for(const char* k:{"join","build","accept_offers","limit","withdrawal","players","offer_builds","offer_old","order","per_builder","spread","identity"})CHECK(settingText(k,"x",0).size()>20);
     CHECK(qs[8].get("text").string().find("most liked")!=std::string::npos&&qs[9].get("text").string().find("At most 3 ")==0&&settings[10].get("text").string().find("8 m")!=std::string::npos);
 }
 static void choices(){
