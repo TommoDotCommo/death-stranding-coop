@@ -299,15 +299,15 @@ int main(int argc,char** argv){
     if(names){
         // The name every player near shows, read as the mod reads it: the whole set of name events of his state.
         std::map<uint64_t,std::string> shown;
-        for(auto& p:players)for(auto& near:p->client->nearby()){
-            if(shown.count(near.first))continue;
+        for(auto& p:players)for(auto& other:p->client->nearby()){
+            if(shown.count(other.first))continue;
             std::string name="(none)";
-            if(auto* b=p->client->state(near.first,ds::broadcast::StateKind::Name)){
+            if(auto* b=p->client->state(other.first,ds::broadcast::StateKind::Name)){
                 name="(not a name)";
                 if(auto events=mod::crowd::unpack(*b,mod::nametag::WireType)){
                     mod::nametag::Receiver r;
                     for(size_t i=0;i<events->size();++i)if(auto n=r.feed((*events)[i])){if(i+1==events->size())name=*n;break;}}}
-            shown[near.first]=name;}
+            shown[other.first]=name;}
         for(auto& [id,name]:shown)std::printf("SWARM name id=%llu \"%s\"\n",(unsigned long long)id,name.c_str());}
     {auto total=traffic();double span=std::max(1e-3,double(nowMs()-start)/1000)*count;
      std::printf("SWARM traffic mode=%s seconds=%.1f per player and second: in=%.1f in_bytes=%.0f out=%.1f out_bytes=%.0f heard=%.1f\n",mode.c_str(),double(nowMs()-start)/1000,
