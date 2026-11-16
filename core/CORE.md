@@ -555,6 +555,10 @@ asks because it saw it had missed a version. `broadcast.h` is header-only and ga
 `broadcast_client.h` and `.cpp` (`ds::broadcast::Client`), which uses the core's encoder, decoder and interpolation
 but no `Core`. Neither is used by the mod yet, and neither is in `build_id.py`'s manifest yet.
 
+Version 3 on the same port is spoken only between the relays of two linked servers (`world/presence.h`;
+`world/README.md`, "Presence across linked servers"); a game never sends or receives it, and a linked server's player
+reaches a game as an ordinary version 2 player.
+
 A player's HELLO says which version it speaks. The server speaks both and puts a player near only players of the same
 version, and in broadcast only players of the same game build and mod build (the HELLO carries both once; within one
 build nothing in the entries is checked against it again).
