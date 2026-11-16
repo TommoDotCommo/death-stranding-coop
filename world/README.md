@@ -47,7 +47,7 @@ loopback, a LAN or a VPN.
 |---|---|
 | `GET …/auth/ds?provider=steam&display_name=&code=TICKET` | the player (stable id per account) and a session: token and gateway address |
 | `…/gate/e/getVersion` | major 0, minor 12 (the game refuses anything else) |
-| `createObject`, `updateObject`, `deleteObject` | stored; the new id is the type letter and 12 characters (the game reads the kind from that letter); only the builder changes or removes an object; an upload the server policy does not allow is refused (403, "Server policy") |
+| `createObject`, `updateObject`, `deleteObject` | stored; the new id is the type letter and 12 characters (the game reads the kind from that letter); only the builder changes or removes an object; an upload the server policy does not let be shared is answered the same way and held for its builder ("Server policy"); over 4000 objects of one player, 403 |
 | `findQpidObjects` | the other players' objects in that area that every player is handed ("Server policy"), at most the asked number per type, never the asker's own |
 | `getQpidObjects`, `lookup`, `reverseLookup` | from the stored objects and players |
 | `sendLike`, `getLikeHistory` | a like is added to the object and to its builder's history (the last 2000 likes are kept); a player reads only his own history, after the time he names |
@@ -383,9 +383,13 @@ envelope) rather than sitting behind it, and nothing in a game uses the object s
 
 ## Server policy
 
-Who builds on a server, which of the uploads the other players are handed, and what becomes of a player's objects
-when he takes them back. Built and tested without a game (2026-11-16): no game has played on a server with a policy
-other than the friends preset yet.
+Which of the uploads the other players are handed, and what becomes of a player's objects when he takes them back.
+The rule behind it: a player's save is his own. A server cannot stop anyone building in his own world; it only
+decides what it shares. Built and tested without a game (2026-11-16), except one live check: a real game (an Episode 3
+save) on a server with `build=nobody`, when uploads were still refused, built a ladder, was answered 403 for its
+upload, did not ask again within 15 seconds, stayed up and had no fault. Whether it then took the ladder out of the
+player's own world is unknown, and a malformed answer is already known to make the game delete its upload, so an
+upload is no longer refused for the policy: it is answered as any other and held (below).
 
 For a player an object on the server is one of three: his own; another player's of this server; another player's
 from a linked server (an import: nobody here changes it, this server can only drop it). Every object records its
@@ -418,12 +422,14 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `offer_old` | `yes`, `no` | no | no | no |
 
 - `join`: recorded and shown, nothing more yet (there are no invitations).
-- `build`: who may upload. `members` are the players the owner marked (`player-set ... member=yes`); anyone else's
-  upload, and with `nobody` everyone's, is refused (403) and nothing is stored.
+- `build`: whose uploads are shared. `members` are the players the owner marked (`player-set ... member=yes`); anyone
+  else's upload, and with `nobody` everyone's, is **held**: answered as any other, stored for its builder and
+  handed to nobody else (the log names the reason).
 - `accept_offers`: what becomes of an upload its builder shares: `auto` every player is handed it, `review` it waits
   for the owner, `never` it is kept for its builder.
-- `limit`: a player's uploads beyond it are refused. It counts his objects built here in every state but remnants.
-  The hard cap of 4000 stays.
+- `limit`: a player's uploads beyond it are held. It counts what he shares and what waits; what is kept or held for
+  him, and remnants, do not count. The hard cap of 4000 objects of every kind a player stores here stays a refusal
+  (403): it protects the server's memory and disk.
 - `withdrawal`: what a player's withdrawal does to what he shared (below).
 - `players`: accounts beyond it are refused at sign-in; the ones the world has still sign in. Solo is a friends
   server for one player: a personal archive.
@@ -445,8 +451,13 @@ coop-world offer      --data world.json --player ID (--object ID | --all) [--no]
   (default no). Recorded only: the server cannot yet tell an old structure from a new one.
 - `default` goes back to the server's value. A change applies to uploads from then on.
 
-What is kept for its builder or waits is handed to him only (the game asks for his own objects by id; it never
-lists them): not to anyone else, by list or by id, no likes from others, and never to a linked server.
+What is kept or held for its builder, or waits, is handed to him only (the game asks for his own objects by id; it
+never lists them): not to anyone else, by list or by id, no likes from others, and never to a linked server.
+
+A **held** object is not his choice but the policy's (`build` or `limit`; `review` and `players` list how many and
+why). It is shared only once the policy allows it: when he is made a member, the limit is raised, or a withdrawal
+makes room. Then his `offer` shares it (as `accept_offers` says), or the owner's `review --accept` does (unless he
+chose `ask` and has not answered). While the reason holds, both are refused. `offer --no` makes it his own kept one.
 
 ### Review
 
@@ -456,8 +467,8 @@ coop-world review --data world.json [--accept ID | --reject ID | --accept-player
 
 Without an option it lists what waits, and for whom. `--accept` hands an object that waits for the owner to every
 player; `--reject` keeps it for its builder (it is not removed); `--accept-player` accepts everything of one player
-that waits for the owner. An object that waits for its builder's answer is not the owner's to answer. Under
-`ask` and `review` both, the builder's yes puts it before the owner.
+that waits for the owner, and every held one the policy now allows. An object that waits for its builder's answer
+is not the owner's to answer. Under `ask` and `review` both, the builder's yes puts it before the owner.
 
 ### Withdrawal
 
@@ -473,7 +484,7 @@ A player takes back what he built here (only his own, and never an import):
   given to linked servers with its builder's name. It is not handed back to its builder (his game has it in its
   save) and does not count for his limit.
 - `withdrawal=go` (friends and solo): it is removed for everyone.
-- Either way, what was never shared (kept for him, or waiting) is removed.
+- Either way, what was never shared (kept or held for him, or waiting) is removed.
 
 ### The owner removes a player's objects
 
@@ -495,8 +506,10 @@ What it holds to:
 
 | Rule | Why |
 |---|---|
-| What is kept or waits is handed to its builder only: not in a list, not by id, no likes, never to a linked server | a player's no, and the owner's review, are not undone by asking another way |
-| An upload that is not allowed (`build`, `limit`, `players`) is refused before anything is stored | a refused upload costs nothing |
+| What is kept, held or waits is handed to its builder only: not in a list, not by id, no likes, never to a linked server | a player's no, the policy and the owner's review are not undone by asking another way |
+| An upload the policy does not let be shared (`build`, `limit`) is answered as any other and held, never refused; only the hard cap of 4000 objects refuses (403) | a player's save is his own: the server decides what it shares, not what he builds, and a game that is refused may take its structure away |
+| A held object is shared only when the policy allows it at that moment; `offer` and `review` check `build` and `limit` again | neither the builder nor the owner gets round the policy by answering |
+| A new account beyond `players` is refused at sign-in (403) | a solo archive stays one player's |
 | An object that waits for its builder is answered by `offer` for him, one that waits for the owner by `review`; `offer` and `withdraw` take only that player's own objects built here | nobody answers for someone else, and an import changes only on its own server |
 | A remnant belongs to no account and its likes reach no one | a withdrawal is final for the builder too |
 | `remove-player` removes that builder's objects only | the other builders of the same linked server are not touched |
@@ -511,8 +524,10 @@ What it holds to:
 - Screens: the launcher does not show or set the policy or a player's choices yet, and the game cannot ask (it does
   not know of them). Today they are set with the commands above, on the server's PC, while the server is stopped.
 - `join` and `offer_old` are recorded only. There is no ban: `remove-player` does not stop anyone building again.
-- What a game does when its upload is refused (403) is unknown, and so is what it does when an object it had is no
-  longer handed to it (withdrawn with `go`, removed by the owner).
+- What a game does when its upload is refused (403) after it built the structure is not known in full: live, once,
+  it did not ask again and stayed up; whether it took the structure out of the player's world was not checked. The
+  policy no longer refuses uploads for that reason; the hard cap still does. Unknown too: what a game does when an
+  object it had is no longer handed to it (withdrawn with `go`, removed by the owner).
 - A setting that changes applies to uploads from then on: nothing stored changes its state.
 
 ## Tests
@@ -523,19 +538,25 @@ change by someone who is not the builder, an object handed back to its builder, 
 prefix and the bearer token.
 
 Server policy: `policy_test.cpp` (the three presets and fourteen settings that are refused; `build` nobody and
-members, the limit with a remnant that does not count, one player; the builder's id and name on every object;
+members and the limit: uploads answered in the game's shape and held, handed to nobody else and never exported,
+refused to `offer` and `review` while the reason holds and shared when it goes (a member, a higher limit, a
+withdrawal), a held one whose builder is to be asked first, waiting objects that count for the limit and kept ones
+that do not; one player; the builder's id and name on every object;
 `offer_builds` no, ask with its answer, and the server's default; kept objects that do not use up the number a
 player asks for; review, accept, reject, a whole player, never; withdrawal with stay and with go, a remnant nobody
 changes and whose likes reach nobody, keeping its name after its builder renamed himself; the owner removing a
 player and one of two builders from the same linked server; exports and link pages with nothing kept or waiting;
-the saved world, a world file from before the policy, and eight files that are refused). Sixteen mutants must fail
+the saved world, a world file from before the policy, and eleven files that are refused). Eighteen mutants must fail
 it (`POLICY_PLAYERS`, `POLICY_BUILD_NOBODY`, `POLICY_BUILD_MEMBERS`, `POLICY_LIMIT`, `POLICY_ASK`, `POLICY_REVIEW`,
 `POLICY_PENDING_SERVED`, `POLICY_OFFER_NO_SERVED`, `POLICY_REMNANT_CHANGE`, `POLICY_REMNANT_LIKES`, `POLICY_PLAYER_ANY`,
 `POLICY_WITHDRAW_STAY_REMOVES`, `POLICY_WITHDRAW_GO_KEEPS`, `POLICY_REMOVE_PLAYER_OTHERS`, `POLICY_EXPORT_PENDING`,
-`POLICY_SAVE_LOST`). `test_server.py` starts the built server as a public server on loopback: an upload waits, the
-other player is handed nothing, by list or by id, until `review --accept`, after a restart that keeps the preset;
-then `withdraw` leaves a remnant and `remove-player` takes it; three start options are refused, and eight command
-lines that are refused leave the file as it was.
+`POLICY_SAVE_LOST`, `POLICY_HELD_SERVED`, `POLICY_HELD_RELEASE`). `test_server.py` starts the built server as a
+public server on loopback: an upload waits, the other player is handed nothing, by list or by id, until
+`review --accept`, after a restart that keeps the preset; then `withdraw` leaves a remnant and `remove-player` takes
+it; three start options are refused, and eight command lines that are refused leave the file as it was. Then a
+server with `build=nobody`: the upload is answered 200 with an id of the game's shape, the other player is handed
+nothing, `offer` is refused while nobody builds, and after `policy --set build=everyone` and `offer --all` the other
+player finds it.
 
 Linked servers: `link_test.cpp` (every filter term on the giving and on the taking side; ids of the game's shape
 that differ from the original and are the same in every world; the same export twice; an id that collides with a
