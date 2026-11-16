@@ -75,6 +75,25 @@ Ports: UDP `49000 + slot`, so give the two players different slots (host 0, clie
 firewall. Windows asks once whether `ds.exe` may use the network; the launcher's lobby says whether Windows
 Firewall lets the game receive your partner's data.
 
+### A group on one server (built, not yet tried live)
+
+For more than two players nobody names a partner. One player hosts the group's server (`coop-world`: the shared
+world over HTTP and the relay for players who are near each other over UDP, [world/README.md](world/README.md)), and
+every player's game talks to that server and to nothing else. Everyone plays their own save.
+
+- **Host:** in the launcher's Settings turn on "Group server", then Play, Host a game, **Start group server and
+  play**. Send the group invite (`DSG-...`) shown there. Windows Firewall has to let `coop-world.exe` receive on the
+  server's port, TCP and UDP (49100 with the default settings).
+- **Everyone else:** Join a friend, paste the invite, **Join group**. There is no lobby: the game starts and meets
+  the others on the server. More players join the same way at any time.
+- By hand: a `mod.json` without `peer`, with `"server": "a.b.c.d"`, `relay`, `relay_key`, `player_id`, `others` and
+  `online_server` ([mod/README.md](mod/README.md), "Group play"), and the same address in the proxy's
+  `COOP_NETWORK_PEERS`. The copy can reach loopback and that address only, as before.
+
+Other players are shown as presence only (position, pose, name); cargo, structures made in the session, vehicles
+and the rest of the two-player layer are not shared with them. The key travels in the clear: use a LAN or a VPN.
+The launcher steps are in [launcher/README.md](launcher/README.md).
+
 When a session goes wrong, the launcher's About tab has **Save diagnostics for a bug report** (also
 `deathstranding-coop.exe --diagnostics`): one text file with the versions, the config and the ends of the logs,
 without the session code, invites or your Windows user name ([launcher/README.md](launcher/README.md)).

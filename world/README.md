@@ -24,7 +24,10 @@ coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] 
 - `--trace`: every call with its body, for research. Bodies name other accounts (the game looks up the Steam
   friends list); keep the file private. The sign-in ticket is never written.
 
-The launcher does all of this for a session when "Shared world" is on in its Settings (`launcher/README.md`). By
+The launcher does all of this for a session when "Shared world" is on in its Settings (`launcher/README.md`). For a
+group of more than two it starts the server with the relay as well ("Group server" in Settings): one port number for
+TCP and UDP (49100 + slot), one key for the path and the relay, `--bind 0.0.0.0`; every game then gets `server`,
+`relay`, `relay_key`, `player_id` and `online_server` (`mod/README.md`, "Group play"). Not run live. By
 hand, each copy of the game gets the address in its `mod.json` (`mod/README.md`, "A private online server"):
 
 ```
@@ -64,7 +67,8 @@ coop-world --port 8089 --relay-port 8090 [--relay-key TEXT] [--relay-enter 150] 
            [--relay-timeout 10] [--relay-players 64] [--relay-rate 200]
 ```
 
-- `--relay-port`: the UDP port, on the same `--bind` address as the rest (loopback by default; never all interfaces).
+- `--relay-port`: the UDP port, on the same `--bind` address as the rest (loopback by default). With `--bind 0.0.0.0`
+  both listen on every address of the PC, which the launcher's group server does, always with a key.
 - `--relay-key`: the group's secret (at most 32 letters, digits, `-` and `_`); every HELLO must carry it. Default: the
   `--prefix`. Beyond loopback the server does not start a relay without one.
 - `--relay-enter`, `--relay-leave`: two players become near at `enter` metres or closer and stay near until they are

@@ -87,12 +87,68 @@ the lobby packets and replaces the guest's own. Both launchers must be this vers
 What it gives today is small: ladders and cairns each player builds are stored and handed to the other game, which
 takes only the kinds its area still has room for (`../STATUS.md`).
 
+## A group on one server (experimental, off by default; built game-free, not run live)
+
+For more than two players there is no partner and no lobby: one player hosts the group's server, and every game
+talks to that server only (`../README.md`, "A group on one server"; `../mod/README.md`, "Group play"). Everyone plays
+their own co-op save. Near each other, players see each other (presence only, with names); the server also carries
+the game's own online layer as under "Shared world".
+
+**Host.** Settings, "Group server". Then Play, Host a game shows the group invite and **Start group server and
+play** instead of a lobby:
+
+1. The launcher makes the group's key once (a random nonzero 32-bit number, `group_secret` in `launcher.ini`), so
+   the invite stays good between sessions. Delete that line for a new key.
+2. It starts `coop-world.exe` (beside the launcher) with `--port P --bind 0.0.0.0 --prefix wKEY --data
+   world\world.json --idle-exit 21600 --relay-port P --relay-key wKEY`: the shared world on TCP port P and the relay on
+   UDP port P, P = 49100 + the slot of the port in Settings (49100 by default). A server already running keeps
+   serving; the second start leaves. It stops by itself six hours after the last player.
+3. It writes the host's `mod.json`: no `peer`, `server` `127.0.0.1`, `relay` `127.0.0.1:P`, `relay_key` `wKEY`,
+   `session` KEY, `player_id`, `others` 15, `partner_tag`, `online_server` `http://127.0.0.1:P/wKEY/auth/ds`, and
+   the play setup's `game_thread`, `puppet_probe`, `required`. The proxy's peer list is `127.0.0.1`.
+4. It starts the game as for any session. Nobody has to be there: friends join when they like.
+
+The host's Windows Firewall has to let `coop-world.exe` receive on port P, TCP and UDP (Windows asks when the
+server first listens). The launcher does not check or change that.
+
+**Joiner.** Join a friend, paste the group invite (the code, the join link or the `deathstranding-coop://` link; a
+copied one is offered from the clipboard), **Join group**:
+
+1. The launcher tries a TCP connection to the server port on every address in the invite, all at once for at most
+   1.5 s, and takes the first address in the invite's order (LAN before Tailscale) that answered. None: it says so
+   and starts nothing.
+2. It writes the joiner's `mod.json`: the same keys as the host's with that address as `server`, in `relay` and in
+   `online_server`, and the joiner's own `player_id`. The proxy's peer list is that one address.
+3. It starts the game. There is no Ready or Start and the host's launcher need not be open, only the server.
+
+A joiner on the host's own PC (two copies, one Steam account) reaches the server on loopback and signs in to the
+shared world under a name made from its player id (`/k/p<id>`).
+
+**The group invite** is `DSG-` followed by the same CRC-checked v1 payload as a lobby invite (`DS-`): the secret is
+the group's key, the port is the server's port P (49100 to 49114, TCP and UDP), the routes are the host's LAN and
+Tailscale addresses. A lobby invite still opens a two-player lobby as before. A launcher from before this change
+does not know the `DSG` prefix and does not take a group invite for a lobby (it reads the text as a host name and
+finds no host). Whoever has the invite can join; it is the only secret, and it travels in the clear (LAN or VPN).
+
+**The player number** (`player_id`, `launcher.ini`) is made once from 49 random bits of the system's generator (1 to
+562949953421312, inside the 15 digits the mod's config takes) and kept. It is not the Steam id and says nothing about
+the player; two installs have two numbers.
+
+Without the window, for tests (`--dev-direct --dev-start`, with `--prepare-only` to write the configuration only):
+`--group-host` hosts (key: `--dev-session N`, else the kept one), `--group-join DSG-...` joins by invite, and
+`--group-join A.B.C.D[:P]` joins a server by address with `--dev-session N` as the key, without the connection test.
+
+Limits today: 15 other players shown per game and 16 players in the shared world (`../world/README.md`); the
+two-player features (cargo, structures made in the session, vehicles, enemies, orders, rain) are not part of group
+play; no list of who is in the group, no way to leave except closing the game, no check of the host's firewall.
+
 ## Diagnostics for a bug report
 
 About → **Save diagnostics for a bug report** (or `deathstranding-coop.exe --diagnostics`, which shows no window)
 writes `diagnostics-<time>.txt` into the co-op data folder: the launcher version, the game folder and whether its
 executable is the supported build, which parts are installed, the mod config, the files in the data folder and the
-last lines of the newest mod, proxy and crash logs. The session code and invites are hidden, addresses other than
+last lines of the newest mod, proxy and crash logs. The session code, invites and a group's key (in the invite, the
+server address and the relay key) are hidden, addresses other than
 this PC's loopback keep only their first two numbers, and the Windows user name in paths becomes `<user>`. The
 report is at most 256 KiB and reads nothing outside the co-op data folder (never a save).
 
@@ -174,6 +230,15 @@ make -C launcher test   # production config round trip, DS codec/URIs, discovery
 make all               # mod, both proxies, launcher and Windows fixtures
 ```
 
+`test_group.py` (part of `make -C launcher test`) starts the built `coop-world` with exactly the command line the
+launcher makes for a group, signs in at the addresses the launcher writes for the host and for a joiner on the same
+PC (two players), and lets three stand-in players (`coop-swarm`) holding the key and session of the launcher's mod
+config meet through the relay; another key is not answered. Group mutants: `GROUP_PEER` (a two-player config
+written), `GROUP_PEERS` (the proxy lists the partner instead of the server), `GROUP_NO_RELAY`, `GROUP_KEY` (the
+games' key is not the server's), `GROUP_ID` (a player number the config refuses), `GROUP_ROUTE` (a route that did not
+answer), `GROUP_INVITE_KIND` (a group invite taken for a lobby invite), `GROUP_SAME_PC`, `DIAG_GROUP_KEY`; three of
+them must also fail the socket test.
+
 The kit's portable suites are vendored and reused (20,000 invite and 10,000
 discovery fuzz rounds). Mutants cover config role, lobby secret, backup links and
 running-game guard, output links, missing-config exit, ticket target/expiry/network, nested release/lab save roots,
@@ -189,7 +254,9 @@ python .\redirect\test_passthrough_windows.py --work-dir "<disposable fixture fo
 ```
 
 The first creates two loopback launchers, checks wrong-secret refusal, the save
-handoff (offer, fetch on Ready, Ready only after it is placed), Ready/Start and matching configs. The second is the kit's Windows adapter/socket suite. The
+handoff (offer, fetch on Ready, Ready only after it is placed), Ready/Start and matching configs, and for group play
+that a joiner takes the invite route whose server answers (a TCP listener stands in for the server; this part has
+not been run since it was added). The second is the kit's Windows adapter/socket suite. The
 third clears COOP_* and uses fake LOCALAPPDATA: release forwarding must survive
 without creating files; the missing-config-closes mutant must exit 125.
 
@@ -245,7 +312,9 @@ established by the portable tests or cross-build.
 
 ## Remaining standard work
 
-This is a launcher foundation, not full A–K compliance. Steam friend/lobby SDK
+Group play (above) is outside the standard's two-player lobby flow: it has no lobby, roster, ready state or
+discovery row, and its window parts (the Settings box, the invite on the Host page, Join group) were built without
+being seen on a screen. This is a launcher foundation, not full A–K compliance. Steam friend/lobby SDK
 integration, UPnP/NAT-PMP, a firewall fix (the status is checked), chat/voice, controller and
 Deck navigation, update UI, save metadata/slot management, recent-host
 rename/pin/forget, automatic lobby return after game exit, and in-game discovery

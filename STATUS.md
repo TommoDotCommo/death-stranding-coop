@@ -15,6 +15,7 @@ is going"). Measured against that:
 | Private strand server | `world/` exists; two copies sign in and exchange built objects (see the `online_server` rows below). Not everything is drawn or kept yet. |
 | Real-time layer | Works for exactly two players over one direct link, with one partner body. |
 | Many players | First live run (2026-11-16): one game on the relay showed 30 other players at once, each with a session and a body of its own (rows "Many Sams in one game" and "Other players through the relay" below). The other players were stand-ins; two or more real games seeing each other this way, their animation, names over heads, gear, uneven ground and the cost of many sessions are not done. |
+| Group play: config and launcher for many players on one server | Built game-free on 2026-11-16, not run live: a `mod.json` without `peer` (no partner; the server listed as `server`) and the launcher's group server and group invites (README, "A group on one server"). |
 | Linked servers | Not started. |
 | Story, order and reward sharing | Built as opt-in settings (rows below); no longer developed. |
 
