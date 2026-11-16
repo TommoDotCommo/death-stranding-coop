@@ -307,7 +307,7 @@ void Client::hostFight(const FightInfo& f,uint64_t now){
     if(visiting_)leaveFight();
     bool another=!hosting_||host_.fight!=f.fight;
     host_=f;hosting_=true;
-    if(another){visitors_=0;deliveredVersion_.clear();postVersion_=0;keepAt_=now;}
+    if(another){visitors_=0;deliveredVersion_.clear();keepAt_=now;}
     if(online_&&now>=keepAt_){sendFight(FightOp::Open);keepAt_=now+FightKeepMs;}}
 void Client::closeFight(){
     if(!hosting_)return;
@@ -317,7 +317,8 @@ bool Client::joinFight(uint64_t owner,uint32_t fight,uint64_t now){
     if(hosting_||!owner||owner==config_.id||!fight)return false;
     if(visiting_&&visitOwner_==owner&&visitFight_==fight)return true;
     if(visiting_)leaveFight();
-    visiting_=true;joined_=false;visitOwner_=owner;visitFight_=fight;postVersion_=0;deliveredVersion_.clear();
+    // The post versions go on from where they were: the server and the owner take each source's versions only forward.
+    visiting_=true;joined_=false;visitOwner_=owner;visitFight_=fight;deliveredVersion_.clear();
     joinAt_=now;if(online_){sendJoin(JoinOp::Join);joinAt_=now+FightJoinEveryMs;}
     return true;}
 void Client::leaveFight(){

@@ -103,6 +103,7 @@ public:
     void receive(const uint8_t*,size_t,uint64_t nowMs);
     void bye();                          // leaving: one BYE to the server; everybody near leaves
     const ds::broadcast::Client& client() const {return client_;}
+    ds::broadcast::Client& client() {return client_;}   // the fight channel (fights.h) is spoken through the same client
     size_t waiting() const {return waiting_.size();}
     // Players.
     void local(const others::Local&) override;

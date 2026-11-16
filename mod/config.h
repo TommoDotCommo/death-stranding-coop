@@ -30,6 +30,9 @@ struct Config {
     // list on the server) or "nobody". Sent in every HELLO; the server's record of his choice comes first.
     std::string showOthers="everyone";
     unsigned others=0;         // the most other players shown besides the partner, presence only (others.h); 0: off
+    // Fights with visitors (fights.h; broadcast only; not run live): a catcher fight in this game is offered to the
+    // players near (host_fights), and this game joins one it is offered as a visitor (join_fights).
+    bool hostFights=false,joinFights=false;
     // What other players are shown with besides body, pose and name (others.h). Shown only: nothing of the world.
     bool othersGear=false;     // the gear each other player wears, copied onto that player's body (gear.h, Mirrors); not run live
     unsigned othersCarry=0;    // with others_gear: the carried cases of the nearest N other players (cargo_stack.h, Stacks); 0: off; not run live

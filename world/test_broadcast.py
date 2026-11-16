@@ -85,7 +85,7 @@ p=subprocess.Popen([exe,'--port',str(port),'--relay-port',str(relay),'--prefix',
                     '--broadcast-animation',str(ANIMATION),'--broadcast-budget',str(BUDGET),'--broadcast-flush',str(FLUSH)],stdout=subprocess.PIPE,text=True)
 try:
     lines=[p.stdout.readline() for _ in range(3)]
-    assert 'speaks pairs and broadcast (every update within 30 m, beyond it one in 200 ms, animation within 50 m, frames of 600 bytes within 25 ms, at most the policy\'s near_cap players near shown to each (32 now))' in lines[2],lines
+    assert 'speaks pairs and broadcast (every update within 30 m, beyond it one in 200 ms, animation within 50 m, frames of 600 bytes within 25 ms, at most the policy\'s near_cap players near shown to each (32 now), fights with at most 9 visitors)' in lines[2],lines
     group=[Player(1000+i,(10*math.cos(i*math.pi/8),0,10*math.sin(i*math.pi/8)),relay) for i in range(16)]
     ring=[Player(2000+i,(80*math.cos(i*math.pi/4),0,80*math.sin(i*math.pi/4)),relay) for i in range(8)]
     apart=[Player(3000,(5000,0,0),relay),Player(3001,(5005,0,0),relay)]

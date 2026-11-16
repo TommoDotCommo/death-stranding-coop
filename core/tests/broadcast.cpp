@@ -474,6 +474,8 @@ static void fights(){
         // Refused (full): the visit ends too. Joined again, then silence: offline ends it as Gone.
         t.client.joinFight(5,23,t.now);status(t,5,23,FightStatus::Full);CHECK(!t.client.visitingOwner()&&t.client.takeFightNews().back().status.status==FightStatus::Full);
         t.client.joinFight(5,23,t.now);status(t,5,23,FightStatus::Joined);t.client.takeFightNews();
+        // The post versions go on from the last visit's: the server and the owner take a source's versions only forward.
+        CHECK(t.client.postFight({7}));p=t.take(Type::Post);CHECK(p.size()==2&&p[1].post.version==2&&p[1].post.fight==23);
         for(int i=0;i<12;++i){t.now+=500;t.client.tick(t.now);}
         news=t.client.takeFightNews();CHECK(!t.client.online()&&news.size()==1&&news[0].status.status==FightStatus::Gone&&!t.client.joined());
     }

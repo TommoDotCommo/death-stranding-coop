@@ -143,6 +143,15 @@ int main() {
      for(auto bad:{"\"all\"","\"Friends\"","\"\"","1"})assert(refused(r((std::string("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":7,\"relay_mode\":\"broadcast\",\"show_others\":")+bad).c_str())));
      assert(refused(r("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":7,\"show_others\":\"friends\"")));   // pairs
      assert(refused(r("\"show_others\":\"nobody\"")));                                         // no relay
+     // Fights with visitors: off by default; only in broadcast, with a relay, the game provider and the game thread.
+     assert(!c.hostFights&&!c.joinFights);
+     {auto b=r("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":7,\"relay_mode\":\"broadcast\",\"host_fights\":true,\"join_fights\":true");
+      auto f=mod::parseConfig(b);assert(f.hostFights&&f.joinFights);
+      assert(!mod::parseConfig(r("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":7,\"relay_mode\":\"broadcast\",\"join_fights\":true")).hostFights);}
+     for(auto key:{"host_fights","join_fights"}){
+         assert(refused(r((std::string("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":7,\"")+key+"\":true").c_str())));   // pairs
+         assert(refused(r((std::string("\"")+key+"\":true").c_str())));                                                                        // no relay
+         assert(refused(r((std::string("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":7,\"relay_mode\":\"broadcast\",\"")+key+"\":1").c_str())));}
      assert(refused(withKeys(probe,"\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":77")));}   // others off
     // Group play: a config without `peer` has no partner; the players' own server is listed as `server`, and only a
     // listed address (or loopback, or the partner's) may be the relay or the online server.

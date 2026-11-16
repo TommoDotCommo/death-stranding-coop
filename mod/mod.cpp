@@ -69,6 +69,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "structures.h"
 #include "others.h"
 #include "crowd.h"
+#include "fights.h"
 #include "../core/relay.h"
 #ifdef MOD_FAKE_NETWORK
 #include "fake_memory.h"
@@ -301,7 +302,7 @@ struct Runtime final:ds::Transport {
         crowd=made.get();others=std::move(made);
         note(("OTHERS ready (broadcast): up to "+std::to_string(config.others)+" other players"+(otherBodies?"\n":" (no bodies in this build)\n")).c_str());
     }
-    void othersStop(){if(!others)return;others->clear(mod::nowMs());pairs=nullptr;crowd=nullptr;others.reset();note("OTHERS stopped\n");}
+    void othersStop(){if(!others)return;others->clear(mod::nowMs());pairs=nullptr;crowd=nullptr;others.reset();fights.reset();note("OTHERS stopped\n");}
     // `now` is the network loop's time for this pass, the one its tick is given. A later reading here put a session's
     // last receive after the tick's time, and the core's timeout (then an unsigned difference) fired at once (live
     // 2026-11-16: sessions dropped and reconnected all the time). The core no longer does that (CORE.md, "times out
@@ -1944,15 +1945,17 @@ struct Runtime final:ds::Transport {
         if(here){auto p=mod::puppet::transform(anchor.pose).position;at={double(p[0]),double(p[1]),double(p[2])};}
         auto gazers=mod::bts::readGazers(*sampler,sampler->base);auto fights=mod::bts::readFights(*sampler,sampler->base);
         bool send=core->connected()&&partnerMode();
+        bool visiting=fightVisiting();   // the catcher fight here is a visited one (fights.h): not this world's to share
         // One health bar for the two games' catchers: first what this game's lost since the last look goes out, then
         // what the partner's lost is taken off here.
         auto catchers=fights.active>0?mod::bts::readCatchers(*sampler,sampler->base):std::vector<mod::bts::Catcher>{};
         for(auto& h:healthSync.observe(catchers)){
-            if(!send)continue;
+            if(!send||visiting)continue;
             ds::CargoEvent e;e.type=mod::bts::WireType;e.item=mod::bts::CatcherHurt;e.ref=h.ordinal;e.position={double(h.percent),0,0};core->queueCargo(e);++btSent;
             std::ostringstream o;o<<"BT catcher "<<h.ordinal<<" lost "<<h.percent<<" % here -> partner\n";note(o.str().c_str());
         }
         for(auto& e:btIn){
+            if(visiting&&e.item!=mod::bts::GazerDead)continue;
             if(e.item==mod::bts::CatcherHurt){
                 mod::bts::HealthSync::Hurt h{uint32_t(e.ref),float(e.position[0])};
                 if(auto next=healthSync.applied(catchers,h)){btHurt(catchers[h.ordinal],*next);catchers[h.ordinal].percent=*next;++btApplied;
@@ -1987,10 +1990,51 @@ struct Runtime final:ds::Transport {
         }
         if(!fightSync.resting(now))btQuietTold=false;
         for(auto w:fightSync.observe(fights,now)){
-            if(!send||!here)continue;
+            if(!send||!here||visiting)continue;
             ds::CargoEvent e;e.type=mod::bts::WireType;e.item=w;e.position=at;core->queueCargo(e);++btSent;
             note(w==mod::bts::FightOn?"BT a catcher fight runs here -> partner\n":"BT a catcher fight ended here with the area cleared -> partner\n");
         }
+    }
+    // Fights with visitors (fights.h): config host_fights, join_fights, over the broadcast client's fight channel. Five
+    // looks a second at this game's catcher fight (gazers only while owning or visiting one).
+    std::unique_ptr<mod::fights::Fights> fights;uint64_t fightsReadAt=0;bool fightsTold=false;
+#ifdef MOD_FAKE_NETWORK
+    mod::fights::Sandbox fakeBts;   // the fake world's catcher manager, gazers and porter (mod_test_bts_*)
+#endif
+    // While this game visits a fight (or still runs the copy it showed), its catcher fight is not its own: none of it
+    // goes to the partner, and the partner's fight news is not applied to it (tickBts).
+    bool fightVisiting() const {return fights&&(fights->role()==mod::fights::Role::Visitor||fights->shown());}
+    void tickFights(uint64_t now){
+#ifndef MOD_MUTANT_FIGHT_SETTINGS
+        if(!crowd||!sampler||!(config.hostFights||config.joinFights))return;
+#else
+        if(!crowd||!sampler)return;
+#endif
+        if(!fights){
+            mod::fights::Api api;
+#ifdef MOD_FAKE_NETWORK
+            api=fakeBts.api();
+#else
+            try{api.command=mod::bts::nativeCatcher(*sampler);api.hurt=mod::bts::nativeHurt(*sampler);api.destroy=mod::bts::nativeDestroy(*sampler);}
+            catch(const std::exception& e){if(!fightsTold){fightsTold=true;note((std::string("FIGHT unavailable: ")+e.what()+"\n").c_str());}return;}
+#endif
+            mod::fights::Settings s;s.host=config.hostFights;s.join=config.joinFights;
+#ifdef MOD_MUTANT_FIGHT_SETTINGS
+            s.host=s.join=true;
+#endif
+            fights=std::make_unique<mod::fights::Fights>(s,std::move(api),[this](const std::string& row){note(row.c_str());});
+            note((std::string("FIGHT ready:")+(s.host?" hosts fights":"")+(s.join?" joins fights":"")+"\n").c_str());}
+        if(now<fightsReadAt+200)return;
+        fightsReadAt=now;
+        std::array<double,3> at{cache.local.position[0],cache.local.position[1],cache.local.position[2]};bool available=cache.available&&!cache.gated;
+#ifdef MOD_FAKE_NETWORK
+        auto l=fakeBts.local(at,available);
+#else
+        mod::fights::Local l;l.fights=mod::bts::readFights(*sampler,sampler->base);l.at=at;l.available=available;l.dead=vitalsSeen.dead;l.caught=vitalsSeen.caught;
+        if(l.fights.active>0)l.catchers=mod::bts::readCatchers(*sampler,sampler->base);
+        if(fights->role()!=mod::fights::Role::None)l.gazers=mod::bts::readGazers(*sampler,sampler->base);
+#endif
+        fights->tick(l,crowd->client(),now);
     }
     // Shared MULEs (enemies.h): opt-in share_enemies. Each look sends the MULEs this player's game saw go down and
     // puts down the ones the partner reports, with the game's own defeat function.
@@ -3141,6 +3185,7 @@ struct Runtime final:ds::Transport {
             if(gameContext)tickMuleGoto(now);
             stage="bts";stages.enter("bts",mod::nowUs());
             if(twin&&gameContext)tickBts(now);
+            if(gameContext)tickFights(now);
             if(twin&&gameContext)tickVoidouts(now);
             stage="roads";stages.enter("roads",mod::nowUs());
             if(twin&&gameContext)tickRoads(now);
@@ -3786,6 +3831,13 @@ MOD_API unsigned mod_test_relay_drain(unsigned char* bytes,unsigned capacity) {
     }
     return 0;
 }
+// The fake world's BTs (fights.h Sandbox): a catcher fight that starts or ends by itself, this porter's own hits, gazers.
+MOD_API void mod_test_bts_start(unsigned catchers) {std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);r.fakeBts.start(catchers);}
+MOD_API void mod_test_bts_hit(unsigned ordinal,float percent) {std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);r.fakeBts.hit(ordinal,percent);}
+MOD_API void mod_test_bts_end(int cleared) {std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);r.fakeBts.end(cleared!=0);}
+MOD_API void mod_test_bts_gazer(uint64_t key,float life) {std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);r.fakeBts.gazer(key,life);}
+MOD_API void mod_test_bts_kill(uint64_t key) {std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);r.fakeBts.kill(key);}
+MOD_API float mod_test_bts_gazer_life(uint64_t key) {std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return -1;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);return r.fakeBts.life(key);}
 MOD_API unsigned mod_test_others_drain(uint64_t* to,unsigned char* bytes,unsigned capacity) {
     std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return 0;
     auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
@@ -3886,6 +3938,13 @@ unsigned mod_status(char* out,unsigned cap) {
          o<<"},\"sets\":"<<k.gear<<"},\"cases_shown\":{\"cases\":"<<(r.stacks?r.stacks->shown():0)<<",\"by\":{";
          if(r.stacks){bool first=true;for(auto key:r.stacks->keys()){o<<(first?"":",")<<"\""<<key<<"\":"<<r.stacks->shown(key);first=false;}}
          o<<"},\"sets\":"<<k.carried<<",\"dropped_events\":"<<k.events<<"}";}
+        {mod::fights::Counters k;if(r.fights)k=r.fights->counters();auto role=r.fights?r.fights->role():mod::fights::Role::None;
+         o<<",\"fights\":{\"on\":"<<(r.fights?"true":"false")<<",\"role\":\""<<(role==mod::fights::Role::Owner?"owner":role==mod::fights::Role::Visitor?"visitor":"none")
+          <<"\",\"owner\":"<<(r.fights?r.fights->owner():0)<<",\"fight\":"<<(r.fights?r.fights->fight():0)<<",\"joined\":"<<(r.fights&&r.fights->joined()?"true":"false")
+          <<",\"shown\":"<<(r.fights&&r.fights->shown()?"true":"false")<<",\"visitors\":"<<(r.crowd?unsigned(r.crowd->client().visitors()):0u)
+          <<",\"hosted\":"<<k.hosted<<",\"visits\":"<<k.joined<<",\"released\":"<<k.released<<",\"states\":"<<k.states<<",\"reports\":"<<k.reports
+          <<",\"states_taken\":"<<k.statesTaken<<",\"reports_taken\":"<<k.reportsTaken<<",\"damage_applied\":"<<k.damageApplied<<",\"gazers_applied\":"<<k.gazersApplied
+          <<",\"kills_taken\":"<<k.killsTaken<<",\"kills_refused\":"<<k.killsRefused<<",\"own_first\":"<<k.ownFirst<<",\"commands\":"<<k.commands<<",\"writes\":"<<k.writes<<"}";}
         {mod::strand::Poller::Counters k;if(r.strandPoller)k=r.strandPoller->counters();
          o<<",\"strand\":{\"on\":"<<(r.strandPoller?"true":"false")<<",\"reads\":"<<k.reads<<",\"answers\":"<<k.answers<<",\"failures\":"<<k.failures<<",\"told\":"<<k.told
           <<",\"known\":"<<k.known<<",\"refused\":"<<(k.refused?"true":"false")<<",\"pending\":"<<(r.notices?r.notices->pending():0)<<"}";}
@@ -3901,7 +3960,13 @@ unsigned mod_status(char* out,unsigned cap) {
              o<<(first?"":",")<<"{\"helper\":\""<<x.helper<<"\",\"visible\":"<<(x.visible?"true":"false")<<",\"at\":["<<pose.position[0]<<","<<pose.position[1]<<","<<pose.position[2]<<"]}";first=false;}
          o<<"],\"pieces_orphaned\":"<<r.fakeOrphaned<<",\"cases\":[";first=true;
          for(auto& [id,x]:r.fakeCases){o<<(first?"":",")<<"{\"item\":"<<x.item<<",\"at\":["<<x.at[0]<<","<<x.at[1]<<","<<x.at[2]<<"]}";first=false;}
-         o<<"]";}
+         o<<"]";
+         // The fake world's catcher manager and gazers, and everything the mod did to them.
+         auto& b=r.fakeBts;o<<",\"fake_bts\":{\"active\":"<<(b.active()?"true":"false")<<",\"cleared\":"<<b.cleared()<<",\"lives\":[";first=true;
+         for(float l:b.lives()){o<<(first?"":",")<<l;first=false;}
+         o<<"],\"commands\":[";first=true;for(auto c:b.commands){o<<(first?"":",")<<int(c);first=false;}
+         o<<"],\"writes\":"<<b.writes<<",\"unkillable\":"<<b.unkillable<<",\"destroyed\":[";first=true;for(auto k:b.destroyed){o<<(first?"":",")<<k;first=false;}
+         o<<"]}";}
 #endif
         o<<",\"carry\":{\"enabled\":"<<(r.config.carryVisual?"true":"false")<<",\"events_sent\":"<<r.carrySent<<",\"shown_entries\":"<<r.carry.view().shown().size()<<"}";   // ds3
         o<<",\"double\":{\"stage\":\""<<(r.twin?r.twin->name():"disabled")<<"\",\"mode\":\""<<(r.twinMode==Runtime::TwinMode::Echo?"echo":r.twinMode==Runtime::TwinMode::Lead?"lead":r.twinMode==Runtime::TwinMode::Peer?"peer":r.twinMode==Runtime::TwinMode::Own?"own":"none")<<"\",\"entity\":"<<(r.twin?r.twin->entity():0)<<"}";
