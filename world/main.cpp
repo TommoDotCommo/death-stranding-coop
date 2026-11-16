@@ -11,6 +11,7 @@
 //   coop-world import  --data world.json --in FILE [--filter FILTER] [--prune]
 //   coop-world forget  --data world.json --server ID
 //   coop-world origins --data world.json
+//   coop-world policy|players|player-set|offer|withdraw|remove-player|review --data world.json ...   (README, "Server policy")
 // Plain HTTP/1.1 with keep-alive, one thread per connection, bounded sizes. It only answers, except for the linked
 // servers it was given an address for (--link-url): those it asks for objects, and nothing else is ever connected to.
 // With --relay-port it is also the relay of the real-time layer (relay.h): one UDP socket on the same address, one thread.
@@ -174,9 +175,87 @@ const char* OfflineUsage="usage: coop-world export  --data FILE --out FILE [--fi
                          "       coop-world import  --data FILE --in FILE [--filter FILTER] [--prune]\n"
                          "       coop-world forget  --data FILE --server ID\n"
                          "       coop-world origins --data FILE\n"
+                         "       coop-world policy        --data FILE [--preset friends|solo|public] [--set KEY=VALUE]...\n"
+                         "       coop-world players       --data FILE\n"
+                         "       coop-world player-set    --data FILE --player ID KEY=VALUE...   (offer_builds=yes|no|ask|default offer_old=yes|no|default member=yes|no)\n"
+                         "       coop-world offer         --data FILE --player ID (--object ID | --all) [--no]\n"
+                         "       coop-world withdraw      --data FILE --player ID (--object ID | --all)\n"
+                         "       coop-world remove-player --data FILE --player ID\n"
+                         "       coop-world review        --data FILE [--accept ID | --reject ID | --accept-player ID]\n"
                          "FILTER: all, none, or terms separated by ';': types=l,rope,e  owners=NAME,ID  areas=226  max-age=30d  likes=no  imported=yes\n";
+// The server policy (README, "Server policy"): one line for the log, or a table; the preset's value where it differs.
+std::string policyText(const world::Policy& p,bool table){
+    auto items=world::policyItems(p),preset=world::policyItems(world::presetPolicy(p.preset));
+    std::string out=table?"server policy, preset "+p.preset+"\n":"policy "+p.preset+":";
+    for(size_t i=0;i<items.size();++i){
+        std::string differs=items[i].second==preset[i].second?"":" (preset: "+preset[i].second+")";
+        if(table)out+="  "+items[i].first+std::string(15-items[i].first.size(),' ')+items[i].second+differs+"\n";
+        else out+=std::string(i?",":"")+" "+items[i].first+" "+items[i].second+differs;}
+    if(table)out+="join and offer_old are recorded only; offer_builds and offer_old are what a player who chose nothing has (coop-world players)\n";
+    return out;
+}
+// The policy commands on a world file (README, "Server policy"): -1 when argv[1] is not one of them.
+int policyCommand(int argc,char** argv){
+    const std::string command=argv[1];
+    if(command!="policy"&&command!="players"&&command!="player-set"&&command!="offer"&&command!="withdraw"&&command!="remove-player"&&command!="review")return -1;
+    std::string preset,player,object,accept,reject,acceptPlayer;std::vector<std::string> sets;bool all=false,no=false;
+    for(int i=2;i<argc;++i){
+        std::string a=argv[i];auto next=[&]{if(i+1>=argc){std::cerr<<"missing value for "<<a<<"\n";std::exit(2);}return std::string(argv[++i]);};
+        if(a=="--data")dataPath=next();else if(a=="--preset")preset=next();else if(a=="--set")sets.push_back(next());else if(a=="--player")player=next();
+        else if(a=="--object")object=next();else if(a=="--all")all=true;else if(a=="--no")no=true;
+        else if(a=="--accept")accept=next();else if(a=="--reject")reject=next();else if(a=="--accept-player")acceptPlayer=next();
+        else if(command=="player-set"&&a.find('=')!=std::string::npos&&a.compare(0,2,"--")!=0)sets.push_back(a);
+        else{std::cerr<<OfflineUsage;return 2;}}
+    const bool needsPlayer=command=="player-set"||command=="offer"||command=="withdraw"||command=="remove-player";
+    const bool choosesObject=command=="offer"||command=="withdraw";
+    bool fits=!dataPath.empty()&&needsPlayer==!player.empty()&&(command=="policy"||preset.empty())&&(command=="policy"||command=="player-set"||sets.empty())
+              &&(command=="player-set"?!sets.empty():true)&&(choosesObject?object.empty()==all:(object.empty()&&!all))&&(command=="offer"||!no)
+              &&(command=="review"||(accept.empty()&&reject.empty()&&acceptPlayer.empty()))&&(!accept.empty())+(!reject.empty())+(!acceptPlayer.empty())<=1;
+    if(!fits){std::cerr<<OfflineUsage;return 2;}
+    world::World w;
+    if(command=="policy"&&!preset.empty()&&!std::ifstream(dataPath,std::ios::binary).good()){if(loadWorld(w,false))return 1;}   // a new world, made with its policy
+    else if(loadWorld(w,true))return 1;
+    try{
+        if(command=="policy"){
+            if(!preset.empty()||!sets.empty()){
+                world::Policy p=preset.empty()?w.policy():world::presetPolicy(preset);
+                for(auto& s:sets)world::setPolicy(p,s);
+                w.setPolicy(p);save(w);}
+            std::cout<<policyText(w.policy(),true);return 0;}
+        if(command=="players"){
+            auto p=w.policy();
+            for(auto& i:w.playerList()){
+                if(!i.known){std::cout<<i.id<<"  "<<i.name<<"  from linked servers: "<<i.imported<<" objects\n";continue;}
+                std::cout<<i.id<<"  "<<i.name<<"  shared "<<i.shared<<", waiting "<<i.pending<<", kept "<<i.kept<<", remnants "<<i.remnants
+                         <<(i.imported?", from linked servers "+std::to_string(i.imported):std::string())<<(i.member?"  member":"")
+                         <<"  offer_builds "<<(i.offerBuilds.empty()?p.offerBuilds+" (server)":i.offerBuilds)<<"  offer_old "<<(i.offerOld.empty()?p.offerOld+" (server)":i.offerOld)<<"\n";}
+            return 0;}
+        if(command=="player-set"){for(auto& s:sets)w.setPlayer(player,s);save(w);std::cout<<"set for "<<player<<"\n";return 0;}
+        if(command=="offer"){auto n=w.offer(player,object,!no);save(w);std::cout<<(no?"kept for its builder: ":"offered: ")<<n<<" objects of "<<player<<"\n";return 0;}
+        if(command=="withdraw"){auto r=w.withdraw(player,object);save(w);std::cout<<"withdrawn for "<<player<<": "<<r.remnants<<" stay as remnants, "<<r.removed<<" removed\n";return 0;}
+        if(command=="remove-player"){auto n=w.removePlayer(player);save(w);std::cout<<"removed "<<n<<" objects of "<<player<<"\n";return 0;}
+        if(!accept.empty()||!reject.empty()){w.review(accept.empty()?reject:accept,!accept.empty());save(w);std::cout<<(accept.empty()?"rejected (kept for its builder) ":"accepted ")<<(accept.empty()?reject:accept)<<"\n";return 0;}
+        if(!acceptPlayer.empty()){auto n=w.reviewPlayer(acceptPlayer);save(w);std::cout<<"accepted "<<n<<" objects of "<<acceptPlayer<<"\n";return 0;}
+        auto list=w.waiting();
+        if(list.empty())std::cout<<"nothing waits\n";
+        for(auto& o:list)std::cout<<o.id<<"  type "<<o.type<<", area "<<o.area<<", by "<<o.name<<" ("<<o.creator<<"): "<<(o.forBuilder?"waits for its builder (coop-world offer)":"waits for the owner")<<"\n";
+        return 0;
+    }catch(const std::exception& e){std::cerr<<"refused, nothing changed: "<<e.what()<<"\n";return 1;}
+}
+// --policy and --policy-set at the start: the preset only for a new world, the settings every time (saved).
+int startPolicy(world::World& w,const std::string& preset,const std::vector<std::string>& sets,bool newWorld,std::string& note){
+    world::Policy p=w.policy();
+    try{
+        if(!preset.empty()&&newWorld)p=world::presetPolicy(preset);
+        else if(!preset.empty()&&preset!=p.preset)note=" (this world keeps its preset: --policy "+preset+" is for a new world, coop-world policy --preset changes it)";
+        for(auto& s:sets)world::setPolicy(p,s);
+    }catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 2;}
+    if(newWorld||world::policyItems(p)!=world::policyItems(w.policy())){w.setPolicy(p);save(w);}
+    return 0;
+}
 // The commands that work on a world file while no server has it open (README, "Linked servers").
 int offline(int argc,char** argv){
+    if(int r=policyCommand(argc,argv);r>=0)return r;
     std::string command=argv[1],in,out,filterText="all",server;bool prune=false;
     for(int i=2;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc){std::cerr<<"missing value for "<<a<<"\n";std::exit(2);}return std::string(argv[++i]);};
@@ -247,6 +326,7 @@ int main(int argc,char** argv){
     if(argc>1&&argv[1][0]!='-')return offline(argc,argv);
     std::string bind="127.0.0.1",prefix,relayKey;int port=0,relayPort=0;long idleExit=0;bool haveRelayKey=false;world::RelayConfig relayConfig;
     std::vector<world::LinkConfig> links;
+    std::string policyPreset;std::vector<std::string> policySets;
     auto link=[&](const std::string& option)->world::LinkConfig&{if(links.empty()){std::cerr<<option<<" comes after --link NAME\n";std::exit(2);}return links.back();};
     auto filter=[](const std::string& option,const std::string& text){
         try{return world::parseFilter(text);}catch(const std::exception& e){std::cerr<<option<<": "<<e.what()<<"\n";std::exit(2);}};
@@ -269,13 +349,17 @@ int main(int argc,char** argv){
         else if(a=="--link-key")link(a).key=next();else if(a=="--link-url")link(a).url=next();
         else if(a=="--link-export")link(a).exportFilter=filter(a,next());else if(a=="--link-import")link(a).importFilter=filter(a,next());
         else if(a=="--link-every")link(a).everySeconds=std::atoi(next().c_str());
+        else if(a=="--policy")policyPreset=next();else if(a=="--policy-set")policySets.push_back(next());
         else{std::cerr<<"usage: coop-world --port N [--bind ADDRESS] [--data FILE] [--prefix SECRET] [--log FILE] [--trace FILE] [--idle-exit SECONDS]\n"
+                        "                  [--policy friends|solo|public] [--policy-set KEY=VALUE]...\n"
                         "                  [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS] [--relay-players N] [--relay-rate N]]\n"
                         "                   [--broadcast-full METRES] [--broadcast-interval MS] [--broadcast-animation METRES] [--broadcast-budget BYTES]\n"
                         "                   [--broadcast-flush MS] [--broadcast-rate N] [--broadcast-build GAME:HEX]]\n"
                         "                  [--link NAME --link-key KEY [--link-url http://ADDRESS:PORT[/PREFIX]] [--link-export FILTER] [--link-import FILTER] [--link-every SECONDS]]...\n"
                       <<OfflineUsage;return 2;}}
     if(port<1||port>65535){std::cerr<<"--port 1..65535 required\n";return 2;}
+    try{world::Policy p=world::presetPolicy(policyPreset.empty()?"friends":policyPreset);for(auto& s:policySets)world::setPolicy(p,s);}
+    catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 2;}
     for(char c:prefix)if(!std::isalnum(static_cast<unsigned char>(c))&&c!='-'&&c!='_'){std::cerr<<"--prefix: letters, digits, - and _ only\n";return 2;}
     // Linked servers: nothing is served to or asked of another server without a key, and every link has its own.
     std::vector<world::LinkEndpoint> linkEndpoints(links.size());
@@ -293,11 +377,13 @@ int main(int argc,char** argv){
     WSADATA wsa;if(WSAStartup(MAKEWORD(2,2),&wsa)!=0){std::cerr<<"winsock unavailable\n";return 1;}
 #endif
     world::World w;w.log=[](const std::string& s){line(s);};
+    const bool newWorld=dataPath.empty()||!std::ifstream(dataPath,std::ios::binary).good();
     if(!dataPath.empty()){
         bool existed=std::ifstream(dataPath,std::ios::binary).good();
         if(loadWorld(w,false))return 1;
         if(existed)line("world loaded: "+std::to_string(w.objects())+" objects");
         if(!links.empty())save(w);}   // the id other servers know this world by is on disk before any of them hears it
+    std::string policyNote;if(int r=startPolicy(w,policyPreset,policySets,newWorld,policyNote))return r;
     world::Front front(w,prefix,links);
     sockaddr_in address{};address.sin_family=AF_INET;address.sin_port=htons(uint16_t(port));
     if(inet_pton(AF_INET,bind.c_str(),&address.sin_addr)!=1){std::cerr<<"--bind needs a numeric IPv4 address\n";return 2;}
@@ -336,6 +422,7 @@ int main(int argc,char** argv){
     if(relayPort)line("coop-world relay on "+bind+":"+std::to_string(relayPort)+" (UDP; near from "+std::to_string(int(relayConfig.enterMetres))+" m to "+std::to_string(int(relayConfig.leaveMetres))+" m, "+std::to_string(relayConfig.maxPlayers)+" players)");
     if(relayPort)line("coop-world relay speaks pairs and broadcast (every update within "+std::to_string(int(relayConfig.fullMetres))+" m, beyond it one in "+std::to_string(relayConfig.intervalMs)+" ms, animation within "
                       +std::to_string(int(relayConfig.animationMetres))+" m, frames of "+std::to_string(relayConfig.budget)+" bytes within "+std::to_string(relayConfig.flushMs)+" ms"+(relayConfig.pinBuild?", one build":"")+")");
+    line(policyText(w.policy(),false)+policyNote);
     while(true){
         sock_t s=accept(listener,nullptr,nullptr);
 #ifdef _WIN32

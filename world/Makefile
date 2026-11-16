@@ -8,6 +8,8 @@ build:
 	mkdir -p build
 build/world-test: world_test.cpp world.cpp world.h json.h | build
 	$(CXX) $(FLAGS) world_test.cpp world.cpp -o $@
+build/policy-test: policy_test.cpp world.cpp world.h json.h | build
+	$(CXX) $(FLAGS) policy_test.cpp world.cpp -o $@
 LINK := link.cpp link.h
 build/link-test: link_test.cpp $(LINK) world.cpp world.h json.h | build
 	$(CXX) $(FLAGS) link_test.cpp link.cpp world.cpp -o $@
@@ -28,8 +30,9 @@ build/coop-world.exe: main.cpp front.cpp front.h $(LINK) world.cpp world.h json.
 ../mod/build/coop-swarm: FORCE
 	$(MAKE) -C ../mod build/coop-swarm
 FORCE:
-test: build/world-test build/link-test build/front-test build/relay-test build/broadcast-test build/coop-world ../mod/build/coop-swarm
+test: build/world-test build/policy-test build/link-test build/front-test build/relay-test build/broadcast-test build/coop-world ../mod/build/coop-swarm
 	./build/world-test
+	./build/policy-test
 	./build/link-test
 	./build/front-test
 	./build/relay-test

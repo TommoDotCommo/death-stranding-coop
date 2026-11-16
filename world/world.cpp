@@ -27,6 +27,7 @@ std::vector<std::string> split(const std::string& s,char by){std::vector<std::st
 // The kinds whose letter is known (mod/game_offsets.md, "Online protocol"); any other kind is named by its letter.
 const std::pair<const char*,char> TypeNames[]={{"post",'p'},{"charger",'c'},{"safehouse",'s'},{"watchtower",'w'},{"bridge",'b'},{"shelter",'n'},{"rope",'r'},
     {"ladder",'l'},{"bike",'v'},{"cairn",'e'},{"road",'o'},{"mushroom",'x'},{"chiralbridge",'g'},{"jumpstand",'j'}};
+bool oneOf(const std::string& s,std::initializer_list<const char*> allowed){for(auto a:allowed)if(s==a)return true;return false;}
 bool wholeNumber(const std::string& s,int64_t& out){
     if(s.empty()||s.size()>18)return false;
     size_t i=s[0]=='-'?1:0;
@@ -55,8 +56,16 @@ Reply World::signIn(const std::string& key,const std::string& displayName,const 
     if(key.empty()||key.size()>MaxKeyBytes||displayName.size()>MaxNameBytes)return refuse(400,"bad-account","account key or name refused");
     auto found=players_.find(key);
     if(found==players_.end()){
+        // The hard cap, or fewer when the policy says so (solo: one).
+#ifndef MUTANT_POLICY_PLAYERS
+        size_t room=std::min(MaxPlayers,size_t(policy_.players));
+#else
+        size_t room=MaxPlayers;
+#endif
 #ifndef MUTANT_WORLD_PLAYER_CAP
-        if(players_.size()>=MaxPlayers){note("sign-in refused: world is full");return refuse(403,"full","this world has all its players");}
+        if(players_.size()>=room){note("sign-in refused: world is full ("+std::to_string(room)+" players)");return refuse(403,"full","this world has all its players");}
+#else
+        (void)room;
 #endif
         Player p;p.key=key;p.id=playerId(key);p.name=displayName.empty()?"Porter":displayName;
         found=players_.emplace(key,p).first;note("new player "+p.id+" "+p.name);
@@ -103,9 +112,19 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
         Value v=Value::object();v.set("version",std::to_string(VersionMajor)+"."+std::to_string(VersionMinor));v.set("major",VersionMajor);v.set("minor",VersionMinor);return ok(v);}
     if(name=="createObject"){
         if(!in.get("t").isString())return refuse(400,"bad-object","object type missing");
-        size_t mine=0;for(auto& o:objects_)if(o.second.creator==me.id&&o.second.originServer.empty())++mine;
+        // Who builds here (policy "build"), and how much one player keeps (policy "limit"; the hard cap stays).
+#ifndef MUTANT_POLICY_BUILD_NOBODY
+        if(policy_.build=="nobody"){note("refused createObject: nobody builds on this server");return refuse(403,"no-building","nobody builds on this server");}
+#endif
+#ifndef MUTANT_POLICY_BUILD_MEMBERS
+        if(policy_.build=="members"&&!me.member){note("refused createObject: "+me.id+" is not a member");return refuse(403,"not-member","only members build on this server");}
+#endif
+        size_t mine=0;for(auto& o:objects_)if(o.second.creator==me.id&&o.second.originServer.empty()&&!o.second.remnant)++mine;
 #ifndef MUTANT_WORLD_OBJECT_CAP
         if(mine>=MaxObjectsPerPlayer){note("refused createObject: "+me.id+" has too many");return refuse(403,"too-many","too many objects");}
+#endif
+#ifndef MUTANT_POLICY_LIMIT
+        if(policy_.limit>0&&mine>=size_t(policy_.limit)){note("refused createObject: "+me.id+" is at the server's limit");return refuse(403,"too-many","this server's limit of objects per player");}
 #endif
         // The game reads an object's kind from the first letter of its id (its own ids are the type letter and 12
         // characters): an id of any other shape makes the builder's game delete its upload at once.
@@ -124,8 +143,15 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
             uint64_t h=fnv(me.id,nextObject_++*0x9e3779b97f4a7c15ull);
             for(int i=0;i<12;++i){o.id+=digits[h%62];h/=62;if(i==5)h^=fnv(o.id,nextObject_);}
         }while(objects_.count(o.id));
-        o.creator=me.id;o.post=in;o.updated=now;o.likes=in.get("lp").integer();
-        auto& kept=objects_[o.id]=o;dirty_=true;++changes_;note("object "+kept.id+" type "+in.get("t").string()+" in area "+std::to_string(in.get("q").integer())+" by "+me.name);
+        o.creator=me.id;o.post=in;o.updated=now;o.likes=in.get("lp").integer();o.name=me.name;
+        // Kept for its builder only, waiting for his answer, or offered (and then as accept_offers says).
+        const std::string& choice=me.offerBuilds.empty()?policy_.offerBuilds:me.offerBuilds;
+#ifndef MUTANT_POLICY_ASK
+        o.share=choice=="no"?"kept":choice=="ask"?"ask":shareAfterOffer();
+#else
+        o.share=choice=="no"?"kept":shareAfterOffer();
+#endif
+        auto& kept=objects_[o.id]=o;dirty_=true;++changes_;note("object "+kept.id+" type "+in.get("t").string()+" in area "+std::to_string(in.get("q").integer())+" by "+me.name+(o.share.empty()?"":" ("+o.share+")"));
         return ok(objectResponse(kept));}
     if(name=="deleteObject"||name=="updateObject"){
         auto found=objects_.find(in.get("id").string());
@@ -136,6 +162,10 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
 #ifndef MUTANT_LINK_IMPORT_OWNER
         // An imported object belongs to its own server: nobody here changes it, whatever his player id is.
         if(!found->second.originServer.empty()){note("refused "+name+": "+found->first+" is imported");return refuse(403,"not-yours","an imported object is changed on its own server");}
+#endif
+#ifndef MUTANT_POLICY_REMNANT_CHANGE
+        // A remnant no longer belongs to the account that built it.
+        if(found->second.remnant){note("refused "+name+": "+found->first+" was withdrawn");return refuse(403,"not-yours","a withdrawn object belongs to nobody");}
 #endif
         dirty_=true;++changes_;
         if(name=="deleteObject"){note("object "+found->first+" removed by "+me.name);objects_.erase(found);return ok(Value::object());}
@@ -151,7 +181,7 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
 #ifndef MUTANT_WORLD_OWN
             if(o.second.creator==me.id)continue;
 #endif
-            if(o.second.post.get("q").integer()!=area)continue;
+            if(o.second.post.get("q").integer()!=area||!servedTo(o.second,me.id))continue;
             auto type=o.second.post.get("t").string();
             if(counts.isObject()){auto l=left.find(type);if(l==left.end()||l->second<=0)continue;--l->second;}
             list.push(objectResponse(o.second));}
@@ -160,17 +190,20 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
         Value out=Value::object();out.set("n",set);return ok(out);}
     if(name=="getQpidObjects"){
         Value list=Value::array();
-        for(auto& id:in.get("ids").items()){auto found=objects_.find(id.string());if(found!=objects_.end())list.push(objectResponse(found->second));}
+        for(auto& id:in.get("ids").items()){auto found=objects_.find(id.string());if(found!=objects_.end()&&servedTo(found->second,me.id))list.push(objectResponse(found->second));}
         Value out=Value::object();out.set("objects",list);return ok(out);}
     if(name=="sendLike"){
         auto found=objects_.find(in.get("oid").string());
-        if(found!=objects_.end()){
+        if(found!=objects_.end()&&servedTo(found->second,me.id)){
             int64_t n=in.get("lp").integer()+in.get("lp2").integer();
 #ifndef MUTANT_WORLD_LIKE_RANGE
             if(n<0||n>100000)return refuse(400,"bad-like","like count refused");
 #endif
             found->second.likes+=n;dirty_=true;++changes_;
-            // The builder hears of it in his like history (never of his own likes).
+            // The builder hears of it in his like history (never of his own likes); a remnant's likes stay on it.
+#ifndef MUTANT_POLICY_REMNANT_LIKES
+            if(found->second.remnant)n=0;
+#endif
             if(found->second.creator!=me.id&&n>0&&playerById(found->second.creator)){
                 Like l;l.to=found->second.creator;l.from=me.id;l.object=found->first;l.type=in.get("lt").string();l.time=now;
                 l.points=in.get("lp").integer();l.autoPoints=in.get("lp2").integer();
@@ -211,13 +244,27 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
 }
 json::Value World::snapshot() const {
     std::lock_guard<std::mutex> g(lock_);
-    Value out=Value::object();out.set("format",1);out.set("server_id",serverId_);out.set("next_object",int64_t(nextObject_));
+    Value out=Value::object();out.set("format",2);out.set("server_id",serverId_);out.set("next_object",int64_t(nextObject_));
+    Value policy=Value::object();policy.set("preset",policy_.preset);
+    for(auto& item:policyItems(policy_)){int64_t n=0;if(wholeNumber(item.second,n))policy.set(item.first,n);else policy.set(item.first,item.second);}
+#ifndef MUTANT_POLICY_SAVE_LOST
+    out.set("policy",policy);
+#endif
     Value players=Value::array();
-    for(auto& p:players_){Value v=Value::object();v.set("key",p.second.key);v.set("id",p.second.id);v.set("name",p.second.name);players.push(v);}
+    for(auto& p:players_){Value v=Value::object();v.set("key",p.second.key);v.set("id",p.second.id);v.set("name",p.second.name);
+        if(!p.second.offerBuilds.empty())v.set("offer_builds",p.second.offerBuilds);
+        if(!p.second.offerOld.empty())v.set("offer_old",p.second.offerOld);
+        if(p.second.member)v.set("member",true);
+        players.push(v);}
     out.set("players",players);
     Value tokens=Value::object();for(auto& t:tokens_)tokens.set(t.first,t.second);out.set("sessions",tokens);
     Value objects=Value::array();
     for(auto& o:objects_){Value v=Value::object();v.set("id",o.second.id);v.set("creator",o.second.creator);v.set("updated",o.second.updated);v.set("likes",o.second.likes);v.set("post",o.second.post);
+        if(!o.second.name.empty())v.set("name",o.second.name);
+#ifndef MUTANT_POLICY_SAVE_LOST
+        if(!o.second.share.empty())v.set("share",o.second.share);
+#endif
+        if(o.second.remnant)v.set("remnant",true);
         if(!o.second.originServer.empty()){Value from=Value::object();from.set("server",o.second.originServer);from.set("id",o.second.originId);from.set("via",o.second.via);
             from.set("name",o.second.originName);from.set("likes",o.second.originLikes);v.set("origin",from);}
         objects.push(v);}
@@ -228,18 +275,28 @@ json::Value World::snapshot() const {
 }
 void World::restore(const json::Value& v){
     std::lock_guard<std::mutex> g(lock_);
-    if(v.get("format").integer()!=1)throw std::runtime_error("world file: unknown format");
-    players_.clear();tokens_.clear();objects_.clear();byOrigin_.clear();++changes_;
+    // Format 1 is from before the server policy: friends, everything shared, nothing withdrawn.
+    int64_t format=v.get("format").integer();
+    if(format!=1&&format!=2)throw std::runtime_error("world file: unknown format");
+    Policy policy;
+    if(format==2&&v.has("policy")){
+        try{
+            policy=presetPolicy(v.get("policy").get("preset").string());
+            for(auto& m:v.get("policy").members())if(m.first!="preset")world::setPolicy(policy,m.first+"="+(m.second.isInt()?std::to_string(m.second.integer()):m.second.isString()?m.second.string():std::string("?")));
+        }catch(const std::exception& e){throw std::runtime_error(std::string("world file: ")+e.what());}}
+    players_.clear();tokens_.clear();objects_.clear();byOrigin_.clear();++changes_;policy_=policy;
     // A world file from before linked servers has no id: it keeps the one made for this process, and is saved with it.
     bool hadId=v.has("server_id");
     if(hadId){if(!serverIdText(v.get("server_id").string()))throw std::runtime_error("world file: bad server id");serverId_=v.get("server_id").string();}
     nextObject_=uint64_t(std::max<int64_t>(1,v.get("next_object").integer()));
     for(auto& p:v.get("players").items()){Player pl;pl.key=p.get("key").string();pl.id=p.get("id").string();pl.name=p.get("name").string();
-        if(pl.key.empty()||pl.id!=playerId(pl.key))throw std::runtime_error("world file: bad player");
+        pl.offerBuilds=p.get("offer_builds").string();pl.offerOld=p.get("offer_old").string();pl.member=p.get("member").boolean();
+        if(pl.key.empty()||pl.id!=playerId(pl.key)||!oneOf(pl.offerBuilds,{"","yes","no","ask"})||!oneOf(pl.offerOld,{"","yes","no"}))throw std::runtime_error("world file: bad player");
         players_[pl.key]=pl;}
     for(auto& t:v.get("sessions").members())if(playerById(t.second.string()))tokens_[t.first]=t.second.string();
     for(auto& o:v.get("objects").items()){Object ob;ob.id=o.get("id").string();ob.creator=o.get("creator").string();ob.updated=o.get("updated").integer();ob.likes=o.get("likes").integer();ob.post=o.get("post");
-        if(ob.id.empty()||!ob.post.isObject())throw std::runtime_error("world file: bad object");
+        ob.name=o.get("name").string();ob.share=o.get("share").string();ob.remnant=o.get("remnant").boolean();
+        if(ob.id.empty()||!ob.post.isObject()||!oneOf(ob.share,{"","kept","ask","review"})||(o.has("origin")&&(ob.remnant||!ob.share.empty())))throw std::runtime_error("world file: bad object");
         if(o.has("origin")){const Value& from=o.get("origin");ob.originServer=from.get("server").string();ob.originId=from.get("id").string();ob.via=from.get("via").string();
             ob.originName=from.get("name").string();ob.originLikes=from.get("likes").integer();
             if(!serverIdText(ob.originServer)||!serverIdText(ob.via)||!objectIdText(ob.originId)||ob.originServer==serverId_||!byOrigin_.emplace(std::make_pair(ob.originServer,ob.originId),ob.id).second)
@@ -339,7 +396,7 @@ void World::setServerId(const std::string& id){
 Shared World::sharedOf(const Object& o) const {
     Shared s;bool imported=!o.originServer.empty();
     s.server=imported?o.originServer:serverId_;s.id=imported?o.originId:o.id;s.creator=o.creator;s.updated=o.updated;s.likes=o.likes;s.post=o.post;
-    if(imported)s.name=o.originName;else if(auto* p=playerById(o.creator))s.name=p->name;
+    if(imported)s.name=o.originName;else if(o.remnant)s.name=o.name;else if(auto* p=playerById(o.creator))s.name=p->name;else s.name=o.name;
     return s;
 }
 json::Value World::exportObjects(const Filter& f,const std::string& forServer,int64_t now,const std::string& after,size_t limit,size_t bytes) const {
@@ -348,6 +405,9 @@ json::Value World::exportObjects(const Filter& f,const std::string& forServer,in
     Value list=Value::array();bool more=false;std::string next;size_t size=0;
     for(auto it=after.empty()?objects_.begin():objects_.upper_bound(after);it!=objects_.end();++it){
         const Object& o=it->second;bool imported=!o.originServer.empty();
+#ifndef MUTANT_POLICY_EXPORT_PENDING
+        if(!o.share.empty())continue;   // kept for its builder, or waiting: nobody else is handed it, nor is another server
+#endif
 #ifndef MUTANT_LINK_ECHO
         // Never back to where it came from, whatever the filter says.
         if(imported&&!forServer.empty()&&(o.originServer==forServer||o.via==forServer))continue;
@@ -476,5 +536,153 @@ Reply World::linkPull(const Filter& f,const std::string& body,int64_t now) const
      if(!have.empty()&&after.empty()&&have==versionLocked()){
          Value same=Value::object();same.set("format",1);same.set("kind",DocumentKind);same.set("server",serverId_);same.set("version",versionLocked());same.set("same",true);return ok(same);}}
     return ok(exportObjects(f,server,now,after,LinkPageObjects,LinkPageBytes));
+}
+// ---- Server policy (README, "Server policy"): presets, settings, the players' choices, withdrawal, moderation.
+Policy presetPolicy(const std::string& name){
+    Policy p;p.preset=name;
+    if(name=="friends")return p;
+    if(name=="solo"){p.players=1;return p;}
+    if(name=="public"){p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";return p;}
+    bad("policy: unknown preset '"+name+"' (friends, solo or public)");
+}
+void setPolicy(Policy& p,const std::string& keyValue){
+    auto eq=keyValue.find('=');if(eq==std::string::npos)bad("policy: '"+keyValue+"' is not KEY=VALUE");
+    const std::string key=trim(keyValue.substr(0,eq)),value=trim(keyValue.substr(eq+1));
+    auto pick=[&](std::string& field,std::initializer_list<const char*> allowed){
+        if(oneOf(value,allowed)){field=value;return;}
+        std::string list;for(auto a:allowed)list+=std::string(list.empty()?"":", ")+a;bad("policy: "+key+" is one of "+list);};
+    auto number=[&](int64_t& field,int64_t least,int64_t most){
+        int64_t n=0;if(!wholeNumber(value,n)||n<least||n>most)bad("policy: "+key+" is a number from "+std::to_string(least)+" to "+std::to_string(most));field=n;};
+    if(key=="join")pick(p.join,{"invite","open"});
+    else if(key=="build")pick(p.build,{"everyone","members","nobody"});
+    else if(key=="accept_offers")pick(p.acceptOffers,{"auto","review","never"});
+    else if(key=="withdrawal")pick(p.withdrawal,{"stay","go"});
+    else if(key=="offer_builds")pick(p.offerBuilds,{"yes","no","ask"});
+    else if(key=="offer_old")pick(p.offerOld,{"yes","no"});
+    else if(key=="limit")number(p.limit,0,int64_t(MaxObjectsPerPlayer));
+    else if(key=="players")number(p.players,1,int64_t(MaxPlayers));
+    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old)");
+}
+std::vector<std::pair<std::string,std::string>> policyItems(const Policy& p){
+    return {{"join",p.join},{"build",p.build},{"accept_offers",p.acceptOffers},{"limit",std::to_string(p.limit)},{"withdrawal",p.withdrawal},
+            {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld}};
+}
+void World::setPolicy(const Policy& p){std::lock_guard<std::mutex> g(lock_);policy_=p;dirty_=true;++changes_;}
+bool World::servedTo(const Object& o,const std::string& player) const {
+    if(o.creator==player)return true;   // his own, whatever its state (the game never asks a list of those)
+#ifndef MUTANT_POLICY_PENDING_SERVED
+    if(o.share=="ask"||o.share=="review")return false;
+#endif
+#ifndef MUTANT_POLICY_OFFER_NO_SERVED
+    if(o.share=="kept")return false;
+#endif
+    return true;
+}
+std::string World::shareAfterOffer() const {
+#ifndef MUTANT_POLICY_REVIEW
+    if(policy_.acceptOffers=="review")return "review";
+#endif
+    return policy_.acceptOffers=="never"?"kept":"";
+}
+void World::setPlayer(const std::string& id,const std::string& keyValue){
+    std::lock_guard<std::mutex> g(lock_);
+    Player* p=nullptr;for(auto& q:players_)if(q.second.id==id)p=&q.second;
+    if(!p)bad("no player "+id+" on this server (coop-world players lists them)");
+    auto eq=keyValue.find('=');if(eq==std::string::npos)bad("'"+keyValue+"' is not KEY=VALUE");
+    const std::string key=trim(keyValue.substr(0,eq)),value=trim(keyValue.substr(eq+1));
+    if(key=="offer_builds"&&oneOf(value,{"yes","no","ask","default"}))p->offerBuilds=value=="default"?"":value;
+    else if(key=="offer_old"&&oneOf(value,{"yes","no","default"}))p->offerOld=value=="default"?"":value;
+    else if(key=="member"&&oneOf(value,{"yes","no"}))p->member=value=="yes";
+    else bad("'"+keyValue+"': offer_builds=yes|no|ask|default, offer_old=yes|no|default or member=yes|no");
+    dirty_=true;++changes_;
+}
+std::vector<World::PlayerInfo> World::playerList() const {
+    std::lock_guard<std::mutex> g(lock_);std::vector<PlayerInfo> out;std::map<std::string,size_t> at;
+    for(auto& p:players_){PlayerInfo i;i.id=p.second.id;i.name=p.second.name;i.offerBuilds=p.second.offerBuilds;i.offerOld=p.second.offerOld;i.member=p.second.member;
+        at[i.id]=out.size();out.push_back(i);}
+    for(auto& o:objects_){
+        const Object& ob=o.second;auto found=at.find(ob.creator);
+        if(found==at.end()){PlayerInfo i;i.id=ob.creator;i.name=ob.originServer.empty()?ob.name:ob.originName;i.known=false;found=at.emplace(ob.creator,out.size()).first;out.push_back(i);}
+        PlayerInfo& i=out[found->second];
+        if(!ob.originServer.empty())++i.imported;else if(ob.remnant)++i.remnants;else if(ob.share.empty())++i.shared;else if(ob.share=="kept")++i.kept;else ++i.pending;}
+    return out;
+}
+std::vector<World::Waiting> World::waiting() const {
+    std::lock_guard<std::mutex> g(lock_);std::vector<Waiting> out;
+    for(auto& o:objects_)if(o.second.share=="ask"||o.second.share=="review"){
+        Waiting w;w.id=o.first;w.creator=o.second.creator;w.type=o.second.post.get("t").string();w.area=o.second.post.get("q").integer();w.updated=o.second.updated;
+        w.forBuilder=o.second.share=="ask";auto* p=playerById(o.second.creator);w.name=p?p->name:o.second.name;out.push_back(w);}
+    return out;
+}
+size_t World::review(const std::string& object,bool accept){
+    std::lock_guard<std::mutex> g(lock_);
+    auto found=objects_.find(object);
+    if(found==objects_.end()||found->second.share!="review")bad("review: "+object+" does not wait for the owner (coop-world review lists what does)");
+    found->second.share=accept?"":"kept";dirty_=true;++changes_;return 1;
+}
+size_t World::reviewPlayer(const std::string& player){
+    std::lock_guard<std::mutex> g(lock_);
+    if(!playerById(player))bad("no player "+player+" on this server (coop-world players lists them)");
+    size_t n=0;for(auto& o:objects_)if(o.second.creator==player&&o.second.share=="review"){o.second.share="";++n;}
+    if(n){dirty_=true;++changes_;}
+    return n;
+}
+World::Object& World::ownObject(const std::string& player,const std::string& object){
+    auto found=objects_.find(object);
+    if(found==objects_.end())bad("no object "+object);
+    Object& o=found->second;
+#ifndef MUTANT_POLICY_PLAYER_ANY
+    if(o.creator!=player)bad(object+" is not "+player+"'s");
+#endif
+    if(!o.originServer.empty())bad(object+" came from another server: only that server changes it");
+    if(o.remnant)bad(object+" is withdrawn already");
+    return o;
+}
+size_t World::offer(const std::string& player,const std::string& object,bool yes){
+    std::lock_guard<std::mutex> g(lock_);
+    if(!playerById(player))bad("no player "+player+" on this server (coop-world players lists them)");
+    std::vector<Object*> list;
+    if(!object.empty()){Object& o=ownObject(player,object);if(o.share!="ask")bad(object+" does not wait for its builder's answer");list.push_back(&o);}
+    else for(auto& o:objects_)if(o.second.creator==player&&o.second.share=="ask")list.push_back(&o.second);
+    for(auto* o:list)o->share=yes?shareAfterOffer():"kept";
+    if(!list.empty()){dirty_=true;++changes_;}
+    return list.size();
+}
+World::Withdrawn World::withdraw(const std::string& player,const std::string& object){
+    std::lock_guard<std::mutex> g(lock_);
+    const Player* p=playerById(player);
+    if(!p)bad("no player "+player+" on this server (coop-world players lists them)");
+    std::vector<std::string> ids;
+    if(!object.empty())ids.push_back(ownObject(player,object).id);
+    else for(auto& o:objects_)if(o.second.creator==player&&o.second.originServer.empty()&&!o.second.remnant)ids.push_back(o.first);
+    Withdrawn r;
+    for(auto& id:ids){
+        Object& o=objects_[id];
+        // What was never handed to anyone just goes; what was shared stays behind under "stay".
+#ifndef MUTANT_POLICY_WITHDRAW_STAY_REMOVES
+        bool stay=policy_.withdrawal=="stay"&&o.share.empty();
+#else
+        bool stay=false;
+#endif
+#ifdef MUTANT_POLICY_WITHDRAW_GO_KEEPS
+        stay=o.share.empty();
+#endif
+        if(stay){o.remnant=true;if(o.name.empty())o.name=p->name;++r.remnants;}
+        else{objects_.erase(id);++r.removed;}}
+    if(!ids.empty()){dirty_=true;++changes_;note("withdrawn for "+player+": "+std::to_string(r.remnants)+" stay as remnants, "+std::to_string(r.removed)+" removed");}
+    return r;
+}
+size_t World::removePlayer(const std::string& id){
+    std::lock_guard<std::mutex> g(lock_);
+    std::set<std::string> gone;std::set<std::string> fromServers;
+    for(auto& o:objects_)if(o.second.creator==id){gone.insert(o.first);if(!o.second.originServer.empty())fromServers.insert(o.second.originServer);}
+#ifdef MUTANT_POLICY_REMOVE_PLAYER_OTHERS
+    for(auto& o:objects_)if(fromServers.count(o.second.originServer))gone.insert(o.first);
+#endif
+    if(gone.empty()&&!playerById(id))bad("no player or builder "+id+" here (coop-world players lists them)");
+    for(auto& k:gone){auto& o=objects_[k];if(!o.originServer.empty())byOrigin_.erase({o.originServer,o.originId});objects_.erase(k);}
+    likes_.erase(std::remove_if(likes_.begin(),likes_.end(),[&](const Like& l){return gone.count(l.object)>0;}),likes_.end());
+    if(!gone.empty()){dirty_=true;++changes_;note("removed "+std::to_string(gone.size())+" objects of "+id);}
+    return gone.size();
 }
 }
