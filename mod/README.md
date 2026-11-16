@@ -1144,7 +1144,15 @@ players use (`others.h`); only where they stand and what animates them is the cr
 code that ran live on 2026-11-16 and have not run live: after a load the bodies are made again one every 300 ms
 instead of all in one tick, and a crowd with nowhere to stand (no partner shown and no readable porter) waits hidden.
 
-## Other players (`others`, off by default; built game-free, not run live)
+## Other players (`others`, off by default; first live run 2026-11-16)
+
+The transport is the relay of the players' own server (`core/relay.h`, `world/README.md` "The relay"). Config:
+`"relay": "ADDRESS:PORT"` (numeric IPv4, on loopback or the partner's address), `"relay_key"` (the group's key,
+letters, digits, `-` and `_`) and `"player_id"` (this player's number on the relay, not 0); they require `others`.
+The mod opens a second UDP socket connected to that address, reports this porter's position (none while loading or
+in a cutscene), and feeds who is near and their datagrams to the sessions below. The log says `RELAY online`,
+`RELAY offline: everybody near has left`, and every 10 s `RELAY online near N in .. out .. accepted .. refused ..`.
+
 
 Besides the one partner the mod can hold up to `"others": N` more remote players (0..32, default 0; requires
 `puppet_probe`), **presence only**. Each one has
