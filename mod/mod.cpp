@@ -280,6 +280,7 @@ struct Runtime final:ds::Transport {
     void othersStart(uint64_t self,mod::others::Link link){
         if(!config.others||!self)return;
         mod::others::Settings s;s.self=self;s.session=config.session;s.cap=config.others;s.build=mod::WireBuild;s.nickname=config.nickname;
+        s.gear=config.othersGear;s.carry=config.othersCarry!=0;   // what is only shown; everything else of theirs is dropped
         others=std::make_unique<mod::others::Others>(s,std::move(link),[]{return nonce();},[this](const std::string& row){note(row.c_str());});
         note(("OTHERS ready: up to "+std::to_string(config.others)+" other players"+(otherBodies?"\n":" (no bodies in this build)\n")).c_str());
     }
@@ -376,13 +377,56 @@ struct Runtime final:ds::Transport {
         if(others)othersShown=others->frame(now);
         const auto& shown=othersShown;
         mod::others::plan(shown,!event,config.partnerPoses,config.partnerAnimation,othersPlan);
+        // A player who left while the body wears gear copies: the copies' removal is queued now, the body's next tick.
+#ifndef MOD_MUTANT_OTHERS_UNDRESSED
+        if(gears)for(auto key:mod::others::undress(shown,gears->keys(),othersPlan))gears->remove(key,anchor.entity);
+#endif
         otherBodies->drive(othersPlan.wants,anchor,now);
         std::array<size_t,4> state{{shown.size(),others?others->connected():0,otherBodies->made(),otherBodies->driving()}};
         if(state!=othersNoted&&now-othersNotedAt>=2000){othersNoted=state;othersNotedAt=now;std::ostringstream o;
             o<<"OTHERS near "<<state[0]<<" connected "<<state[1]<<" bodies made "<<state[2]<<" shown "<<state[3]<<"\n";note(o.str().c_str());}
     }
     // The porter's visible gear on the partner's own body (gear.h); config partner_gear or puppet.gear "on <stamp>".
-    std::filesystem::path gearCommand;std::unique_ptr<mod::gear::Mirror> gear;bool gearOn=false;
+    // One mirror per body (gear.h, Mirrors): key 0 is the partner's own body, a player's id another player's body
+    // (config others_gear: what that player wears, as that player sent it).
+    std::filesystem::path gearCommand;std::unique_ptr<mod::gear::Mirrors> gears;bool gearOn=false;uint64_t gearPorter=0;
+#ifdef MOD_FAKE_NETWORK
+    // The fake world's gear: this porter has a backpack and a wrist cuff as direct children, each shown or hidden
+    // (mod_test_set_gear), and the engine's side is a table of the pieces the mod made.
+    struct FakePiece {uint64_t parent=0;std::string helper;bool visible=false;};std::map<uint64_t,FakePiece> fakePieces;uint64_t fakePieceNext=0x40000000,fakeOrphaned=0;
+    std::atomic<unsigned> fakeGear{3};
+#endif
+    // This porter's direct children and theirs, as gear.h reads them.
+    std::vector<mod::gear::Node> gearNodes(uint64_t porter) {
+#ifdef MOD_FAKE_NETWORK
+        std::vector<mod::gear::Node> out;if(!porter)return out;unsigned worn=fakeGear.load();
+        auto piece=[&](uint64_t entity,uint64_t vtable,uint64_t mover,const char* helper,bool visible){
+            mod::gear::Node n;n.entity=entity;n.vtable=sampler->base+vtable;n.moverVtable=sampler->base+mover;n.helper=helper;n.flags=visible?mod::gear::FlagVisible:0;out.push_back(n);};
+        piece(0x7001,mod::gear::BackpackVtable,mod::gear::BackpackMoverVtable,"HLP_Backpack",worn&1);
+        piece(0x7002,mod::gear::EntityVtable,mod::gear::HelperMoverVtable,"HLP_Hcuf",worn&2);
+        return out;
+#else
+        return mod::gear::snapshot(*sampler,porter);
+#endif
+    }
+    // Is the body visible, and where: nothing while it cannot be read (no piece is ever made at an unreadable place).
+    std::optional<mod::gear::Site> gearSite(uint64_t body) {
+        auto pose=mod::puppet::readEntityPose(*sampler,body);if(!(pose.available&&pose.coherent))return std::nullopt;
+        mod::gear::Site site;uint64_t flags=0;site.shown=sampler->read(body+mod::gear::Flags,&flags,8)&&(flags&mod::gear::FlagVisible);
+        site.at=mod::puppet::transform(pose);return site;
+    }
+    void makeGears(mod::gear::Api api) {
+        gears=std::make_unique<mod::gear::Mirrors>(std::move(api),[this](uint64_t body){return gearSite(body);},[this]{return gearNodes(gearPorter);},
+            sampler->base,[this](const std::string& row){note(row.c_str());});
+    }
+    // Where the copy of a backpack is (the cases hang on it). The fake world's copies have no place of their own: the body's.
+    mod::Pose packPose(uint64_t pack,uint64_t body) {
+#ifdef MOD_FAKE_NETWORK
+        (void)pack;return mod::puppet::readEntityPose(*sampler,body);
+#else
+        (void)body;return mod::puppet::readEntityPose(*sampler,pack);
+#endif
+    }
     uint32_t gearChurnMode=0,gearChurnLeft=0;uint64_t gearChurnAt=0;
     // The partner's own gear (gear.h, CARGO type 7): what they show, and what this porter shows sent to them.
     // The partner's outfit (outfit.h, CARGO type 8): their enabled art parts, and this porter's sent to them.
@@ -709,9 +753,9 @@ struct Runtime final:ds::Transport {
                 // moves them and sets the stacking direction (anchor axes right, forward, up; metres).
                 mod::stack::Layout l;int n=0;
                 if(std::sscanf(text.c_str()+6,"at %lf %lf %lf %lf %lf %lf",&l.offset[0],&l.offset[1],&l.offset[2],&l.up[0],&l.up[1],&l.up[2])==6){
-                    auto now=stackLayout.value_or(mod::stack::Layout{});now.offset=l.offset;now.up=l.up;stackLayout=now;if(cargoStack)cargoStack->layout=now;}
+                    auto now=stackLayout.value_or(mod::stack::Layout{});now.offset=l.offset;now.up=l.up;stackLayout=now;if(stacks)stacks->layout=now;}
                 else if(unsigned cols=0;std::sscanf(text.c_str()+6,"across %lf %lf %lf %u",&l.across[0],&l.across[1],&l.across[2],&cols)==4&&cols>=1&&cols<=4){
-                    auto now=stackLayout.value_or(mod::stack::Layout{});now.across=l.across;now.columns=cols;stackLayout=now;if(cargoStack)cargoStack->layout=now;}
+                    auto now=stackLayout.value_or(mod::stack::Layout{});now.across=l.across;now.columns=cols;stackLayout=now;if(stacks)stacks->layout=now;}
                 else if(std::sscanf(text.c_str()+6,"%d",&n)==1&&n>=0&&n<=int(mod::stack::Stack::MaxCases))stackTest=n;
                 else {note("RIDE stack refused\n");return;}}
             else if(text.rfind("place ",0)==0&&text.size()>stamp.size()&&text.compare(text.size()-stamp.size(),stamp.size(),stamp)==0){
@@ -773,7 +817,13 @@ struct Runtime final:ds::Transport {
     }
     // --- The partner's carried cargo drawn on the partner body (cargo_stack.h): with carry_visual, from the partner's
     // carry summary (backpack slot); `puppet.ride` "stack N" / "stack auto" / "stack off" / "stack at ..." test it.
-    std::unique_ptr<mod::stack::Stack> cargoStack;bool stackTried=false;Background<mod::stack::Api> stackJob;int stackTest=-1;uint64_t stackPorter=0;
+    // One stack per body (cargo_stack.h, Stacks): key 0 is the partner's, a player's id another player's (config
+    // others_carry: the nearest N others who carry something and whose body wears a copy of the backpack).
+    std::unique_ptr<mod::stack::Stacks> stacks;mod::others::Nearest othersNearest;
+#ifdef MOD_FAKE_NETWORK
+    struct FakeCase {uint32_t item=0;std::array<double,3> at{};};std::map<uint64_t,FakeCase> fakeCases;uint64_t fakeCaseNext=0x50000000;
+#endif
+    bool stackTried=false;Background<mod::stack::Api> stackJob;int stackTest=-1;uint64_t stackPorter=0;
     std::optional<mod::stack::Layout> stackLayout;
     // Where each case sits (carry_place.h): this porter's go out measured from his backpack; the partner's are drawn
     // at the same places on the copy of the backpack the body wears.
@@ -785,9 +835,12 @@ struct Runtime final:ds::Transport {
         return out;}
     void tickStack(uint64_t body,const mod::puppet::Anchor& anchor) {
         bool on=(config.carryVisual&&stackTest!=-2)||stackTest>=0;
-        if(!on){if(cargoStack)cargoStack->tick(false,{},nullptr);return;}
+        bool forOthers=config.othersCarry&&others&&otherBodies&&gears;
+        // Off: the partner's stack keeps itself (and its count of refusals) with no cases, as the single stack did;
+        // any other player's goes.
+        if(!on&&!forOthers){if(stacks)stacks->tick({mod::stack::Load{}});return;}
 #ifndef MOD_FAKE_NETWORK
-        if(!cargoStack&&!stackTried){
+        if(!stacks&&!stackTried){
             auto* sp=&*sampler;if(!stackJob.ready([sp]{return mod::stack::nativeApi(*sp);}))return;   // checked beside the game
             stackTried=true;
             try{auto api=stackJob.job.get();
@@ -795,21 +848,48 @@ struct Runtime final:ds::Transport {
                 auto slow=[this](const char* what,uint64_t us){if(us>=10000)note((std::string("STACK slow ")+what+" "+std::to_string(us/1000)+" ms\n").c_str());};
                 api.caseFor=[f=api.caseFor,slow](uint32_t item,bool variant){auto t=mod::nowUs();auto r=f(item,variant);slow("case lookup",mod::nowUs()-t);return r;};
                 api.create=[f=api.create,slow](const mod::stack::Case& c,const mod::puppet::Transform& at){auto t=mod::nowUs();auto r=f(c,at);slow("mesh create",mod::nowUs()-t);return r;};
-                cargoStack=std::make_unique<mod::stack::Stack>(std::move(api),[this](const std::string& row){note(row.c_str());});
-                if(stackLayout)cargoStack->layout=*stackLayout;}
+                stacks=std::make_unique<mod::stack::Stacks>(std::move(api),[this](const std::string& row){note(row.c_str());});
+                if(stackLayout)stacks->layout=*stackLayout;}
             catch(const std::exception& e){note((std::string("STACK unavailable: ")+e.what()+"\n").c_str());}}
+#else
+        // The fake world's case meshes: a table of what the mod made and where it last put each.
+        if(!stacks){mod::stack::Api api;
+            api.caseFor=[](uint32_t item,bool)->std::optional<mod::stack::Case>{mod::stack::Case c;c.model=0x1000+item;return c;};
+            api.create=[this](const mod::stack::Case& c,const mod::puppet::Transform& at)->uint64_t{fakeCases[fakeCaseNext+=0x40]={uint32_t(c.model-0x1000),at.position};return fakeCaseNext;};
+            api.place=[this](uint64_t m,const mod::puppet::Transform& at){auto it=fakeCases.find(m);if(it==fakeCases.end())return false;it->second.at=at.position;return true;};
+            api.release=[this](uint64_t m){fakeCases.erase(m);};
+            stacks=std::make_unique<mod::stack::Stacks>(std::move(api),[this](const std::string& row){note(row.c_str());});}
 #endif
-        if(!cargoStack)return;
-        if(anchor.entity!=stackPorter){if(stackPorter)cargoStack->forget("world changed");stackPorter=anchor.entity;}
+        if(!stacks)return;
+        if(anchor.entity!=stackPorter){if(stackPorter)stacks->forget("world changed");stackPorter=anchor.entity;}
+        std::vector<mod::stack::Load> loads;
+        // The partner's (key 0), listed first: not permitted means his cases go.
+        {mod::stack::Load partner;if(on)partnerLoad(body,partner);loads.push_back(std::move(partner));}
+        // The other players': the nearest few carriers, each on the copy of the backpack that player's body wears.
+        if(forOthers){
+            auto viewer=others->here();
+            for(auto& c:mod::others::carriers(othersShown,*otherBodies,[this](uint64_t id){return gears->copyAt(id,"HLP_Backpack");},!inEvent,viewer?&*viewer:nullptr,config.othersCarry,othersNearest)){
+                // As the partner's: a hidden body or an unreadable backpack copy has no cases this tick (its stack stays).
+                mod::stack::Load l;l.key=c.key;
+                uint64_t flags=0;bool shown=sampler->read(c.body+mod::gear::Flags,&flags,8)&&(flags&mod::gear::FlagVisible);
+                auto pose=packPose(c.pack,c.body);
+                if(shown&&pose.available&&pose.coherent){l.permitted=true;l.anchor=mod::puppet::transform(pose);l.items=std::move(c.items);l.placed=std::move(c.placed);}
+                loads.push_back(std::move(l));
+            }
+        }
+        stacks->tick(loads);
+    }
+    // What the partner's body carries now (the partner path as it was; `load` stays not permitted when nothing is to show).
+    void partnerLoad(uint64_t body,mod::stack::Load& load) {
         auto wanted=stackTest>=0?std::vector<mod::stack::Item>(size_t(stackTest)):backpackItems(carrySink.shown);
         if(!(core&&core->connected())){placeShown.reset();placeRx.reset();cartPlaceShown.reset();cartPlaceRx.reset();}
         uint64_t flags=0;bool shown=body&&sampler->read(body+mod::gear::Flags,&flags,8)&&(flags&mod::gear::FlagVisible);
         bool permitted=shown&&!inEvent&&(stackTest>=0||(partnerMode()&&core&&core->connected()));
         // On the copy of the backpack the body wears when there is one (it moves with the body's back), else the body.
-        uint64_t on_=gear?gear->copyAt("HLP_Backpack"):0;
-        auto pose=mod::puppet::readEntityPose(*sampler,on_?on_:body);
-        if(!permitted||!(pose.available&&pose.coherent)){cargoStack->tick(false,{},nullptr);return;}
-        auto t=mod::puppet::transform(pose);
+        uint64_t on_=gears?gears->copyAt(0,"HLP_Backpack"):0;
+        auto pose=on_?packPose(on_,body):mod::puppet::readEntityPose(*sampler,body);
+        if(!permitted||!(pose.available&&pose.coherent))return;
+        auto t=mod::puppet::transform(pose);load.permitted=true;load.anchor=t;
         // With the partner's measured places and a backpack copy to hang them on: every case exactly there. The cases in
         // his hands follow (relative to his root, as his mirrored arms hold them), after the others so the stack stays.
         bool cartCases=config.partnerCart&&cartPlaceShown&&!cartPlaceShown->empty()&&cartDisplay.idAt(0);
@@ -826,9 +906,9 @@ struct Runtime final:ds::Transport {
                 for(auto& p:*cartPlaceShown){if(items.size()>=mod::stack::Stack::MaxPlaced)break;
                     items.push_back({p.item,p.variant});places.push_back(mod::carryplace::relative(t,mod::carryplace::compose(cart,p.rel)));}
                 break;}
-            cargoStack->tick(true,items,&t,&places);return;
+            load.items=std::move(items);load.placed=std::move(places);return;
         }
-        cargoStack->tick(true,wanted,&t);
+        load.items=std::move(wanted);
     }
     // --- Likes for the partner (likes.h): opt-in partner_likes. L sends one like (at most one per 1.5 s); a like that
     // arrives is given to this porter the game's way (at most one a second, ten a minute).
@@ -1094,25 +1174,42 @@ struct Runtime final:ds::Transport {
         void hold(uint32_t,uint8_t) override {log("CARRY refused: a cargo record on the partner body would be this porter's cargo\n");}
     } carrySink{[this](const std::string& s){note(s.c_str());}};
     mod::carry::Exchange carry;uint64_t carryReadAt=0,carrySent=0;std::string carryLast;
+#ifdef MOD_FAKE_NETWORK
+    std::optional<mod::carry::Summary> fakeCarried;
+#endif
     void tickCarry(uint64_t now) {
-        if(!config.carryVisual||!core||!sampler||!cargoManagerSlot||now-carryReadAt<250)return;
+        // The same read serves the partner (carry_visual) and the other players (others_carry): each has senders of its own.
+        bool forOthers=config.othersCarry&&others;
+        if((!config.carryVisual&&!forOthers)||!core||!sampler||now-carryReadAt<250)return;
+#ifndef MOD_FAKE_NETWORK
+        if(!cargoManagerSlot)return;
+#endif
         carryReadAt=now;uint64_t manager=0;std::optional<mod::carry::Summary> read;
         auto anchor=anchorNow();
         if(anchor.entity&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
             if(auto items=mod::carry::readCarried(*sampler,anchor.entity,sampler->base+mod::carry::ComponentVtable,manager))read=mod::carry::summarise(*items);
+#ifdef MOD_FAKE_NETWORK
+        if(anchor.entity&&fakeCarried)read=*fakeCarried;   // the fake porter's load (mod_test_set_carry)
+#endif
         std::string d=read?"porter carries "+mod::carry::describe(*read):anchor.entity?"porter's carrier unreadable (layout or vtable check failed)":"";
         if(!d.empty()&&d!=carryLast){carryLast=d;note(("CARRY "+d+"\n").c_str());}
-        for(auto& e:carry.tick(read,core->connected()&&partnerMode(),now,carrySink)){core->queueCargo(e);++carrySent;}
+        if(config.carryVisual)for(auto& e:carry.tick(read,core->connected()&&partnerMode(),now,carrySink)){core->queueCargo(e);++carrySent;}
         // Where the cases sit, measured from this porter's backpack (found by the gear read), twice a second.
+        std::optional<std::vector<mod::carryplace::Placed>> placedNow;   // only on the passes that measured
         if(now-placeReadAt>=500&&anchor.entity&&manager&&ownBackpack){
             placeReadAt=now;auto pack=mod::puppet::readEntityPose(*sampler,ownBackpack);
             if(pack.available&&pack.coherent){
                 auto placed=mod::carryplace::readPlaced(*sampler,anchor.entity,sampler->base+mod::carry::ComponentVtable,manager,mod::puppet::transform(pack));
-                auto events=placeTx.observe(placed,core->connected()&&partnerMode(),now);
-                for(auto& e:events){core->queueCargo(e);++placeSent;}
-                if(!events.empty())note(("CARRY this porter's "+std::to_string(placed?placed->size():0)+" cases with their places -> partner\n").c_str());
+                placedNow=placed;
+                if(config.carryVisual){
+                    auto events=placeTx.observe(placed,core->connected()&&partnerMode(),now);
+                    for(auto& e:events){core->queueCargo(e);++placeSent;}
+                    if(!events.empty())note(("CARRY this porter's "+std::to_string(placed?placed->size():0)+" cases with their places -> partner\n").c_str());
+                }
             }
         }
+        if(forOthers){auto sent=others->carries(read,placedNow,now);if(sent)note(("CARRY "+std::to_string(sent)+" events of what this porter carries -> other players\n").c_str());}
+        if(!config.carryVisual)return;   // the cart's cases are the partner path's only
         // The cases on the cart he tows (the nearest attached one, as carts.h sends first), relative to that cart.
         if(config.partnerCart&&now-cartPlaceReadAt>=500&&anchor.entity&&anchor.pose.available&&manager){
             cartPlaceReadAt=now;auto here=mod::puppet::transform(anchor.pose).position;auto shown=cartDisplay.ids();
@@ -2301,7 +2398,10 @@ struct Runtime final:ds::Transport {
                     p.own.alive=[this](uint64_t b){uint64_t v=0;return sampler->read(b,&v,8)&&v==fake->base+0xff10;};
                     p.own.park=[flag](uint64_t b){flag(b,mod::puppet::FlagVisible,false);flag(b,mod::puppet::FlagSleeping,true);};
                     p.own.dress=[](uint64_t){return true;};
-                    p.own.remove=[this,at](uint64_t b){fake->mutate([&]{fake->put<uint64_t>(at(b),0);});};
+                    p.own.remove=[this,at](uint64_t b){
+                        // A body removed while gear copies still hang on it (others.h, undress: they come off first).
+                        for(auto& [id,x]:fakePieces)if(x.parent==b)++fakeOrphaned;
+                        fake->mutate([&]{fake->put<uint64_t>(at(b),0);});};
                     p.drive=twinApi;
                     p.drive.sleep=[flag](uint64_t e,bool b){flag(e,mod::puppet::FlagSleeping,b);};
                     p.drive.visible=[flag](uint64_t e,bool b){flag(e,mod::puppet::FlagVisible,b);};
@@ -2310,6 +2410,15 @@ struct Runtime final:ds::Transport {
                     return p;};
                 otherBodies=std::make_unique<mod::others::Bodies>([this](uint64_t){
                     return std::make_unique<mod::others::Body>(bodyParts(),[this](const std::string& row){note(("OTHERS "+row).c_str());});});
+                // The fake engine's side of gear.h: a piece is a row in a table, with its parent, helper and visibility.
+                {mod::gear::Api api;
+                 api.resource=[](uint64_t e){return e;};
+                 api.create=[this](uint64_t,const mod::puppet::Transform&)->uint64_t{fakePieces[fakePieceNext+=0x40]={};return fakePieceNext;};
+                 api.attach=[this](uint64_t e,uint64_t parent,const std::string& helper){auto& x=fakePieces.at(e);x.parent=parent;x.helper=helper;};
+                 api.visible=[this](uint64_t e,bool on){auto it=fakePieces.find(e);if(it!=fakePieces.end())it->second.visible=on;};
+                 api.remove=[this](uint64_t e){fakePieces.erase(e);};
+                 api.alive=[this](uint64_t e){return fakePieces.count(e)!=0;};
+                 gearOn=config.partnerGear;makeGears(std::move(api));}
 #endif
 #if defined(MOD_PUPPET_DOUBLE_RESOURCE) && !defined(MOD_FAKE_NETWORK)
                 // Experiment builds only: once the probe has created our own body, the double backend drives it
@@ -2368,7 +2477,7 @@ struct Runtime final:ds::Transport {
                         return std::make_unique<mod::others::Body>(bodyParts(),[this,label](const std::string& row){note((std::string(label)+row).c_str());});});};
                     crowdBodies=bodiesNamed("CROWD ");otherBodies=bodiesNamed("OTHERS ");
                     gearOn=config.partnerGear;
-                    gear=std::make_unique<mod::gear::Mirror>(mod::gear::nativeApi(*sampler),[this](const std::string& row){note(row.c_str());});
+                    makeGears(mod::gear::nativeApi(*sampler));
                 }
 #endif
                 // The partner shown from the start (config partner), as the puppet.double command would; the Double
@@ -2525,51 +2634,61 @@ struct Runtime final:ds::Transport {
     // The porter's visible gear on the own body only (never on the game's resident double). "on <stamp>" / "off
     // <stamp>" in puppet.gear; off removes the copies. The copies are hidden whenever the body is.
     void tickGear(uint64_t bodyEntity,const mod::puppet::Anchor& anchor,uint64_t now) {
-        if(!gear)return;
+        if(!gears)return;
         if(std::filesystem::exists(gearCommand)) {
             auto command=readConfig(gearCommand);auto stamp=" "+mod::runStamp()+"\n";
             if(!std::filesystem::remove(gearCommand))throw std::runtime_error("cannot consume gear command");
-            if(command=="on"+stamp){gearOn=true;gear->start();note("GEAR on\n");}
-            else if(command=="off"+stamp){gearOn=false;gear->stop();note("GEAR off\n");}
+            // As the single mirror did: off removes the partner body's copies and stops; on lets it make them again.
+            if(command=="on"+stamp){gearOn=true;if(auto* one=gears->of(0))one->start();note("GEAR on\n");}
+            else if(command=="off"+stamp){gearOn=false;if(auto* one=gears->of(0))one->stop();note("GEAR off\n");}
             else note("GEAR ignored command for another process\n");
         }
-        if(!gearOn||!anchor.entity)return;
-        if(gearChurnLeft&&gear){
-            if(gearChurnMode==1){gear->flash(gearChurnLeft%2==0?false:true);--gearChurnLeft;}
-            else if(now-gearChurnAt>=6000){gearChurnAt=now;gear->clear();--gearChurnLeft;}
+        // gearOn: the partner's body (partner_gear, or the command). forOthers: the other players' bodies (others_gear).
+        bool forOthers=config.othersGear&&others&&otherBodies;
+        if(!anchor.entity)return;
+        if(!gearOn&&!forOthers){if(gears->size())gears->tick(anchor.entity,{});return;}   // whatever is left comes off
+        if(gearOn&&gearChurnLeft){
+            auto* one=gears->of(0);
+            if(gearChurnMode==1){if(one)one->flash(gearChurnLeft%2==0?false:true);--gearChurnLeft;}
+            else if(now-gearChurnAt>=6000){gearChurnAt=now;if(one)one->clear();--gearChurnLeft;}
 #ifdef _WIN32
             if(!gearChurnLeft)note(("GEAR test: churn done, culling guard at "+std::to_string(mod::guard::cullSkipped.load())+"\n").c_str());
 #endif
         }
         // What this porter shows goes to the partner (read once a second; sent when it holds still, and on every connection).
         // Nothing is read until a load (a game event) has been over for SettleMs: right after one the porter shows gear
-        // and parts he hides seconds later (live: 7 pieces sent, then 2).
+        // and parts he hides seconds later (live: 7 pieces sent, then 2). The same read goes to the other players, each
+        // session with a sender of its own.
         constexpr uint64_t SettleMs=8000;
         bool settled=!inEvent&&now-eventOverAt>=SettleMs&&anchor.pose.available;
-        if(core&&settled&&now-wornReadAt>=1000){wornReadAt=now;stages.enter("gear worn",mod::nowUs());
-            auto nodes=mod::gear::snapshot(*sampler,anchor.entity);
+        if((core||forOthers)&&settled&&now-wornReadAt>=1000){wornReadAt=now;stages.enter("gear worn",mod::nowUs());
+            auto nodes=gearNodes(anchor.entity);
             ownBackpack=0;for(auto& n:nodes)if(n.parent<0&&n.vtable==sampler->base+mod::gear::BackpackVtable){ownBackpack=n.entity;break;}
             auto mine=mod::gear::worn(nodes,sampler->base);
-            auto events=wornTx.observe(mine,core->connected(),now);
-            if(!events.empty()){note(("GEAR sent "+std::to_string(mine.size())+" pieces\n").c_str());for(auto& e:events)core->queueCargo(e);}}
+            if(core&&gearOn){auto events=wornTx.observe(mine,core->connected(),now);
+                if(!events.empty()){note(("GEAR sent "+std::to_string(mine.size())+" pieces\n").c_str());for(auto& e:events)core->queueCargo(e);}}
+            if(forOthers)if(auto sent=others->wears(mine,now))note(("GEAR "+std::to_string(sent)+" events of this porter's "+std::to_string(mine.size())+" pieces -> other players\n").c_str());}
         stages.enter("gear",mod::nowUs());
         uint64_t flags=0;bool shown=bodyEntity&&sampler->read(bodyEntity+mod::gear::Flags,&flags,8)&&(flags&mod::gear::FlagVisible);
         // The outfit: this porter's art parts go to the partner; the body takes the partner's, a few parts a second.
-        if(core&&now-outfitAt>=1000){outfitAt=now;stages.enter("gear outfit",mod::nowUs());
+        if(gearOn&&core&&now-outfitAt>=1000){outfitAt=now;stages.enter("gear outfit",mod::nowUs());
             if(settled)if(auto e=outfitTx.observe(mod::outfit::read(*sampler,anchor.entity),core->connected(),now)){note("OUTFIT sent\n");core->queueCargo(*e);}
             if(bodyEntity&&shown&&partnerParts&&partToggle)if(auto mine=mod::outfit::read(*sampler,bodyEntity)){
                 auto todo=mod::outfit::changes(*mine,*partnerParts,4);unsigned done=0;
                 for(auto& [index,on]:todo)done+=partToggle(bodyEntity,index,on);
                 if(!todo.empty())note(("OUTFIT switched "+std::to_string(done)+" of "+std::to_string(todo.size())+" parts on the body\n").c_str());}}
         stages.enter("gear mirror",mod::nowUs());
-        auto pose=bodyEntity?mod::puppet::readEntityPose(*sampler,bodyEntity):anchor.pose;
-        if(bodyEntity&&!(pose.available&&pose.coherent))return;   // never make pieces at an unreadable place
-        auto at=bodyEntity?mod::puppet::transform(pose):mod::puppet::Transform{};
-        auto* sp=&*sampler;uint64_t porter=anchor.entity;
-        // The partner's own gear when they have sent it; else what this porter shows.
-        auto theirs=partnerWorn;
-        gear->tick(bodyEntity,porter,[sp,porter,theirs]{auto nodes=mod::gear::snapshot(*sp,porter);
-            return theirs?mod::gear::planFor(nodes,sp->base,*theirs):mod::gear::plan(nodes,sp->base);},at,shown);
+        std::vector<mod::gear::Wearer> wearers;
+        // The partner's body (key 0, first): the partner's own gear when they have sent it; else what this porter shows.
+        if(gearOn){mod::gear::Wearer partner;partner.body=bodyEntity;partner.worn=partnerWorn;partner.local=true;wearers.push_back(std::move(partner));}
+        // Every other player whose body exists (key: the player's id): what that player sent, nothing until then.
+        // SEAM others_gear (off by default, not run live): per body these are the partner's calls, but the end-of-tick
+        // flush of deferred rep calls (repTickEnd) watches only the partner's body. Whether attaching copies to other
+        // bodies leaves calls waiting on their queues must be seen live (REP and GUARD lines, fault records) before
+        // others_gear is on for anybody; generalising the watch to every body is the step after that.
+        if(forOthers)for(auto& w:mod::others::wearers(othersShown,*otherBodies))wearers.push_back(std::move(w));
+        gearPorter=anchor.entity;
+        gears->tick(anchor.entity,wearers);
     }
     void tickTwin(uint64_t now) {
         signalBody=0;
@@ -3054,7 +3173,7 @@ struct Runtime final:ds::Transport {
                     }
 #endif
                 }
-                else if(auto churn=mod::puppet::parseCargoCommand(text,mod::runStamp(),"gear");churn&&gear) {
+                else if(auto churn=mod::puppet::parseCargoCommand(text,mod::runStamp(),"gear");churn&&gears) {
                     // Test: "gear 1" hides and shows the partner's gear copies 40 times; "gear 2" removes them all
                     // (the mirror makes them again), 10 times, 6 s apart. To find what upsets the game's culling tree.
                     gearChurnMode=*churn;gearChurnLeft=*churn==1?80:10;gearChurnAt=0;
@@ -3524,6 +3643,14 @@ MOD_API uint32_t mod_test_thread_id() {return currentThread();}
 MOD_API uint64_t mod_test_frame_caller() {return mod::dispatch::FixtureSites.framePattern+16;}
 MOD_API const char* mod_test_run_stamp() {static std::string stamp=mod::runStamp();return stamp.c_str();}
 MOD_API void mod_test_set_event(int on) {std::lock_guard<std::mutex> lock(lifecycle);if(runtime)runtime->fakeEvent=on!=0;}
+// What the fake porter shows of his gear (bit 0 the backpack, bit 1 the wrist cuff) and what he carries (the
+// coop-partner --carry form, "hash[:slot[:count]],..." or "none").
+MOD_API void mod_test_set_gear(unsigned shown) {std::lock_guard<std::mutex> lock(lifecycle);if(runtime)runtime->fakeGear=shown;}
+MOD_API int mod_test_set_carry(const char* spec) {
+    std::lock_guard<std::mutex> lock(lifecycle);if(!runtime||!spec)return 0;
+    auto summary=mod::carry::parseSpec(spec);if(!summary)return 0;
+    auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);r.fakeCarried=*summary;return 1;
+}
 MOD_API void mod_test_set_pose(const double* position,const float* rotation,int menu) {
     std::lock_guard<std::mutex> lock(lifecycle);if(!runtime||!runtime->fake)return;
     auto* f=runtime->fake.get();
@@ -3651,11 +3778,24 @@ unsigned mod_status(char* out,unsigned cap) {
          o<<",\"others\":{\"on\":"<<(r.others?"true":"false")<<",\"near\":"<<(r.others?r.others->size():0)<<",\"connected\":"<<(r.others?r.others->connected():0)
           <<",\"bodies\":"<<(r.otherBodies?r.otherBodies->made():0)<<",\"shown\":"<<(r.otherBodies?r.otherBodies->driving():0)
           <<",\"sent\":"<<k.sent<<",\"received\":"<<k.received<<",\"accepted\":"<<k.accepted<<",\"refused\":"<<k.refused<<",\"unknown\":"<<k.unknown<<",\"malformed\":"<<k.malformed<<"}";
-         o<<",\"labels_shown\":"<<(r.nameTags?r.nameTags->shown():0);}
+         o<<",\"labels_shown\":"<<(r.nameTags?r.nameTags->shown():0);
+         // What is shown on the bodies: gear copies and case meshes that exist now, in all and per key (0: the partner).
+         o<<",\"gear_shown\":{\"pieces\":"<<(r.gears?r.gears->made():0)<<",\"by\":{";
+         if(r.gears){bool first=true;for(auto key:r.gears->keys()){o<<(first?"":",")<<"\""<<key<<"\":"<<r.gears->made(key);first=false;}}
+         o<<"},\"sets\":"<<k.gear<<"},\"cases_shown\":{\"cases\":"<<(r.stacks?r.stacks->shown():0)<<",\"by\":{";
+         if(r.stacks){bool first=true;for(auto key:r.stacks->keys()){o<<(first?"":",")<<"\""<<key<<"\":"<<r.stacks->shown(key);first=false;}}
+         o<<"},\"sets\":"<<k.carried<<",\"dropped_events\":"<<k.events<<"}";}
 #ifdef MOD_FAKE_NETWORK
         {auto ascii=[](const std::u16string& n){std::string t;for(auto ch:n)t+=(ch>=0x20&&ch<0x7f&&ch!='"'&&ch!='\\')?char(ch):'?';return t;};
          o<<",\"label_names\":[";bool first=true;for(auto& [id,l]:r.fakeLabels){o<<(first?"":",")<<"\""<<ascii(l.name)<<"\"";first=false;}
          o<<"],\"labels\":[";first=true;for(auto& [id,l]:r.fakeLabels){o<<(first?"":",")<<"{\"name\":\""<<ascii(l.name)<<"\",\"at\":["<<l.at[0]<<","<<l.at[1]<<","<<l.at[2]<<"]}";first=false;}
+         o<<"]";
+         // The fake engine's tables: every gear piece (the body it hangs on, where that body is) and every case mesh.
+         o<<",\"pieces\":[";first=true;
+         for(auto& [id,x]:r.fakePieces){auto pose=mod::puppet::readEntityPose(*r.sampler,x.parent);
+             o<<(first?"":",")<<"{\"helper\":\""<<x.helper<<"\",\"visible\":"<<(x.visible?"true":"false")<<",\"at\":["<<pose.position[0]<<","<<pose.position[1]<<","<<pose.position[2]<<"]}";first=false;}
+         o<<"],\"pieces_orphaned\":"<<r.fakeOrphaned<<",\"cases\":[";first=true;
+         for(auto& [id,x]:r.fakeCases){o<<(first?"":",")<<"{\"item\":"<<x.item<<",\"at\":["<<x.at[0]<<","<<x.at[1]<<","<<x.at[2]<<"]}";first=false;}
          o<<"]";}
 #endif
         o<<",\"carry\":{\"enabled\":"<<(r.config.carryVisual?"true":"false")<<",\"events_sent\":"<<r.carrySent<<",\"shown_entries\":"<<r.carry.view().shown().size()<<"}";   // ds3

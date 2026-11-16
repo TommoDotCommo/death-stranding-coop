@@ -166,6 +166,17 @@ std::vector<gear::Wearer> wearers(const std::vector<Shown>& shown,const Bodies& 
     }
     return out;
 }
+std::vector<uint64_t> undress(const std::vector<Shown>& shown,const std::vector<uint64_t>& dressed,Plan& plan){
+    std::vector<uint64_t> gone;
+    for(auto key:dressed){
+        if(!key||std::any_of(shown.begin(),shown.end(),[&](const Shown& v){return v.id==key;}))continue;
+        gone.push_back(key);
+#ifndef MUTANT_OTHERS_UNDRESS
+        Want w;w.key=key;plan.wants.push_back(w);
+#endif
+    }
+    return gone;
+}
 std::vector<bool> Nearest::choose(const std::vector<std::pair<uint64_t,double>>& candidates,size_t limit){
     std::vector<std::pair<double,size_t>> order;order.reserve(candidates.size());
     for(size_t i=0;i<candidates.size();++i){
@@ -390,6 +401,11 @@ size_t Others::carries(const std::optional<carry::Summary>& summary,const std::o
     for(auto& [id,s]:sessions_){
         bool up=s->core->connected();
         for(auto& e:s->carryTx.observe(summary,up,nowMs)){s->core->queueCargo(e);++queued;}
+        // Places only on the passes that measured them: the sender notices a new connection only when it is called,
+        // and one noticed on a pass without places would never send them to that player again.
+#ifndef MUTANT_OTHERS_PLACE_FRESH
+        if(!placed)continue;
+#endif
         for(auto& e:s->placeTx.observe(placed,up,nowMs)){s->core->queueCargo(e);++queued;}
     }
     return queued;

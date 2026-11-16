@@ -42,10 +42,12 @@ build/fake-others-no-relay.so: $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_OTHERS_NO_RELAY -fPIC -shared $(SRC) -o $@
 build/fake-group-sends.so: $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_GROUP_SENDS -fPIC -shared $(SRC) -o $@
+build/fake-others-undressed.so: $(SRC) $(HEADERS) | build
+	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_OTHERS_UNDRESSED -fPIC -shared $(SRC) -o $@
 build/unit: unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp $(HEADERS) | build
 	$(CXX) $(FLAGS) unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o $@
 host: identity build/mod.so build/mod-no-build.so build/mod-no-interpolation.so build/mod_probe build/unit
-test: environment-test join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so build/fake-others-to-partner.so build/fake-others-no-relay.so build/fake-group-sends.so
+test: environment-test join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so build/fake-others-to-partner.so build/fake-others-no-relay.so build/fake-group-sends.so build/fake-others-undressed.so
 	./build/unit
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_PARTNER unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-partner && if ./build/unit-config-partner >/dev/null 2>&1; then echo SURVIVED CONFIG_PARTNER; exit 1; else echo KILLED MUTANT_CONFIG_PARTNER; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_MARKER unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-marker && if ./build/unit-config-marker >/dev/null 2>&1; then echo SURVIVED CONFIG_MARKER; exit 1; else echo KILLED MUTANT_CONFIG_MARKER; fi
@@ -258,7 +260,7 @@ game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderlo
 	./build/mule-goal-test
 	python3 -B mutants.py --sources "$(MULEGOAL_SRC)" --prefix build/mutant-mulegoal- MULEGOAL_COMPONENT MULEGOAL_CAPACITY MULEGOAL_KEY MULEGOAL_INDEX MULEGOAL_OFFSET MULEGOAL_NEAR MULEGOAL_DSCOMPONENT MULEGOAL_AGREE MULEGOAL_AI_VTABLE MULEGOAL_WALKING MULEGOAL_D_VTABLE MULEGOAL_WRITABLE MULEGOAL_SAME MULEGOAL_REACH MULEGOAL_RUNNING MULEGOAL_PENDING && echo KILLED 16 mule goal mutants
 	./build/others-test
-	python3 -B mutants.py --sources "$(OTHERS_SRC)" --prefix build/mutant-others- OTHERS_CAP OTHERS_UNKNOWN OTHERS_BUILD OTHERS_SELF OTHERS_LEFT OTHERS_ROLE OTHERS_PAIR BODIES_ONE_NEW OTHERS_STICKY OTHERS_KINDS OTHERS_STALE BODIES_HIDE BODIES_REMOVE BODIES_ONCE BODIES_RATE BODIES_MIX OTHERS_LABEL_BODY OTHERS_LABEL_NAME OTHERS_EVENTS_OFF OTHERS_EVENTS_MIX OTHERS_WEAR_BODY OTHERS_WEAR_MIX OTHERS_CARRY_LOST OTHERS_CARRY_LIMIT OTHERS_CARRY_NEAREST OTHERS_CARRY_FLAP OTHERS_CARRY_HIDDEN OTHERS_CARRY_PACK OTHERS_CARRY_MIX && echo KILLED 29 others mutants
+	python3 -B mutants.py --sources "$(OTHERS_SRC)" --prefix build/mutant-others- OTHERS_CAP OTHERS_UNKNOWN OTHERS_BUILD OTHERS_SELF OTHERS_LEFT OTHERS_ROLE OTHERS_PAIR BODIES_ONE_NEW OTHERS_STICKY OTHERS_KINDS OTHERS_STALE BODIES_HIDE BODIES_REMOVE BODIES_ONCE BODIES_RATE BODIES_MIX OTHERS_LABEL_BODY OTHERS_LABEL_NAME OTHERS_EVENTS_OFF OTHERS_EVENTS_MIX OTHERS_WEAR_BODY OTHERS_WEAR_MIX OTHERS_CARRY_LOST OTHERS_CARRY_LIMIT OTHERS_CARRY_NEAREST OTHERS_CARRY_FLAP OTHERS_CARRY_HIDDEN OTHERS_CARRY_PACK OTHERS_CARRY_MIX OTHERS_UNDRESS OTHERS_PLACE_FRESH && echo KILLED 31 others mutants
 	./build/guard-test
 	./build/orders-test
 	./build/link-test

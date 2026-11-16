@@ -133,6 +133,11 @@ std::vector<nametag::Named> labels(const std::vector<Shown>&,const class Bodies&
 // set that player sent. Without a set nothing is made for that body: this porter's gear says nothing about a player
 // with a save of their own. Whether the copies show is the body's affair (Mirrors asks whether the body is visible).
 std::vector<gear::Wearer> wearers(const std::vector<Shown>&,const class Bodies&);
+// A body that still wears copies when its player has left (or is no longer listed): the copies come off first. Given
+// the keys that wear copies now, returns those whose player is not in `shown`, and keeps each one's body for this tick,
+// hidden (a Want without a goal). The caller removes those keys' copies now; next tick they wear nothing and their
+// bodies go. So the game is asked to remove a body's attached copies one tick before the body itself, never after.
+std::vector<uint64_t> undress(const std::vector<Shown>&,const std::vector<uint64_t>& dressed,Plan&);
 // Whose carried cases are drawn (cargo_stack.h, Stacks). A full backpack is up to 24 meshes, so only the nearest few
 // players get theirs: CarriersAtOnce by default, at most MaxCarriers. A player who has them keeps them until another is
 // KeepMetres nearer (nametag.h), so two at about the same distance do not swap every tick.
@@ -184,7 +189,8 @@ public:
     // What this porter wears and carries, whenever the mod has read it again (nothing: the read failed). Each session
     // sends it by the partner path's own rules (gear.h WornSender, carry_visual.h Sender, carry_place.h Sender: once
     // it has held still, on every new connection, not too often), as the same events. Without Settings::gear /
-    // Settings::carry nothing is sent. Returns the events queued.
+    // Settings::carry nothing is sent. `placed` is given on the passes that measured the places (nothing: not this
+    // pass). Returns the events queued.
     size_t wears(const std::optional<gear::WornSet>&,uint64_t nowMs);
     size_t carries(const std::optional<carry::Summary>&,const std::optional<std::vector<carryplace::Placed>>&,uint64_t nowMs);
     std::optional<std::array<double,3>> here() const {if(!local_.available)return std::nullopt;return local_.state.position;}   // this porter (wire axes)

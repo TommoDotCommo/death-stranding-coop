@@ -63,6 +63,7 @@ struct Player {
     std::map<uint64_t,unsigned> pulsesFrom;
     // What this player's mod read of its porter: worn gear, the carry summary, where the cases sit.
     std::optional<mod::gear::WornSet> worn;std::optional<mod::carry::Summary> carried;std::optional<std::vector<mod::carryplace::Placed>> placed;
+    unsigned placedEvery=1;   // the places are measured on one step in this many (the mod: twice a second, the summary four times)
     Player(uint64_t i,uint64_t c,double z):id(i),clock(c),lane(z){}
     double x(uint64_t now) const {return offset+(walking?1.5*double(now)/1000.:0);}
     Local local(uint64_t now){
@@ -84,7 +85,7 @@ struct Sim {
     // 10 ms: everybody reads its porter, the link delivers, everybody's network tick, then this game's frame.
     void step(){
         now+=10;world.clock=now;
-        for(auto& p:players){p->others->local(p->local(now));p->others->wears(p->worn,now+p->clock);p->others->carries(p->carried,p->placed,now+p->clock);}
+        for(auto& p:players){p->others->local(p->local(now));p->others->wears(p->worn,now+p->clock);p->others->carries(p->carried,(now/10)%p->placedEvery==0?p->placed:std::nullopt,now+p->clock);}
         hub.deliver(now);
         for(auto& p:players){
             p->others->tick(now+p->clock);
@@ -353,10 +354,29 @@ void wearing(){
     c.worn=WornSet{};c.carried=Summary{};s.run(8000);
     vc=s.see(200);CHECK(vc&&vc->worn&&vc->worn->empty()&&vc->carried&&vc->carried->empty());
     vb=s.see(50);CHECK(vb&&vb->worn&&*vb->worn==wb);
-    // B's session drops: what B carried is forgotten (what B wore stays); back: B says it again.
+    // B's session drops: what B carried is forgotten (what B wore stays); back: B says it again. B measures the places
+    // on one pass in fifty, so the session comes back up on a pass without them.
+    b.placedEvery=50;
     s.hub.drop=[](uint64_t from,uint64_t to,const std::vector<uint8_t>&){return from==50||to==50;};
     s.run(6000);vb=s.see(50);CHECK(vb&&!vb->connected&&!vb->carried&&!vb->places&&vb->worn);
     s.hub.drop=nullptr;s.run(8000);vb=s.see(50);CHECK(vb&&vb->connected&&vb->carried&&*vb->carried==sb&&vb->places&&vb->places->size()==3);
+}
+// A player who leaves while the body wears copies: the body stays one tick, hidden, and goes on the next.
+void undressing(){
+    Sim s;s.add(100,0);s.add(50,20);s.add(200,40);
+    s.run(3000);auto body=s.bodies.entity(200);CHECK(body&&s.world.shown(body)&&s.world.removes==0);
+    s.hub.leave(200,s.now);
+    // One tick by hand, as the mod's: who is shown, the plan, then the keys that wear copies (the partner's 0, both players).
+    std::vector<uint64_t> dressed{0,50,200};
+    auto tick=[&]{s.now+=10;for(auto& p:s.players)p->others->local(p->local(s.now));s.hub.deliver(s.now);for(auto& p:s.players)p->others->tick(s.now+p->clock);
+        s.shown=s.me().others->frame(s.now+s.me().clock);mod::others::plan(s.shown,true,true,true,s.plan);
+        auto gone=undress(s.shown,dressed,s.plan);for(auto k:gone)dressed.erase(std::find(dressed.begin(),dressed.end(),k));
+        s.bodies.drive(s.plan.wants,s.world.anchor,s.now+s.me().clock);s.world.frame();return gone;};
+    auto gone=tick();
+    CHECK((gone==std::vector<uint64_t>{200})&&s.world.removes==0&&s.world.of(body)&&!s.world.shown(body));   // the copies first
+    CHECK(s.world.shown(s.bodies.entity(50)));
+    gone=tick();CHECK(gone.empty()&&s.world.removes==1&&!s.world.of(body)&&s.bodies.size()==1);              // then the body
+    gone=tick();CHECK(gone.empty()&&s.world.removes==1&&(dressed==std::vector<uint64_t>{0,50}));              // the partner's key is never a player
 }
 // Whose cases are drawn: the nearest few with a backpack copy to hang them on.
 void carrying(){
@@ -458,7 +478,7 @@ void kinds(){
 }
 }
 int main(){
-    pairing();several();stale();leaving();limits();isolation();identity();jump();animation();reload();showing();labelling();wearing();carrying();kinds();
+    pairing();several();stale();leaving();limits();isolation();identity();jump();animation();reload();showing();labelling();wearing();undressing();carrying();kinds();
     if(failures){std::fprintf(stderr,"others: %u failures\n",failures);return 1;}
     std::puts("others: sessions per player, bodies per player, limits, isolation, staleness and leaving hold");
     return 0;

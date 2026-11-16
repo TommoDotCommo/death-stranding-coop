@@ -86,6 +86,7 @@ public:
     void clear();                    // every mesh released, every stack dropped
     Stack* of(uint64_t key){auto it=stacks_.find(key);return it==stacks_.end()?nullptr:it->second.get();}
     size_t size() const {return stacks_.size();}
+    std::vector<uint64_t> keys() const {std::vector<uint64_t> k;for(auto& [key,s]:stacks_)k.push_back(key);return k;}
     size_t shown() const {size_t n=0;for(auto& [key,s]:stacks_)n+=s->shown();return n;}   // meshes that exist, all bodies
     size_t shown(uint64_t key) const {auto it=stacks_.find(key);return it==stacks_.end()?0:it->second->shown();}
     Layout layout;                   // given to every stack on every tick

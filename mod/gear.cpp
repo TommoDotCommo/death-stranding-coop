@@ -292,9 +292,9 @@ void Mirror::tick(uint64_t body,uint64_t world,const std::function<std::vector<P
         m.shown=shown;
     }
 }
-void Mirrors::remove(uint64_t key){
+void Mirrors::remove(uint64_t key,uint64_t world){
     auto it=mirrors_.find(key);if(it==mirrors_.end())return;
-    it->second->clear();mirrors_.erase(it);
+    it->second->tick(0,world,[]{return std::vector<Piece>{};},{},false);mirrors_.erase(it);
 }
 void Mirrors::clear(){for(auto& [key,m]:mirrors_)m->clear();mirrors_.clear();}
 void Mirrors::tick(uint64_t world,const std::vector<Wearer>& wearers){

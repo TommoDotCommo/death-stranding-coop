@@ -177,8 +177,11 @@ public:
         :api_(std::move(api)),look_(std::move(look)),nodes_(std::move(nodes)),image_(image),log_(std::move(log)){}
     // One game-thread tick with everybody who should wear gear now. world: the porter entity, never 0.
     void tick(uint64_t world,const std::vector<Wearer>&);
-    void remove(uint64_t key);       // that key's copies removed now, its mirror dropped
-    void clear();                    // every key's
+    // That key's copies removed now and its mirror dropped. world: the porter entity now (0: none); copies of another
+    // world are forgotten, never touched.
+    void remove(uint64_t key,uint64_t world);
+    void clear();                    // every key's copies removed, whatever the world: only for tests and shutdown paths that know it is the same world
+    std::vector<uint64_t> keys() const {std::vector<uint64_t> k;for(auto& [key,m]:mirrors_)k.push_back(key);return k;}
     Mirror* of(uint64_t key){auto it=mirrors_.find(key);return it==mirrors_.end()?nullptr:it->second.get();}
     uint64_t copyAt(uint64_t key,const std::string& helper) const {auto it=mirrors_.find(key);return it==mirrors_.end()?0:it->second->copyAt(helper);}
     size_t size() const {return mirrors_.size();}

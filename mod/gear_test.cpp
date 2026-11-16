@@ -297,7 +297,8 @@ int main(){
         all.pop_back();run(settle+30);
         CHECK(w.removes==removes&&set.made()==w.live()-live&&set.made(0)==2&&set.made(8)==0&&set.made(7)==1);
         // remove and clear: now.
-        removes=w.removes;set.remove(7);CHECK(w.removes==removes+1&&set.made(7)==0);
+        removes=w.removes;set.remove(7,world);CHECK(w.removes==removes+1&&set.made(7)==0&&set.keys().size()==set.size());
+        CHECK(set.made(6)==2);set.remove(6,world+0x100000);CHECK(w.removes==removes+1&&set.made(6)==0);   // another world's: forgotten
         auto left=set.made();set.clear();CHECK(w.removes==removes+1+left&&set.size()==0&&set.made()==0);
     }
     if(failures)return 1;
