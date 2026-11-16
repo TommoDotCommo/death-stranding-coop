@@ -1,5 +1,6 @@
 """The built server over a real socket: sign-in, a gateway call, keep-alive, the secret prefix, the saved file; the server
-policy: an upload that waits for the owner is handed to nobody else until he accepts it, and the policy commands."""
+policy: an upload that waits for the owner is handed to nobody else until he accepts it, one the policy does not let be
+shared is answered and held for its builder, and the policy commands."""
 import http.client,json,os,socket,subprocess,sys,tempfile,time
 exe=sys.argv[1]
 def free_port():
@@ -79,6 +80,29 @@ with tempfile.TemporaryDirectory() as d:
                        (['remove-player','--data',held],2),(['policy','--data',held,'--set','limit=-1'],1),(['withdraw','--data',held,'--player','zygo_nobody','--all'],1),
                        (['review','--data',held,'--accept','lnothing00000'],1),(['player-set','--data',held,'--player',ann_id,'member=maybe'],1)):
         r=run(*wrong);assert r.returncode==code and open(held).read()==before,(wrong,r.returncode,r.stdout,r.stderr)
+    # build=nobody: the upload is answered as any other and held for its builder; once the policy allows it, he offers it.
+    port=free_port();held2=os.path.join(d,'held.json');p=start(port,'--policy-set','build=nobody',path=held2)
+    try:
+        c=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
+        (ann,ann_id),(bob,_)=sign_in('ann'),sign_in('bob')
+        status,kept=gate(ann,'createObject',{'t':'l','q':226,'px':1,'py':2,'pz':3});assert status==200 and kept['id'][0]=='l' and len(kept['id'])==13 and kept['l']==[1,2,3],(status,kept)
+        assert gate(bob,'findQpidObjects',{'q':226})[1]['n']['oa']==[] and gate(bob,'getQpidObjects',{'ids':[kept['id']]})[1]['objects']==[]
+        assert len(gate(ann,'getQpidObjects',{'ids':[kept['id']]})[1]['objects'])==1
+        c.close()
+    finally:
+        p.kill();p.wait()
+    saved=json.load(open(held2))['objects'];assert len(saved)==1 and saved[0]['share']=='held' and saved[0]['held']=='build',saved
+    r=run('review','--data',held2);assert r.returncode==0 and 'held for its builder only: nobody builds on this server' in r.stdout,r.stdout
+    r=run('offer','--data',held2,'--player',ann_id,'--object',kept['id']);assert r.returncode==1 and 'stays held' in r.stderr,(r.stdout,r.stderr)
+    r=run('policy','--data',held2,'--set','build=everyone');assert r.returncode==0,r.stderr
+    r=run('offer','--data',held2,'--player',ann_id,'--all');assert r.returncode==0 and 'offered: 1 objects' in r.stdout,r.stdout
+    port=free_port();p=start(port,path=held2)
+    try:
+        c=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
+        assert [o['id'] for o in gate(bob,'findQpidObjects',{'q':226})[1]['n']['oa']]==[kept['id']]
+        c.close()
+    finally:
+        p.kill();p.wait()
     # --idle-exit: a server nobody asks anything leaves by itself.
     port=free_port();p=subprocess.Popen([exe,'--port',str(port),'--idle-exit','1'],stdout=subprocess.PIPE,text=True)
     try:assert p.wait(timeout=20)==0

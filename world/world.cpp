@@ -36,6 +36,8 @@ bool wholeNumber(const std::string& s,int64_t& out){
     out=std::stoll(s);return true;}
 Value triple(const Value& post,const char* a,const char* b,const char* c){Value v=Value::array();v.push(post.get(a).integer());v.push(post.get(b).integer());v.push(post.get(c).integer());return v;}
 }
+std::string heldText(const std::string& why){
+    return why=="build"?"nobody builds on this server":why=="member"?"only members build on this server":why=="limit"?"this server's limit of objects per player":why;}
 std::string unwrap(const std::string& body){
     const std::string head="{\"data\":\"",tail="\"}";
     if(body.size()>=head.size()+tail.size()&&body.compare(0,head.size(),head)==0&&body.compare(body.size()-tail.size(),tail.size(),tail)==0)
@@ -112,19 +114,11 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
         Value v=Value::object();v.set("version",std::to_string(VersionMajor)+"."+std::to_string(VersionMinor));v.set("major",VersionMajor);v.set("minor",VersionMinor);return ok(v);}
     if(name=="createObject"){
         if(!in.get("t").isString())return refuse(400,"bad-object","object type missing");
-        // Who builds here (policy "build"), and how much one player keeps (policy "limit"; the hard cap stays).
-#ifndef MUTANT_POLICY_BUILD_NOBODY
-        if(policy_.build=="nobody"){note("refused createObject: nobody builds on this server");return refuse(403,"no-building","nobody builds on this server");}
-#endif
-#ifndef MUTANT_POLICY_BUILD_MEMBERS
-        if(policy_.build=="members"&&!me.member){note("refused createObject: "+me.id+" is not a member");return refuse(403,"not-member","only members build on this server");}
-#endif
+        // The hard cap on what one player stores here (the server's memory and disk). What the policy does not let him
+        // share is not refused: his game builds in his own world whatever a server says, so the server holds it for him.
         size_t mine=0;for(auto& o:objects_)if(o.second.creator==me.id&&o.second.originServer.empty()&&!o.second.remnant)++mine;
 #ifndef MUTANT_WORLD_OBJECT_CAP
         if(mine>=MaxObjectsPerPlayer){note("refused createObject: "+me.id+" has too many");return refuse(403,"too-many","too many objects");}
-#endif
-#ifndef MUTANT_POLICY_LIMIT
-        if(policy_.limit>0&&mine>=size_t(policy_.limit)){note("refused createObject: "+me.id+" is at the server's limit");return refuse(403,"too-many","this server's limit of objects per player");}
 #endif
         // The game reads an object's kind from the first letter of its id (its own ids are the type letter and 12
         // characters): an id of any other shape makes the builder's game delete its upload at once.
@@ -144,13 +138,16 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
             for(int i=0;i<12;++i){o.id+=digits[h%62];h/=62;if(i==5)h^=fnv(o.id,nextObject_);}
         }while(objects_.count(o.id));
         o.creator=me.id;o.post=in;o.updated=now;o.likes=in.get("lp").integer();o.name=me.name;
-        // Kept for its builder only, waiting for his answer, or offered (and then as accept_offers says).
+        // Kept for its builder only, held (the policy does not let him share it), waiting for his answer, or offered
+        // (and then as accept_offers says).
         const std::string& choice=me.offerBuilds.empty()?policy_.offerBuilds:me.offerBuilds;
+        const std::string why=choice=="no"?std::string():blocked(me,false);
 #ifndef MUTANT_POLICY_ASK
-        o.share=choice=="no"?"kept":choice=="ask"?"ask":shareAfterOffer();
+        o.share=choice=="no"?"kept":!why.empty()?"held":choice=="ask"?"ask":shareAfterOffer();
 #else
-        o.share=choice=="no"?"kept":shareAfterOffer();
+        o.share=choice=="no"?"kept":!why.empty()?"held":shareAfterOffer();
 #endif
+        if(o.share=="held"){o.held=why;o.heldAsk=choice=="ask";note("object held for "+me.name+" only: "+heldText(why));}
         auto& kept=objects_[o.id]=o;dirty_=true;++changes_;note("object "+kept.id+" type "+in.get("t").string()+" in area "+std::to_string(in.get("q").integer())+" by "+me.name+(o.share.empty()?"":" ("+o.share+")"));
         return ok(objectResponse(kept));}
     if(name=="deleteObject"||name=="updateObject"){
@@ -263,6 +260,8 @@ json::Value World::snapshot() const {
         if(!o.second.name.empty())v.set("name",o.second.name);
 #ifndef MUTANT_POLICY_SAVE_LOST
         if(!o.second.share.empty())v.set("share",o.second.share);
+        if(!o.second.held.empty())v.set("held",o.second.held);
+        if(o.second.heldAsk)v.set("held_ask",true);
 #endif
         if(o.second.remnant)v.set("remnant",true);
         if(!o.second.originServer.empty()){Value from=Value::object();from.set("server",o.second.originServer);from.set("id",o.second.originId);from.set("via",o.second.via);
@@ -295,8 +294,9 @@ void World::restore(const json::Value& v){
         players_[pl.key]=pl;}
     for(auto& t:v.get("sessions").members())if(playerById(t.second.string()))tokens_[t.first]=t.second.string();
     for(auto& o:v.get("objects").items()){Object ob;ob.id=o.get("id").string();ob.creator=o.get("creator").string();ob.updated=o.get("updated").integer();ob.likes=o.get("likes").integer();ob.post=o.get("post");
-        ob.name=o.get("name").string();ob.share=o.get("share").string();ob.remnant=o.get("remnant").boolean();
-        if(ob.id.empty()||!ob.post.isObject()||!oneOf(ob.share,{"","kept","ask","review"})||(o.has("origin")&&(ob.remnant||!ob.share.empty())))throw std::runtime_error("world file: bad object");
+        ob.name=o.get("name").string();ob.share=o.get("share").string();ob.remnant=o.get("remnant").boolean();ob.held=o.get("held").string();ob.heldAsk=o.get("held_ask").boolean();
+        if(ob.id.empty()||!ob.post.isObject()||!oneOf(ob.share,{"","kept","ask","review","held"})||(o.has("origin")&&(ob.remnant||!ob.share.empty()))
+           ||(ob.share=="held")!=oneOf(ob.held,{"build","member","limit"})||(ob.heldAsk&&ob.share!="held"))throw std::runtime_error("world file: bad object");
         if(o.has("origin")){const Value& from=o.get("origin");ob.originServer=from.get("server").string();ob.originId=from.get("id").string();ob.via=from.get("via").string();
             ob.originName=from.get("name").string();ob.originLikes=from.get("likes").integer();
             if(!serverIdText(ob.originServer)||!serverIdText(ob.via)||!objectIdText(ob.originId)||ob.originServer==serverId_||!byOrigin_.emplace(std::make_pair(ob.originServer,ob.originId),ob.id).second)
@@ -406,7 +406,7 @@ json::Value World::exportObjects(const Filter& f,const std::string& forServer,in
     for(auto it=after.empty()?objects_.begin():objects_.upper_bound(after);it!=objects_.end();++it){
         const Object& o=it->second;bool imported=!o.originServer.empty();
 #ifndef MUTANT_POLICY_EXPORT_PENDING
-        if(!o.share.empty())continue;   // kept for its builder, or waiting: nobody else is handed it, nor is another server
+        if(!o.share.empty())continue;   // kept or held for its builder, or waiting: nobody else is handed it, nor is another server
 #endif
 #ifndef MUTANT_LINK_ECHO
         // Never back to where it came from, whatever the filter says.
@@ -576,7 +576,31 @@ bool World::servedTo(const Object& o,const std::string& player) const {
 #ifndef MUTANT_POLICY_OFFER_NO_SERVED
     if(o.share=="kept")return false;
 #endif
+#ifndef MUTANT_POLICY_HELD_SERVED
+    if(o.share=="held")return false;
+#endif
     return true;
+}
+// What the policy says to one more shared object of this player (`counted`: it counts for the limit already, as an
+// object that waits does): "" when it may be shared, else build, member or limit.
+std::string World::blocked(const Player& p,bool counted) const {
+#ifndef MUTANT_POLICY_BUILD_NOBODY
+    if(policy_.build=="nobody")return "build";
+#endif
+#ifndef MUTANT_POLICY_BUILD_MEMBERS
+    if(policy_.build=="members"&&!p.member)return "member";
+#endif
+#ifndef MUTANT_POLICY_LIMIT
+    if(policy_.limit>0&&!counted&&offered(p.id)>=size_t(policy_.limit))return "limit";
+#else
+    (void)counted;
+#endif
+    return "";
+}
+size_t World::offered(const std::string& player) const {
+    size_t n=0;
+    for(auto& o:objects_)if(o.second.creator==player&&o.second.originServer.empty()&&!o.second.remnant&&oneOf(o.second.share,{"","ask","review"}))++n;
+    return n;
 }
 std::string World::shareAfterOffer() const {
 #ifndef MUTANT_POLICY_REVIEW
@@ -604,26 +628,46 @@ std::vector<World::PlayerInfo> World::playerList() const {
         const Object& ob=o.second;auto found=at.find(ob.creator);
         if(found==at.end()){PlayerInfo i;i.id=ob.creator;i.name=ob.originServer.empty()?ob.name:ob.originName;i.known=false;found=at.emplace(ob.creator,out.size()).first;out.push_back(i);}
         PlayerInfo& i=out[found->second];
-        if(!ob.originServer.empty())++i.imported;else if(ob.remnant)++i.remnants;else if(ob.share.empty())++i.shared;else if(ob.share=="kept")++i.kept;else ++i.pending;}
+        if(!ob.originServer.empty())++i.imported;else if(ob.remnant)++i.remnants;else if(ob.share.empty())++i.shared;else if(ob.share=="kept")++i.kept;
+        else if(ob.share=="held")++i.held;else ++i.pending;}
     return out;
 }
 std::vector<World::Waiting> World::waiting() const {
     std::lock_guard<std::mutex> g(lock_);std::vector<Waiting> out;
-    for(auto& o:objects_)if(o.second.share=="ask"||o.second.share=="review"){
+    for(auto& o:objects_)if(oneOf(o.second.share,{"ask","review","held"})){
         Waiting w;w.id=o.first;w.creator=o.second.creator;w.type=o.second.post.get("t").string();w.area=o.second.post.get("q").integer();w.updated=o.second.updated;
-        w.forBuilder=o.second.share=="ask";auto* p=playerById(o.second.creator);w.name=p?p->name:o.second.name;out.push_back(w);}
+        w.forBuilder=o.second.share=="ask"||o.second.heldAsk;w.held=o.second.held;auto* p=playerById(o.second.creator);w.name=p?p->name:o.second.name;out.push_back(w);}
     return out;
 }
 size_t World::review(const std::string& object,bool accept){
     std::lock_guard<std::mutex> g(lock_);
     auto found=objects_.find(object);
-    if(found==objects_.end()||found->second.share!="review")bad("review: "+object+" does not wait for the owner (coop-world review lists what does)");
-    found->second.share=accept?"":"kept";dirty_=true;++changes_;return 1;
+    if(found==objects_.end()||(found->second.share!="review"&&found->second.share!="held"))bad("review: "+object+" does not wait for the owner and is not held (coop-world review lists what does)");
+    Object& o=found->second;
+    if(accept&&o.share=="held"){
+        if(o.heldAsk)bad("review: "+object+" waits for its builder's answer first (coop-world offer)");
+        const Player* p=playerById(o.creator);if(!p)bad("review: "+object+" has no builder here");
+        std::string why=blocked(*p,false);
+#ifdef MUTANT_POLICY_HELD_RELEASE
+        why.clear();
+#endif
+        if(!why.empty())bad("review: "+object+" stays held: "+heldText(why));}
+    o.share=accept?"":"kept";o.held.clear();o.heldAsk=false;dirty_=true;++changes_;return 1;
 }
 size_t World::reviewPlayer(const std::string& player){
     std::lock_guard<std::mutex> g(lock_);
     if(!playerById(player))bad("no player "+player+" on this server (coop-world players lists them)");
-    size_t n=0;for(auto& o:objects_)if(o.second.creator==player&&o.second.share=="review"){o.second.share="";++n;}
+    const Player* p=playerById(player);size_t n=0;
+    for(auto& o:objects_){
+        Object& ob=o.second;if(ob.creator!=player)continue;
+        if(ob.share=="held"&&!ob.heldAsk){
+            std::string why=blocked(*p,false);
+#ifdef MUTANT_POLICY_HELD_RELEASE
+            why.clear();
+#endif
+            if(!why.empty()){ob.held=why;continue;}}
+        else if(ob.share!="review")continue;
+        ob.share="";ob.held.clear();ob.heldAsk=false;++n;}
     if(n){dirty_=true;++changes_;}
     return n;
 }
@@ -640,13 +684,26 @@ World::Object& World::ownObject(const std::string& player,const std::string& obj
 }
 size_t World::offer(const std::string& player,const std::string& object,bool yes){
     std::lock_guard<std::mutex> g(lock_);
-    if(!playerById(player))bad("no player "+player+" on this server (coop-world players lists them)");
+    const Player* p=playerById(player);
+    if(!p)bad("no player "+player+" on this server (coop-world players lists them)");
     std::vector<Object*> list;
-    if(!object.empty()){Object& o=ownObject(player,object);if(o.share!="ask")bad(object+" does not wait for its builder's answer");list.push_back(&o);}
-    else for(auto& o:objects_)if(o.second.creator==player&&o.second.share=="ask")list.push_back(&o.second);
-    for(auto* o:list)o->share=yes?shareAfterOffer():"kept";
-    if(!list.empty()){dirty_=true;++changes_;}
-    return list.size();
+    if(!object.empty()){Object& o=ownObject(player,object);if(o.share!="ask"&&o.share!="held")bad(object+" does not wait for its builder's answer and is not held");list.push_back(&o);}
+    else for(auto& o:objects_)if(o.second.creator==player&&(o.second.share=="ask"||o.second.share=="held"))list.push_back(&o.second);
+    size_t n=0;
+    for(auto* o:list){
+        if(yes){
+            // Shared only as far as the policy allows: what it does not stays held, with the reason of now.
+            std::string why=blocked(*p,o->share=="ask");
+#ifdef MUTANT_POLICY_HELD_RELEASE
+            why.clear();
+#endif
+            if(!why.empty()){
+                if(!object.empty())bad(object+" stays held: "+heldText(why));
+                if(o->share=="held")o->held=why;
+                continue;}}
+        o->share=yes?shareAfterOffer():"kept";o->held.clear();o->heldAsk=false;++n;}
+    if(n){dirty_=true;++changes_;}
+    return n;
 }
 World::Withdrawn World::withdraw(const std::string& player,const std::string& object){
     std::lock_guard<std::mutex> g(lock_);
