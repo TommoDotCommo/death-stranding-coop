@@ -141,7 +141,7 @@ with tempfile.TemporaryDirectory() as d:
             c.request(method,'/abc/coop/'+call+('?player='+player if player else ''),body=None if body is None else json.dumps(body))
             r=c.getresponse();return r.status,json.loads(r.read() or b'{}')
         c.request('GET','/coop/policy');r=c.getresponse();r.read();assert r.status==404
-        status,policy=coop('GET','policy');assert status==200 and policy['preset']=='public' and len(policy['settings'])==8,policy
+        status,policy=coop('GET','policy');assert status==200 and policy['preset']=='public' and len(policy['settings'])==11,policy
         build=[s for s in policy['settings'] if s['key']=='build'][0];assert build['value']=='everyone' and build['preset']=='members' and build['text'].startswith('What any player'),build
         status,me=coop('GET','me',player='ann');assert status==200 and me['known'] is False,me
         status,me=coop('POST','choices',{'player':'ann','offer_builds':'ask','offer_old':'no'});assert status==200 and me['known'] and me['applies']['offer_builds']=='ask',me
