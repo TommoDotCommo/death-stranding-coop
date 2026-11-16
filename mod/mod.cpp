@@ -295,6 +295,7 @@ struct Runtime final:ds::Transport {
         mod::others::Settings s;s.self=self;s.session=config.session;s.cap=config.others;s.build=mod::WireBuild;s.nickname=config.nickname;
         s.gear=config.othersGear;s.carry=config.othersCarry!=0;
         ds::broadcast::ClientConfig c;c.token=config.relayKey;c.nickname=ds::relay::nicknameText(config.nickname)?config.nickname:std::string();
+        c.show=config.showOthers=="nobody"?ds::broadcast::Show::Nobody:config.showOthers=="friends"?ds::broadcast::Show::Friends:ds::broadcast::Show::Everyone;
         auto made=std::make_unique<mod::crowd::Crowd>(s,c,std::move(send),[this](const std::string& row){note(row.c_str());});
         crowd=made.get();others=std::move(made);
         note(("OTHERS ready (broadcast): up to "+std::to_string(config.others)+" other players"+(otherBodies?"\n":" (no bodies in this build)\n")).c_str());

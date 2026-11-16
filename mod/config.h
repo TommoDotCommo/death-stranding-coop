@@ -26,6 +26,9 @@ struct Config {
     // pair's datagrams on: others.h) or "broadcast" (one client, the server copying each update to everybody near:
     // core/broadcast.h, crowd.h). The server speaks both and never puts players of different modes near each other.
     std::string relayMode="pairs";
+    // Broadcast: who this player sees of the players near, "everyone" (at most the server's cap), "friends" (his friend
+    // list on the server) or "nobody". Sent in every HELLO; the server's record of his choice comes first.
+    std::string showOthers="everyone";
     unsigned others=0;         // the most other players shown besides the partner, presence only (others.h); 0: off
     // What other players are shown with besides body, pose and name (others.h). Shown only: nothing of the world.
     bool othersGear=false;     // the gear each other player wears, copied onto that player's body (gear.h, Mirrors); not run live
