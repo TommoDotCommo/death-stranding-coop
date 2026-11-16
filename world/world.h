@@ -52,6 +52,7 @@ struct Policy {
 Policy presetPolicy(const std::string& name);       // friends, solo or public; throws for anything else
 void setPolicy(Policy&,const std::string& keyValue); // "KEY=VALUE"; throws with the reason and leaves it as it was
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy&);   // key and value, in a fixed order
+std::string heldText(const std::string& why);       // why an object is held (build, member, limit), in words
 // A gateway request body as the game sends it with plain bodies: {"data":"<json, quotes not escaped>"}, or plain JSON.
 std::string unwrap(const std::string& body);
 class World {
@@ -92,16 +93,19 @@ public:
     // A player's own choices, "KEY=VALUE": offer_builds yes|no|ask|default, offer_old yes|no|default, member yes|no.
     void setPlayer(const std::string& id,const std::string& keyValue);
     // One line per player of this world, then one per builder known here only from imports (known=false).
-    struct PlayerInfo { std::string id,name,offerBuilds,offerOld;bool known=true,member=false;size_t shared=0,pending=0,kept=0,remnants=0,imported=0; };
+    struct PlayerInfo { std::string id,name,offerBuilds,offerOld;bool known=true,member=false;size_t shared=0,pending=0,kept=0,held=0,remnants=0,imported=0; };
     std::vector<PlayerInfo> playerList() const;
-    // The objects that wait: for their builder's answer (offer_builds ask), or for the owner (accept_offers review).
-    struct Waiting { std::string id,creator,name,type;int64_t area=0,updated=0;bool forBuilder=false; };
+    // The objects that wait: for their builder's answer (offer_builds ask), or for the owner (accept_offers review),
+    // and the ones held because the policy does not let them be shared (`held`: build, member or limit).
+    struct Waiting { std::string id,creator,name,type,held;int64_t area=0,updated=0;bool forBuilder=false; };
     std::vector<Waiting> waiting() const;
-    // The owner: an object that waits for him is shared (accept) or kept for its builder only (reject). With
-    // `player`, every object of that player that waits for the owner is accepted. Returns how many.
+    // The owner: an object that waits for him is shared (accept) or kept for its builder only (reject). A held object
+    // is shared only once the policy allows it (and its builder, if he was to be asked, said yes). With `player`,
+    // every object of that player that waits for the owner, or is held and now allowed, is accepted. Returns how many.
     size_t review(const std::string& object,bool accept);
     size_t reviewPlayer(const std::string& player);
-    // A player's answer for what waits for him ("" = all of it): yes goes on as accept_offers says, no keeps it his.
+    // A player's answer for what waits for him or is held ("" = all of it): yes goes on as accept_offers says (a held
+    // object only once the policy allows it), no keeps it his.
     size_t offer(const std::string& player,const std::string& object,bool yes);
     // A player takes back his objects ("" = all): with withdrawal "stay" what was shared stays as a remnant under his
     // name that no account owns; anything else, and everything with "go", is removed.
@@ -119,11 +123,13 @@ private:
     // An imported object keeps where it was first built (originServer, originId), which server handed it over (via),
     // its builder's name there and the like count it arrived with; `likes` is that count plus what was given here.
     // `name` is the builder's name when it was built (kept for a remnant); `share` is "" for an object every player
-    // is handed, else "kept" (its builder's only), "ask" (waits for its builder) or "review" (waits for the owner).
+    // is handed, else "kept" (its builder's only), "ask" (waits for its builder), "review" (waits for the owner) or
+    // "held" (its builder's only because the policy does not let it be shared: `held` says why, build, member or
+    // limit; `heldAsk`: its builder is still to be asked).
     // A remnant was withdrawn by its builder and stayed: nobody changes it, and its likes go to no one.
     struct Object { std::string id,creator;json::Value post;int64_t updated=0;int64_t likes=0;
                     std::string originServer,originId,via,originName;int64_t originLikes=0;
-                    std::string name,share;bool remnant=false; };
+                    std::string name,share,held;bool remnant=false,heldAsk=false; };
     struct Like { std::string to,from,object,type;int64_t time=0,points=0,autoPoints=0; };   // to: the object's builder
     mutable std::mutex lock_;
     std::function<std::string()> random_;
@@ -138,6 +144,8 @@ private:
     std::string versionLocked() const {return epoch_+"-"+std::to_string(changes_);}
     bool servedTo(const Object&,const std::string& player) const;          // may this player be handed it
     std::string shareAfterOffer() const;                                   // what an offered upload becomes
+    std::string blocked(const Player&,bool counted) const;                 // why this player may not share one more ("": he may)
+    size_t offered(const std::string& player) const;                      // his objects that count for the limit
     Object& ownObject(const std::string& player,const std::string& object);
     std::string importedId(char type,const std::pair<std::string,std::string>& origin) const;
     Shared sharedOf(const Object&) const;

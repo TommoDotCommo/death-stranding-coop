@@ -45,16 +45,47 @@ static void presets(){
     CHECK(Server().w.policy().preset=="friends");
 }
 static void building(){
-    // Nobody builds: refused, nothing stored. Members only: a member builds, another does not.
-    {Server s("friends",{"build=nobody"});auto ann=s.signIn("steam-a","Ann");CHECK(s.build(ann).status==403&&s.w.objects()==0);}
+    // Nobody builds: the upload is answered as any other (the builder's game keeps its structure) and held for him:
+    // nobody else is handed it, nor a linked server, and it is not shared while the policy does not allow it.
+    {Server s("friends",{"build=nobody"});auto ann=s.signIn("steam-a","Ann"),bob=s.signIn("steam-b","Bob");
+     auto r=s.build(ann);CHECK(r.status==200);auto id=json::parse(r.body).get("id").string();
+     CHECK(id.size()==13&&id[0]=='l'&&s.w.objects()==1&&s.object(id).get("share").string()=="held"&&s.object(id).get("held").string()=="build");
+     CHECK(s.found(bob)==0&&!s.got(bob,id)&&s.got(ann,id)&&s.w.exportObjects(parseFilter("all"),"",200).get("objects").items().empty());
+     CHECK(throws([&]{s.w.offer(Ann,id,true);})&&throws([&]{s.w.review(id,true);})&&s.w.offer(Ann,"",true)==0&&s.w.reviewPlayer(Ann)==0&&s.found(bob)==0);
+     {auto w=s.w.waiting();CHECK(w.size()==1&&w[0].held=="build"&&!w[0].forBuilder);}
+     CHECK(s.info(Ann).held==1&&s.info(Ann).shared==0);
+     {World saved([]{return std::string("fresh");});saved.restore(json::parse(s.w.snapshot().dump()));
+      CHECK(json::parse(saved.call(bob,"getQpidObjects","{\"ids\":[\""+id+"\"]}",1).body).get("objects").items().empty());}
+     Policy p=s.w.policy();setPolicy(p,"build=everyone");s.w.setPolicy(p);
+     CHECK(s.w.offer(Ann,id,true)==1&&s.found(bob)==1&&s.got(bob,id));}
+    // Members only: a non-member's upload is held; once he is a member the owner may share it.
     {Server s("public",{"accept_offers=auto"});auto ann=s.signIn("steam-a","Ann"),bob=s.signIn("steam-b","Bob");
-     CHECK(s.build(ann).status==403&&s.w.objects()==0);
-     s.w.setPlayer(Ann,"member=yes");CHECK(s.build(ann).status==200&&s.build(bob).status==403&&s.w.objects()==1&&s.found(bob)==1);
-     s.w.setPlayer(Ann,"member=no");CHECK(s.build(ann).status==403);}
-    // The limit per player: the next one is refused; others still build; a remnant does not count.
+     auto id=s.make(ann);CHECK(s.object(id).get("held").string()=="member"&&s.found(bob)==0&&!s.got(bob,id));
+     CHECK(throws([&]{s.w.review(id,true);}));
+     s.w.setPlayer(Ann,"member=yes");auto shared=s.make(ann);CHECK(s.found(bob)==1&&s.got(bob,shared));
+     CHECK(s.w.review(id,true)==1&&s.found(bob)==2);
+     auto bobs=s.make(bob);CHECK(s.found(ann)==0&&!s.got(ann,bobs));
+     s.w.setPlayer(Ann,"member=no");auto later=s.make(ann);CHECK(s.object(later).get("held").string()=="member"&&s.found(bob)==2);
+     CHECK(s.w.offer(Ann,later,false)==1&&s.object(later).get("share").string()=="kept"&&!s.object(later).has("held"));}
+    // Held while its builder is still to be asked: his answer comes first, the owner cannot share it for him.
+    {Server s("friends",{"build=nobody"});auto ann=s.signIn("steam-a","Ann"),bob=s.signIn("steam-b","Bob");s.w.setPlayer(Ann,"offer_builds=ask");
+     auto id=s.make(ann);CHECK(s.object(id).get("held_ask").boolean());{auto w=s.w.waiting();CHECK(w.size()==1&&w[0].forBuilder);}
+     Policy p=s.w.policy();setPolicy(p,"build=everyone");s.w.setPolicy(p);
+     CHECK(throws([&]{s.w.review(id,true);})&&s.w.reviewPlayer(Ann)==0&&s.found(bob)==0);
+     CHECK(s.w.offer(Ann,id,true)==1&&s.found(bob)==1);}
+    // The limit counts what is shared or waits: past it an upload is held; kept ones do not count; a withdrawal, or a
+    // higher limit, makes room again.
     {Server s("friends",{"limit=2","withdrawal=stay"});auto ann=s.signIn("steam-a","Ann"),bob=s.signIn("steam-b","Bob");
-     auto first=s.make(ann);s.make(ann,"r");CHECK(s.build(ann,"e").status==403&&s.w.objects()==2&&s.build(bob).status==200);
-     CHECK(s.w.withdraw(Ann,first).remnants==1);CHECK(s.build(ann,"e").status==200&&s.build(ann,"e").status==403);}
+     auto first=s.make(ann);s.make(ann,"r");auto third=s.make(ann,"e");
+     CHECK(s.object(third).get("held").string()=="limit"&&s.w.objects()==3&&s.found(bob)==2&&!s.got(bob,third)&&s.build(bob).status==200);
+     CHECK(throws([&]{s.w.offer(Ann,third,true);})&&throws([&]{s.w.review(third,true);}));
+     s.w.setPlayer(Ann,"offer_builds=no");auto kept=s.make(ann,"b");CHECK(s.object(kept).get("share").string()=="kept");s.w.setPlayer(Ann,"offer_builds=default");
+     CHECK(s.w.withdraw(Ann,first).remnants==1);CHECK(s.w.offer(Ann,"",true)==1&&s.got(bob,third)&&s.found(bob)==3);
+     auto fourth=s.make(ann,"e");CHECK(s.object(fourth).get("held").string()=="limit"&&!s.got(bob,fourth));
+     Policy p=s.w.policy();setPolicy(p,"limit=0");s.w.setPolicy(p);CHECK(s.w.reviewPlayer(Ann)==1&&s.got(bob,fourth));}
+    {Server s("public",{"build=everyone","limit=1"});auto ann=s.signIn("steam-a","Ann");auto one=s.make(ann),two=s.make(ann,"r");
+     CHECK(s.object(one).get("share").string()=="review"&&s.object(two).get("held").string()=="limit");
+     CHECK(s.w.reviewPlayer(Ann)==1&&s.object(one).get("share").isNull()&&s.object(two).get("share").string()=="held");}
     // One player (solo): a second account is refused, the first signs in again.
     {Server s("solo");s.signIn("steam-a","Ann");CHECK(s.w.signIn("steam-b","Bob","g").status==403&&s.w.signIn("steam-a","Ann","g").status==200);}
     // Every object records its builder: his id and his name when he built it.
@@ -193,6 +224,9 @@ static void saved(){
     CHECK(broken([](json::Value& d){json::Value p=d.get("policy");p.set("limit",-4);d.set("policy",p);}));
     CHECK(broken([](json::Value& d){json::Value list=json::Value::array();for(auto o:d.get("objects").items()){o.set("share","later");list.push(o);}d.set("objects",list);}));
     CHECK(broken([](json::Value& d){json::Value list=json::Value::array();for(auto p:d.get("players").items()){p.set("offer_builds","maybe");list.push(p);}d.set("players",list);}));
+    CHECK(broken([](json::Value& d){json::Value list=json::Value::array();for(auto o:d.get("objects").items()){o.set("share","held");list.push(o);}d.set("objects",list);}));
+    CHECK(broken([](json::Value& d){json::Value list=json::Value::array();for(auto o:d.get("objects").items()){o.set("share","held");o.set("held","mood");list.push(o);}d.set("objects",list);}));
+    CHECK(broken([](json::Value& d){json::Value list=json::Value::array();for(auto o:d.get("objects").items()){o.set("held_ask",true);list.push(o);}d.set("objects",list);}));
     CHECK(broken([](json::Value& d){json::Value list=json::Value::array();for(auto o:d.get("objects").items()){json::Value from=json::Value::object();from.set("server","serverF1");from.set("id","lfar100000000");
         from.set("via","serverF1");o.set("origin",from);o.set("remnant",true);list.push(o);break;}d.set("objects",list);}));
     CHECK(!broken([](json::Value&){}));

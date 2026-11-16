@@ -226,7 +226,7 @@ int policyCommand(int argc,char** argv){
             auto p=w.policy();
             for(auto& i:w.playerList()){
                 if(!i.known){std::cout<<i.id<<"  "<<i.name<<"  from linked servers: "<<i.imported<<" objects\n";continue;}
-                std::cout<<i.id<<"  "<<i.name<<"  shared "<<i.shared<<", waiting "<<i.pending<<", kept "<<i.kept<<", remnants "<<i.remnants
+                std::cout<<i.id<<"  "<<i.name<<"  shared "<<i.shared<<", waiting "<<i.pending<<", kept "<<i.kept<<", held "<<i.held<<", remnants "<<i.remnants
                          <<(i.imported?", from linked servers "+std::to_string(i.imported):std::string())<<(i.member?"  member":"")
                          <<"  offer_builds "<<(i.offerBuilds.empty()?p.offerBuilds+" (server)":i.offerBuilds)<<"  offer_old "<<(i.offerOld.empty()?p.offerOld+" (server)":i.offerOld)<<"\n";}
             return 0;}
@@ -238,7 +238,7 @@ int policyCommand(int argc,char** argv){
         if(!acceptPlayer.empty()){auto n=w.reviewPlayer(acceptPlayer);save(w);std::cout<<"accepted "<<n<<" objects of "<<acceptPlayer<<"\n";return 0;}
         auto list=w.waiting();
         if(list.empty())std::cout<<"nothing waits\n";
-        for(auto& o:list)std::cout<<o.id<<"  type "<<o.type<<", area "<<o.area<<", by "<<o.name<<" ("<<o.creator<<"): "<<(o.forBuilder?"waits for its builder (coop-world offer)":"waits for the owner")<<"\n";
+        for(auto& o:list)std::cout<<o.id<<"  type "<<o.type<<", area "<<o.area<<", by "<<o.name<<" ("<<o.creator<<"): "<<(!o.held.empty()?"held for its builder only: "+world::heldText(o.held)+(o.forBuilder?" (and then its builder's answer)":""):o.forBuilder?"waits for its builder (coop-world offer)":"waits for the owner")<<"\n";
         return 0;
     }catch(const std::exception& e){std::cerr<<"refused, nothing changed: "<<e.what()<<"\n";return 1;}
 }

@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parent
 families=[('world_test.cpp',['world.cpp'],['WORLD_NO_TOKEN','WORLD_OWNER','WORLD_OWN','WORLD_OBJECT_CAP','WORLD_PLAYER_CAP','WORLD_LIKE_RANGE','WORLD_ID_LETTER','WORLD_LIKES_MINE','WORLD_LIKES_SINCE']),
           ('policy_test.cpp',['world.cpp'],['POLICY_PLAYERS','POLICY_BUILD_NOBODY','POLICY_BUILD_MEMBERS','POLICY_LIMIT','POLICY_ASK','POLICY_REVIEW','POLICY_PENDING_SERVED','POLICY_OFFER_NO_SERVED',
                                              'POLICY_REMNANT_CHANGE','POLICY_REMNANT_LIKES','POLICY_PLAYER_ANY','POLICY_WITHDRAW_STAY_REMOVES','POLICY_WITHDRAW_GO_KEEPS','POLICY_REMOVE_PLAYER_OTHERS',
-                                             'POLICY_EXPORT_PENDING','POLICY_SAVE_LOST']),
+                                             'POLICY_EXPORT_PENDING','POLICY_SAVE_LOST','POLICY_HELD_SERVED','POLICY_HELD_RELEASE']),
           ('link_test.cpp',['link.cpp','world.cpp'],['LINK_KEEP_ID','LINK_DUPLICATE','LINK_PASS_IMPORTED','LINK_ECHO','LINK_IMPORT_OWN','LINK_IMPORT_OWNER','LINK_FILTER_TYPE','LINK_FILTER_OWNER',
                                                       'LINK_FILTER_AREA','LINK_FILTER_AGE','LINK_NO_PRUNE','LINK_FORGET_ANY','LINK_CAP','LINK_SIZE','LINK_STRICT','LINK_LIKES','LINK_VERSION']),
           ('front_test.cpp',['front.cpp','link.cpp','world.cpp'],['FRONT_PREFIX','FRONT_BEARER','FRONT_LINK_KEY']),
