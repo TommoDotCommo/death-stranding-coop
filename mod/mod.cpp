@@ -1074,7 +1074,8 @@ struct Runtime final:ds::Transport {
         if(!onlinePointed){
             onlinePointed=true;
             if(!onlineApi->plain()||!onlineApi->point(config.onlineServer)){note("ONLINE unavailable: address or body functions not set\n");onlineApi.reset();return;}
-            note(("ONLINE server "+config.onlineServer+"\n").c_str());}
+            note(("ONLINE server "+config.onlineServer+"\n").c_str());
+            receivedPatch();}                                // before the game can sign in: no answer has arrived yet
         auto st=onlineApi->state();
         if(!(st==onlineSeen)){
             onlineSeen=st;
@@ -1086,6 +1087,17 @@ struct Runtime final:ds::Transport {
     // game has just made from that server's answer, writes the one flag byte that skips its range and placement checks,
     // once per record. The walker then builds it in the game's own frame.
     mod::received::Builder receivedBuilder;mod::received::Builder::Write receivedWrite;bool receivedOn=false,receivedTimed=false;
+    // And from the first frame: with the option, two bytes of the game's request builder for a server's answer are
+    // changed once, right after the sign-in address is pointed at the server and before the game is asked to sign in,
+    // so a record the game makes from an answer is made with the flags the scan would write and built in the frame it
+    // is made (a rain shelter is refused in that same frame). The scan stays: it has nothing to do then, and does the
+    // work alone when the code differs.
+    mod::received::Early receivedEarly=mod::received::Early::Off;
+    void receivedPatch() {
+        if(!sampler||!mod::received::early(config.buildReceived,!config.onlineServer.empty()))return;
+        receivedEarly=mod::received::patchAnswers(*sampler,sampler->base,mod::received::nativeCodeWrite());
+        note(mod::received::line(receivedEarly).c_str());
+    }
     void tickReceived() {
         bool on=sampler&&mod::received::active(config.buildReceived,!config.onlineServer.empty(),onlineSeen.signedIn());
         if(on!=receivedOn){receivedOn=on;if(config.buildReceived)note(on?"RECEIVED on: structures this server hands the game are built at once\n":"RECEIVED off: not signed in to the server\n");}
@@ -3963,7 +3975,7 @@ unsigned mod_status(char* out,unsigned cap) {
           <<",\"hosted\":"<<k.hosted<<",\"visits\":"<<k.joined<<",\"released\":"<<k.released<<",\"states\":"<<k.states<<",\"reports\":"<<k.reports
           <<",\"states_taken\":"<<k.statesTaken<<",\"reports_taken\":"<<k.reportsTaken<<",\"damage_applied\":"<<k.damageApplied<<",\"gazers_applied\":"<<k.gazersApplied
           <<",\"kills_taken\":"<<k.killsTaken<<",\"kills_refused\":"<<k.killsRefused<<",\"own_first\":"<<k.ownFirst<<",\"commands\":"<<k.commands<<",\"writes\":"<<k.writes<<"}";}
-        o<<",\"received_structures\":{\"on\":"<<(r.receivedOn?"true":"false")<<",\"built\":"<<r.receivedBuilder.changed()<<",\"skipped\":"<<r.receivedBuilder.skipped()<<"}";
+        o<<",\"received_structures\":{\"on\":"<<(r.receivedOn?"true":"false")<<",\"answers\":\""<<mod::received::label(r.receivedEarly)<<"\",\"built\":"<<r.receivedBuilder.changed()<<",\"skipped\":"<<r.receivedBuilder.skipped()<<"}";
         {mod::strand::Poller::Counters k;if(r.strandPoller)k=r.strandPoller->counters();
          o<<",\"strand\":{\"on\":"<<(r.strandPoller?"true":"false")<<",\"reads\":"<<k.reads<<",\"answers\":"<<k.answers<<",\"failures\":"<<k.failures<<",\"told\":"<<k.told
           <<",\"known\":"<<k.known<<",\"refused\":"<<(k.refused?"true":"false")<<",\"pending\":"<<(r.notices?r.notices->pending():0)<<"}";}

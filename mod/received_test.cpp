@@ -33,6 +33,86 @@ static void record(Memory& m,unsigned i,uint32_t id,uint8_t type,uint8_t state,u
     m.put(object(i)+0xb2,owner);m.put(object(i)+0xb8,online);
 }
 static uint8_t flags(Memory& m,unsigned i){return *m.at(object(i)+Flags,1);}
+
+// From the first frame: the game's code that builds a request per object of a server's answer, as read from the
+// pinned executable (AnswerBuilder's first bytes, and its flag stores at AnswerFlags; the request is at rbp-0x70).
+const uint8_t BuilderStart[9]={0x40,0x55,0x53,0x41,0x54,0x41,0x55,0x41,0x57};
+const uint8_t Stores[AnswerFlagsSize]={0xc6,0x85,0xb3,0x05,0x00,0x00,0x00,0xc6,0x85,0xb5,0x05,0x00,0x00,0x01,0xc6,0x85,
+    0xbd,0x05,0x00,0x00,0x01,0x0f,0xb6,0x81,0x10,0x01,0x00,0x00,0x88,0x85,0xb9,0x05,0x00,0x00,0x88,0x85,0xcd,0x05,0x00,0x00};
+// What those instructions do to a request, run the way the processor runs them (the four forms the block has; any
+// other byte sequence is refused). The request starts with the constructor's defaults (0x277fde0).
+static bool run(const uint8_t* code,size_t n,uint8_t answer,std::map<unsigned,uint8_t>& request){
+    request={{0x623,0},{0x625,1},{0x629,0},{0x62d,0},{0x63d,1}};
+    auto disp=[&](size_t k){uint32_t d;std::memcpy(&d,code+k,4);return unsigned(d+0x70);};
+    unsigned eax=0x100;size_t i=0;
+    while(i<n){
+        if(i+7<=n&&code[i]==0xc6&&code[i+1]==0x85){request[disp(i+2)]=code[i+6];i+=7;}                    // mov byte [rbp+d],imm
+        else if(i+7<=n&&code[i]==0x0f&&code[i+1]==0xb6&&code[i+2]==0x81){if(disp(i+3)!=0x110+0x70)return false;eax=answer;i+=7;}   // movzx eax,[rcx+0x110]
+        else if(i+7<=n&&code[i]==0x0f&&code[i+1]==0xb6&&code[i+2]==0x85){if(!request.count(disp(i+3)))return false;eax=request[disp(i+3)];i+=7;}   // movzx eax,[rbp+d]
+        else if(i+6<=n&&code[i]==0x88&&code[i+1]==0x85){if(eax>0xff)return false;request[disp(i+2)]=uint8_t(eax);i+=6;}   // mov [rbp+d],al
+        else return false;
+    }
+    return true;
+}
+// The object bits the record init (0x2c32760) makes of them, and whether the check the game runs as it makes the record
+// (0x2c35fb0 with its second argument 1) passes on these bits: +0xa9 bit 7 set, +0xaf bit 7 and +0xaa 0x20 clear, and
+// +0xaa 0x10 set (without it the range test decides).
+static bool builtAtOnce(std::map<unsigned,uint8_t>& r){
+    uint8_t a9=r[0x625]?0x80:0,aa=uint8_t((r[0x63d]?0x10:0)|(r[0x62d]?0x20:0)),af=r[0x629]?0x80:0;
+    return (a9&0x80)&&!(af&0x80)&&!(aa&0x20)&&(aa&0x10);
+}
+static void answers(){
+    CHECK(early(true,true)&&!early(false,true)&&!early(true,false)&&!early(false,false));
+    CHECK(std::string(label(Early::Patched))=="patched"&&std::string(label(Early::Off))=="off"&&line(Early::Off).empty());
+    CHECK(line(Early::Patched)=="RECEIVED answer requests changed: served structures are made without the range and placement checks\n");
+    CHECK(line(Early::Differs).find("the scan alone")!=std::string::npos&&line(Early::Failed).find("the scan alone")!=std::string::npos);
+    // The game's own code: +0x62d 1, +0x63d the answer's byte (0 for a download): the record waits for both checks.
+    std::map<unsigned,uint8_t> r;
+    CHECK(run(Stores,sizeof Stores,0,r)&&r[0x62d]==1&&r[0x63d]==0&&r[0x629]==0&&r[0x625]==1&&!builtAtOnce(r));
+
+    auto image=[](Memory& m){m.block(Base+AnswerBuilder,sizeof BuilderStart);std::memcpy(m.at(Base+AnswerBuilder,9),BuilderStart,9);
+        m.block(Base+AnswerFlags,AnswerFlagsSize);std::memcpy(m.at(Base+AnswerFlags,AnswerFlagsSize),Stores,AnswerFlagsSize);};
+    Memory m;image(m);
+    mod::discovery::Sampler s{[&](uint64_t a,void* p,size_t n){return m.read(a,p,n);},Base};
+    std::vector<std::pair<uint64_t,uint8_t>> writes;
+    auto code=[&](uint64_t a,uint8_t v){writes.push_back({a,v});auto q=m.at(a,1);if(!q)return false;*q=v;return true;};
+    CHECK(patchAnswers(s,Base,code)==Early::Patched);
+    // Two bytes, nothing else.
+    CHECK(writes.size()==2);
+    if(writes.size()==2)CHECK(writes[0]==std::make_pair(Base+AnswerFlags+0x14,uint8_t(0))&&writes[1]==std::make_pair(Base+AnswerFlags+0x24,uint8_t(0xb9)));
+    {unsigned differ=0;for(size_t i=0;i<AnswerFlagsSize;++i)differ+=*m.at(Base+AnswerFlags+i,1)!=Stores[i];CHECK(differ==2);
+     CHECK(!std::memcmp(m.at(Base+AnswerBuilder,9),BuilderStart,9));}
+    // What the changed code makes: +0x62d 0, +0x63d 1, +0x629 still the answer's byte: built as it is made.
+    const uint8_t* now=m.at(Base+AnswerFlags,AnswerFlagsSize);
+    CHECK(run(now,AnswerFlagsSize,0,r)&&r[0x62d]==0&&r[0x63d]==1&&r[0x629]==0&&r[0x625]==1&&r[0x623]==0&&builtAtOnce(r));
+    CHECK(run(now,AnswerFlagsSize,1,r)&&r[0x629]==1&&r[0x63d]==1&&r[0x62d]==0);   // the game's own byte, if it ever set it
+    // Again: found changed, nothing written.
+    writes.clear();
+    CHECK(patchAnswers(s,Base,code)==Early::Already&&writes.empty());
+
+    // Code that is not this build's: nothing written.
+    {Memory d;image(d);*d.at(Base+AnswerFlags+0x0a,1)=0x00;   // another request offset for the +0x625 store
+     mod::discovery::Sampler ds{[&](uint64_t a,void* p,size_t n){return d.read(a,p,n);},Base};writes.clear();
+     auto dcode=[&](uint64_t a,uint8_t v){writes.push_back({a,v});*d.at(a,1)=v;return true;};
+     CHECK(patchAnswers(ds,Base,dcode)==Early::Differs&&writes.empty());
+     image(d);*d.at(Base+AnswerBuilder+1,1)=0x56;            // another function's start
+     CHECK(patchAnswers(ds,Base,dcode)==Early::Differs&&writes.empty());}
+    {mod::discovery::Sampler none{[](uint64_t,void*,size_t){return false;},Base};writes.clear();
+     CHECK(patchAnswers(none,Base,code)==Early::Differs&&writes.empty());}
+
+    // A write that fails: what was written is put back, the code is as it was.
+    {Memory f;image(f);unsigned calls=0;
+     mod::discovery::Sampler fs{[&](uint64_t a,void* p,size_t n){return f.read(a,p,n);},Base};
+     auto second=[&](uint64_t a,uint8_t v){if(++calls==2)return false;*f.at(a,1)=v;return true;};
+     CHECK(patchAnswers(fs,Base,second)==Early::Failed&&!std::memcmp(f.at(Base+AnswerFlags,AnswerFlagsSize),Stores,AnswerFlagsSize));
+     // A write that says it took and did not: read back, refused.
+     auto none=[](uint64_t,uint8_t){return true;};
+     CHECK(patchAnswers(fs,Base,none)==Early::Failed&&!std::memcmp(f.at(Base+AnswerFlags,AnswerFlagsSize),Stores,AnswerFlagsSize));
+#ifndef _WIN32
+     CHECK(patchAnswers(fs,Base,nativeCodeWrite())==Early::Failed&&!std::memcmp(f.at(Base+AnswerFlags,AnswerFlagsSize),Stores,AnswerFlagsSize));
+#endif
+    }
+}
 int main(){
     // Whether the mod looks at all: the option, a server in the config and the game signed in to it, all three.
     CHECK(active(true,true,true));
@@ -121,6 +201,7 @@ int main(){
     // Nothing to read is nothing changed.
     { mod::discovery::Sampler none{[](uint64_t,void*,size_t){return false;},Base};Builder n;CHECK(n.step(none,Base,Image,write).empty()); }
 
+    answers();
     if(failures){std::fprintf(stderr,"received oracle: %d failures\n",failures);return 1;}
     std::puts("received ok");return 0;
 }

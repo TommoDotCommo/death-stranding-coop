@@ -52,4 +52,32 @@ private:
 const char* name(uint8_t constructionType);
 // One byte into committed read-write memory (Windows); elsewhere every write fails.
 Builder::Write nativeWrite();
+
+// From the first frame (game_offsets.md, "Received structures kept from their first frame"). The game makes a record
+// from a server's answer and walks it in the same frame, and a rain shelter is refused in that walk, before any tick of
+// the mod. So the mod also changes the request the record is made from, in the game's code: the builder of requests
+// for a findQpidObjects answer (AnswerBuilder, one request per accepted object, nothing else uses it) sets request
+// +0x62d = 1 (object +0xaa 0x20) and copies the answer's byte +0x110, which is 0 for every downloaded object, into
+// request +0x63d (object +0xaa 0x10). Two bytes of that code: its constant 1 for +0x62d becomes 0, and its store into
+// +0x63d goes to +0x629 instead, where the same byte was just stored, so +0x63d keeps the request constructor's 1. The
+// record is then made with 0x10 set and 0x20 clear, the flags the scan writes, and built as it is made, as the game
+// builds the save's records of other players. +0x629 (object +0xaf bit 7, which holds the build until another online
+// callback clears it) keeps the answer's byte. Nothing else of the game's code changes: the porter's builds,
+// CreateConstruction, the save's records and every other request come from other code.
+constexpr uint64_t AnswerBuilder=0x2c5f850,AnswerFlags=0x2c601c0;
+constexpr size_t AnswerFlagsSize=0x28;
+// Patched (written now or found so), Differs (the code is not this build's: nothing written), Failed (a write did not
+// take; what was written is put back).
+enum class Early{Off,Patched,Already,Differs,Failed};
+// Whether to change the code: the option and a server in the config. It is changed before the game signs in (no answer
+// can arrive before that) and stays so: answers only come from the server the config names.
+bool early(bool option,bool server);
+// Checks the builder's first bytes and the 0x28 bytes at AnswerFlags, then writes the two bytes with `code` and reads
+// them back.
+Early patchAnswers(const discovery::Sampler&,uint64_t base,const Builder::Write& code);
+const char* label(Early);   // "patched", "already", "differs", "failed", "off"
+std::string line(Early);    // the log line
+// One byte into the game's code (Windows: the page made writable for the write, the instruction cache flushed);
+// elsewhere every write fails.
+Builder::Write nativeCodeWrite();
 }

@@ -34,7 +34,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('place',['ORDER','RESTLESS'],['carry_place_test.cpp','carry_place.cpp','structures.cpp','discovery.cpp']),
           ('road',['TOTAL_ADDS','LOAD','LESS','ECHO','TWICE','AMOUNT'],['roads_test.cpp','roads.cpp','discovery.cpp']),
           ('own',['IDBOUND','LIST','PENDING','OWNER','ROAD','OTHERS','FAILED','LETTER','AREA','TWICE','LIKES'],['own_strand_test.cpp','own_strand.cpp','structures.cpp','discovery.cpp']),
-          ('received',['OPTION','SERVER','BUILT','PLAYER','SAVED','REMOVAL','ONLINE','ONCE','RECHECK'],['received_test.cpp','received.cpp','own_strand.cpp','structures.cpp','discovery.cpp']),
+          ('received',['OPTION','SERVER','BUILT','PLAYER','SAVED','REMOVAL','ONLINE','ONCE','RECHECK','EARLY_OPTION','PLACEMENT','RANGE','HOLD','IDENTITY','AGAIN','READBACK','ROLLBACK'],['received_test.cpp','received.cpp','own_strand.cpp','structures.cpp','discovery.cpp']),
           ('offer',['OWNER','PENDING','HELD','SHAPE','CLAMP','POLE','FLOAT','BRIDGE'],['offer_strand_test.cpp','offer_strand.cpp','discovery.cpp']),
           ('bt',['ALL_ALIVE','HEAL','KILL','HURT_ECHO','ECHO','UNSEEN','DYNAMIC','MASS','CLEARED_ANY','FAR','END_IDLE'],['bts_test.cpp','bts.cpp','discovery.cpp']),
           ('order',['STORY','ECHO','ANY_STATE','UNIT_ANY','UNIT_ECHO','STORY_BACK','STORY_IN','STORY_FAIL','WATCH_ANY'],['orders_test.cpp','orders.cpp','discovery.cpp']),
