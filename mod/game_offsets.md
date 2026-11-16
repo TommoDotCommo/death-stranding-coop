@@ -5794,9 +5794,9 @@ walked, refused by the placement check and marked for removal inside one frame w
 from it. A bridge survives to the next frame only because its range test (1000 m) holds it back, which is why the
 tick could catch the bridge and never the shelter.
 
-**Where the flags come from.** The builder of requests for a `findQpidObjects` answer is `0x2c5f850` (the slot at
-`0x3e094d8` of the construction manager's vtable that also holds the upload answer `0x2cce670`; one request per
-accepted object; the request is at `rbp-0x70`). It starts from the request constructor `0x277fde0`, whose defaults
+**Where the flags come from.** The builder of requests for a `findQpidObjects` answer is `0x2c5f850` (called through
+the slot at `0x3e094d8` of a vtable that also holds the upload answer handler `0x2cce670`; one request per accepted
+object; the request is at `rbp-0x70`). It starts from the request constructor `0x277fde0`, whose defaults
 include `+0x625` = 1, `+0x629` = 0, `+0x62d` = 0 and `+0x63d` = 1, and then, at `0x2c601c0`:
 
 | Address | Bytes | Does |
@@ -5811,10 +5811,10 @@ include `+0x625` = 1, `+0x629` = 0, `+0x62d` = 0 and `+0x63d` = 1, and then, at 
 Nothing after these, in the builder or in `0x2c32410` and the queue push `0x2c2acf0`, writes those request bytes. The
 record init `0x2c32760` turns them into object bits: `+0x625` into `+0xa9` bit 7 (`0x2c3295a`), `+0x63d` into `+0xaa`
 0x10 (`0x2c32996`), `+0x629` into `+0xaf` bit 7 (`0x2c329af`), `+0x62d` into `+0xaa` 0x20 (`0x2c32a7e`; cleared again
-for owner 0). `0x2c35fb0` refuses while `+0xaf` bit 7 is set (`cmp byte [rcx+0xaf],0; jl`, `0x2c36019`). The one place in the construction code (`0x2c20000..0x2d40000`) that
-clears it is `0x2c2a130`, the construction manager's vtable slot at `0x3e09550` (next to the answer builder's), which
-also adds the record's creator user id (`+0xb4`) to a list at manager `+0x410`/`+0x418`; when the online layer calls
-it was not read. The save loader (`0x2c9a149`)
+for owner 0). `0x2c35fb0` refuses while `+0xaf` bit 7 is set (`cmp byte [rcx+0xaf],0; jl`, `0x2c36019`). The one
+place found in the construction code (`0x2c20000..0x2d40000`) that clears it is `0x2c2a130`, the slot at `0x3e09550` of the
+same vtable as the answer builder, which also adds the record's creator user id (`+0xb4`) to a list at `+0x410` /
+`+0x418` of its object; when the online layer calls it was not read. The save loader (`0x2c9a149`)
 sets request `+0x63d` to 1 for the save's structures except one case, which is where the save's received structures
 get their 0x10.
 
