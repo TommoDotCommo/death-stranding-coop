@@ -48,7 +48,7 @@ loopback, a LAN or a VPN.
 | `GET …/auth/ds?provider=steam&display_name=&code=TICKET` | the player (stable id per account) and a session: token and gateway address |
 | `…/gate/e/getVersion` | major 0, minor 12 (the game refuses anything else) |
 | `createObject`, `updateObject`, `deleteObject` | stored; the new id is the type letter and 12 characters (the game reads the kind from that letter); only the builder changes or removes an object; an upload the server policy does not let be shared is answered the same way and held for its builder ("Server policy"); over 4000 objects of one player, 403 |
-| `findQpidObjects` | the other players' objects in that area that every player is handed ("Server policy"), at most the asked number per type, never the asker's own |
+| `findQpidObjects` | the other players' objects in that area that every player is handed ("Server policy"), at most the asked number per type, never the asker's own, chosen as "Which objects a game is handed" says |
 | `getQpidObjects`, `lookup`, `reverseLookup` | from the stored objects and players |
 | `sendLike`, `getLikeHistory` | a like is added to the object and to its builder's history (the last 2000 likes are kept); a player reads only his own history, after the time he names |
 | `getRankingSchedules`, `getWastedBaggages`, `findMissions`, `getOrderedMissions`, … | empty lists |
@@ -382,9 +382,9 @@ envelope) rather than sitting behind it, and nothing in a game uses the object s
 ### Not done (linked servers)
 
 - No game has seen an imported object. Unknown until one has: whether the game accepts the remapped ids in every
-  list (roads have 23-character ids in a save, the server makes 13 for every kind), how many objects of a kind a
-  game takes per area (it asks for a number per kind and the server hands out the first that match, imports and
-  local ones alike, in id order), and what a game does when an object it activated is removed on the server.
+  list (roads have 23-character ids in a save, the server makes 13 for every kind), which ones a game takes when
+  there are more than it asks for (imports take part in the server's choice like objects built here, "Which objects
+  a game is handed"), and what a game does when an object it activated is removed on the server.
 - A linked server can only be asked (pull). A server behind NAT that cannot be reached can take but not give.
 - No exclusion terms (`everything but ...`), no filter by position inside an area, no per-builder caps.
 - A removal is seen as "no longer listed", so `import` without `--prune` never removes, and an object that leaves
@@ -431,6 +431,9 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `players` | 1 to 16 | 16 | 1 | 16 |
 | `offer_builds` | `yes`, `no`, `ask` | yes | yes | yes |
 | `offer_old` | `yes`, `no` | no | no | no |
+| `order` | `newest`, `liked` | newest | newest | liked |
+| `per_builder` | objects of one builder per kind in one answer, 0 for none (up to 1000) | 0 | 0 | 3 |
+| `spread` | metres, 0 for off (up to 1000) | 8 | 8 | 8 |
 
 - `join`: recorded and shown, nothing more yet (there are no invitations).
 - `build`: whose uploads are shared. `members` are the players the owner marked (`player-set ... member=yes`); anyone
@@ -445,6 +448,8 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 - `players`: accounts beyond it are refused at sign-in; the ones the world has still sign in. Solo is a friends
   server for one player: a personal archive.
 - `offer_builds`, `offer_old`: what a player who has chosen nothing has chosen (below).
+- `order`, `per_builder`, `spread`: which of an area's objects a game is handed when there are more than it asks for
+  ("Which objects a game is handed").
 
 ### The players' choices
 
@@ -525,6 +530,7 @@ What it holds to:
 | A remnant belongs to no account and its likes reach no one | a withdrawal is final for the builder too |
 | `remove-player` removes that builder's objects only | the other builders of the same linked server are not touched |
 | The world file keeps the policy, the choices and every object's state; it is format 2, which a `coop-world` from before refuses | an older server would hand out what is kept and let remnants be changed |
+| A `coop-world` from before `order`, `per_builder` and `spread` refuses a world file that has them (unknown setting) | it would not choose as the owner set |
 
 ### Not built (server policy)
 
@@ -541,6 +547,58 @@ What it holds to:
   object it had is no longer handed to it (withdrawn with `go`, removed by the owner).
 - A setting that changes applies to uploads from then on: nothing stored changes its state.
 
+## Which objects a game is handed
+
+When a game loads an area it asks `findQpidObjects` for it with a number per kind (`o.ct`), and only for some kinds.
+Live (2026-11-16, one real game, an Episode 3 save, area 226): `t` 33, `x` 3, `b` 2, `v` 4, `n` 1, `h` 5, `e` 5, and
+no ladders (`l`) at all. With 40 cairns on the server in that area, on a 4 m grid, the server handed the first 5 by
+id; the game activated 1 and set the other 4 to Fail (it places an object by rules of its own, and these were close
+together). An object the game had activated and the server then removed stayed in the game for at least 90 s: the
+game asks again only when the area loads (`mod/game_offsets.md`, "What the game does with a served object").
+
+So the server chooses. For each kind, at most the asked number (a kind not asked gets none; a request without `ct`
+gets every kind with no number), from the objects of that area that every player is handed: built here by other
+players, remnants and imported ones alike. Never the asker's own (his game has them in its save), and nothing kept,
+held or waiting ("Server policy"). In this order:
+
+1. **What his game was handed there before**, while it is still on the server and handed to everyone, in the order it
+   was handed. A structure that was there last time is there again, so structures do not change between sessions.
+   Newer or more liked ones do not push it out. It counts for the cap per builder below and is not checked for spread.
+2. **The rest, best first.** `order=newest` (friends and solo): the last changed first. `order=liked` (public): a
+   friend's objects first, then the most liked, then the newest. There is no friend list yet, so nobody is a friend
+   (the server has the place for one). The same time, likes and friendship: by id.
+3. Skipped on the way: an object of a builder who already has `per_builder` of that kind in this answer (0: no cap;
+   public 3), so one player does not fill an area while others have built there; and an object closer than `spread`
+   metres (straight line, at the position `l / 10^exp` the game reads) to one of its kind already in this answer, so
+   the game is handed objects it can place rather than ones it fails (0: off). An object without a position is never
+   too close. A skipped object is not handed in that answer, even when nothing else is left.
+
+The right `spread` is not measured yet. The default, 8 m, comes from the one live result above (4 m apart: one of five
+placed); the game's own rule (per kind or not, the distance to the save's own structures, the ground) is unknown.
+
+What a player was handed is remembered per player and area: what the answer held, then what was remembered before and
+is still there (a kind not asked this time, or the part of a kind beyond a smaller number, comes first again when it
+is asked for). It is saved with the world (`picks`), at most 1000 objects per area and 128 areas per player (the areas
+asked for longest ago are forgotten first). A world file without `picks` loads with nothing remembered. An object that
+is removed, withdrawn with `go`, or no longer handed to everyone leaves every answer from then on; a game that has it
+already is not told.
+
+What it holds to (`curate` in `world.cpp`, a function of the asker, the area, the asked numbers, the area's objects,
+what was handed before and the policy):
+
+| Rule | Why |
+|---|---|
+| At most the asked number of each kind, none of a kind not asked | the game fails what it did not ask for |
+| Never the asker's own, never what is kept, held or waits | his game has his own; a player's no and the policy are not undone here |
+| What a game was handed in an area comes first while it is there and handed to everyone | structures do not change between sessions |
+| At most `per_builder` of one builder per kind in one answer | one player does not fill an area |
+| Nothing closer than `spread` to one of its kind in the same answer | the game fails objects that stand close together |
+| The memory is bounded per player and area, and saved with the world | a long-running server does not grow without end, and a restart changes no answer |
+
+Not built: a friend list; choosing by distance from the player (the game does not say where he is when it asks).
+Unknown: whether a game counts the objects it already has from the server against the number it asks for, and what
+it does when one it was handed is no longer in the answer. Nothing of this has been run with a game yet.
+
 ## Tests
 
 `make test`: the core (`world_test.cpp`), the HTTP surface without sockets (`front_test.cpp`), the built server over a
@@ -548,7 +606,7 @@ real socket (`test_server.py`), and a mutant for every protection (`test_mutants
 change by someone who is not the builder, an object handed back to its builder, both caps, the like range, the secret
 prefix and the bearer token.
 
-Server policy: `policy_test.cpp` (the three presets and fourteen settings that are refused; `build` nobody and
+Server policy: `policy_test.cpp` (the three presets and twenty-one settings that are refused; `build` nobody and
 members and the limit: uploads answered in the game's shape and held, handed to nobody else and never exported,
 refused to `offer` and `review` while the reason holds and shared when it goes (a member, a higher limit, a
 withdrawal), a held one whose builder is to be asked first, waiting objects that count for the limit and kept ones
@@ -568,6 +626,22 @@ it; three start options are refused, and eight command lines that are refused le
 server with `build=nobody`: the upload is answered 200 with an id of the game's shape, the other player is handed
 nothing, `offer` is refused while nobody builds, and after `policy --set build=everyone` and `offer --all` the other
 player finds it.
+
+Which objects a game is handed: `curate_test.cpp` (the asked number of each kind for none, one, three and more than
+there are, a kind not asked, a negative number, no numbers at all; the asker's own, a kept one and another area left
+out; newest first, likes then newest, a friend first, and no friend first with `newest`; a builder capped at three
+while another builder fills the rest, and no cap; 40 cairns on a 4 m grid of which five are handed at least 8 m apart
+and twelve fit, `spread=0`, exactly 8 m, another kind beside one, objects without a position; the same objects again
+after newer and more liked ones came, one removed and one no longer shared replaced, fewer asked and a kind not asked
+still remembered, an id twice, 1050 objects with 1000 remembered; then through the server's calls: the same answer
+again, an object too close to a chosen one, a removed one replaced, the picks saved and the same answer from a
+restored world after a newer object came, a world file without picks, five that are refused, 148 areas of which the
+last 128 are kept). Nine mutants must fail it (`CURATE_OWN`, `CURATE_UNSHARED`, `CURATE_ORDER`, `CURATE_COUNTS`,
+`CURATE_UNSTABLE`, `CURATE_BUILDER_CAP`, `CURATE_SPREAD`, `CURATE_SAVE_LOST`, `CURATE_UNBOUNDED`). `test_server.py`
+builds 16 cairns on a 4 m grid and, a second later, two far away on a server on loopback: asked for four, the other
+player gets the two newer ones and two of the grid at least 8 m apart; two newer ones still do not change his answer,
+nor does a restart (the picks are in the world file); after one of the four is removed the other three stay and the
+newest takes its place.
 
 Linked servers: `link_test.cpp` (every filter term on the giving and on the taking side; ids of the game's shape
 that differ from the original and are the same in every world; the same export twice; an id that collides with a
