@@ -49,6 +49,43 @@ with multiple links. Logs are flushed, never truncated. Setting logging false
 retains stderr/debug diagnostics. Trusted quiescent instance trees are required;
 concurrent rename/replace races are not supported.
 
+### Group play: a config without a partner (built 2026-11-16, not run live)
+
+A config **without `peer`** has no partner: the player is in a group that meets on the players' own server. Such a
+config names the server instead:
+
+```json
+{"server":"100.90.1.2","slot":0,"nickname":"Porter","provider":"game","session":305419896,
+ "required":true,"logging":true,"game_thread":true,"puppet_probe":true,"partner_tag":true,
+ "others":15,"relay":"100.90.1.2:49100","relay_key":"w305419896","player_id":281474976710657,
+ "online_server":"http://100.90.1.2:49100/w305419896/auth/ds","discovery_sha256":"<the pinned hash>"}
+```
+
+| Key | Rule |
+|---|---|
+| `peer` | absent: this is what makes it a group config. With `peer` everything is as before |
+| `server` | required without `peer`: the server's numeric unicast IPv4 address (`127.0.0.1` for the player who runs it). Also allowed beside `peer`, for a partner and a server on a third PC |
+| `relay`, `online_server` | their address must be loopback, the partner's (`peer`) or exactly `server`; anything else is refused when the config is read |
+| `session` | the group's number: every player of a group has the same one (each pair's core session is derived from it and the two ids) |
+| `player_id` | this player's number on the relay, 1 to 999999999999999 (the parser takes integers of at most 15 digits). It must be stable and say nothing about the player: the launcher makes it once from 49 random bits and keeps it in its settings; it is never the Steam id. The relay refuses a second game with an id that is in use |
+| `relay_key` | the group's key, the one the server was started with |
+| `slot` | still required (0..15), but no port is bound from it |
+| refused without `peer` | `role` other than `none`, `peer_slot`, `bind`, `partner` other than `off`, `join_at_host` and every `share_*` setting that is on: they need the partner and would silently do nothing |
+
+What the mod does differently: the direct socket is never opened (the log says `NET no partner (group play): the
+direct socket is not opened`), and nothing the two-player core asks to send leaves the process. Other players come
+through the relay's own connected socket, as in "Other players" below. The other `partner_*` options are accepted
+and have nobody to act on, except `partner_tag`.
+
+The proxy reads the same config and refuses to start the mod when `server` is not an address its network policy
+reaches (loopback or one listed in `COOP_NETWORK_PEERS`): the config never widens that list
+(`redirect/README.md`). So the modded game still talks to loopback and listed addresses only.
+
+Tests: the rules in `unit.cpp` with two mutants (`CONFIG_GROUP`: the partner-only keys accepted and no server
+needed; `CONFIG_SERVER_ANY`: any address once a server is listed); `test_probe.py` runs the mod with a group config
+on the test transport and counts what reaches the partner's side: nothing, and the core's handshake datagrams from
+the mutant build `fake-group-sends.so`. Not run: the Windows socket path in a game (no socket, no bind, the relay alone).
+
 The optional proxy bootstrap is reached on the first D3DCreateBlob/D3DReflect
 call, after the Windows loader returns. All 29 names/ordinals are preserved; the
 other 27 exports stay forwarded. It reads this config; missing config skips with
@@ -1169,7 +1206,8 @@ instead of all in one tick, and a crowd with nowhere to stand (no partner shown 
 ## Other players (`others`, off by default; first live run 2026-11-16)
 
 The transport is the relay of the players' own server (`core/relay.h`, `world/README.md` "The relay"). Config:
-`"relay": "ADDRESS:PORT"` (numeric IPv4, on loopback or the partner's address), `"relay_key"` (the group's key,
+`"relay": "ADDRESS:PORT"` (numeric IPv4, on loopback, at the partner's address or at the listed `server`; "Group
+play" above), `"relay_key"` (the group's key,
 letters, digits, `-` and `_`) and `"player_id"` (this player's number on the relay, not 0); they require `others`.
 The mod opens a second UDP socket connected to that address, reports this porter's position (none while loading or
 in a cutscene), and feeds who is near and their datagrams to the sessions below. The log says `RELAY online`,
@@ -1583,8 +1621,8 @@ it requires permission to create/bind local UDP sockets and fails if that is den
 ## A private online server (`online_server`, off by default)
 
 `"online_server": "http://ADDRESS:PORT/path"` (game provider and `game_thread`) connects the game's own online layer to
-a server the players run (`world/README.md`). The address is numeric and either loopback or the partner's (`peer`);
-anything else is refused when the config is read, and the proxy's network policy would refuse the connection anyway.
+a server the players run (`world/README.md`). The address is numeric and loopback, the partner's (`peer`) or the
+listed `server` ("Group play" above); anything else is refused when the config is read, and the proxy's network policy would refuse the connection anyway.
 The mod then does three things in the game (`online.h`; addresses in `game_offsets.md`, "Sign-in"):
 
 - points the game's sign-in address string at the server;

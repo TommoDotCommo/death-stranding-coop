@@ -29,8 +29,8 @@ loaded module so that the copy:
   game's rights; the network policy still applies to it.
 - **can run next to another copy.** Named kernel objects listed per copy (the game's single-instance mutex) get a
   per-copy suffix (`objects.h`).
-- **stays off the online service** (`network_policy.h`, default `enforce`). Only loopback and the co-op partners'
-  IPv4 addresses are reachable. Every other destination, host lookup and WinHTTP connection fails the way an offline
+- **stays off the online service** (`network_policy.h`, default `enforce`). Only loopback and the listed IPv4
+  addresses (the co-op partner, or in group play the players' own server) are reachable. Every other destination, host lookup and WinHTTP connection fails the way an offline
   PC fails, and the game switches to its own offline mode. Why: the game's online features carry one player's
   structures into other players' worlds; a modded client must not take part. `log-only` records without refusing,
   for discovery runs only.
@@ -82,7 +82,7 @@ Windows/game behavior is inferred from a cross-build.
 | `COOP_THREAD_TRACE` | absent/`0`: off; `1`: observe main-executable message calls (requires enforced networking) |
 | `COOP_VIRTUAL_PAD` | absent/`0`: off; `1`: wrap the game's by-name `XInputGetState` lookup in `xinput1_4.dll` so a mod pad script drives player 1 (requires enforced networking, the mod, and the mod's `virtual_pad`; a mismatch refuses startup). With `COOP_THREAD_TRACE=1` the script's keyboard and mouse steps are fed to the game as raw input on its game thread, with or without the window focus (see "Scripted keyboard and mouse") |
 | `COOP_BACKGROUND_FPS` | absent/`0`: off; `1`–`240`: for two copies on one PC, the copy whose window is not in the foreground holds its game thread in the frame's empty `PeekMessage` until 1/n s has passed since its last frame (requires `COOP_THREAD_TRACE=1`). The copy in front is never delayed and the mod's network worker is never held. Two copies on one GPU halve each other's frame rate or worse even with the GPU half idle; the copy you look at gets its full rate back only when the other one nearly stops (measured: about 2× when the background copy is held to under 1 frame per second, about 1.2× at a quarter of its speed) |
-| `COOP_NETWORK_PEERS` | `a.b.c.d|...` co-op partners (numeric IPv4, at most 16) |
+| `COOP_NETWORK_PEERS` | `a.b.c.d|...` co-op partners and the players' own server (numeric IPv4, at most 16). A mod config that names a `server` which is neither loopback nor in this list refuses the start (`redirect: the mod config's server is not in COOP_NETWORK_PEERS`): the config never widens the list |
 | `COOP_CRASH_RECORD` | absent/`0`: off; `1`: crash and hang recorder (below); `2`: as `1`, and the minidump is also written at the first recorded fault. Other values refuse startup |
 | `COOP_CRASH_HANG_SECONDS` | absent: 15; `0`: no hang note; `1`–`600`: seconds without the main thread's message pump before the hang note (needs `COOP_THREAD_TRACE=1`, which provides the heartbeat) |
 

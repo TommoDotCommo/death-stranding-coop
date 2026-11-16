@@ -34,7 +34,7 @@ a.primary{background:var(--accent);color:var(--on)} button,a.ghost{background:tr
   };
   var card=document.getElementById('card');
   var code=decodeURIComponent((location.hash||'').slice(1)).trim().toUpperCase();
-  var m=code.match(/^(DS)-[0-9A-Z]{5}(-[0-9A-Z]{1,5})+$/);
+  var m=code.match(/^(DSG|DS)-[0-9A-Z]{5}(-[0-9A-Z]{1,5})+$/);   // DS: a two-player lobby; DSG: a group's server
   function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e;}
   if(!m){
     card.innerHTML='';
@@ -42,7 +42,7 @@ a.primary{background:var(--accent);color:var(--on)} button,a.ghost{background:tr
     card.appendChild(el('p','bad',code?'This invite looks incomplete. Ask your friend to copy the whole invite again.':'This link has no invite in it. Ask your friend for their invite.'));
     return;
   }
-  var g=GAMES[m[1]];
+  var g=GAMES.DS;
   document.title='Join '+g.name;
   card.innerHTML='';
   card.appendChild(el('h1',null,'Join a friend in '+g.name));

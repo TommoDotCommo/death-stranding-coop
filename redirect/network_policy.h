@@ -41,5 +41,9 @@ bool parse_net_peers(const std::wstring& text, std::vector<uint32_t>& out);
 bool parse_net_mode(const std::wstring&, NetMode& out);
 // True when the call must fail: a deny verdict under enforce.
 bool net_refuses(const NetPolicy&, NetVerdict);
+// The mod's config names the players' own server (`server`, host byte order). Under enforce the policy must reach it:
+// loopback, or an address the owner listed as a peer. False means the config and the peer list disagree, and the copy
+// must not start as if it could reach that server (the mod config never widens the list).
+bool net_reaches(const NetPolicy&, uint32_t address);
 const wchar_t* verdict_name(NetVerdict);
 }

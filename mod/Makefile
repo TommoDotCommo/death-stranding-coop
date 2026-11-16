@@ -40,10 +40,12 @@ build/fake-others-to-partner.so: $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_OTHERS_TO_PARTNER -fPIC -shared $(SRC) -o $@
 build/fake-others-no-relay.so: $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_OTHERS_NO_RELAY -fPIC -shared $(SRC) -o $@
+build/fake-group-sends.so: $(SRC) $(HEADERS) | build
+	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_GROUP_SENDS -fPIC -shared $(SRC) -o $@
 build/unit: unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp $(HEADERS) | build
 	$(CXX) $(FLAGS) unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o $@
 host: identity build/mod.so build/mod-no-build.so build/mod-no-interpolation.so build/mod_probe build/unit
-test: environment-test join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so build/fake-others-to-partner.so build/fake-others-no-relay.so
+test: environment-test join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so build/fake-others-to-partner.so build/fake-others-no-relay.so build/fake-group-sends.so
 	./build/unit
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_PARTNER unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-partner && if ./build/unit-config-partner >/dev/null 2>&1; then echo SURVIVED CONFIG_PARTNER; exit 1; else echo KILLED MUTANT_CONFIG_PARTNER; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_MARKER unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-marker && if ./build/unit-config-marker >/dev/null 2>&1; then echo SURVIVED CONFIG_MARKER; exit 1; else echo KILLED MUTANT_CONFIG_MARKER; fi
@@ -52,6 +54,7 @@ test: environment-test join-test vehicle-test game-thread-test discovery-test po
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_OTHERS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-others && if ./build/unit-config-others >/dev/null 2>&1; then echo SURVIVED CONFIG_OTHERS; exit 1; else echo KILLED MUTANT_CONFIG_OTHERS; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_RELAY_ADDRESS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-relay-address && if ./build/unit-config-relay-address >/dev/null 2>&1; then echo SURVIVED CONFIG_RELAY_ADDRESS; exit 1; else echo KILLED MUTANT_CONFIG_RELAY_ADDRESS; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_RELAY_NEEDS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-relay-needs && if ./build/unit-config-relay-needs >/dev/null 2>&1; then echo SURVIVED CONFIG_RELAY_NEEDS; exit 1; else echo KILLED MUTANT_CONFIG_RELAY_NEEDS; fi
+	python3 -B mutants.py --sources "unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp" --prefix build/mutant-unit- CONFIG_GROUP CONFIG_SERVER_ANY && echo KILLED MUTANT_CONFIG_GROUP MUTANT_CONFIG_SERVER_ANY
 	python3 -B test_probe.py
 	python3 -B -m unittest -q test_game_thread_api test_probe_puppet test_actor_resources test_actor_reader_windows
 	python3 -B test_actor_resource_mutants.py

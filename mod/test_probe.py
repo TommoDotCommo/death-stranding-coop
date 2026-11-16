@@ -258,6 +258,48 @@ with tempfile.TemporaryDirectory() as tmp:
             print('KILLED', variant, str(e))
         else:
             raise AssertionError('SURVIVED '+variant)
+def group_only(tmp, variant):
+    """Group play: a config without `peer` (no partner, the players' own server instead). The mod starts and ticks,
+    and the two-player core is never given a way out: nothing reaches the partner transport."""
+    directory = tmp/('group-'+variant)
+    directory.mkdir()
+    path = directory/'mod.so'
+    shutil.copyfile(root/'build'/variant, path)
+    lib = c.CDLL(str(path))
+    lib.mod_init.argtypes = [c.c_char_p]
+    lib.mod_tick.argtypes = [c.c_double]
+    lib.mod_status.argtypes = [c.c_void_p, c.c_uint]
+    lib.mod_last_error.restype = c.c_char_p
+    config = directory/'config.json'
+    config.write_text(json.dumps(dict(slot=0, session=123, server='127.0.0.1', nickname='test', provider='synthetic', logging=True)))
+    assert lib.mod_init(str(config).encode()), lib.mod_last_error()
+    try:
+        packet = (c.c_ubyte*128)()
+        sent = 0
+        end = time.monotonic()+1.5
+        while time.monotonic() < end:
+            assert lib.mod_tick(.01), lib.mod_last_error()
+            while lib.mod_test_drain(packet):
+                sent += 1
+            time.sleep(.01)
+        s = status(lib)
+        assert not s['failed'] and not s['connected'], s
+        assert sent == 0, 'group play sent %d datagrams to a partner' % sent
+    finally:
+        lib.mod_shutdown()
+
+
 with tempfile.TemporaryDirectory() as tmp:
     game_provider_fake(Path(tmp))
+with tempfile.TemporaryDirectory() as tmp:
+    group_only(Path(tmp), 'fake.so')
+    print('group play (no peer): the mod runs and sends nothing to a partner')
+    try:
+        group_only(Path(tmp), 'fake-group-sends.so')
+    except AssertionError as e:
+        if 'datagrams to a partner' not in str(e):
+            raise
+        print('KILLED fake-group-sends.so', str(e))
+    else:
+        raise AssertionError('SURVIVED fake-group-sends.so')
 print('mod API/thread/fake transport checks passed')

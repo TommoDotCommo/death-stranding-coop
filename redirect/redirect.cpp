@@ -1239,6 +1239,9 @@ BOOL CALLBACK bootstrap_mod(PINIT_ONCE,PVOID,PVOID*) {
         auto c=mod::parseConfig(std::string(bytes,n));
         if(c.gameThread&&(!trace_enabled||net.mode!=redirect::NetMode::enforce))fatal("redirect: game_thread requires observer hooks and enforced networking\n");
         if(c.virtualPad!=pad_enabled)fatal("redirect: COOP_VIRTUAL_PAD and mod virtual_pad must agree\n");
+        // The players' own server named in the mod config must be an address this copy may reach (loopback or a listed
+        // peer). The config never widens the list: a mismatch refuses the start instead of running without the server.
+        if(c.serverAddress&&!redirect::net_reaches(net,c.serverAddress))fatal("redirect: the mod config's server is not in COOP_NETWORK_PEERS\n");
         // This single reviewed library is the only explicit loader exception.
         // Its CRT entry point has no mod startup or IO. Resolve dependencies only
         // from the DLL folder and System32. Patch BEFORE calling any mod API.

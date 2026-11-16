@@ -16,6 +16,52 @@ inline std::string ipText(uint32_t ip) {char b[32];snprintf(b,sizeof(b),"%u.%u.%
 inline sockaddr_in endpoint(uint32_t ip,unsigned port) {sockaddr_in a{};a.sin_family=AF_INET;a.sin_addr.s_addr=htonl(ip);a.sin_port=htons(uint16_t(port));return a;}
 inline bool sameEndpoint(const sockaddr_in& a,const sockaddr_in& b) {return a.sin_addr.s_addr==b.sin_addr.s_addr&&a.sin_port==b.sin_port;}
 struct ScanResult {cd_list hosts{};std::string status;};
+// This PC's addresses a friend can reach it at, for an invite: LAN first, then Tailscale, with a place kept for
+// Tailscale when virtual adapters would otherwise fill all four.
+inline std::vector<ci_route> localRoutes() {
+    std::vector<ci_route> out;cdw_adapter ad[128];int n=cdw_adapters(ad,128);
+    bool vpn=false;for(int i=0;i<n;++i)vpn|=cd_tailscale_ip(ad[i].a.ip)!=0;
+    for(int pass=0;pass<2;++pass)for(int i=0;i<n&&out.size()<(pass==0&&vpn?3u:4u);++i) {
+        auto ip=ad[i].a.ip;
+        if(!mod::peerAddress(ipText(ip))||((ip>>24)==127)||bool(cd_tailscale_ip(ip))!=(pass==1))continue;
+        bool duplicate=false;for(auto& r:out)duplicate|=cd_ip(r.ip)==ip;
+        if(duplicate)continue;
+        ci_route r{};r.kind=cd_tailscale_ip(ip)?CI_VPN:CI_LAN;
+        for(int k=0;k<4;++k)r.ip[k]=uint8_t(ip>>(24-8*k));
+        out.push_back(r);
+    }
+    return out;
+}
+// Group play: which of a group invite's routes has the group's server listening (a TCP connect to every route at
+// once, `ms` at most; it ends as soon as the best route that can still answer has answered). Nothing is sent.
+inline std::vector<bool> probeServers(const ci_invite& v,unsigned ms=1500) {
+    size_t count=size_t(v.n<0?0:v.n>CI_MAX_ROUTES?CI_MAX_ROUTES:v.n);
+    std::vector<bool> answered(count,false);std::vector<SOCKET> socks(count,INVALID_SOCKET);
+    for(size_t i=0;i<count;++i) {
+        auto ip=cd_ip(v.route[i].ip);if(!mod::peerAddress(ipText(ip)))continue;
+        SOCKET s=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);if(s==INVALID_SOCKET)continue;
+        u_long nb=1;ioctlsocket(s,FIONBIO,&nb);auto a=endpoint(ip,v.port);
+        if(connect(s,reinterpret_cast<sockaddr*>(&a),sizeof(a))==0)answered[i]=true;
+        else if(WSAGetLastError()!=WSAEWOULDBLOCK){closesocket(s);continue;}
+        socks[i]=s;
+    }
+    auto start=GetTickCount();
+    for(;;) {
+        bool waiting=false;                                  // for a route better than every one that answered
+        for(size_t i=0;i<count;++i){if(answered[i])break;if(socks[i]!=INVALID_SOCKET){waiting=true;break;}}
+        auto elapsed=GetTickCount()-start;if(!waiting||elapsed>=ms)break;
+        fd_set writable,failed;FD_ZERO(&writable);FD_ZERO(&failed);
+        for(size_t i=0;i<count;++i)if(socks[i]!=INVALID_SOCKET&&!answered[i]){FD_SET(socks[i],&writable);FD_SET(socks[i],&failed);}
+        timeval wait{0,100000};
+        if(select(0,nullptr,&writable,&failed,&wait)<=0)continue;
+        for(size_t i=0;i<count;++i)if(socks[i]!=INVALID_SOCKET&&!answered[i]) {
+            if(FD_ISSET(socks[i],&writable))answered[i]=true;
+            else if(FD_ISSET(socks[i],&failed)){closesocket(socks[i]);socks[i]=INVALID_SOCKET;}
+        }
+    }
+    for(auto s:socks)if(s!=INVALID_SOCKET)closesocket(s);
+    return answered;
+}
 class Network {
     SOCKET sock=INVALID_SOCKET;
     sockaddr_in partner{};
@@ -63,17 +109,7 @@ public:
     }
     std::string invite() const {
         ci_invite v{};v.secret=session.secret;v.port=uint16_t(session.port);v.flags=inviteOnly?CI_FLAG_INVITE_ONLY:0;
-        cdw_adapter ad[128];int n=cdw_adapters(ad,128);
-        bool vpn=false;for(int i=0;i<n;++i)vpn|=cd_tailscale_ip(ad[i].a.ip)!=0;
-        // Reserve a route for Tailscale when virtual adapters would otherwise fill all four slots.
-        for(int pass=0;pass<2;++pass)for(int i=0;i<n&&v.n<(pass==0&&vpn?3:4);++i) {
-            auto ip=ad[i].a.ip;
-            if(!mod::peerAddress(ipText(ip))||((ip>>24)==127)||bool(cd_tailscale_ip(ip))!=(pass==1))continue;
-            bool duplicate=false;for(int k=0;k<v.n;++k)duplicate|=cd_ip(v.route[k].ip)==ip;
-            if(duplicate)continue;
-            auto& r=v.route[v.n++];r.kind=cd_tailscale_ip(ip)?CI_VPN:CI_LAN;
-            for(int k=0;k<4;++k)r.ip[k]=uint8_t(ip>>(24-8*k));
-        }
+        for(auto& r:localRoutes())v.route[v.n++]=r;
         if(!v.n)throw std::runtime_error("No LAN or Tailscale IPv4 address is available. Connect to a network and try again.");
         char code[CI_CODE_MAX];if(!ci_encode(&v,Prefix,code,sizeof(code)))throw std::runtime_error("Cannot create the invite.");return code;
     }

@@ -1416,6 +1416,7 @@ struct Runtime final:ds::Transport {
     }
     void storySend(const std::string& d) {
 #ifndef MOD_FAKE_NETWORK
+        if(config.group)return;   // no partner (group play): the direct socket does not exist
         sendto(socket,d.data(),int(d.size()),0,reinterpret_cast<sockaddr*>(&peer),sizeof(peer));
 #else
         (void)d;
@@ -2023,6 +2024,15 @@ struct Runtime final:ds::Transport {
         if(log!=-1 && write(log,s,strlen(s))!=static_cast<ssize_t>(strlen(s))) throw std::runtime_error("mod log write failure");
 #endif
     }
+    // Group play (config without `peer`): there is no partner. The two-player core still runs, but nothing it asks to
+    // send leaves this process, by the direct socket (never opened, see init) or the test queue.
+    bool noPartner() const {
+#ifdef MOD_MUTANT_GROUP_SENDS
+        return false;
+#else
+        return config.group;
+#endif
+    }
     void send(const ds::Bytes& input) override {
         auto clock=mod::nowUs();
         if(input[6]==uint8_t(ds::Kind::Presence)) {
@@ -2039,6 +2049,7 @@ struct Runtime final:ds::Transport {
         if(config.fault=="version") b[4]=2;
         if(config.fault=="session") b[32]^=128;
         checksum(b);
+        if(noPartner())return;   // the bookkeeping above still runs (a jump flag is not kept for ever)
         #ifdef MOD_FAKE_NETWORK
         if(outgoing.size()<256) {outgoing.push_back(b);++sent;} else ++dropped;
 #else
@@ -2048,7 +2059,7 @@ struct Runtime final:ds::Transport {
     }
     // ANIMATION (core.h): the one longer packet, with the same identity rewrite.
     void sendLong(const std::vector<uint8_t>& input) override {
-        if(input.size()<ds::WireSize)return;
+        if(input.size()<ds::WireSize||noPartner())return;
         auto b=input;std::copy(mod::WireBuild.begin(),mod::WireBuild.end(),b.begin()+16);checksum(b.data(),b.size());
 #ifndef MOD_FAKE_NETWORK
         auto n=sendto(socket,reinterpret_cast<const char*>(b.data()),int(b.size()),0,reinterpret_cast<sockaddr*>(&peer),sizeof(peer));
@@ -2097,7 +2108,7 @@ struct Runtime final:ds::Transport {
                 if(lastNetwork)networkTick.add(clock-lastNetwork);
                 lastNetwork=clock;
                 #ifndef MOD_FAKE_NETWORK
-                for(unsigned budget=0;budget<64;++budget) {
+                for(unsigned budget=0;budget<64&&!config.group;++budget) {   // group play: no direct socket to read
                     sockaddr_in source{};
 #ifdef _WIN32
                     int size=sizeof(source);
@@ -2399,6 +2410,10 @@ struct Runtime final:ds::Transport {
 #ifdef _WIN32
         WSADATA data;if(WSAStartup(MAKEWORD(2,2),&data)) throw std::runtime_error("WSAStartup failed");wsa=true;
 #endif
+        // Group play (config without `peer`): no partner, so no direct socket at all: nothing is bound, nothing can be
+        // sent to or taken from a partner's address. Other players come through the relay's own socket (relayStart).
+        if(config.group)note("NET no partner (group play): the direct socket is not opened\n");
+        else {
         socket=::socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);if(socket==INVALID_SOCKET) throw std::runtime_error("UDP socket failed");
         peer.sin_family=AF_INET;peer.sin_port=htons(ds::portForSlot(config.peerSlot));peer.sin_addr.s_addr=htonl(config.peerAddress);
         // Local address: loopback for a loopback peer; otherwise the configured bind address, or the address of the
@@ -2433,6 +2448,7 @@ struct Runtime final:ds::Transport {
 #else
         if(fcntl(socket,F_SETFL,O_NONBLOCK)<0) throw std::runtime_error("nonblocking UDP failed");
 #endif
+        }
         #endif
         relayStart();
         ds::Config c;c.role=(config.role=="host"||(config.role=="none"&&config.slot<config.peerSlot))?ds::Role::Host:ds::Role::Client;

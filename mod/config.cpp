@@ -20,15 +20,30 @@ Config parseConfig(const std::string& s) {
         ws();if(at==s.size() || s[at]!=',') break;++at;
     }
     take('}');ws();if(at!=s.size()) throw std::runtime_error("trailing JSON");
-    for(auto& kv:values) if(!std::set<std::string>{"slot","relay","relay_key","player_id","share_story_orders","share_rewards","story_resync","story_key","share_environment","share_enemies","share_enemy_positions","enemy_position_pull","enemy_position_goal","share_orders","share_order_units","share_order_load","share_roads","share_saved_structures","body_update_link","passenger_key","partner_poses","partner_animation","partner_cart","record_animation","join_move","carry_visual","partner","partner_gear","partner_marker","partner_vehicle","partner_likes","partner_tag","notices","online_server","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","link","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host","partner_shout","partner_shout_voice","partner_scan","partner_vitals","others"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
+    for(auto& kv:values) if(!std::set<std::string>{"slot","server","relay","relay_key","player_id","share_story_orders","share_rewards","story_resync","story_key","share_environment","share_enemies","share_enemy_positions","enemy_position_pull","enemy_position_goal","share_orders","share_order_units","share_order_load","share_roads","share_saved_structures","body_update_link","passenger_key","partner_poses","partner_animation","partner_cart","record_animation","join_move","carry_visual","partner","partner_gear","partner_marker","partner_vehicle","partner_likes","partner_tag","notices","online_server","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","link","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host","partner_shout","partner_shout_voice","partner_scan","partner_vitals","others"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
     auto text=[&](const char* k){if(!strings.count(k)) throw std::runtime_error(std::string("missing/string expected: ")+k);return values.at(k);};
     auto number=[&](const char* k){auto v=values[k];if(strings.count(k)||v.empty()||v.size()>15||v.find_first_not_of("0123456789")!=std::string::npos||(v.size()>1&&v[0]=='0')) throw std::runtime_error(std::string("invalid integer: ")+k);return std::stoull(v);};
     auto boolean=[&](const char* k,bool d){if(!values.count(k)) return d;auto v=values[k];if(strings.count(k)||(v!="true"&&v!="false")) throw std::runtime_error("boolean expected");return v=="true";};
-    Config c; auto slot=number("slot"),peer=number("peer_slot");if(slot>=16||peer>=16||slot==peer) throw std::runtime_error("distinct slots 0..15 required");c.slot=slot;c.peerSlot=peer;
+    // Group play: no `peer` means no partner. Such a config names the players' own server instead, and nothing that
+    // needs the partner: no role, no partner slot, no bind address for the direct socket, no partner body, nothing shared
+    // over the two-player session (it would silently do nothing).
+    Config c;c.group=!values.count("peer");
+    auto slot=number("slot"),peer=c.group?(number("slot")?0ull:1ull):number("peer_slot");if(slot>=16||peer>=16||slot==peer) throw std::runtime_error("distinct slots 0..15 required");c.slot=slot;c.peerSlot=peer;
     c.session=number("session");if(!c.session) throw std::runtime_error("nonzero session required");
     if(values.count("role"))c.role=text("role");
-    c.peer=text("peer");c.nickname=text("nickname");c.provider=text("provider");
-    {auto a=peerAddress(c.peer);if(!a)throw std::runtime_error("peer must be a numeric unicast IPv4 address");c.peerAddress=*a;}
+    if(!c.group)c.peer=text("peer");
+    c.nickname=text("nickname");c.provider=text("provider");
+    if(!c.group){auto a=peerAddress(c.peer);if(!a)throw std::runtime_error("peer must be a numeric unicast IPv4 address");c.peerAddress=*a;}
+    if(values.count("server")){c.server=text("server");auto a=peerAddress(c.server);if(!a)throw std::runtime_error("server must be a numeric unicast IPv4 address");c.serverAddress=*a;}
+#ifndef MUTANT_CONFIG_GROUP
+    if(c.group){
+        if(!c.serverAddress)throw std::runtime_error("a config without peer (no partner) requires server");
+        if(c.role!="none")throw std::runtime_error("role requires peer (a partner)");
+        for(auto key:{"peer_slot","bind","join_at_host"})if(values.count(key))throw std::runtime_error(std::string(key)+" requires peer (a partner)");
+        if(values.count("partner")&&values["partner"]!="off")throw std::runtime_error("partner requires peer (a partner)");
+        for(auto& kv:values)if(kv.first.compare(0,6,"share_")==0&&kv.second!="false"&&kv.second!="off")throw std::runtime_error(kv.first+" requires peer (a partner)");
+    }
+#endif
     if(values.count("bind")){
         c.bind=text("bind");auto b=peerAddress(c.bind);
         if(!b)throw std::runtime_error("bind must be a numeric unicast IPv4 address");
@@ -121,7 +136,7 @@ Config parseConfig(const std::string& s) {
     if(values.count("online_server")){
         c.onlineServer=text("online_server");
         if(c.provider!="game"||!c.gameThread)throw std::runtime_error("online_server requires the game provider and game_thread");
-        if(!onlineAddress(c.onlineServer,c.peerAddress))throw std::runtime_error("online_server must be http://ADDRESS:PORT/path on loopback or the partner's address");
+        if(!onlineAddress(c.onlineServer,c.peerAddress,c.serverAddress))throw std::runtime_error("online_server must be http://ADDRESS:PORT/path on loopback, at the partner's address or at the listed server");
     }
     if(values.count("others")){
         auto n=number("others");
@@ -132,7 +147,8 @@ Config parseConfig(const std::string& s) {
         c.others=unsigned(n);
     }
     // The relay other players are reached through (core/relay.h, the players' own server): numeric IPv4 and port, on
-    // loopback or at the partner's address like online_server; with it go the group's key and this player's id there.
+    // loopback, at the partner's address or at the listed `server`, like online_server; with it go the group's key and
+    // this player's id there.
     if(values.count("relay")){
         c.relay=text("relay");auto colon=c.relay.rfind(':');uint32_t address=0;unsigned long port=0;
         bool ok=colon!=std::string::npos&&colon+1<c.relay.size()&&c.relay.size()-colon-1<=5&&c.relay.find_first_not_of("0123456789",colon+1)==std::string::npos;
@@ -142,7 +158,13 @@ Config parseConfig(const std::string& s) {
                 else if(ch=='.'&&digits){address=(address<<8)|value;++parts;value=digits=0;}else ok=false;}
             ok=ok&&parts==4&&port>=1&&port<=65535;}
 #ifndef MUTANT_CONFIG_RELAY_ADDRESS
-        if(!ok||!((address>>24)==127||address==c.peerAddress))throw std::runtime_error("relay must be ADDRESS:PORT (numeric IPv4) on loopback or the partner's address");
+        bool listed=(address>>24)==127||address==c.peerAddress;
+#ifndef MUTANT_CONFIG_SERVER_ANY
+        listed=listed||(c.serverAddress&&address==c.serverAddress);
+#else
+        listed=listed||c.serverAddress;
+#endif
+        if(!ok||!listed)throw std::runtime_error("relay must be ADDRESS:PORT (numeric IPv4) on loopback, at the partner's address or at the listed server");
 #endif
         c.relayAddress=address;c.relayPort=uint16_t(port);
         c.relayKey=values.count("relay_key")?text("relay_key"):std::string();c.playerId=values.count("player_id")?number("player_id"):0;
@@ -196,7 +218,7 @@ std::optional<uint32_t> peerAddress(const std::string& t){
 #endif
     return a;
 }
-std::optional<std::string> onlineAddress(const std::string& url,uint32_t peer){
+std::optional<std::string> onlineAddress(const std::string& url,uint32_t peer,uint32_t server){
     const std::string scheme="http://";
     if(url.size()>OnlineAddressMax||url.compare(0,scheme.size(),scheme)!=0)return std::nullopt;
     size_t colon=url.find(':',scheme.size()),slash=url.find('/',scheme.size());
@@ -204,7 +226,13 @@ std::optional<std::string> onlineAddress(const std::string& url,uint32_t peer){
     auto host=peerAddress(url.substr(scheme.size(),colon-scheme.size()));
     if(!host)return std::nullopt;
 #ifndef MUTANT_ONLINE_HOST_ANY
-    if((*host>>24)!=127&&*host!=peer)return std::nullopt;
+#ifndef MUTANT_CONFIG_SERVER_ANY
+    if((*host>>24)!=127&&*host!=peer&&!(server&&*host==server))return std::nullopt;
+#else
+    if((*host>>24)!=127&&*host!=peer&&!server)return std::nullopt;
+#endif
+#else
+    (void)server;
 #endif
     auto port=url.substr(colon+1,slash-colon-1);
     if(port.empty()||port.size()>5||port[0]=='0'||port.find_first_not_of("0123456789")!=std::string::npos||std::stoul(port)>65535)return std::nullopt;

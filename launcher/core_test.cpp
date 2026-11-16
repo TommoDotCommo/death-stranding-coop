@@ -7,6 +7,16 @@ namespace fs=std::filesystem;
 static void check(bool b,const char* what) {if(!b){std::cerr<<"launcher oracle: "<<what<<'\n';std::exit(1);}}
 template<class F> static void rejects(F f) {bool rejected=false;try{f();}catch(...){rejected=true;}check(rejected,"invalid input accepted");}
 int main(int argc,char** argv) {
+    if(argc==5&&std::string(argv[1])=="--group") {   // for test_group.py: what the launcher gives the group's server and the games
+        launcher::Session h;h.name="Host";h.port=unsigned(std::stoul(argv[2]));h.secret=uint32_t(std::stoul(argv[3]));h.group=launcher::Group::Host;h.playerId=77;
+        for(auto& a:launcher::worldArguments(h,argv[4]))std::cout<<"arg "<<a<<'\n';
+        auto hc=mod::parseConfig(launcher::config(h));
+        std::cout<<"relay "<<hc.relay<<"\nkey "<<hc.relayKey<<"\nsession "<<hc.session<<"\nhost "<<hc.onlineServer<<'\n';
+        ci_invite v{};v.secret=h.secret;v.port=uint16_t(launcher::worldPort(h));v.n=1;v.route[0]={CI_LAN,{127,0,0,1}};
+        launcher::Session me;me.name="Joiner";me.playerId=78;
+        std::cout<<"join "<<mod::parseConfig(launcher::config(launcher::groupJoin(v,0,me))).onlineServer<<'\n';
+        return 0;
+    }
     check(argc==2,"temporary test root required");fs::path root=argv[1];fs::create_directories(root);
     launcher::Session s;s.peer="100.90.1.2";s.name="Porter";s.port=49003;s.secret=0x12345678;
     for(bool host:{false,true}) {s.host=host;launcher::writeConfig(root,s);
@@ -35,6 +45,55 @@ int main(int argc,char** argv) {
         auto bytes=launcher::packet(p);bytes[5]=4;launcher::Packet q;check(!launcher::parsePacket(bytes,q),"unknown lobby flag refused");
         check(launcher::sessionWorld(true,true,false)&&!launcher::sessionWorld(true,false,true),"the host's own setting");
         check(launcher::sessionWorld(false,false,true)&&!launcher::sessionWorld(false,true,false),"a guest follows the host");
+    }
+    {   // Group play: no partner and no lobby. One player hosts the server (shared world and relay, one key); every
+        // player's game names that server and nothing else; a group invite carries the key, the port and the routes.
+        using launcher::Group;
+        launcher::Session h;h.name="Porter";h.port=49003;h.secret=0x12345678;h.group=Group::Host;h.playerId=123456789012345ull;
+        auto hc=mod::parseConfig(launcher::config(h));
+        check(hc.group&&hc.peer.empty()&&hc.role=="none"&&hc.server=="127.0.0.1"&&hc.slot==3,"a group player has no partner");
+        check(hc.others==launcher::GroupOthers&&hc.relay=="127.0.0.1:49103"&&hc.relayKey=="w305419896"&&hc.playerId==h.playerId&&hc.partnerTag&&hc.session==h.secret&&hc.gameThread&&hc.puppetProbe&&hc.required,"group host config");
+        check(hc.onlineServer=="http://127.0.0.1:49103/w305419896/auth/ds","the host's game signs in on loopback, as its own account");
+        check(hc.partner=="off"&&!hc.shareOrders&&!hc.shareEnemies&&!hc.shareRoads&&!hc.shareSavedStructures&&hc.shareEnvironment=="off"&&!hc.notices,"nothing of the two-player session in group play");
+        auto a=launcher::worldArguments(h,"D");
+        check(a==std::vector<std::string>{"--port","49103","--bind","0.0.0.0","--prefix","w305419896","--data","D","--idle-exit","21600","--relay-port","49103","--relay-key","w305419896"},"group server command line: shared world and relay");
+        check(a.back()==hc.relayKey&&hc.onlineServer.find("/"+a[5]+"/")!=std::string::npos,"one key for the server and the games");
+        check(launcher::networkPeers(h)=="127.0.0.1"&&launcher::networkPeers(s)=="100.90.1.2","the proxy lists the server in group play, the partner otherwise");
+        std::vector<ci_route> routes{{CI_LAN,{192,168,1,20}},{CI_VPN,{100,70,1,2}}};
+        auto code=launcher::groupInvite(h.secret,launcher::worldPort(h),routes);
+        check(code.rfind("DSG-",0)==0,"group invite prefix");
+        cr_result r{};bool group=false;
+        for(auto text:{code,"deathstranding-coop://join/"+code,"https://tommodotcommo.github.io/death-stranding-coop/join/#"+code,"  "+code+"\n"}) {
+            int kind=launcher::recognise(text,r,group);
+            check((kind==CR_INVITE||kind==CR_LINK)&&group&&r.invite.secret==h.secret&&r.invite.port==49103&&r.invite.n==2&&r.invite.route[1].ip[0]==100,"group invite round trip");}
+        ci_invite lobby{};lobby.secret=7;lobby.port=49000;lobby.n=1;lobby.route[0]={CI_LAN,{192,168,1,20}};char text[CI_CODE_MAX];
+        check(ci_encode(&lobby,"DS",text,sizeof(text))>0,"lobby invite");
+        {cr_result q{};bool g=true;check(launcher::recognise(text,q,g)==CR_INVITE&&!g&&q.invite.secret==7&&q.invite.port==49000,"a two-player lobby invite is still read as one");}
+        {ci_invite old{};const char* other=nullptr;check(ci_decode(code.data(),code.size(),"DS",&old,&other)==CI_WRONG_GAME,"a group invite is never taken for a lobby invite");}
+        check(ci_encode(&lobby,"MDK2",text,sizeof(text))>0,"another game's invite");
+        {cr_result q{};bool g=true;check(launcher::recognise(text,q,g)==CR_ERROR&&!g&&q.error==CI_WRONG_GAME,"another game's invite is refused as before");}
+        {auto damaged=code;damaged[8]=damaged[8]=='1'?'2':'1';cr_result q{};bool g=false;check(launcher::recognise(damaged,q,g)==CR_ERROR&&g&&q.error!=CI_WRONG_GAME,"a damaged group invite is refused as a group invite");}
+        {cr_result q{};bool g=true;check(launcher::recognise("192.168.1.20:49000",q,g)==CR_ADDRESS&&!g,"addresses as before");}
+        check(launcher::groupInvite(0,49103,routes).empty()&&launcher::groupInvite(1,49003,routes).empty()&&launcher::groupInvite(1,49103,{}).empty(),"no invite without a key, a server port or a route");
+        check(launcher::groupRoute(r.invite,{false,true})==1&&launcher::groupRoute(r.invite,{true,true})==0&&launcher::groupRoute(r.invite,{false,false})==-1&&launcher::groupRoute(r.invite,{})==-1,"the first route whose server answered");
+        launcher::Session me;me.name="Fragile";me.playerId=77;me.peer="10.9.9.9";
+        auto j=launcher::groupJoin(r.invite,1,me);auto jc=mod::parseConfig(launcher::config(j));
+        check(jc.group&&jc.server=="100.70.1.2"&&jc.relay=="100.70.1.2:49103"&&jc.relayKey==hc.relayKey&&jc.session==hc.session&&jc.playerId==77&&jc.slot==3&&jc.nickname=="Fragile"&&jc.others==launcher::GroupOthers,"a joiner's config names the server from the invite");
+        check(jc.onlineServer=="http://100.70.1.2:49103/w305419896/auth/ds","a joiner on another PC signs in as its own account");
+        check(launcher::networkPeers(j)=="100.70.1.2","a joiner's proxy lists the server and nothing else");
+        check(launcher::worldArguments(j,"D").empty(),"only the host runs the group's server");
+        auto third=me;third.name="Deadman";third.playerId=78;auto t=mod::parseConfig(launcher::config(launcher::groupJoin(r.invite,0,third)));
+        check(t.server=="192.168.1.20"&&t.session==jc.session&&t.relayKey==jc.relayKey&&t.playerId!=jc.playerId,"more than two players join one server");
+        rejects([&]{launcher::groupJoin(r.invite,-1,me);});rejects([&]{launcher::groupJoin(r.invite,2,me);});
+        {auto wrong=r.invite;wrong.port=49003;rejects([&]{launcher::groupJoin(wrong,0,me);});}
+        {auto nobody=me;nobody.playerId=0;rejects([&]{launcher::groupJoin(r.invite,0,nobody);});}
+        {auto local=r.invite;local.route[0]={CI_LAN,{127,0,0,1}};
+         check(mod::parseConfig(launcher::config(launcher::groupJoin(local,0,me))).onlineServer=="http://127.0.0.1:49103/w305419896/k/p77/auth/ds","a joiner on the host's PC (one Steam account) signs in under its own name");}
+        for(uint64_t random:{uint64_t(0),uint64_t(1),~uint64_t(0),uint64_t(0x123456789abcdefull),(uint64_t(1)<<49)-1,uint64_t(1)<<49})check(launcher::playerIdValid(launcher::playerId(random)),"a player number the mod's config takes, never 0");
+        check(launcher::playerId(5)!=launcher::playerId(6)&&!launcher::playerIdValid(0)&&launcher::playerIdValid(launcher::PlayerIdMax)&&!launcher::playerIdValid(launcher::PlayerIdMax+1),"player number range");
+        check(launcher::redact("\"relay_key\":\"w305419896\",\"online_server\":\"http://127.0.0.1:49103/w305419896/k/p77/auth/ds\" "+code+" x")
+              =="\"relay_key\":\"<hidden>\",\"online_server\":\"http://127.0.0.1:49103/w<hidden>/k/p77/auth/ds\" DSG-<hidden> x","the group's key is hidden in diagnostics in every form");
+        check(launcher::redact("data/world/world.json /w12x /w1234567890123/ DSG-AB")=="data/world/world.json /w12x /w1234567890123/ DSG-AB","only the key's own forms change");
     }
     for(auto peer:{"0.0.0.0","example.com","255.255.255.255","192.168.01.2","224.0.0.1"}) {s.peer=peer;rejects([&]{launcher::config(s);});}s.peer="127.0.0.1";
     for(auto port:{0u,48999u,49015u,65535u}) {s.port=port;rejects([&]{launcher::config(s);});}s.port=49000;

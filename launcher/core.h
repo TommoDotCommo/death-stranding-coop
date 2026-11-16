@@ -9,6 +9,23 @@
 namespace launcher {
 inline constexpr const char* GameId="DSDC";
 inline constexpr const char* Prefix="DS";
+inline constexpr const char* GroupPrefix="DSG";   // a group invite: DSG-..., the same payload as a lobby invite
+// Group play (README "A group on one server"): no partner and no lobby. One player hosts the group's server
+// (coop-world with its relay); every player's game talks to that server only, and plays its own save.
+enum class Group : uint8_t {None,Host,Join};
+inline constexpr unsigned GroupOthers=15;        // other players shown at once: the server's sign-in holds 16 players
+// A player's number on the relay: made once from the system's random numbers and kept in the launcher's settings, so
+// it is the same in every session and says nothing about the player (never the Steam id). 1..PlayerIdMax: the mod's
+// config takes integers of at most 15 digits.
+inline constexpr uint64_t PlayerIdMax=999999999999999ull;
+inline bool playerIdValid(uint64_t id){return id>=1&&id<=PlayerIdMax;}
+inline uint64_t playerId(uint64_t random) {
+#ifdef MUTANT_GROUP_ID
+    return random;
+#else
+    return (random&((uint64_t(1)<<49)-1))+1;   // 49 random bits: 1..562949953421312
+#endif
+}
 struct Session {
     bool host=true;
     std::string peer="127.0.0.1",name="Porter";
@@ -18,11 +35,35 @@ struct Session {
     // Opt-in: the game's own online layer (other players' structures, signs, likes) on the group's own server
     // (world/README.md). The host's launcher runs the server; both games get its address as `online_server`.
     bool sharedWorld=false;
+    // Group play. `secret` is the group's key (session number, server path and relay key all come from it), `port`
+    // 49000 + the server's slot (its TCP and UDP port is 49100 + slot), `server` the address this game reaches the
+    // server at (Join; the host's own game uses loopback) and `playerId` this player's number on the relay.
+    Group group=Group::None;
+    std::string server="127.0.0.1";
+    uint64_t playerId=0;
 };
+// The addresses the proxy's network policy lists for the session (COOP_NETWORK_PEERS): the partner, or in group play
+// the server and nothing else.
+std::string networkPeers(const Session&);
+// Group play: the relay's address for the mod ("ADDRESS:PORT", UDP, the same number as the server's TCP port) and
+// the relay key (the server's secret path element).
+std::string relayAddress(const Session&);
+// A group invite: "DSG-" and the lobby invite's payload, with the group's key as the secret, the server's port
+// (49100..49114, TCP and UDP) and the addresses the host can be reached at, best first. Empty when it cannot be made.
+std::string groupInvite(uint32_t secret,unsigned serverPort,const std::vector<ci_route>& routes);
+// One pasted text (the kit's recogniser): `group` says a group invite (DSG-...), otherwise as coop_recognise for DS.
+int recognise(const std::string& text,cr_result& result,bool& group);
+// Which of a group invite's routes to use: the first one, in the host's order, whose server answered. -1: none.
+int groupRoute(const ci_invite&,const std::vector<bool>& answered);
+// The joiner's session from a group invite and the chosen route (name and player id from `mine`). Throws on an invite
+// that is not a group's (port outside 49100..49114, no such route, no key).
+Session groupJoin(const ci_invite&,int route,Session mine);
 // The shared world's server for a session: its TCP port (49100 + the session's slot), the secret path element both
 // players derive from the session secret, the address a game signs in to (the host's game on loopback, the guest's at
 // the host; on one PC, where both games are the same Steam account, the address names the player), and the server's
-// command line (host only; it listens beyond loopback only when the partner is on another PC).
+// command line (host only; it listens beyond loopback only when the partner is on another PC). In group play the
+// host's command line also turns the relay on, with the same key, and listens on every address; a joiner on the
+// host's own PC (one Steam account) signs in under a name made from its player id.
 unsigned worldPort(const Session&);
 std::string worldPrefix(const Session&);
 std::string worldAddress(const Session&);

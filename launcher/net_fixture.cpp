@@ -37,6 +37,20 @@ int main(){
         client.saveInstalled();wait([&]{return host.peerReady;},"ready exchange");host.start();
         wait([&]{return host.launch&&client.launch;},"both launch requests acknowledged");
         check(mod::parseConfig(launcher::config(host.session)).slot==12&&mod::parseConfig(launcher::config(client.session)).slot==13,"matching mod ports");
-        std::puts("PASS: game-free Windows lobby, wrong-secret refusal, save handoff, ready/start and matching configuration");return 0;
+        {   // Group play: a joiner takes the first route of a group invite whose server answers (a TCP listener stands in
+            // for coop-world), and its config names that server and nothing else.
+            SOCKET listener=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);auto at=launcher::endpoint(0x7f000001,49112);
+            check(listener!=INVALID_SOCKET&&!bind(listener,reinterpret_cast<sockaddr*>(&at),sizeof(at))&&!listen(listener,4),"stand-in group server");
+            ci_invite v{};v.secret=77;v.port=49112;v.n=2;v.route[0]={CI_LAN,{127,0,0,9}};v.route[1]={CI_LAN,{127,0,0,1}};   // nobody listens on the first
+            auto answered=launcher::probeServers(v);
+            check(answered.size()==2&&!answered[0]&&answered[1]&&launcher::groupRoute(v,answered)==1,"the route whose server answers");
+            launcher::Session me;me.name="fixture";me.playerId=5;
+            auto c=mod::parseConfig(launcher::config(launcher::groupJoin(v,launcher::groupRoute(v,answered),me)));
+            check(c.group&&c.server=="127.0.0.1"&&c.relay=="127.0.0.1:49112"&&c.session==77,"a joiner's config names the answering server");
+            closesocket(listener);
+            answered=launcher::probeServers(v,300);
+            check(launcher::groupRoute(v,answered)==-1,"no route once the server is gone");
+        }
+        std::puts("PASS: game-free Windows lobby, wrong-secret refusal, save handoff, ready/start, matching configuration and group routes");return 0;
     }catch(const std::exception& e){std::fprintf(stderr,"lobby fixture oracle: %s\n",e.what());return 1;}
 }

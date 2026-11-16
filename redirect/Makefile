@@ -102,7 +102,7 @@ test: thread-trace-test iat-race-test module-hold-test avrt-proxy-test crash-rec
 portable-test: thread-trace-test | build
 	g++ -std=c++17 -Wall -Wextra -Werror network_policy.cpp network_test.cpp -o build/network-test
 	./build/network-test
-	@python3 -B ../mod/mutants.py --sources "network_policy.cpp network_test.cpp" NET_ALLOW_ALL NET_EXACT_LOOPBACK NET_NO_PEERS NET_ANY_V6 NET_MAPPED_LOCAL NET_NAME_PREFIX NET_NEVER_REFUSE NET_REFUSE_LOG_ONLY NET_PEER_LOOPBACK_LISTED
+	@python3 -B ../mod/mutants.py --sources "network_policy.cpp network_test.cpp" NET_ALLOW_ALL NET_EXACT_LOOPBACK NET_NO_PEERS NET_ANY_V6 NET_MAPPED_LOCAL NET_NAME_PREFIX NET_NEVER_REFUSE NET_REFUSE_LOG_ONLY NET_PEER_LOOPBACK_LISTED NET_SERVER_UNLISTED
 	g++ -std=c++17 -Wall -Wextra -Werror objects.cpp objects_test.cpp -o build/objects-test
 	./build/objects-test
 	@python3 -B ../mod/mutants.py --sources "objects.cpp objects_test.cpp" OBJECT_NONE OBJECT_ALL OBJECT_CASE OBJECT_PREFIX

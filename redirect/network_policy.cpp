@@ -119,6 +119,14 @@ bool net_refuses(const NetPolicy& p, NetVerdict v) {
 #endif
 }
 
+bool net_reaches(const NetPolicy& p, uint32_t address) {
+#ifdef MUTANT_NET_SERVER_UNLISTED
+    (void)p; (void)address; return true;
+#else
+    return p.mode != NetMode::enforce || classify4(p, address) != NetVerdict::deny;
+#endif
+}
+
 const wchar_t* verdict_name(NetVerdict v) {
     switch(v) {
     case NetVerdict::local: return L"local";
