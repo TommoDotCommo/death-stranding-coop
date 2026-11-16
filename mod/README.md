@@ -1970,6 +1970,17 @@ The mod then does three things in the game (`online.h`; addresses in `game_offse
 The log says `ONLINE server …`, `ONLINE sign-in asked` and each change of the login task, with `(signed in)` at the
 end. Game-free tests: the address rules and the asking logic, five mutants (`online_test.cpp`).
 
+### The player's own strand (`own_strand.h`; a reader, not wired into the mod)
+
+A read-only reader for what in a game's memory is the player's own (the launcher's "My strand" and a live probe;
+`game_offsets.md`, "The player's own strand"): construction records whose owner byte says Player variant (built in
+this save, or handed back by a server as his), and online objects whose creator is the signed-in player (the
+game's user id 1, filed in an area's second list), joined by online id into one list with the server's letter, the
+area, the position and the level. Likes are not read from the game (where it keeps them is unknown); a server's
+counts are merged in by online id. Static research only: nothing of it has been read from a running game yet.
+Game-free: `own_strand_test.cpp` over a fake process memory, eleven mutants (family `own` in
+`test_game_thread_mutants.py`).
+
 ## The partner is down or caught (`vitals.h`, with `notices`)
 
 Every tenth of a second the mod reads, read-only, whether its porter is dead (the entity's dead bit or the animation
