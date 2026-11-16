@@ -93,12 +93,14 @@ void serve(sock_t s,world::Front& front,world::World& w){
         catch(const std::exception& e){reply.status=500;reply.body="{}";line(std::string("error: ")+e.what());}
         save(w);
         if(!tracePath.empty()){
-            // Research aid: every call with its body. The Steam ticket and a launcher's sign-in ticket are left out; bodies can
-            // name other accounts.
+            // Research aid: every call with its body. The Steam ticket, a launcher's sign-in ticket and the answers that hand
+            // out tickets and tokens are left out; bodies can name other accounts.
             auto target=r.target;if(auto code=target.find("code=");code!=std::string::npos)target.resize(code+5);
             if(auto t=target.find("/t/");t!=std::string::npos){auto end=target.find('/',t+3);target.replace(t+3,(end==std::string::npos?target.size():end)-t-3,"<ticket>");}
+            // The answers that hand out a ticket or a token (a mod's notice token travels in a header, which is not written).
+            bool pass=false;for(const char* call:{"/coop/ticket","/coop/relay-token","/coop/notice-token"})pass=pass||target.find(call)!=std::string::npos;
             std::lock_guard<std::mutex> g(outLock);std::ofstream f(tracePath,std::ios::app);
-            f<<nowSeconds()<<' '<<r.method<<' '<<target<<' '<<r.body.substr(0,4000)<<" -> "<<reply.status<<' '<<reply.body.substr(0,600)<<'\n';}
+            f<<nowSeconds()<<' '<<r.method<<' '<<target<<' '<<r.body.substr(0,4000)<<" -> "<<reply.status<<' '<<(pass?std::string("<pass>"):reply.body.substr(0,600))<<'\n';}
         std::string out="HTTP/1.1 "+std::to_string(reply.status)+" "+reason(reply.status)+"\r\nContent-Type: application/json\r\nContent-Length: "+std::to_string(reply.body.size())+"\r\n"+(close?"Connection: close\r\n":"")+"\r\n"+reply.body;
         if(!sendAll(s,out)||close)return;}
 }

@@ -24,6 +24,11 @@ constexpr size_t MaxWorldFileBytes=512u*1024*1024;
 // A relay token: until its first HELLO, at most RelayTokenUnusedSeconds; then while HELLOs keep coming, until
 // RelayTokenIdleSeconds after the last one. A new one of either kind ends the player's older one.
 constexpr int64_t TicketUnusedSeconds=1800,TicketGraceSeconds=120,RelayTokenUnusedSeconds=1800,RelayTokenIdleSeconds=300;
+// A notice token (README, "What the game is told"): the mod's read of its player's own objects' states, under every
+// identity. Good until its first read, at most NoticeTokenUnusedSeconds; then while reads keep coming, until
+// NoticeTokenIdleSeconds after the last. The time of the last read is saved at most every NoticeTokenSaveSeconds, so a
+// token outlives a short restart of the server. A new one ends the player's older one.
+constexpr int64_t NoticeTokenUnusedSeconds=1800,NoticeTokenIdleSeconds=900,NoticeTokenSaveSeconds=300;
 constexpr size_t PassBytes=32;                      // a ticket or relay token: at most this many letters and digits
 struct Reply { int status=200;std::string body="{}"; };
 // What may travel between two servers. Text form: "all", "none", or terms separated by ';':
@@ -107,6 +112,12 @@ public:
     // May this HELLO's (or BYE's) token speak for relay id `id`? identity none: the token is the group's key
     // (`groupKey`); keys: a good relay token of that id (a HELLO it admits keeps it good).
     bool relayAdmit(uint64_t id,const std::string& token,const std::string& groupKey,int64_t now);
+    // What the game is told (README, "What the game is told"). A notice token for the player of this account (made
+    // when new, as by choices; any identity: the API's own rules say who may ask), and the read it allows: the states of
+    // his own objects built here and nothing else. `since` is the `version` of his last answer: the objects whose state
+    // changed after it, or every one of his objects (`full`) when it is not a version of this process.
+    json::Value apiNoticeToken(const std::string& account,int64_t now);
+    Reply notices(const std::string& token,const std::string& since,int64_t now);
     // The owner's account key (identity::account of the host's launcher key; "" none): his signed calls are the
     // owner's actions in the API. Saved with the world.
     void setOwner(const std::string& account);
@@ -196,9 +207,11 @@ private:
     // limit; `heldAsk`: its builder is still to be asked).
     // A remnant was withdrawn by its builder and stayed: nobody changes it, and its likes go to no one.
     // `home`: the display name of its first server as the record that brought it gave it ("" none given).
+    // `kept`: why a kept object is kept: "choice" (its builder's), "owner" (the owner's review), "server" (accept_offers
+    // never); "" in a world file from before. `stamp`: when its state last changed (stamps_; not saved).
     struct Object { std::string id,creator;json::Value post;int64_t updated=0;int64_t likes=0;
                     std::string originServer,originId,via,originName,home;int64_t originLikes=0;
-                    std::string name,share,held;bool remnant=false,heldAsk=false; };
+                    std::string name,share,held,kept;bool remnant=false,heldAsk=false;uint64_t stamp=0; };
     struct Like { std::string to,from,object,type;int64_t time=0,points=0,autoPoints=0; };   // to: the object's builder
     mutable std::mutex lock_;
     std::function<std::string()> random_;
@@ -214,7 +227,8 @@ private:
     Policy policy_;
     // Identity: the owner's account, and the tickets and relay tokens the launchers took (by text).
     struct Pass { std::string account;uint64_t relayId=0;int64_t issued=0,used=0; };   // used: first sign-in; a token's last HELLO
-    std::string owner_;std::map<std::string,Pass> tickets_,relayTokens_;
+    std::string owner_;std::map<std::string,Pass> tickets_,relayTokens_,noticeTokens_;
+    uint64_t stamps_=0;void touch(Object& o){o.stamp=++stamps_;}   // an object's state changed (what notices reads)
     std::string pass(std::map<std::string,Pass>& passes,const std::string& account,uint64_t relayId,int64_t now);
     Player& playerFor(const std::string& account,const char* why);   // made when new, within `players`
     Reply signInLocked(const std::string& key,const std::string& displayName,const std::string& gateway);

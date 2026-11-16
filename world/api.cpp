@@ -176,7 +176,8 @@ Reply ownerApi(World& w,const std::string& method,const std::string& call,const 
 }
 Reply launcherApi(World& w,const std::string& method,const std::string& call,const std::string& player,const std::string& text,const std::string& signer,int64_t now){
     if(call.compare(0,6,"owner/")==0)return ownerApi(w,method,call.substr(6),text,signer);
-    const bool read=call=="policy"||call=="me"||call=="mine",change=call=="choices"||call=="offer"||call=="withdraw",pass=call=="ticket"||call=="relay-token";
+    // notice-token is taken as a change is: for any player under identity none, signed by its player under keys.
+    const bool read=call=="policy"||call=="me"||call=="mine",change=call=="choices"||call=="offer"||call=="withdraw"||call=="notice-token",pass=call=="ticket"||call=="relay-token";
 #ifndef MUTANT_API_METHOD
     if((read&&method!="GET")||((change||pass)&&method!="POST")||(!read&&!change&&!pass))return answer(404,"not found");   // a change is never a GET
 #else
@@ -211,7 +212,7 @@ Reply launcherApi(World& w,const std::string& method,const std::string& call,con
     try{if(text.size()>MaxApiBody)bad("too long");in=json::parse(text);if(!in.isObject())bad("not an object");}
     catch(const std::exception&){return answer(400,"the body is a JSON object");}
     const std::vector<std::string> fields=call=="choices"?std::vector<std::string>{"player","offer_builds","offer_old"}:
-                                          call=="offer"?std::vector<std::string>{"player","object","all","answer"}:pass?std::vector<std::string>{"player"}:std::vector<std::string>{"player","object","all"};
+                                          call=="offer"?std::vector<std::string>{"player","object","all","answer"}:pass||call=="notice-token"?std::vector<std::string>{"player"}:std::vector<std::string>{"player","object","all"};
     for(auto& m:in.members()){
 #ifdef MUTANT_API_CHOICES_MEMBER
         if(m.first=="member")continue;
@@ -228,6 +229,7 @@ Reply launcherApi(World& w,const std::string& method,const std::string& call,con
             if(call=="ticket")return ok(w.apiTicket(key,now));
             identity::PublicKey k{};if(!identity::keyOf(key,k))return answer(403,"a relay token is for a player's key");
             return ok(w.apiRelayToken(key,identity::relayId(k),now));}
+        if(call=="notice-token")return ok(w.apiNoticeToken(key,now));
         if(call=="choices"){
             w.apiChoices(key,in.get("offer_builds").string(),in.get("offer_old").string());
 #ifdef MUTANT_API_CHOICES_MEMBER

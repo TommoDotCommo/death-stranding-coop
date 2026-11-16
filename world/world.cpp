@@ -122,6 +122,9 @@ Reply World::signIn(const std::string& key,const std::string& displayName,const 
 Reply World::signInTicket(const std::string& ticket,const std::string& displayName,const std::string& gateway,int64_t now){
     std::lock_guard<std::mutex> g(lock_);
     auto t=passText(ticket)?tickets_.find(ticket):tickets_.end();
+#ifdef MUTANT_NOTICES_TOKEN_TICKET
+    if(t==tickets_.end()&&passText(ticket))if(auto n=noticeTokens_.find(ticket);n!=noticeTokens_.end())t=tickets_.emplace(ticket,n->second).first;
+#endif
     bool good=t!=tickets_.end();
 #ifndef MUTANT_TICKET_EXPIRY
     if(good&&!t->second.used&&now>t->second.issued+TicketUnusedSeconds)good=false;
@@ -143,10 +146,11 @@ World::Player& World::playerFor(const std::string& account,const char* why){
 }
 // One good pass of a kind per player: a new one ends his older one, and passes that can no longer be used are dropped.
 std::string World::pass(std::map<std::string,Pass>& passes,const std::string& account,uint64_t relayId,int64_t now){
-    const bool ticket=&passes==&tickets_;
+    const bool ticket=&passes==&tickets_,notice=&passes==&noticeTokens_;
     for(auto it=passes.begin();it!=passes.end();){
         const Pass& p=it->second;
-        bool over=ticket?(p.used?now>p.used+TicketGraceSeconds:now>p.issued+TicketUnusedSeconds):(p.used?now>p.used+RelayTokenIdleSeconds:now>p.issued+RelayTokenUnusedSeconds);
+        bool over=ticket?(p.used?now>p.used+TicketGraceSeconds:now>p.issued+TicketUnusedSeconds):
+                  notice?(p.used?now>p.used+NoticeTokenIdleSeconds:now>p.issued+NoticeTokenUnusedSeconds):(p.used?now>p.used+RelayTokenIdleSeconds:now>p.issued+RelayTokenUnusedSeconds);
 #ifndef MUTANT_TICKET_REPLACE
         over=over||p.account==account;
 #endif
@@ -171,6 +175,56 @@ json::Value World::apiRelayToken(const std::string& account,uint64_t relayId,int
     playerFor(account,"relay token");
     Value out=Value::object();out.set("format",1);out.set("token",pass(relayTokens_,account,relayId,now));out.set("relay_id",int64_t(relayId));out.set("expires",now+RelayTokenUnusedSeconds);
     note("relay token for "+playerId(account));return out;
+}
+json::Value World::apiNoticeToken(const std::string& account,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+    if(account.empty()||account.size()>MaxKeyBytes)bad("a notice token is for a player's account");
+    const Player& p=playerFor(account,"notice token");
+    Value out=Value::object();out.set("format",1);out.set("token",pass(noticeTokens_,account,0,now));out.set("expires",now+NoticeTokenUnusedSeconds);
+    note("notice token for "+p.id);return out;
+}
+Reply World::notices(const std::string& token,const std::string& since,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+    auto t=passText(token)?noticeTokens_.find(token):noticeTokens_.end();
+    bool good=t!=noticeTokens_.end();
+#ifndef MUTANT_NOTICES_EXPIRY
+    if(good&&(t->second.used?now>t->second.used+NoticeTokenIdleSeconds:now>t->second.issued+NoticeTokenUnusedSeconds))good=false;
+#endif
+    auto found=good?players_.find(t->second.account):players_.end();
+    if(found==players_.end()){note("notices refused: unknown or expired notice token");return refuse(403,"notice-token","the notice token is unknown or expired: start the game from the launcher again");}
+    // Kept good while the mod reads; the time of the last read reaches the world file now and then, not on every read.
+    if(!t->second.used||now>=t->second.used+NoticeTokenSaveSeconds)dirty_=true;
+    t->second.used=std::max(t->second.used,now);
+    const std::string id=found->second.id;
+    // `since` names a version of this process (its epoch and a stamp): only what changed after it. Anything else (the
+    // first read, a server started again) gets every one of his objects, and the mod compares them with what it knows.
+    uint64_t after=0;bool full=true;const std::string mark=epoch_+"-";
+#ifndef MUTANT_NOTICES_EPOCH
+    if(since.size()>mark.size()&&since.size()<=mark.size()+19&&since.compare(0,mark.size(),mark)==0){
+#else
+    if(auto dash=since.find('-');dash!=std::string::npos&&since.size()>dash+1&&since.size()<=dash+20){const std::string mark=since.substr(0,dash+1);
+#endif
+        uint64_t n=0;bool digits=true;for(size_t i=mark.size();i<since.size();++i){digits=digits&&since[i]>='0'&&since[i]<='9';if(digits)n=n*10+uint64_t(since[i]-'0');}
+        if(digits&&n<=stamps_){after=n;full=false;}}
+    Value list=Value::array();
+    for(auto& o:objects_){
+        const Object& ob=o.second;
+#ifndef MUTANT_NOTICES_OTHERS
+        if(ob.creator!=id)continue;
+#endif
+#ifndef MUTANT_NOTICES_IMPORTS
+        if(!ob.originServer.empty())continue;   // its builder id is what the other server says: not his here
+#endif
+#ifndef MUTANT_NOTICES_SINCE
+        if(!full&&ob.stamp<=after)continue;
+#endif
+        Value v=Value::object();v.set("id",ob.id);v.set("kind",typeName(ob.post.get("t").string()));
+        std::string state=ob.remnant?"remnant":ob.share.empty()?"shared":ob.share=="kept"?"kept":ob.share=="held"?"held":"waiting";
+        v.set("state",state);
+        v.set("why",ob.share=="held"?ob.held:ob.share=="kept"?ob.kept:ob.share=="ask"?std::string("you"):ob.share=="review"?std::string("owner"):std::string());
+        list.push(v);}
+    Value out=Value::object();out.set("format",1);out.set("name",name_);out.set("version",epoch_+"-"+std::to_string(stamps_));out.set("full",full);out.set("objects",list);
+    return ok(out);
 }
 bool World::relayAdmit(uint64_t id,const std::string& token,const std::string& groupKey,int64_t now){
     std::lock_guard<std::mutex> g(lock_);
@@ -294,6 +348,8 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
         o.share=choice=="no"?"kept":!why.empty()?"held":shareAfterOffer();
 #endif
         if(o.share=="held"){o.held=why;o.heldAsk=choice=="ask";note("object held for "+me.name+" only: "+heldText(why));}
+        if(o.share=="kept")o.kept=choice=="no"?"choice":"server";
+        touch(o);
         auto& kept=objects_[o.id]=o;dirty_=true;++changes_;note("object "+kept.id+" type "+in.get("t").string()+" in area "+std::to_string(in.get("q").integer())+" by "+me.name+(o.share.empty()?"":" ("+o.share+")"));
         return ok(objectResponse(kept));}
     if(name=="deleteObject"||name=="updateObject"){
@@ -415,12 +471,16 @@ json::Value World::snapshot() const {
     out.set("players",players);
     Value tokens=Value::object();for(auto& t:tokens_)tokens.set(t.first,t.second);out.set("sessions",tokens);
     if(!owner_.empty())out.set("owner",owner_);
-    for(auto* passes:{&tickets_,&relayTokens_}){
+    for(auto* passes:{&tickets_,&relayTokens_,&noticeTokens_}){
         Value list=Value::array();
         for(auto& t:*passes){Value v=Value::object();v.set("text",t.first);v.set("account",t.second.account);v.set("issued",t.second.issued);v.set("used",t.second.used);
             if(passes==&relayTokens_)v.set("relay_id",int64_t(t.second.relayId));
             list.push(v);}
-        out.set(passes==&tickets_?"tickets":"relay_tokens",list);}
+#ifdef MUTANT_NOTICES_SAVE
+        if(passes==&noticeTokens_)continue;
+#endif
+        if(passes==&noticeTokens_&&list.items().empty())continue;   // a world without notice tokens is written as before
+        out.set(passes==&tickets_?"tickets":passes==&relayTokens_?"relay_tokens":"notice_tokens",list);}
     Value objects=Value::array();
     for(auto& o:objects_){Value v=Value::object();v.set("id",o.second.id);v.set("creator",o.second.creator);v.set("updated",o.second.updated);v.set("likes",o.second.likes);v.set("post",o.second.post);
         if(!o.second.name.empty())v.set("name",o.second.name);
@@ -428,6 +488,7 @@ json::Value World::snapshot() const {
         if(!o.second.share.empty())v.set("share",o.second.share);
         if(!o.second.held.empty())v.set("held",o.second.held);
         if(o.second.heldAsk)v.set("held_ask",true);
+        if(!o.second.kept.empty())v.set("kept",o.second.kept);
 #endif
         if(o.second.remnant)v.set("remnant",true);
         if(!o.second.originServer.empty()){Value from=Value::object();from.set("server",o.second.originServer);from.set("id",o.second.originId);from.set("via",o.second.via);
@@ -460,7 +521,7 @@ void World::restore(const json::Value& v){
     const std::string owner=v.get("owner").string(),worldName=v.get("name").string();
     if(!owner.empty()&&!identity::accountIsKey(owner))throw std::runtime_error("world file: bad owner");
     if(v.has("name")&&!serverNameText(worldName))throw std::runtime_error("world file: bad server name");
-    players_.clear();tokens_.clear();objects_.clear();byOrigin_.clear();tickets_.clear();relayTokens_.clear();++changes_;policy_=policy;owner_=owner;name_=worldName;
+    players_.clear();tokens_.clear();objects_.clear();byOrigin_.clear();tickets_.clear();relayTokens_.clear();noticeTokens_.clear();++changes_;policy_=policy;owner_=owner;name_=worldName;
     // A world file from before linked servers has no id: it keeps the one made for this process, and is saved with it.
     bool hadId=v.has("server_id");
     if(hadId){if(!serverIdText(v.get("server_id").string()))throw std::runtime_error("world file: bad server id");serverId_=v.get("server_id").string();}
@@ -475,8 +536,14 @@ void World::restore(const json::Value& v){
             Pass p{t.get("account").string(),uint64_t(t.get("relay_id").integer()),t.get("issued").integer(),t.get("used").integer()};const std::string text=t.get("text").string();
             if(!passText(text)||!identity::accountIsKey(p.account)||!players_.count(p.account)||(passes==&relayTokens_)!=(p.relayId!=0)||!passes->emplace(text,p).second)
                 throw std::runtime_error("world file: bad ticket or relay token");}
+    // The mods' notice tokens: for any account of this world (identity none has accounts that are no key).
+    for(auto& t:v.get("notice_tokens").items()){
+        Pass p{t.get("account").string(),0,t.get("issued").integer(),t.get("used").integer()};const std::string text=t.get("text").string();
+        if(!passText(text)||!players_.count(p.account)||t.has("relay_id")||!noticeTokens_.emplace(text,p).second)throw std::runtime_error("world file: bad notice token");}
     for(auto& o:v.get("objects").items()){Object ob;ob.id=o.get("id").string();ob.creator=o.get("creator").string();ob.updated=o.get("updated").integer();ob.likes=o.get("likes").integer();ob.post=o.get("post");
         ob.name=o.get("name").string();ob.share=o.get("share").string();ob.remnant=o.get("remnant").boolean();ob.held=o.get("held").string();ob.heldAsk=o.get("held_ask").boolean();
+        ob.kept=o.get("kept").string();
+        if((!ob.kept.empty()&&ob.share!="kept")||!oneOf(ob.kept,{"","choice","owner","server"}))throw std::runtime_error("world file: bad object");
         if(ob.id.empty()||!ob.post.isObject()||!oneOf(ob.share,{"","kept","ask","review","held"})||(o.has("origin")&&(ob.remnant||!ob.share.empty()))
            ||(ob.share=="held")!=oneOf(ob.held,{"build","member","limit"})||(ob.heldAsk&&ob.share!="held"))throw std::runtime_error("world file: bad object");
         if(o.has("origin")){const Value& from=o.get("origin");ob.originServer=from.get("server").string();ob.originId=from.get("id").string();ob.via=from.get("via").string();
@@ -961,7 +1028,16 @@ size_t World::review(const std::string& object,bool accept){
         why.clear();
 #endif
         if(!why.empty())bad("review: "+object+" stays held: "+heldText(why));}
-    o.share=accept?"":"kept";o.held.clear();o.heldAsk=false;dirty_=true;++changes_;return 1;
+#ifndef MUTANT_NOTICES_KEPT_WHY
+    o.kept=accept?"":"owner";
+#else
+    o.kept=accept?"":"choice";
+#endif
+    o.share=accept?"":"kept";o.held.clear();o.heldAsk=false;
+#ifndef MUTANT_NOTICES_STAMP
+    touch(o);
+#endif
+    dirty_=true;++changes_;return 1;
 }
 size_t World::reviewPlayer(const std::string& player){
     std::lock_guard<std::mutex> g(lock_);
@@ -974,9 +1050,13 @@ size_t World::reviewPlayer(const std::string& player){
 #ifdef MUTANT_POLICY_HELD_RELEASE
             why.clear();
 #endif
-            if(!why.empty()){ob.held=why;continue;}}
+            if(!why.empty()){if(ob.held!=why){ob.held=why;touch(ob);}continue;}}
         else if(ob.share!="review")continue;
-        ob.share="";ob.held.clear();ob.heldAsk=false;++n;}
+        ob.share="";ob.held.clear();ob.heldAsk=false;ob.kept.clear();
+#ifndef MUTANT_NOTICES_STAMP
+        touch(ob);
+#endif
+        ++n;}
     if(n){dirty_=true;++changes_;}
     return n;
 }
@@ -1008,9 +1088,13 @@ size_t World::offer(const std::string& player,const std::string& object,bool yes
 #endif
             if(!why.empty()){
                 if(!object.empty())bad(object+" stays held: "+heldText(why));
-                if(o->share=="held")o->held=why;
+                if(o->share=="held"&&o->held!=why){o->held=why;touch(*o);}
                 continue;}}
-        o->share=yes?shareAfterOffer():"kept";o->held.clear();o->heldAsk=false;++n;}
+        o->share=yes?shareAfterOffer():"kept";o->held.clear();o->heldAsk=false;o->kept=o->share!="kept"?"":yes?"server":"choice";
+#ifndef MUTANT_NOTICES_STAMP
+        touch(*o);
+#endif
+        ++n;}
     if(n){dirty_=true;++changes_;}
     return n;
 }
@@ -1033,7 +1117,7 @@ World::Withdrawn World::withdraw(const std::string& player,const std::string& ob
 #ifdef MUTANT_POLICY_WITHDRAW_GO_KEEPS
         stay=o.share.empty();
 #endif
-        if(stay){o.remnant=true;if(o.name.empty())o.name=p->name;++r.remnants;}
+        if(stay){o.remnant=true;if(o.name.empty())o.name=p->name;touch(o);++r.remnants;}
         else{objects_.erase(id);++r.removed;}}
     if(!ids.empty()){dirty_=true;++changes_;note("withdrawn for "+player+": "+std::to_string(r.remnants)+" stay as remnants, "+std::to_string(r.removed)+" removed");}
     return r;

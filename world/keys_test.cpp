@@ -99,6 +99,12 @@ static void calls(){
     // A ticket and a relay token only under keys; the relay id is the one of his key.
     auto r=json::parse(s.post(&a,"relay-token",body(a)).body);CHECK(uint64_t(r.get("relay_id").integer())==id::relayId(a.pub)&&r.get("token").string().size()<=32);
     {Server f("friends");CHECK(f.post(&a,"ticket",body(a)).status==403&&f.post(&a,"relay-token",body(a)).status==403&&f.players()==0);}
+    // A notice token (what the game is told) is taken as any change: signed, for the signer only. The mod's read with it
+    // carries no signature: the token is its credential, and it reads its own player's objects.
+    CHECK(s.post(nullptr,"notice-token",body(a)).status==401&&s.post(&b,"notice-token",body(a)).status==403);
+    auto n=s.post(&a,"notice-token",body(a));CHECK(n.status==200);
+    auto read=s.raw("GET","/s3cret/coop/notices","",{{"x-coop-token",n.status==200?json::parse(n.body).get("token").string():std::string()}});
+    CHECK(read.status==200&&json::parse(read.body).get("full").boolean());
 }
 static void none(){
     // Identity none is as before: unsigned calls act for any account, a sign-in by name or Steam ticket works. An

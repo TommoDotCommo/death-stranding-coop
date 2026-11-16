@@ -28,6 +28,9 @@ build/front-test: front_test.cpp front.cpp front.h $(API) $(LINK) world.cpp worl
 	$(CXX) $(FLAGS) front_test.cpp front.cpp api.cpp link.cpp world.cpp identity.cpp signatures.cpp $(MONO) -o $@
 build/api-test: api_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h | build
 	$(CXX) $(FLAGS) api_test.cpp front.cpp api.cpp link.cpp world.cpp identity.cpp signatures.cpp $(MONO) -o $@
+# What the game is told (README "What the game is told"): the notice token and the mod's read.
+build/notices-test: notices_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h | build
+	$(CXX) $(FLAGS) notices_test.cpp front.cpp api.cpp link.cpp world.cpp identity.cpp signatures.cpp $(MONO) -o $@
 build/keys-test: keys_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
 	$(CXX) $(FLAGS) keys_test.cpp front.cpp api.cpp link.cpp world.cpp identity.cpp signatures.cpp relay.cpp $(MONO) -o $@
 RELAY := relay.cpp relay.h presence.h ../core/relay.h ../core/broadcast.h
@@ -48,7 +51,7 @@ build/coop-world.exe: main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.
 ../mod/build/coop-swarm: FORCE
 	$(MAKE) -C ../mod build/coop-swarm
 FORCE:
-test: build/identity-test build/world-test build/policy-test build/curate-test build/names-test build/link-test build/front-test build/api-test build/keys-test build/relay-test build/broadcast-test build/presence-test build/coop-world ../mod/build/coop-swarm
+test: build/identity-test build/world-test build/policy-test build/curate-test build/names-test build/link-test build/front-test build/api-test build/notices-test build/keys-test build/relay-test build/broadcast-test build/presence-test build/coop-world ../mod/build/coop-swarm
 	./build/identity-test
 	./build/world-test
 	./build/policy-test
@@ -57,6 +60,7 @@ test: build/identity-test build/world-test build/policy-test build/curate-test b
 	./build/link-test
 	./build/front-test
 	./build/api-test
+	./build/notices-test
 	./build/keys-test
 	./build/relay-test
 	./build/broadcast-test

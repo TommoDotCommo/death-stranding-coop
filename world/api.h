@@ -9,6 +9,8 @@
 //   POST [/PREFIX]/coop/withdraw  {"player":KEY,"object":ID} or {"player":KEY,"all":true}
 //   POST [/PREFIX]/coop/ticket       {"player":KEY}   signed, identity keys: a sign-in ticket for his game (world.h)
 //   POST [/PREFIX]/coop/relay-token  {"player":KEY}   signed, identity keys: a relay token for his relay id (identity.h)
+//   POST [/PREFIX]/coop/notice-token {"player":KEY}   a notice token for his game's mod (world.h; signed under keys, as any change)
+// The mod's one call, with its notice token and no signature (front.h): GET [/PREFIX]/coop/notices?since=VERSION.
 // The owner's calls, signed with the owner's key (World::owner):
 //   GET  [/PREFIX]/coop/owner/players | owner/review                    every player; what waits or is held
 //   POST [/PREFIX]/coop/owner/review  {"accept":ID} | {"reject":ID} | {"accept_player":PLAYER-ID}
