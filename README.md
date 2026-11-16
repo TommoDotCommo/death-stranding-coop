@@ -48,6 +48,7 @@ below stays as opt-in settings but is no longer where the work goes. See [STATUS
 | [`launcher/`](launcher/README.md) | Native Windows Play / Saves / Settings / About launcher: LAN/Tailscale lobbies, standard invites, Steam launch with isolated co-op saves, and backups. A development foundation; see its remaining standard work. |
 | [`install/`](install/README.md) | Game-free package/install/uninstall core for the drop-in `avrt.dll` release layout. |
 | [`redirect/`](redirect/README.md) | The loader proxy that isolates each test copy: saves, loaded modules, the single-instance guard and network access. |
+| [`vendor/`](vendor/monocypher/README.md) | Monocypher (CC0 or BSD-2-Clause), unchanged: Ed25519 and SHA-512 for the players' keys (`world/identity.h`). |
 
 ## Build and test
 
