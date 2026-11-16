@@ -2057,7 +2057,8 @@ What is live and what is not:
 With `"offer_strand": true` (needs `online_server` and `strand_token`, the notice token the launcher takes) the mod
 reads the server's word on the player's older strand with that token (`offer_old` in the answer of `/coop/notices`,
 "Strand notices" above). While the game is signed in to the server the config names and that word is `yes`, it waits
-20 s (the game's own area requests and uploads first) and then, on the game thread:
+20 s (the game's own area requests and uploads first) and then, on the game thread and only while the porter is in play
+(not loading, not in a cutscene or event):
 
 1. reads the construction records the porter built (owner byte 1, built: `own_strand::readStructures`);
 2. keeps those the game uploads (`offer_strand::plan`: not refused by the game, `+0xab` bit 7; a kind with a server
@@ -2114,10 +2115,10 @@ ropes, and without `mt`, `rmt`, `tags` and `ci`.
 Tests: `offer_strand_test.cpp` over a fake process memory and a scripted game: which records and how; the settle
 wait; one at a time; uploaded when the id comes, sent again when the re-create leaves the queue; nothing more, then a
 new record found at the next look and none asked twice; refused, not queued, a minute without an answer, gone; off
-and on again; a call that is not made stops it; the code (found once at its address, twice, elsewhere, a changed
+and on again; nothing read or asked out of play; a call that is not made stops it; the code (found once at its address, twice, elsewhere, a changed
 slot, a changed callee); the uploader (its pointer, class and both slots); the queues (listed, in flight, neither, a
 count that is none); and the body. Mutants (family `offer` in `test_game_thread_mutants.py`): OWNER, PENDING, HELD,
-SHAPE, CLAMP, POLE, FLOAT, BRIDGE, OPTION, SIGNED, YES, KEPT, SETTLE, TIMEOUT, PACE, ONCE, SIGNATURE, IDENTITY. The
+SHAPE, CLAMP, POLE, FLOAT, BRIDGE, OPTION, SIGNED, YES, KEPT, SETTLE, TIMEOUT, PACE, ONCE, SIGNATURE, IDENTITY, READY. The
 config in `unit.cpp` (mutant CONFIG_OFFER); the server's word read through the real server in `test_strand_notices.py`
 (above).
 

@@ -1128,7 +1128,7 @@ struct Runtime final:ds::Transport {
         calls.scan=[this]{return mod::own_strand::readStructures(*sampler,sampler->base,imageSize,mod::offer_strand::select());};
         calls.ask=offerAsk;
         calls.queued=[this](uint64_t object,bool again){return mod::offer_strand::queued(*sampler,mod::offer_strand::uploader(*sampler),object,again);};
-        for(auto& line:offerer.step(on,now,calls))note(line.c_str());
+        for(auto& line:offerer.step(on,poseAvailable&&!inEvent,now,calls))note(line.c_str());
     }
     // --- What the game is told about this player's builds on the server (strand_notices.h): opt-in `strand_notices`.
     // The server's API is read on a thread of its own with the notice token the launcher took (`strand_token`); its

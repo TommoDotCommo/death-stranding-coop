@@ -205,7 +205,7 @@ std::string Offerer::finish(const Current& c,const char* how,uint64_t now){
     char b[240];std::snprintf(b,sizeof b,"OFFER %s %s%s%s record %u: %s\n",c.recreate?"re-create":"upload",received::name(c.type),c.online.empty()?"":" ",c.online.c_str(),c.id,how);
     return b;
 }
-std::vector<std::string> Offerer::step(bool on,uint64_t now,const Calls& calls){
+std::vector<std::string> Offerer::step(bool on,bool ready,uint64_t now,const Calls& calls){
     std::vector<std::string> out;
     if(!on){
         if(k_.on){k_.on=false;out.push_back(current_?"OFFER off: not signed in to the server, or no yes from it for the older strand; the structure asked for last is the game's now\n":
@@ -221,6 +221,11 @@ std::vector<std::string> Offerer::step(bool on,uint64_t now,const Calls& calls){
 #endif
         out.push_back("OFFER on: this player's older strand is offered to the server in "+std::to_string(SettleMs/1000)+" s, one structure at a time\n");}
     if(now<next_)return out;
+#ifndef MUTANT_OFFER_READY
+    if(!ready)return out;                            // the records and the game's queues only in play
+#else
+    (void)ready;
+#endif
     auto seen=calls.scan?calls.scan():std::vector<own_strand::Structure>{};
     if(current_){
         Current c=*current_;

@@ -93,8 +93,9 @@ public:
         std::function<bool(uint64_t object,bool recreate)> ask;     // the game's call; false: not made (identity)
         std::function<int(uint64_t object,bool recreate)> queued;   // as queued() above
     };
-    // One step: `on` is active() now. Returns log lines ("OFFER ...").
-    std::vector<std::string> step(bool on,uint64_t now,const Calls&);
+    // One step: `on` is active() now; `ready`: the porter is in play (not loading, not in a cutscene or event), else
+    // nothing is read or asked this step. Returns log lines ("OFFER ...").
+    std::vector<std::string> step(bool on,bool ready,uint64_t now,const Calls&);
     struct Counters { unsigned asked=0,uploaded=0,recreated=0,refused=0,timedOut=0,unqueued=0,gone=0,left=0;bool on=false,broken=false; };
     const Counters& counters() const {return k_;}
 private:

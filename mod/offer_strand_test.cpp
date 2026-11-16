@@ -58,65 +58,71 @@ static void offering(){
     Game g;
     g.records={own(10001,25),own(10002,31,"bK3v9QmZ0aB1c"),own(10003,18,"NQ7fT2nP4xY8w"),own(10004,26,"",2),own(10005,6,"",Player,2,0x80),own(10006,4)};
     Offerer o;auto c=g.calls();
-    CHECK(o.step(false,0,c).empty()&&g.asked.empty());
-    auto lines=o.step(true,1000,c);CHECK(has(lines,"OFFER on:")&&g.asked.empty()&&o.counters().on);
-    CHECK(o.step(true,1000+Offerer::SettleMs-1,c).empty()&&g.asked.empty());     // the game's own requests first
+    CHECK(o.step(false,true,0,c).empty()&&g.asked.empty());
+    auto lines=o.step(true,true,1000,c);CHECK(has(lines,"OFFER on:")&&g.asked.empty()&&o.counters().on);
+    CHECK(o.step(true,true,1000+Offerer::SettleMs-1,c).empty()&&g.asked.empty());     // the game's own requests first
     const uint64_t t=1000+Offerer::SettleMs;
-    lines=o.step(true,t,c);
+    lines=o.step(true,true,t,c);
     CHECK(g.asked.size()==1&&g.asked[0]==std::make_pair(g.find(10001)->record.object,false)&&has(lines,"1 own structures to upload, 1 to send again with their ids, 4 left out")&&has(lines,"asked the game to upload ladder record 10001"));
     // One at a time: nothing else while the ladder has no answer.
-    o.step(true,t+Offerer::PollMs,c);o.step(true,t+2*Offerer::PollMs,c);CHECK(g.asked.size()==1);
+    o.step(true,true,t+Offerer::PollMs,c);o.step(true,true,t+2*Offerer::PollMs,c);CHECK(g.asked.size()==1);
     // Answered: its id is in the record and it has left the queue.
     g.find(10001)->online="lZ9y8X7w6V5u4";g.queue.erase(g.find(10001)->record.object);
-    lines=o.step(true,t+3*Offerer::PollMs,c);CHECK(has(lines,"upload ladder lZ9y8X7w6V5u4 record 10001: uploaded")&&o.counters().uploaded==1&&g.asked.size()==1);
-    CHECK(o.step(true,t+3*Offerer::PollMs+Offerer::GapMs-1,c).empty());
+    lines=o.step(true,true,t+3*Offerer::PollMs,c);CHECK(has(lines,"upload ladder lZ9y8X7w6V5u4 record 10001: uploaded")&&o.counters().uploaded==1&&g.asked.size()==1);
+    CHECK(o.step(true,true,t+3*Offerer::PollMs+Offerer::GapMs-1,c).empty());
     // The bridge with an id of the original service: sent again with it; done once the game no longer has it queued.
-    lines=o.step(true,t+3*Offerer::PollMs+Offerer::GapMs,c);
+    lines=o.step(true,true,t+3*Offerer::PollMs+Offerer::GapMs,c);
     CHECK(g.asked.size()==2&&g.asked[1]==std::make_pair(g.find(10002)->record.object,true)&&has(lines,"send again bridge bK3v9QmZ0aB1c record 10002 (on another server)"));
     uint64_t now=t+3*Offerer::PollMs+Offerer::GapMs+Offerer::PollMs;
-    lines=o.step(true,now,c);CHECK(lines.empty());
+    lines=o.step(true,true,now,c);CHECK(lines.empty());
     g.queue.erase(g.find(10002)->record.object);now+=Offerer::PollMs;
-    lines=o.step(true,now,c);CHECK(has(lines,"sent again with its id")&&o.counters().recreated==1);
+    lines=o.step(true,true,now,c);CHECK(has(lines,"sent again with its id")&&o.counters().recreated==1);
     // Nothing more: the capital-letter id, another player's ladder, a held record and a kind the game does not upload stay.
-    now+=Offerer::GapMs;lines=o.step(true,now,c);CHECK(has(lines,"nothing more to offer: 1 uploaded, 1 sent again")&&g.asked.size()==2&&o.counters().left==4);
-    CHECK(o.step(true,now+Offerer::PollMs,c).empty());
+    now+=Offerer::GapMs;lines=o.step(true,true,now,c);CHECK(has(lines,"nothing more to offer: 1 uploaded, 1 sent again")&&g.asked.size()==2&&o.counters().left==4);
+    CHECK(o.step(true,true,now+Offerer::PollMs,c).empty());
     // A new own record later (a load, a new build the game did not take): asked for at the next look; the ladder never again.
     g.records.push_back(own(10007,18));g.find(10001)->online.clear();
-    lines=o.step(true,now+Offerer::RescanMs,c);CHECK(g.asked.size()==3&&g.asked[2].first==g.find(10007)->record.object&&has(lines,"asked the game to upload rain shelter record 10007"));
+    lines=o.step(true,true,now+Offerer::RescanMs,c);CHECK(g.asked.size()==3&&g.asked[2].first==g.find(10007)->record.object&&has(lines,"asked the game to upload rain shelter record 10007"));
 
     // Refused (out of the queue with no id), not queued at all, no answer, gone: each one finished, and each record once.
     {Game h;h.records={own(1,25),own(2,25),own(3,25),own(4,25)};Offerer q;auto k=h.calls();
-     q.step(true,0,k);now=Offerer::SettleMs;q.step(true,now,k);CHECK(h.asked.size()==1);
-     h.queue.clear();now+=Offerer::PollMs;lines=q.step(true,now,k);CHECK(has(lines,"answered without an id")&&q.counters().refused==1);
+     q.step(true,true,0,k);now=Offerer::SettleMs;q.step(true,true,now,k);CHECK(h.asked.size()==1);
+     h.queue.clear();now+=Offerer::PollMs;lines=q.step(true,true,now,k);CHECK(has(lines,"answered without an id")&&q.counters().refused==1);
      // The next: the game does not queue it.
      auto ask=k.ask;k.ask=[&](uint64_t a,bool r){bool ok=ask(a,r);h.queue.erase(a);return ok;};
-     now+=Offerer::GapMs;lines=q.step(true,now,k);CHECK(h.asked.size()==2&&has(lines,"the game did not queue it")&&q.counters().unqueued==1);
+     now+=Offerer::GapMs;lines=q.step(true,true,now,k);CHECK(h.asked.size()==2&&has(lines,"the game did not queue it")&&q.counters().unqueued==1);
      k.ask=ask;
      // The third: no answer for a minute; then the fourth.
-     now+=Offerer::GapMs;q.step(true,now,k);CHECK(h.asked.size()==3);const uint64_t asked=now;
-     for(now+=Offerer::PollMs;now<asked+Offerer::TimeoutMs;now+=Offerer::PollMs)q.step(true,now,k);
+     now+=Offerer::GapMs;q.step(true,true,now,k);CHECK(h.asked.size()==3);const uint64_t asked=now;
+     for(now+=Offerer::PollMs;now<asked+Offerer::TimeoutMs;now+=Offerer::PollMs)q.step(true,true,now,k);
      CHECK(h.asked.size()==3);
-     lines=q.step(true,now,k);CHECK(has(lines,"no answer within a minute")&&q.counters().timedOut==1);
-     now+=Offerer::GapMs;q.step(true,now,k);CHECK(h.asked.size()==4&&h.asked[3].first==h.records[3].record.object);
+     lines=q.step(true,true,now,k);CHECK(has(lines,"no answer within a minute")&&q.counters().timedOut==1);
+     now+=Offerer::GapMs;q.step(true,true,now,k);CHECK(h.asked.size()==4&&h.asked[3].first==h.records[3].record.object);
      // Gone (dismantled) before its answer.
-     h.records.pop_back();now+=Offerer::PollMs;lines=q.step(true,now,k);CHECK(has(lines,"gone before an answer")&&q.counters().gone==1);
+     h.records.pop_back();now+=Offerer::PollMs;lines=q.step(true,true,now,k);CHECK(has(lines,"gone before an answer")&&q.counters().gone==1);
      // Nobody is asked for twice, whatever happened to it.
-     now+=Offerer::GapMs;lines=q.step(true,now,k);CHECK(h.asked.size()==4&&has(lines,"nothing more to offer"));
+     now+=Offerer::GapMs;lines=q.step(true,true,now,k);CHECK(h.asked.size()==4&&has(lines,"nothing more to offer"));
      std::set<uint64_t> once;for(auto& a:h.asked)CHECK(once.insert(a.first).second);}
 
     // Off (signed out, or the server's yes withdrawn): nothing asked, the waiting stops; on again: the settling again.
     {Game h;h.records={own(1,25),own(2,25)};Offerer q;auto k=h.calls();
-     q.step(true,0,k);q.step(true,Offerer::SettleMs,k);CHECK(h.asked.size()==1);
-     lines=q.step(false,Offerer::SettleMs+Offerer::PollMs,k);CHECK(has(lines,"OFFER off")&&!q.counters().on);
-     for(uint64_t at=Offerer::SettleMs;at<5*Offerer::SettleMs;at+=Offerer::PollMs)q.step(false,at,k);
+     q.step(true,true,0,k);q.step(true,true,Offerer::SettleMs,k);CHECK(h.asked.size()==1);
+     lines=q.step(false,true,Offerer::SettleMs+Offerer::PollMs,k);CHECK(has(lines,"OFFER off")&&!q.counters().on);
+     for(uint64_t at=Offerer::SettleMs;at<5*Offerer::SettleMs;at+=Offerer::PollMs)q.step(false,true,at,k);
      CHECK(h.asked.size()==1);
-     now=5*Offerer::SettleMs;q.step(true,now,k);q.step(true,now+Offerer::SettleMs-1,k);CHECK(h.asked.size()==1);
-     q.step(true,now+Offerer::SettleMs,k);CHECK(h.asked.size()==2&&h.asked[1].first==h.records[1].record.object);}
+     now=5*Offerer::SettleMs;q.step(true,true,now,k);q.step(true,true,now+Offerer::SettleMs-1,k);CHECK(h.asked.size()==1);
+     q.step(true,true,now+Offerer::SettleMs,k);CHECK(h.asked.size()==2&&h.asked[1].first==h.records[1].record.object);}
+
+    // Not in play (loading, a cutscene): nothing read or asked; once back, at once.
+    {Game h;h.records={own(1,25)};Offerer q;auto k=h.calls();unsigned scans=0;auto scan=k.scan;k.scan=[&]{++scans;return scan();};
+     q.step(true,true,0,k);for(uint64_t at=0;at<3*Offerer::SettleMs;at+=Offerer::PollMs)q.step(true,false,at,k);
+     CHECK(h.asked.empty()&&scans==0);
+     q.step(true,true,3*Offerer::SettleMs,k);CHECK(h.asked.size()==1&&scans==1);}
 
     // The game's call is not the expected one: stopped, never asked again.
     {Game h;h.records={own(1,25),own(2,25)};h.callable=false;Offerer q;auto k=h.calls();
-     q.step(true,0,k);lines=q.step(true,Offerer::SettleMs,k);CHECK(has(lines,"OFFER stopped")&&q.counters().broken);
-     h.callable=true;for(uint64_t at=Offerer::SettleMs;at<Offerer::SettleMs+5*Offerer::RescanMs;at+=Offerer::GapMs)q.step(true,at,k);
+     q.step(true,true,0,k);lines=q.step(true,true,Offerer::SettleMs,k);CHECK(has(lines,"OFFER stopped")&&q.counters().broken);
+     h.callable=true;for(uint64_t at=Offerer::SettleMs;at<Offerer::SettleMs+5*Offerer::RescanMs;at+=Offerer::GapMs)q.step(true,true,at,k);
      CHECK(h.asked.empty());}
 }
 // The code and the uploader, in a fake image with sites of its own (the pinned build's bytes at small addresses).
