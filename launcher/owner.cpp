@@ -77,6 +77,7 @@ bool connect(strand::Target& t,const strand::Transport& send,strand::Policy& p,s
     if(!t.keys){why="This launcher has no player key, so it cannot be the server's owner.";return false;}
     auto f=strand::fetchPolicy(t,send,p);
     if(f==strand::Fetch::Old){why="This server is a coop-world from before the owner's calls: use its commands while it is stopped (coop-world players, review, policy).";return false;}
+    if(f==strand::Fetch::Unreachable){why="The group's server did not answer: start it first (Play, Host a game, Start group server and play).";return false;}
     if(f!=strand::Fetch::Ok){why=strand::fetchText(f);return false;}
     t.server=p.server;
 #ifndef MUTANT_OWNER_CLOCK

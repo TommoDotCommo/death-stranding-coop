@@ -577,7 +577,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         int groupMode=0;   // --group-host (1), --group-join INVITE-OR-ADDRESS (2)
         strand::Choices given;std::string strandReport;bool policyGiven=false;   // --strand-builds, --strand-old, --strand-policy FILE|-; --group-policy
         owner::Action ownerAction;std::string ownerReport;   // --owner-... (one action) and --owner-report FILE|-: the server owner's calls without the window
-        auto ownerKind=[&](const char* kind){if(!ownerAction.kind.empty()&&ownerAction.kind!=kind)throw std::runtime_error("One --owner-... action at a time.");ownerAction.kind=kind;};
+        std::string ownerError;   // reported in --owner-report, never in a dialog
+        auto ownerKind=[&](const char* kind){if(!ownerAction.kind.empty()&&ownerAction.kind!=kind)ownerError="One --owner-... action at a time.";ownerAction.kind=kind;};
         int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);if(!argv)throw std::runtime_error("Cannot read launcher arguments.");
         for(int i=1;i<argc;++i){std::wstring a=argv[i];auto value=[&](){if(++i>=argc)throw std::runtime_error("Missing launcher option value.");return std::wstring(argv[i]);};
             if(a==L"--dev-direct")options.direct=true;
@@ -621,8 +622,13 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         if(devStart&&!options.direct)throw std::runtime_error("--dev-start requires --dev-direct.");
         if((!given.offerBuilds.empty()||!given.offerOld.empty()||!strandReport.empty())&&!(devStart&&groupMode==2))throw std::runtime_error("--strand-builds, --strand-old and --strand-policy go with --dev-direct --dev-start --group-join.");
         if(policyGiven&&!(devStart&&groupMode==1))throw std::runtime_error("--group-policy goes with --dev-direct --dev-start --group-host.");
-        if((!ownerAction.kind.empty()||!ownerReport.empty())&&(!options.direct||devStart||groupMode||ownerAction.kind.empty()||ownerReport.empty()))
-            throw std::runtime_error("--owner-... is one action with --owner-report FILE (or -) and --dev-direct, without --dev-start.");
+        if((!ownerAction.kind.empty()||!ownerReport.empty())&&ownerError.empty()&&(!options.direct||devStart||groupMode||ownerAction.kind.empty()||ownerReport.empty()))
+            ownerError="--owner-... is one action with --owner-report FILE (or -) and --dev-direct, without --dev-start.";
+        // Headless owner calls: whatever goes wrong is in the report (exit 3), never a dialog nobody is there to close.
+        auto ownerRefused=[&](const std::string& why){
+            if(ownerReport.empty())throw std::runtime_error(why);
+            json::Value r=json::Value::object();r.set("action",ownerAction.kind);r.set("ok",false);r.set("message",why);writeReport(ownerReport,r.dump()+"\n");return 3;};
+        if(!ownerError.empty())return ownerRefused(ownerError);
         if(options.direct&&equalPath(options.data,defaultData)&&!environment(L"COOP_MODULE_INSTANCE").empty())options.data=environment(L"COOP_MODULE_INSTANCE");
         wchar_t self[32768];GetModuleFileNameW(nullptr,self,32768);executable=self;options.world=executable.parent_path()/L"coop-world.exe";
         if(registerOnly){registerHandler(executable);return 0;}
@@ -641,12 +647,14 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
             saves::install(coopAccount(),steamAccount(),bytes,options.data/"backups"/("before-join-"+std::to_string(std::time(nullptr))));
             if(!devStart)return 0;
         }
-        identity();
+        if(!ownerAction.kind.empty()){try{identity();}catch(const std::exception& e){return ownerRefused(e.what());}}   // a damaged player.key, reported
+        else identity();
         if(!ownerAction.kind.empty()) {   // the server owner's call on the group server this launcher hosts, without the window
             Session s=chosenSession();s.group=Group::Host;s.ownerKey=world::identity::hex(keys.pub);
-            if(!devSessionGiven&&!groupSecret)throw std::runtime_error("This launcher has hosted no group server yet: give its key with --dev-session N.");
+            if(!devSessionGiven&&!groupSecret)return ownerRefused("This launcher has hosted no group server yet: give its key with --dev-session N.");
             s.secret=devSessionGiven?devSession:groupSecret;
-            auto t=targetOf(s);auto report=owner::run(t,strand::transport(t),ownerAction);
+            json::Value report;
+            try{auto t=targetOf(s);report=owner::run(t,strand::transport(t),ownerAction);}catch(const std::exception& e){return ownerRefused(e.what());}
             writeReport(ownerReport,report.dump()+"\n");
             return report.get("ok").boolean()?0:3;   // refused: no dialog
         }
