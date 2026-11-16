@@ -181,6 +181,10 @@ build/own-strand-test: own_strand_test.cpp own_strand.cpp own_strand.h structure
 build/received-test: received_test.cpp received.cpp received.h own_strand.cpp own_strand.h structures.cpp structures.h discovery.cpp | build
 	$(CXX) $(FLAGS) received_test.cpp received.cpp own_strand.cpp structures.cpp discovery.cpp -o $@
 
+# Offering the existing strand to a server (offer_strand.h): which records and how, and the game's body; not wired in.
+build/offer-strand-test: offer_strand_test.cpp offer_strand.cpp offer_strand.h discovery.cpp | build
+	$(CXX) $(FLAGS) offer_strand_test.cpp offer_strand.cpp discovery.cpp -o $@
+
 build/carts-test: carts_test.cpp carts.cpp carts.h carry_place.cpp carry_place.h discovery.cpp | build
 	$(CXX) $(FLAGS) carts_test.cpp carts.cpp carry_place.cpp discovery.cpp -o $@
 build/bts-test: bts_test.cpp bts.cpp bts.h discovery.cpp | build
@@ -257,7 +261,7 @@ build/wire-test: wire_test.cpp rewards.cpp rewards.h signals.cpp signals.h order
 	$(CXX) $(FLAGS) wire_test.cpp rewards.cpp signals.cpp orderload.cpp cargo.cpp discovery.cpp ../core/core.cpp -o $@
 build/rewards-test: rewards_test.cpp rewards.cpp rewards.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(CXX) $(FLAGS) rewards_test.cpp rewards.cpp discovery.cpp ../core/core.cpp -o $@
-game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/mule-goal-test build/passenger-test build/place-test build/roads-test build/own-strand-test build/received-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test build/strand-notices-test build/signals-test build/story-test build/enemy-poses-test build/others-test build/crowd-test build/fights-test
+game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/mule-goal-test build/passenger-test build/place-test build/roads-test build/own-strand-test build/offer-strand-test build/received-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test build/strand-notices-test build/signals-test build/story-test build/enemy-poses-test build/others-test build/crowd-test build/fights-test
 	./build/story-test
 	./build/wire-test
 	./build/rewards-test
@@ -296,6 +300,7 @@ game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderlo
 	./build/roads-test
 	./build/own-strand-test
 	./build/received-test
+	./build/offer-strand-test
 	./build/bts-test
 	./build/carts-test
 	for m in CARTS_VTABLE CARTS_ANY CARTS_ECHO CARTS_MANY; do $(CXX) $(FLAGS) -DMUTANT_$$m carts_test.cpp carts.cpp carry_place.cpp discovery.cpp -o build/carts-mutant && if ./build/carts-mutant >/dev/null 2>&1; then echo SURVIVED $$m; exit 1; else echo KILLED MUTANT_$$m; fi; done
