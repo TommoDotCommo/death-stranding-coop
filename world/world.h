@@ -8,12 +8,39 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 namespace world {
 constexpr int VersionMajor=0,VersionMinor=12;      // what this game build requires of getVersion
 constexpr size_t MaxObjectsPerPlayer=4000,MaxPlayers=16,MaxNameBytes=64,MaxKeyBytes=96,MaxLikes=2000;
+// Linked servers (README, "Linked servers"): at most this many objects held from one other server, this many bytes
+// for one object's data on the way, and this much for one page and one request of a live link.
+constexpr size_t MaxImportedPerServer=20000,MaxSharedPostBytes=64*1024,LinkPageObjects=500,LinkPageBytes=1024*1024,MaxLinkRequestBytes=4096;
+constexpr size_t MaxWorldFileBytes=512u*1024*1024;
 struct Reply { int status=200;std::string body="{}"; };
+// What may travel between two servers. Text form: "all", "none", or terms separated by ';':
+//   types=l,rope,e   owners=NAME,zygo_...   areas=226,227   max-age=30d (s, m, h, d)   likes=no   imported=yes
+// A term that is left out does not narrow. `imported=yes` also passes objects that are themselves imports.
+struct Filter {
+    bool none=false;
+    std::set<std::string> types,owners;std::set<int64_t> areas;
+    int64_t maxAgeSeconds=-1;
+    bool likes=true,imported=false;
+};
+Filter parseFilter(const std::string& text);        // throws std::runtime_error with the reason
+// One object on its way between servers: `server` and `id` are where it was first built and its id there.
+struct Shared {
+    std::string server,id,creator,name;int64_t updated=0,likes=0;json::Value post;
+    std::string type() const {return post.get("t").string();}
+    int64_t area() const {return post.get("q").integer();}
+};
+Shared readShared(const json::Value&);              // strict: throws for anything but exactly a well-formed object
+json::Value writeShared(const Shared&);
+bool passes(const Filter&,const Shared&,bool imported,int64_t nowSeconds);
+bool serverIdText(const std::string&);              // 4..32 letters and digits
+bool objectIdText(const std::string&);              // 2..64 letters and digits
+struct ImportResult { size_t added=0,updated=0,unchanged=0,removed=0,filtered=0,own=0; };
 // A gateway request body as the game sends it with plain bodies: {"data":"<json, quotes not escaped>"}, or plain JSON.
 std::string unwrap(const std::string& body);
 class World {
@@ -29,12 +56,33 @@ public:
     bool dirty() const {std::lock_guard<std::mutex> g(lock_);return dirty_;}
     void saved(){std::lock_guard<std::mutex> g(lock_);dirty_=false;}
     std::function<void(const std::string&)> log;   // one line per notable event (unknown calls, refusals)
+    // Linked servers. This world's own id is made once and saved with it.
+    std::string serverId() const {std::lock_guard<std::mutex> g(lock_);return serverId_;}
+    void setServerId(const std::string& id);
+    // Changes whenever anything an export could hold changes, and with every start of the process.
+    std::string version() const {std::lock_guard<std::mutex> g(lock_);return versionLocked();}
+    // The objects that pass `f`, as a document: the ones after id `after`, at most `limit` and about `bytes` of them
+    // ("more" and "next" say whether and where to go on). Never an object that came from `forServer`.
+    json::Value exportObjects(const Filter& f,const std::string& forServer,int64_t now,const std::string& after={},size_t limit=size_t(-1),size_t bytes=size_t(-1)) const;
+    // Takes a document made by exportObjects. All of it is checked first: a document that is refused (it throws)
+    // changed nothing. With `prune`, objects held from that server which the document no longer lists are removed.
+    ImportResult importObjects(const json::Value& document,const Filter& f,bool prune,int64_t now);
+    ImportResult importShared(const std::string& via,const std::vector<Shared>& list,const Filter& f,bool prune,int64_t now);
+    size_t forget(const std::string& server);       // everything first built on, or received from, that server
+    // One page for a linked server that asks (body: {"format":1,"server":ID,"have":VERSION,"after":ID}).
+    Reply linkPull(const Filter& exportFilter,const std::string& body,int64_t now) const;
+    struct Origin { std::string server,via;size_t objects=0; };
+    std::vector<Origin> origins() const;
+    size_t imported() const {std::lock_guard<std::mutex> g(lock_);return byOrigin_.size();}
     // For tests.
     size_t objects() const {std::lock_guard<std::mutex> g(lock_);return objects_.size();}
     std::string playerOf(const std::string& token) const;
 private:
     struct Player { std::string id,name,key; };
-    struct Object { std::string id,creator;json::Value post;int64_t updated=0;int64_t likes=0; };
+    // An imported object keeps where it was first built (originServer, originId), which server handed it over (via),
+    // its builder's name there and the like count it arrived with; `likes` is that count plus what was given here.
+    struct Object { std::string id,creator;json::Value post;int64_t updated=0;int64_t likes=0;
+                    std::string originServer,originId,via,originName;int64_t originLikes=0; };
     struct Like { std::string to,from,object,type;int64_t time=0,points=0,autoPoints=0; };   // to: the object's builder
     mutable std::mutex lock_;
     std::function<std::string()> random_;
@@ -43,6 +91,11 @@ private:
     std::map<std::string,Object> objects_;          // by object id
     std::vector<Like> likes_;                       // oldest first, at most MaxLikes
     uint64_t nextObject_=1;bool dirty_=false;
+    std::string serverId_,epoch_;uint64_t changes_=0;
+    std::map<std::pair<std::string,std::string>,std::string> byOrigin_;   // (origin server, id there) -> id here
+    std::string versionLocked() const {return epoch_+"-"+std::to_string(changes_);}
+    std::string importedId(char type,const std::pair<std::string,std::string>& origin) const;
+    Shared sharedOf(const Object&) const;
     json::Value objectResponse(const Object&) const;
     Reply gateway(const Player&,const std::string& name,const json::Value& in,int64_t now);
     const Player* playerById(const std::string& id) const;

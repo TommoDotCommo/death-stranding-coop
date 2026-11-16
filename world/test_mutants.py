@@ -4,7 +4,9 @@ import os,subprocess,sys,tempfile
 from concurrent.futures import ThreadPoolExecutor
 ROOT=Path(__file__).resolve().parent
 families=[('world_test.cpp',['world.cpp'],['WORLD_NO_TOKEN','WORLD_OWNER','WORLD_OWN','WORLD_OBJECT_CAP','WORLD_PLAYER_CAP','WORLD_LIKE_RANGE','WORLD_ID_LETTER','WORLD_LIKES_MINE','WORLD_LIKES_SINCE']),
-          ('front_test.cpp',['front.cpp','world.cpp'],['FRONT_PREFIX','FRONT_BEARER']),
+          ('link_test.cpp',['link.cpp','world.cpp'],['LINK_KEEP_ID','LINK_DUPLICATE','LINK_PASS_IMPORTED','LINK_ECHO','LINK_IMPORT_OWN','LINK_IMPORT_OWNER','LINK_FILTER_TYPE','LINK_FILTER_OWNER',
+                                                      'LINK_FILTER_AREA','LINK_FILTER_AGE','LINK_NO_PRUNE','LINK_FORGET_ANY','LINK_CAP','LINK_SIZE','LINK_STRICT','LINK_LIKES','LINK_VERSION']),
+          ('front_test.cpp',['front.cpp','link.cpp','world.cpp'],['FRONT_PREFIX','FRONT_BEARER','FRONT_LINK_KEY']),
           ('relay_test.cpp',['relay.cpp'],['RELAY_NO_TOKEN','RELAY_REBIND','RELAY_ANY_SOURCE','RELAY_FORWARD_FAR','RELAY_SOURCE_ID','RELAY_NO_HYSTERESIS','RELAY_AREA','RELAY_NO_POSITION',
                                            'RELAY_NO_TIMEOUT','RELAY_NO_LEAVE','RELAY_NO_RATE','RELAY_PLAYER_CAP','RELAY_HELLO_STALE','RELAY_ROSTER_ONCE'])]
 with tempfile.TemporaryDirectory() as d:

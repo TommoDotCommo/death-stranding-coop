@@ -61,8 +61,8 @@ private:
 class Parser {
 public:
     static constexpr size_t MaxBytes=4*1024*1024;static constexpr unsigned MaxDepth=32;
-    static Value parse(const std::string& text){
-        if(text.size()>MaxBytes)throw std::runtime_error("json: too large");
+    static Value parse(const std::string& text,size_t maxBytes=MaxBytes){
+        if(text.size()>maxBytes)throw std::runtime_error("json: too large");
         Parser p(text);p.ws();Value v=p.value(0);p.ws();if(p.at_!=text.size())throw std::runtime_error("json: trailing data");return v;}
 private:
     explicit Parser(const std::string& t):t_(t){}
@@ -121,4 +121,6 @@ private:
     }
 };
 inline Value parse(const std::string& text){return Parser::parse(text);}
+// A file of our own (the world file, an export): the cap is the caller's, not the one for a request body.
+inline Value parseFile(const std::string& text,size_t maxBytes){return Parser::parse(text,maxBytes);}
 }

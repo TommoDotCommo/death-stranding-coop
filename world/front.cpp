@@ -42,6 +42,19 @@ Reply Front::handle(const Request& r,int64_t now){
 #else
     if(!prefix_.empty()&&path.compare(0,prefix_.size()+1,"/"+prefix_)==0){path.erase(0,prefix_.size()+1);base="/"+prefix_;}
 #endif
+    if(path=="/link/pull"){
+        // A linked server asking for objects. Its key says which link it is, and so which filter applies; without a
+        // configured link, or with a key that is none of theirs, this path does not exist.
+        if(r.method!="POST"||links_.empty())return notFound();
+        std::string given;auto auth=r.headers.find("authorization");
+        if(auth!=r.headers.end()&&auth->second.compare(0,5,"Link ")==0)given=auth->second.substr(5);
+        const LinkConfig* link=nullptr;
+        for(auto& l:links_)if(sameKey(l.key,given))link=&l;
+#ifdef MUTANT_FRONT_LINK_KEY
+        if(!link)link=&links_.front();
+#endif
+        if(!link){if(world_.log)world_.log("link request refused: no link has that key");return notFound();}
+        return world_.linkPull(link->exportFilter,r.body,now);}
     std::string key;
     if(path.compare(0,3,"/k/")==0){
         size_t end=path.find('/',3);if(end==std::string::npos)return notFound();

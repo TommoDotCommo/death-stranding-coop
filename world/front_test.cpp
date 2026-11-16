@@ -43,6 +43,28 @@ int main(){
     World w2([&n]{return "t"+std::to_string(++n);});Front open(w2,"");
     CHECK(open.handle(req("GET","/auth/ds?code="+ticket),1).status==200);
     CHECK(json::parse(open.handle(req("GET","/k/x/auth/ds?code="+ticket),1).body).get("session").get("gateway").string()=="http://10.0.0.2:8089/gate");
+    // Linked servers: /link/pull exists only for a server that has links, only with one of their keys, and the key
+    // picks the filter. A game's session token is no key, and a key is no session.
+    const std::string ask="{\"format\":1,\"server\":\"otherServer\",\"have\":\"\",\"after\":\"\"}";
+    CHECK(f.handle(req("POST","/s3cret/link/pull",ask,"Link key-for-north"),7).status==404);
+    LinkConfig north,south;north.name="north";north.key="key-for-north";north.exportFilter=parseFilter("all");
+    south.name="south";south.key="key-for-south";south.exportFilter=parseFilter("types=r");
+    std::vector<std::string> lines;w.log=[&lines](const std::string& text){lines.push_back(text);};
+    Front linked(w,"s3cret",{north,south});
+    auto pulled=linked.handle(req("POST","/s3cret/link/pull",ask,"Link key-for-north"),7);CHECK(pulled.status==200);
+    CHECK(json::parse(pulled.body).get("objects").items().size()==1&&json::parse(pulled.body).get("server").string()==w.serverId());
+    pulled=linked.handle(req("POST","/s3cret/link/pull",ask,"Link key-for-south"),7);CHECK(pulled.status==200&&json::parse(pulled.body).get("objects").items().empty());
+    CHECK(lines.empty());
+    for(const char* auth:{"Link key-for-nobody","Link key-for-nort","Link key-for-northh","Link ","","Bearer key-for-north","key-for-north","link key-for-north"})
+        CHECK(linked.handle(req("POST","/s3cret/link/pull",ask,auth),7).status==404);
+    CHECK(lines.size()==8&&lines[0].find("link request refused")==0);
+    CHECK(linked.handle(req("POST","/s3cret/link/pull",ask,"Link "+ta),7).status==404);
+    CHECK(linked.handle(req("GET","/s3cret/link/pull",ask,"Link key-for-north"),7).status==404);
+    CHECK(linked.handle(req("POST","/link/pull",ask,"Link key-for-north"),7).status==404);
+    CHECK(linked.handle(req("POST","/s3cret/link/pull","garbage","Link key-for-north"),7).status==400);
+    CHECK(linked.handle(req("POST","/s3cret/gate/e/getVersion","","Bearer key-for-north"),7).status==401);
+    CHECK(linked.handle(req("POST","/s3cret/gate/e/getVersion","","Link key-for-north"),7).status==401);
+    w.log=nullptr;
     if(failures)return 1;
     std::puts("front tests passed");return 0;
 }
