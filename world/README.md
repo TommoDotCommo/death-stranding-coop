@@ -393,8 +393,9 @@ export filter passes. The server connects out only to the addresses given with `
 Two linked servers that both run the relay can also show each other's broadcast players: a player of one server who
 stands near a player of the other sees him (body, animation, gear, carried cases, and his name with his server's) as
 he sees the players of his own server, and the other way round. It is off unless both servers ask for it on that link.
-Built and tested without a game (2026-11-17): no game has seen a player of a linked server yet; players written by the
-tests and `coop-swarm` stand-ins have.
+Built and tested without a game (2026-11-17), then live once the same day: two real games, each on its own server's
+relay in broadcast mode, saw each other across a link on loopback, each name carrying the other's server, and the
+player of a stopped server left the other game within 9 s (`../STATUS.md`, "Linked servers").
 
 ```
 coop-world --port 8089 --relay-port 8090 ... --link NAME --link-key KEY --link-presence yes
