@@ -142,6 +142,7 @@ struct Protection {
     bool pingRetry=true, pingHistory=true, cargoOrder=true, cargoAck=true, cargoOnce=true;
     bool progressReady=true, progress=true, progressUnknown=true, progressFlag=true, progressPolicy=true;
     bool vehicle=true, vehicleLerp=true;
+    bool clockOrder=true;   // a time earlier than one already seen is no time passed (never an unsigned difference)
     bool environmentRange=true, environmentRole=true, environmentOrder=true, environmentFresh=true, environmentRate=true;
     bool animationRange=true, animationOrder=true, animationRose=true;
     bool enemiesRange=true, enemiesRole=true, enemiesOrder=true, enemiesFresh=true, enemiesStale=true, enemiesRate=true;

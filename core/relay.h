@@ -237,7 +237,12 @@ public:
     void clearPosition(){have_=false;}
     void tick(uint64_t now){
 #ifndef MUTANT_RELAY_CLIENT_SILENT
+        // A tick time earlier than the last WELCOME's is no silence (never an unsigned difference: offline at once).
+#ifndef MUTANT_RELAY_CLIENT_CLOCK
+        if(online_&&now>lastWelcome_&&now-lastWelcome_>config_.silentMs)offline();
+#else
         if(online_&&now-lastWelcome_>config_.silentMs)offline();
+#endif
 #endif
         if(!sentHello_||now>=nextHello_){
             Hello h;h.id=config_.id;h.token=config_.token;h.nickname=config_.nickname;h.sequence=++helloSequence_;

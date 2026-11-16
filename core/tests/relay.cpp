@@ -189,6 +189,8 @@ static void client(){
     CHECK(!c.sendTo(2,core,sizeof core));
     c.tick(11100);h=wire.last(Type::Hello).hello;CHECK(h.stream==0&&h.ack==0);
     give(c,welcomeFor(1,h.sequence,9),11100);give(c,rosterOf(9,1,{{true,2,"Bob"}}),11100);CHECK(c.online()&&c.takeEvents().size()==1);
+    // A tick with a time earlier than the WELCOME's (the caller's clock readings out of order) is not silence.
+    c.tick(11090);c.tick(0);CHECK(c.online()&&c.nearby().size()==1);
     // BYE: said once, everyone forgotten.
     c.bye();auto y=wire.last(Type::Bye).bye;CHECK(y.id==1&&y.token=="key");e=c.takeEvents();CHECK(e.size()==1&&!e[0].enter&&!c.online());
 }

@@ -374,7 +374,10 @@ void Core::adaptDelay(uint64_t now) {
     delay_=std::clamp(target,delay_-step,delay_+step); delay_=std::clamp(delay_,least,most); delayAt_=now;
 }
 void Core::tick(uint64_t now) {
-    if(connected_ && protections_.timeout && now-lastReceive_>3000) reset(true);
+    // A tick time earlier than the last receive (an adapter that stamped a datagram with a later clock reading than this
+    // tick's) is no silence at all: the unsigned difference would be a timeout at once, and the session would flap.
+    bool silent=protections_.clockOrder?(now>lastReceive_&&now-lastReceive_>3000):now-lastReceive_>3000;
+    if(connected_ && protections_.timeout && silent) reset(true);
     if(!connected_&&protections_.progressReady&&!provider_.readyForSession())return;
     adaptDelay(now);
     if(!connected_) { if(now>=nextHello_) { send(Kind::Hello,now); nextHello_=now+250; } return; }
@@ -499,7 +502,9 @@ Error Core::receive(const uint8_t* b,size_t n,uint64_t now) {
     uint64_t localTime=clockValid_?uint64_t(std::max(0.,mapped)):now;
     if(protections_.time && (mapped<0 || (clockValid_ && std::abs(mapped-double(now))>2000) || (haveSequence_ && (q.stamp<=lastArrival_ || localTime<=snapshots_.back().time)))) return fail(Error::Time);
     bool teleport=(q.state.flags&Teleport)!=0;
-    if(protections_.teleport && teleport && haveTeleport_ && now-lastTeleport_<5000) return fail(Error::Teleport);
+    // The same for a receive time earlier than the last teleport's: it is inside the five seconds, not far beyond them.
+    bool recentTeleport=protections_.clockOrder?(now<lastTeleport_||now-lastTeleport_<5000):now-lastTeleport_<5000;
+    if(protections_.teleport && teleport && haveTeleport_ && recentTeleport) return fail(Error::Teleport);
     if(protections_.speed && haveSequence_ && !teleport) {
         double elapsed=double(q.stamp-lastArrival_)/1000.;
         if(distance(q.state,snapshots_.back().state)>100*std::min(elapsed,2.)+0.5) return fail(Error::Speed);

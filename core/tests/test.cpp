@@ -225,6 +225,15 @@ void sessionTests() {
     { Fixture f; f.provider.blocked=true; f.core.tick(100); unsigned count=0; for(auto& b:f.transport.packets) count+=b[6]==uint8_t(Kind::Presence); check(count==0,"gate"); f.core.frame(100); check(!f.provider.remote.visible,"apply_gate"); }
     { Fixture f; for(unsigned t=0;t<500;++t) { f.provider.local.position[0]=t*.001; f.core.tick(t); } unsigned count=0; for(auto& b:f.transport.packets) count+=b[6]==uint8_t(Kind::Presence); check(count<=10&&count>=2,"rate"); }
     { Fixture f; f.core.tick(3001); check(!f.core.connected(),"timeout"); Packet p; p.kind=Kind::Ack; p.role=Role::Client; p.session=42; p.nonce=201; p.echo=101; check(f.receive(p,3100)==Error::None&&f.core.connected(),"reconnect"); check(f.receive(f.presence(1,3200),3200)==Error::Nonce,"old_connection_replay"); }
+    // A tick whose time is earlier than the last receive's is no silence (clockOrder): the session stays, and the three
+    // seconds still count from that receive. A teleport received at a time earlier than the last one's is still inside
+    // its five seconds.
+    { Fixture f; check(f.receive(f.presence(1,100),5000)==Error::None,"clockOrder_setup"); f.core.tick(4990); check(f.core.connected(),"clockOrder");
+      f.core.tick(0); check(f.core.connected(),"clockOrder"); f.core.tick(8000); check(f.core.connected(),"clockOrder_window"); f.core.tick(8001); check(!f.core.connected(),"timeout"); }
+    { Fixture f; f.core.tick(100); Packet g; g.kind=Kind::Pong; g.role=Role::Client; g.session=42; g.nonce=200; g.echo=100; g.t0=100; g.t1=g.t2=160; check(f.receive(g,120)==Error::None,"clockOrder_setup");
+      auto a=f.presence(1,1050); a.state.flags=Teleport; check(f.receive(a,1000)==Error::None,"clockOrder_setup");
+      auto b=f.presence(2,1100,1); b.state.flags=Teleport; check(f.receive(b,990)==Error::Teleport,"clockOrder");
+      auto c2=f.presence(3,7000,2); c2.state.flags=Teleport; check(f.receive(c2,6950)==Error::None,"clockOrder_later"); }
     { Fixture f; auto p=f.presence(1,100); p.kind=Kind::Bye; f.receive(p,100); check(!f.core.connected()&&f.core.buffered()==0,"bye"); }
     // The clock mapping is refined (refine): a lopsided first round trip sets it 40 ms off; quicker round trips pull it to
     // the truth (remote = local + 50) at one percent of elapsed time, and a later slow, lopsided one does not pull it away.
@@ -325,7 +334,7 @@ int main(int argc,char** argv) {
     auto start=std::chrono::steady_clock::now(); std::string mutant=argc>1?argv[1]:"";
 #define MUTATE(name) if(mutant==#name) protection.name=false
     MUTATE(version); MUTATE(range); MUTATE(teleport); MUTATE(duplicate); MUTATE(delay); MUTATE(adapt); MUTATE(refine); MUTATE(session); MUTATE(build);
-    MUTATE(magic); MUTATE(checksum); MUTATE(reserved); MUTATE(nonce); MUTATE(time); MUTATE(speed); MUTATE(floor); MUTATE(extrapolate); MUTATE(stale); MUTATE(gate); MUTATE(timeout); MUTATE(buffer); MUTATE(rate); MUTATE(length); MUTATE(kind); MUTATE(role); MUTATE(handshake); MUTATE(ping); MUTATE(pingHistory); MUTATE(clamp); MUTATE(finite); MUTATE(cargoOrder); MUTATE(cargoAck); MUTATE(cargoOnce); MUTATE(progressReady); MUTATE(progress); MUTATE(progressUnknown); MUTATE(progressFlag); MUTATE(progressPolicy); MUTATE(vehicle); MUTATE(vehicleLerp);
+    MUTATE(magic); MUTATE(checksum); MUTATE(reserved); MUTATE(nonce); MUTATE(time); MUTATE(speed); MUTATE(floor); MUTATE(extrapolate); MUTATE(stale); MUTATE(gate); MUTATE(timeout); MUTATE(buffer); MUTATE(rate); MUTATE(length); MUTATE(kind); MUTATE(role); MUTATE(handshake); MUTATE(ping); MUTATE(pingHistory); MUTATE(clamp); MUTATE(finite); MUTATE(cargoOrder); MUTATE(cargoAck); MUTATE(cargoOnce); MUTATE(progressReady); MUTATE(progress); MUTATE(progressUnknown); MUTATE(progressFlag); MUTATE(progressPolicy); MUTATE(vehicle); MUTATE(vehicleLerp); MUTATE(clockOrder);
 #undef MUTATE
     parserTests(); cargoTests(); progressTests(); sessionTests(); if(mutant.empty()&&failures==0) fuzz();
     std::printf("%s failures=%d runtime=%.3fs\n",failures?"FAILED":"PASSED",failures,std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());

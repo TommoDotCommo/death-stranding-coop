@@ -52,6 +52,6 @@ $(BUILD)/relay-tests: tests/relay.cpp relay.h | $(BUILD)
 	$(CXX) $(CXXFLAGS) tests/relay.cpp -o $@
 relay-test: $(BUILD)/relay-tests
 	./$(BUILD)/relay-tests
-	python3 -B ../mod/mutants.py --sources tests/relay.cpp --prefix $(BUILD)/mutant- RELAY_WIRE_VERSION RELAY_WIRE_LENGTH RELAY_WIRE_RANGE RELAY_WIRE_TEXT RELAY_WIRE_PAYLOAD RELAY_CLIENT_SILENT RELAY_CLIENT_STREAM RELAY_CLIENT_ORDER RELAY_CLIENT_STRANGER
-	@echo relay mutants killed: 9
+	python3 -B ../mod/mutants.py --sources tests/relay.cpp --prefix $(BUILD)/mutant- RELAY_WIRE_VERSION RELAY_WIRE_LENGTH RELAY_WIRE_RANGE RELAY_WIRE_TEXT RELAY_WIRE_PAYLOAD RELAY_CLIENT_SILENT RELAY_CLIENT_STREAM RELAY_CLIENT_ORDER RELAY_CLIENT_STRANGER RELAY_CLIENT_CLOCK
+	@echo relay mutants killed: 10
 .PHONY: relay-test

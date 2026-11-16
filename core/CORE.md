@@ -113,7 +113,21 @@ the sender's nonce. Only an ACK to a previously sent HELLO with the current
 recipient echo establishes pairing. Duplicate HELLO/ACK does not clear snapshots
 or extend liveness. A different nonce cannot replace a connected peer; timeout or
 explicit disconnect is required. Build/version/session rejection happens before
-pairing. `receive` returns a typed error and `reason(error)` supplies clear text,
+pairing. A connected session with nothing accepted for 3 s times out and starts
+again with a new nonce.
+
+**Times out of order.** `tick`, `receive` and `frame` take the caller's monotonic
+milliseconds, and the caller should give every call of one pass the same reading.
+The core does not depend on it: a `tick` time earlier than the last receive's is
+no silence (the session stays; the 3 s still count from that receive), and a
+teleport received at a time earlier than the last teleport's is inside its 5 s.
+Before this the differences were unsigned, so one datagram stamped a millisecond
+after the tick's reading ended the session at once (seen live from an adapter that
+read the clock twice in a pass; mutant `clockOrder`). The other time comparisons
+(render age, delay slew, PONG, environment and enemy rates) were already ordered.
+Nothing on the wire changed.
+
+`receive` returns a typed error and `reason(error)` supplies clear text,
 including `game/mod build mismatch`, `protocol version mismatch` and `wrong
 session`. Surface these in the adapter UI/log, rather than reporting only timeout.
 No rejection amplification packets are sent for malformed or mismatched data.
@@ -209,7 +223,8 @@ cover version, range validation, teleport cooldown, duplicate rejection,
 interpolation delay, session, build, magic, checksum, reserved fields, nonce,
 timestamp, motion speed, floor snapping, extrapolation cap, staleness, provider
 gating, timeout, buffer bound, send rate, lengths, kinds, roles, handshake and
-PONG replay, local finite clamps and NaN/infinity rejection. Mutants are injected only through `DS_TESTING` APIs; production core
+PONG replay, local finite clamps and NaN/infinity rejection, and times out of
+order (`clockOrder`). Mutants are injected only through `DS_TESTING` APIs; production core
 has no public protection-disabling API.
 
 Measured on this Linux worker: **500/500 sessions, 27/27 mutants killed**;
@@ -506,7 +521,8 @@ hands it only datagrams that came from that address, and calls `tick(now)`.
 - `sendTo(player, datagram)`: wraps one core datagram; refused for a player who is not in the roster.
 - `receive(...)`: returns true with the source player and the payload for a RELAYED datagram from a player in the
   roster; everything else is handled inside or dropped.
-- No WELCOME for 5 s: the relay is gone; everyone near leaves and the next HELLO starts a new stream.
+- No WELCOME for 5 s: the relay is gone; everyone near leaves and the next HELLO starts a new stream. A `tick` time
+  earlier than the last WELCOME's is no silence (as in the core, never an unsigned difference).
 - `bye()`: tells the server once and forgets everyone.
 
 Pairing two players' cores is the adapter's job. The stand-in swarm (`mod/swarm.cpp`) uses one rule that needs no
@@ -517,7 +533,7 @@ negotiation: the same session number for everyone, and of two players the one wi
 `make -C core relay-test` (part of `make test`): `tests/relay.cpp` pins the layout byte for byte, sends every message
 through the wire and back, refuses every sample cut short at each length or one byte longer, each bad field, and
 40,000 damaged datagrams; then it drives a `Client` with hand-made server messages (order, repeats, gaps, another
-stream, a late WELCOME, a new stream, a refusal, five seconds of silence, BYE). Nine mutants must fail it:
-`RELAY_WIRE_VERSION`, `RELAY_WIRE_LENGTH`, `RELAY_WIRE_RANGE`, `RELAY_WIRE_TEXT`, `RELAY_WIRE_PAYLOAD`,
-`RELAY_CLIENT_SILENT`, `RELAY_CLIENT_STREAM`, `RELAY_CLIENT_ORDER`, `RELAY_CLIENT_STRANGER`. The server's side and
+stream, a late WELCOME, a new stream, a refusal, five seconds of silence, a tick out of order, BYE). Ten mutants
+must fail it: `RELAY_WIRE_VERSION`, `RELAY_WIRE_LENGTH`, `RELAY_WIRE_RANGE`, `RELAY_WIRE_TEXT`, `RELAY_WIRE_PAYLOAD`,
+`RELAY_CLIENT_SILENT`, `RELAY_CLIENT_STREAM`, `RELAY_CLIENT_ORDER`, `RELAY_CLIENT_STRANGER`, `RELAY_CLIENT_CLOCK`. The server's side and
 both sides together are tested in `world/` (README there, "The relay").
