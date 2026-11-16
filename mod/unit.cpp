@@ -105,6 +105,11 @@ int main() {
     assert(mod::parseConfig(withKeys(threaded,"\"partner\":\"off\"")).partner=="off");
     assert(!mod::parseConfig(probe).partnerMarker&&mod::parseConfig(withKeys(probe,"\"partner_marker\":true")).partnerMarker);
     assert(refused(withKeys(threaded,"\"partner_marker\":true")));                          // no puppet_probe
+    // Other players (others.h): off by default, at most 32, and only where bodies can be made.
+    assert(mod::parseConfig(probe).others==0&&mod::parseConfig(withKeys(probe,"\"others\":32")).others==32&&mod::parseConfig(withKeys(probe,"\"others\":0")).others==0);
+    assert(refused(withKeys(probe,"\"others\":33")));assert(refused(withKeys(probe,"\"others\":true")));assert(refused(withKeys(probe,"\"others\":\"4\"")));
+    assert(refused(withKeys(threaded,"\"others\":4")));                                    // no puppet_probe
+    assert(mod::parseConfig(withKeys(threaded,"\"others\":0")).others==0);
     assert(mod::parseConfig(withKeys(threaded,"\"virtual_pad\":true,\"required\":true")).virtualPad);
     assert(mod::parseConfig(withKeys(good,"\"virtual_pad\":true,\"required\":true,\"self_tick\":true")).virtualPad);
     assert(refused(withKeys(threaded,"\"virtual_pad\":true")));

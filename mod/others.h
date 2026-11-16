@@ -1,0 +1,171 @@
+#pragma once
+// Others: more remote players than the one partner, presence only. Each other player has a 64-bit id (given by
+// whatever carries the datagrams), a presence-core session of its own (core/core.h: handshake, clock, interpolation,
+// animation samples) and a body of its own (an OwnBody driven by a Double, double.h). Nothing else of the two-player
+// layer exists for them: no cargo, structures, enemies, orders, story, vehicles, gear or carried cargo.
+//
+// Three parts, all game-free:
+//   Body, Bodies   one more Sam and a keyed set of them (also what the lab command `crowd N` uses);
+//   Others         the sessions: who is here, what each one's core says, what to send them;
+//   MemoryHub      a link in memory that joins several Others, for tests.
+// Nothing here opens a socket. The datagrams travel through a Link the caller supplies (CORE.md, "Several peers").
+#include "../core/core.h"
+#include "double.h"
+#include "nametag.h"
+#include <array>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+namespace mod::others {
+constexpr size_t MaxOthers=32;            // the most sessions (config `others` is capped here)
+constexpr uint64_t MakeEveryMs=300;       // one new body at a time: making one takes the game a while
+
+// ---- Bodies ---------------------------------------------------------------------------------------------------------
+// What the game side gives for one more Sam. own: how a body is made, dressed, parked and removed. drive: the calls that
+// move it; `find` is replaced (the Double drives this body, never the game's resident double). settle: optional, after
+// every drive of a body that exists (the mod keeps the body's inventory component quiet and joins it to the porter's
+// update group there).
+struct BodyParts {
+    puppet::OwnBodyApi own;puppet::DoubleApi drive;
+    std::function<void(uint64_t body,uint64_t porter,uint64_t now)> settle;
+};
+class Body {
+public:
+    Body(BodyParts parts,std::function<void(const std::string&)> log);
+    Body(const Body&)=delete;Body& operator=(const Body&)=delete;
+    // One game-thread tick. The body is made when the porter's world allows it (once per world: OwnBody) and mayMake
+    // says so, then driven to goal with that speed, those actions and that animation sample. goal==nullptr: hidden and
+    // asleep where it stands, still the mod's (no new acquire when it is shown again). Returns the body's entity, 0
+    // while there is none.
+    uint64_t tick(const puppet::Anchor& porter,const puppet::Transform* goal,const ds::Animation* sample,bool fresh,double speed,uint32_t actions,uint64_t now,bool mayMake=true);
+    uint64_t creations() const {return creations_;}   // entities the game made for this body (one per world)
+    void remove();                          // handed back and removed by the game
+    uint64_t entity() const {return entity_;}
+    bool givenUp() const {return own_.exhausted();}
+    bool driving() const {return drive_.stage()==puppet::Double::Stage::Driving;}
+private:
+    std::function<void(uint64_t,uint64_t,uint64_t)> settle_;uint64_t entity_=0,porter_=0,creations_=0;
+    puppet::OwnBody own_;puppet::Double drive_;
+};
+// What one body is to do this tick. The pointers must stay valid until drive() returns.
+struct Want {uint64_t key=0;const puppet::Transform* goal=nullptr;const ds::Animation* sample=nullptr;bool fresh=false;double speed=0;uint32_t actions=0;};
+// A set of bodies by key (a player id, or an index for the crowd). drive(): a body whose key is no longer wanted is
+// removed; a wanted key without a body gets one; every body is driven with its own Want and nothing else. The game is
+// asked for at most one new entity every MakeEveryMs, also when a new world needs every body made again.
+class Bodies {
+public:
+    using Make=std::function<std::unique_ptr<Body>(uint64_t key)>;
+    explicit Bodies(Make make):make_(std::move(make)){}
+    bool available() const {return bool(make_);}
+    void drive(const std::vector<Want>& wants,const puppet::Anchor& porter,uint64_t now);
+    size_t size() const {return bodies_.size();}
+    uint64_t entity(uint64_t key) const {auto it=bodies_.find(key);return it==bodies_.end()?0:it->second->entity();}
+    size_t made() const {return made_;}           // bodies that exist in the game, as of the last drive()
+    size_t driving() const {return driving_;}
+    size_t givenUp() const {return givenUp_;}
+    uint64_t makes() const {return makes_;}       // entities the game was asked for and made
+    uint64_t removes() const {return removes_;}
+private:
+    Make make_;std::map<uint64_t,std::unique_ptr<Body>> bodies_;uint64_t madeAt_=0,makes_=0,removes_=0;bool madeOnce_=false;
+    size_t made_=0,driving_=0,givenUp_=0;
+};
+
+// ---- Sessions -------------------------------------------------------------------------------------------------------
+// The seam to the transport. send: one datagram for player `to` (called from tick, animation, entered and left; never
+// kept). The transport calls Others::entered / left / received. Every call into Others must come from one thread at a
+// time (the mod makes them under its runtime lock).
+struct Link {std::function<void(uint64_t to,const uint8_t* data,size_t size)> send;};
+// This porter, once per game-thread tick. jumped: this sample is a jump (the provider's teleport flag on the tick it
+// rose); each session keeps it until a presence packet carrying it has gone to that player.
+struct Local {ds::State state;bool available=false,gated=true,jumped=false;uint64_t sampledAt=0;};
+struct Settings {
+    uint64_t self=0;                     // this player's id on the link; nonzero
+    uint64_t session=0;                  // the group's shared number (config `session`); nonzero
+    size_t cap=0;                        // the most other players at once; 0 = off
+    std::array<uint8_t,16> build{};      // the adapter's wire identity (identity.h), bytes 16..31 of every datagram
+    std::string nickname;
+    uint32_t delayMs=120;
+};
+// The core session two players share: the same on both sides, different for every pair, never zero.
+uint64_t pairSession(uint64_t session,uint64_t a,uint64_t b);
+// The lower id is the core's host of the pair (the core wants opposite roles; no role means more than that here).
+inline ds::Role pairRole(uint64_t self,uint64_t other){return self<other?ds::Role::Host:ds::Role::Client;}
+// One other player for this game-thread tick. visible: connected, fresh enough and not in a private room or cutscene
+// (the core's rule) and this game is not gated; otherwise the body is hidden.
+struct Shown {
+    uint64_t id=0;bool connected=false,visible=false;ds::Render render;std::string name;
+    std::optional<ds::AnimationShown> animation;   // the sample due now, when one is
+};
+// How a body shows a player: where it stands, how fast, which of the game's own poses.
+struct Drive {bool shown=false;puppet::Transform goal;double speed=0;uint32_t actions=0;bool mirror=false;};
+Drive drive(const Shown&,bool poses=true);
+// The Wants for these players, one each, in the same order (a hidden player's has no goal). plan keeps what the Wants
+// point at. show=false: nobody is shown (a local game event). animation=false: no controls are mirrored.
+struct Plan {std::vector<Drive> drives;std::vector<std::optional<ds::Animation>> samples;std::vector<Want> wants;};
+void plan(const std::vector<Shown>&,bool show,bool poses,bool animation,Plan&);
+struct Counters {
+    uint64_t sent=0,received=0,accepted=0;
+    uint64_t unknown=0;        // from an id that has not entered
+    uint64_t malformed=0;      // not a datagram of the presence core (size)
+    uint64_t foreignBuild=0;   // another adapter identity
+    uint64_t kind=0;           // a kind others never carry (environment, enemies)
+    uint64_t refused=0;        // refused by the session's core
+    uint64_t full=0;           // entered over the cap
+    uint64_t events=0;         // reliable events that were not a name: acknowledged and dropped
+};
+class Others {
+public:
+    Others(Settings,Link,std::function<uint64_t()> nonce,std::function<void(const std::string&)> log);
+    ~Others();
+    Others(const Others&)=delete;Others& operator=(const Others&)=delete;
+    // From the link. entered: false when refused (off, zero, this player's own id, already here, or full; a player
+    // refused because it was full is taken when somebody leaves).
+    bool entered(uint64_t id,uint64_t nowMs);
+    void left(uint64_t id,uint64_t nowMs);
+    ds::Error received(uint64_t from,const uint8_t* data,size_t size,uint64_t nowMs);   // None = taken by that player's core
+    // From the mod. local: before tick and frame of the same game-thread tick. tick: handshakes, pings, presence and
+    // names for every session. animation: this porter's controls (rose = the pulses since the previous call) to every
+    // connected session at the core's rate; true when any was sent. frame: every player as shown now, by id.
+    void local(const Local&);
+    void tick(uint64_t nowMs);
+    bool animation(const ds::Animation&,uint64_t nowMs);
+    std::vector<Shown> frame(uint64_t nowMs);
+    void clear(uint64_t nowMs);          // everybody leaves (the link went away)
+    size_t size() const {return sessions_.size();}
+    size_t connected() const;
+    bool here(uint64_t id) const {return sessions_.count(id)!=0;}
+    const Counters& counters() const {return counters_;}
+    const Settings& settings() const {return settings_;}
+private:
+    struct Session;
+    Settings settings_;Link link_;std::function<uint64_t()> nonce_;std::function<void(const std::string&)> log_;
+    Local local_;Counters counters_;std::map<uint64_t,std::unique_ptr<Session>> sessions_;std::deque<uint64_t> waiting_;
+    void out(uint64_t to,std::vector<uint8_t> datagram);
+};
+
+// ---- A link in memory -----------------------------------------------------------------------------------------------
+// Joins several Others as a relay would: everybody who has joined is "near" everybody else. Datagrams are queued and
+// handed over by deliver(), each after delayMs; drop decides per datagram whether it is lost. Every player may have a
+// clock of its own: `clock` is added to the hub's time for every call into that player.
+class MemoryHub {
+public:
+    uint32_t delayMs=0;
+    std::function<bool(uint64_t from,uint64_t to,const std::vector<uint8_t>&)> drop;
+    Link link(uint64_t self);                               // the Link for the player with this id
+    void join(uint64_t id,Others& player,uint64_t nowMs,uint64_t clock=0);   // ENTER both ways with everybody already here
+    void leave(uint64_t id,uint64_t nowMs);                 // LEAVE both ways
+    void deliver(uint64_t nowMs);
+    size_t queued() const {return queue_.size();}
+    struct Datagram {uint64_t from=0,to=0,due=0;std::vector<uint8_t> bytes;};
+    std::vector<Datagram> sentLog;                          // every datagram handed to the hub while record is set
+    bool record=false;
+private:
+    struct Player {Others* others=nullptr;uint64_t clock=0;};
+    std::map<uint64_t,Player> players_;std::deque<Datagram> queue_;uint64_t now_=0;
+};
+}

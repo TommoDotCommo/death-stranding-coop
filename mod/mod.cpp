@@ -66,6 +66,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "gear.h"
 #include "outfit.h"
 #include "structures.h"
+#include "others.h"
 #ifdef MOD_FAKE_NETWORK
 #include "fake_memory.h"
 #endif
@@ -109,6 +110,7 @@ static_assert(distinct(),"two CARGO event features share a wire type");
 constexpr bool delivered(){for(auto t:all)if(t<1||t>ds::CargoTypeMax)return false;return true;}
 static_assert(delivered(),"a CARGO event type is above the core's CargoTypeMax");
 }
+static_assert(mod::OthersMax==mod::others::MaxOthers,"config `others` and others.h agree on the most players");
 namespace {
 std::string error;
 std::mutex lifecycle;
@@ -255,12 +257,46 @@ struct Runtime final:ds::Transport {
     bool partnerMode() const {return twinMode==TwinMode::Peer||twinMode==TwinMode::Own;}
     std::filesystem::path cargoCommand;std::function<void(uint32_t,const mod::puppet::Transform&)> cargoCreate;
     std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
-    // Crowd experiment (lab command "crowd N" in puppet.double): N more bodies, each made and driven exactly like the
-    // partner's own body, standing in rings around him (or around this porter while no partner is shown). It answers
-    // how many Sams one game holds; nothing here is on the wire.
-    struct CrowdMember{std::unique_ptr<mod::puppet::OwnBody> own;std::unique_ptr<mod::puppet::Double> drive;uint64_t entity=0,linkedTo=0,quietBody=0,quietComponent=0;};
-    std::vector<std::unique_ptr<CrowdMember>> crowd;size_t crowdWanted=0;std::function<std::unique_ptr<CrowdMember>()> crowdMake;
-    uint64_t crowdMadeAt=0,crowdNotedAt=0,crowdWorstUs=0,crowdSumUs=0,crowdTicks=0,crowdTickAt=0,crowdGapWorstMs=0;
+    // More Sams (others.h): bodies made and driven exactly like the partner's own body. bodyParts gives the game's calls
+    // for one more (native builds only). crowdBodies is the lab command "crowd N" in puppet.double: N bodies standing in
+    // rings around the partner (or around this porter while no partner is shown), all with the partner's animation; it
+    // answers how many Sams one game holds and nothing of it is on the wire. otherBodies are the other players' bodies.
+    std::function<mod::others::BodyParts()> bodyParts;
+    std::unique_ptr<mod::others::Bodies> crowdBodies,otherBodies;size_t crowdWanted=0;
+    uint64_t crowdNotedAt=0,crowdWorstUs=0,crowdSumUs=0,crowdTicks=0,crowdTickAt=0,crowdGapWorstMs=0;
+    // Other players (others.h), presence only: a core session and a body each, besides the one partner. Config `others`
+    // is the most there may be (0 = off).
+    std::unique_ptr<mod::others::Others> others;mod::others::Plan othersPlan;uint64_t othersNotedAt=0;std::array<size_t,4> othersNoted{{~size_t(0),0,0,0}};
+    mod::controls::Gather othersGather;std::atomic<bool> othersControls{false};   // this porter's controls for them (under controlsLock)
+    // ---- SEAM: the transport for other players. Nothing in this build calls these five. ---------------------------
+    // Whatever carries the datagrams between players (a relay) calls them, always under `mutex`; the network thread's
+    // loop() is the place (poll the relay beside the partner's socket, see the mark there):
+    //   othersStart(self, link)            this player's id on the link is known; link.send(to, data, size) sends one datagram
+    //   othersEntered(id), othersLeft(id)  who is near
+    //   othersReceived(from, data, size)   one datagram from that player, as it was sent
+    //   othersStop()                       the link is gone: everybody leaves
+    void othersStart(uint64_t self,mod::others::Link link){
+        if(!config.others||!self)return;
+        mod::others::Settings s;s.self=self;s.session=config.session;s.cap=config.others;s.build=mod::WireBuild;s.nickname=config.nickname;
+        others=std::make_unique<mod::others::Others>(s,std::move(link),[]{return nonce();},[this](const std::string& row){note(row.c_str());});
+        note(("OTHERS ready: up to "+std::to_string(config.others)+" other players"+(otherBodies?"\n":" (no bodies in this build)\n")).c_str());
+    }
+    void othersStop(){if(!others)return;others->clear(mod::nowMs());others.reset();note("OTHERS stopped\n");}
+    void othersEntered(uint64_t id){if(others)others->entered(id,mod::nowMs());}
+    void othersLeft(uint64_t id){if(others)others->left(id,mod::nowMs());}
+    void othersReceived(uint64_t from,const uint8_t* data,size_t size){if(others)others->received(from,data,size,mod::nowMs());}
+    // The other players' bodies (game thread, after the partner's): each goes to its own player's interpolated pose with
+    // that player's animation sample; hidden while the player is stale, away or in a private room and during a local
+    // game event; removed when the player has left.
+    void tickOthers(const mod::puppet::Anchor& anchor,bool event,uint64_t now){
+        if(!otherBodies||(!others&&!otherBodies->size()))return;
+        std::vector<mod::others::Shown> shown;if(others)shown=others->frame(now);
+        mod::others::plan(shown,!event,config.partnerPoses,config.partnerAnimation,othersPlan);
+        otherBodies->drive(othersPlan.wants,anchor,now);
+        std::array<size_t,4> state{{shown.size(),others?others->connected():0,otherBodies->made(),otherBodies->driving()}};
+        if(state!=othersNoted&&now-othersNotedAt>=2000){othersNoted=state;othersNotedAt=now;std::ostringstream o;
+            o<<"OTHERS near "<<state[0]<<" connected "<<state[1]<<" bodies made "<<state[2]<<" shown "<<state[3]<<"\n";note(o.str().c_str());}
+    }
     // The porter's visible gear on the partner's own body (gear.h); config partner_gear or puppet.gear "on <stamp>".
     std::filesystem::path gearCommand;std::unique_ptr<mod::gear::Mirror> gear;bool gearOn=false;
     uint32_t gearChurnMode=0,gearChurnLeft=0;uint64_t gearChurnAt=0;
@@ -444,7 +480,7 @@ struct Runtime final:ds::Transport {
         std::unique_lock<std::mutex> g(controlsLock,std::try_to_lock);if(!g||!controlEntity)return false;
         std::array<uint8_t,ds::AnimationBoolBytes> held{};std::array<float,ds::AnimationFloats> floats{};
         if(!mod::controls::readPorter(*sampler,controlEntity,animatorVtable,controlBinding,held,floats))return false;
-        controlGather.add(held,floats);++frameSamples;return true;}
+        controlGather.add(held,floats);if(othersControls.load(std::memory_order_relaxed))othersGather.add(held,floats);++frameSamples;return true;}
     mod::carryplace::SlotCache handSlots;uint8_t handsNoted=0;
     std::vector<mod::carryplace::Placed> partnerHands;
     // Floating carriers (carts.h): the partner's towed carts made here, and what this porter tows.
@@ -1187,32 +1223,25 @@ struct Runtime final:ds::Transport {
     }
     // One tick of the crowd experiment (game thread, after the partner's body was driven).
     void tickCrowd(const mod::puppet::Anchor& anchor,const mod::puppet::Transform* goal,const ds::Animation* sample,bool fresh,double speed,uint32_t actions,uint64_t now){
-        if(!crowdMake||(!crowdWanted&&crowd.empty()))return;
+        if(!crowdBodies||(!crowdWanted&&!crowdBodies->size()))return;
         uint64_t began=mod::nowUs();
         if(crowdTickAt&&now-crowdTickAt>crowdGapWorstMs)crowdGapWorstMs=now-crowdTickAt;
         crowdTickAt=now;
-        while(crowd.size()>crowdWanted){auto& m=crowd.back();m->drive->mirror(nullptr,false);m->drive->tick(true,nullptr);m->own->remove();crowd.pop_back();}
-        // One new body every 300 ms: making one takes the game a while, and a refusal should be seen one at a time.
-        if(crowd.size()<crowdWanted&&now-crowdMadeAt>=300&&anchor.entity&&anchor.pose.available){crowdMadeAt=now;crowd.push_back(crowdMake());}
-        mod::puppet::Transform centre=goal?*goal:mod::puppet::transform(anchor.pose);
-        size_t made=0,given_up=0,driving=0;
-        for(size_t i=0;i<crowd.size();++i){auto& m=*crowd[i];
-            m.entity=m.own->exhausted()?0:m.own->tick(anchor);
-            if(m.own->exhausted())++given_up;
-            if(!m.entity){m.drive->mirror(nullptr,false);m.drive->tick(true,nullptr);continue;}
-            ++made;
-            // Rings of 6, 12, 18 ... bodies, 2 m apart, at the centre's height (flat ground is assumed).
+        // Rings of 6, 12, 18 ... bodies, 2 m apart, at the centre's height (flat ground is assumed). With no centre
+        // (no partner shown and no readable porter) they wait hidden.
+        std::vector<mod::puppet::Transform> places(crowdWanted);std::vector<mod::others::Want> wants(crowdWanted);
+        bool centred=goal||(anchor.entity&&anchor.pose.available);
+        mod::puppet::Transform centre;if(goal)centre=*goal;else if(centred)centre=mod::puppet::transform(anchor.pose);
+        for(size_t i=0;i<crowdWanted;++i){
             size_t ring=1,first=0;while(i>=first+6*ring){first+=6*ring;++ring;}
             double angle=6.283185307179586*double(i-first)/double(6*ring),radius=2.0*double(ring);
-            auto t=centre;t.position[0]+=radius*std::cos(angle);t.position[1]+=radius*std::sin(angle);
-            m.drive->mirror(sample,fresh);m.drive->tick(true,&t,speed,actions,false);m.drive->mirror(nullptr,false);
-            if(m.drive->stage()==mod::puppet::Double::Stage::Driving)++driving;
-            quietInventoryOf(m.entity,now,m.quietBody,m.quietComponent);
-            if(config.bodyUpdateLink&&m.linkedTo!=anchor.entity&&anchor.entity){m.linkedTo=anchor.entity;joinUpdateGroup(m.entity,anchor.entity);}
+            places[i]=centre;places[i].position[0]+=radius*std::cos(angle);places[i].position[1]+=radius*std::sin(angle);
+            wants[i].key=i;if(centred){wants[i].goal=&places[i];wants[i].sample=sample;wants[i].fresh=fresh;wants[i].speed=speed;wants[i].actions=actions;}
         }
+        crowdBodies->drive(wants,anchor,now);
         uint64_t took=mod::nowUs()-began;crowdSumUs+=took;++crowdTicks;if(took>crowdWorstUs)crowdWorstUs=took;
         if(now-crowdNotedAt>=5000){crowdNotedAt=now;std::ostringstream o;
-            o<<"CROWD wanted "<<crowdWanted<<" made "<<made<<" driving "<<driving<<" given up "<<given_up<<" tick avg "<<(crowdTicks?crowdSumUs/crowdTicks:0)<<" us worst "<<crowdWorstUs
+            o<<"CROWD wanted "<<crowdWanted<<" made "<<crowdBodies->made()<<" driving "<<crowdBodies->driving()<<" given up "<<crowdBodies->givenUp()<<" tick avg "<<(crowdTicks?crowdSumUs/crowdTicks:0)<<" us worst "<<crowdWorstUs
              <<" us, longest gap between ticks "<<crowdGapWorstMs<<" ms over "<<crowdTicks<<" ticks\n";note(o.str().c_str());
             crowdSumUs=crowdTicks=crowdWorstUs=crowdGapWorstMs=0;}
     }
@@ -1989,7 +2018,10 @@ struct Runtime final:ds::Transport {
                 #endif
                 for(size_t i=0;i<pending.size();) if(pending[i].due<=now) {auto p=pending[i];pending.erase(pending.begin()+i);accept(p,now);} else ++i;
                 storyPoll(now);
-                core->tick(now);paired|=core->connected();}
+                core->tick(now);paired|=core->connected();
+                // SEAM (others.h): the transport for other players is polled here, under this lock, and feeds
+                // othersEntered / othersLeft / othersReceived; then their sessions tick like the partner's.
+                if(others)others->tick(now);}
                 cadence.wait();
             }
         } catch(const std::exception& e) {std::lock_guard<std::timed_mutex> guard(mutex);failed=true;failure=e.what();try{note(failure.c_str());}catch(...){}running=false;}
@@ -2164,20 +2196,25 @@ struct Runtime final:ds::Transport {
                     driver.find=[this](uint64_t){return ownEntity;};
                     ownTwin=std::make_unique<mod::puppet::Double>(std::move(driver),[this](const std::string& row){note(row.c_str());});
                     ownTwin->walk(true);
-                    crowdMake=[this,sp,camera,akukan]{
-                        auto m=std::make_unique<CrowdMember>();auto* raw=m.get();
-                        auto made=mod::puppet::nativeApi(*sp);auto driver=mod::puppet::nativeDoubleApi(*sp);
-                        mod::puppet::OwnBodyApi oa;auto resourceOf=made.resource;
-                        oa.resource=[resourceOf,sp,camera,akukan](uint64_t porter){auto d=mod::puppet::findDouble(*sp,porter,camera,akukan);return d?resourceOf(d):0;};
-                        oa.create=made.create;oa.remove=made.remove;
-                        oa.alive=[sp,akukan](uint64_t b){uint64_t v=0;return sp->read(b,&v,8)&&v==akukan;};
-                        auto hide=driver.visible;auto rest=driver.sleep;oa.park=[hide,rest](uint64_t b){hide(b,false);rest(b,true);};
-                        oa.dress=mod::puppet::nativeDress(*sp,[this]{return dressMask;},[this](const std::string& row){note(row.c_str());});
-                        oa.ready=[sp](uint64_t porter){return mod::puppet::wornParts(*sp,porter,sp->base+0x3cf2b18)>1;};
-                        m->own=std::make_unique<mod::puppet::OwnBody>(std::move(oa),[this](const std::string& row){note(("CROWD "+row).c_str());});
-                        driver.find=[raw](uint64_t){return raw->entity;};
-                        m->drive=std::make_unique<mod::puppet::Double>(std::move(driver),[](const std::string&){});
-                        m->drive->walk(true);m->drive->enable();return m;};
+                    // One more Sam, made like the body above and driven by a backend of its own (others.h).
+                    bodyParts=[this,sp,camera,akukan]{
+                        mod::others::BodyParts p;auto made=mod::puppet::nativeApi(*sp);p.drive=mod::puppet::nativeDoubleApi(*sp);
+                        auto resourceOf=made.resource;
+                        p.own.resource=[resourceOf,sp,camera,akukan](uint64_t porter){auto d=mod::puppet::findDouble(*sp,porter,camera,akukan);return d?resourceOf(d):0;};
+                        p.own.create=made.create;p.own.remove=made.remove;
+                        p.own.alive=[sp,akukan](uint64_t b){uint64_t v=0;return sp->read(b,&v,8)&&v==akukan;};
+                        auto hide=p.drive.visible;auto rest=p.drive.sleep;p.own.park=[hide,rest](uint64_t b){hide(b,false);rest(b,true);};
+                        p.own.dress=mod::puppet::nativeDress(*sp,[this]{return dressMask;},[this](const std::string& row){note(row.c_str());});
+                        p.own.ready=[sp](uint64_t porter){return mod::puppet::wornParts(*sp,porter,sp->base+0x3cf2b18)>1;};
+                        // As for the partner's body: its inventory component kept quiet, and updated in this porter's group.
+                        struct Kept{uint64_t quietBody=0,quietComponent=0,linkedBody=0,linkedTo=0;};auto kept=std::make_shared<Kept>();
+                        p.settle=[this,kept](uint64_t body,uint64_t porter,uint64_t now){
+                            quietInventoryOf(body,now,kept->quietBody,kept->quietComponent);
+                            if(config.bodyUpdateLink&&porter&&(kept->linkedBody!=body||kept->linkedTo!=porter)){kept->linkedBody=body;kept->linkedTo=porter;joinUpdateGroup(body,porter);}};
+                        return p;};
+                    auto bodiesNamed=[this](const char* label){return std::make_unique<mod::others::Bodies>([this,label](uint64_t){
+                        return std::make_unique<mod::others::Body>(bodyParts(),[this,label](const std::string& row){note((std::string(label)+row).c_str());});});};
+                    crowdBodies=bodiesNamed("CROWD ");otherBodies=bodiesNamed("OTHERS ");
                     gearOn=config.partnerGear;
                     gear=std::make_unique<mod::gear::Mirror>(mod::gear::nativeApi(*sampler),[this](const std::string& row){note(row.c_str());});
                 }
@@ -2394,7 +2431,7 @@ struct Runtime final:ds::Transport {
             else if(command.rfind("crowd ",0)==0&&command.size()>stamp.size()&&command.compare(command.size()-stamp.size(),stamp.size(),stamp)==0){
                 auto n=command.substr(6,command.size()-stamp.size()-6);
                 if(n.empty()||n.size()>3||n.find_first_not_of("0123456789")!=std::string::npos){note("CROWD refused: crowd <0..200>\n");return;}
-                crowdWanted=std::min<size_t>(200,size_t(std::stoul(n)));note(("CROWD wanted "+std::to_string(crowdWanted)+(crowdMake?"\n":" (unavailable in this build)\n")).c_str());return;}
+                crowdWanted=std::min<size_t>(200,size_t(std::stoul(n)));note(("CROWD wanted "+std::to_string(crowdWanted)+(crowdBodies?"\n":" (unavailable in this build)\n")).c_str());return;}
             else if(command=="lead"+stamp)twinMode=TwinMode::Lead;
             else if(command=="still"+stamp){twin->walk(false);if(ownTwin)ownTwin->walk(false);note("DOUBLE own (private-room) network for the next acquire\n");return;}
             else if(command=="off"+stamp)twinMode=TwinMode::None;else {note("DOUBLE ignored command for another process\n");return;}
@@ -2509,6 +2546,8 @@ struct Runtime final:ds::Transport {
             twin->tick(true,goal,speed,actions,hold);if(ownTwin)ownTwin->tick(true,nullptr);}
         stages.enter("crowd",mod::nowUs());
         tickCrowd(anchor,goal,mirrorSample,mirrorFresh,goal?speed:0,goal?actions:0,now);
+        stages.enter("others",mod::nowUs());
+        tickOthers(anchor,event,now);
         twin->mirror(nullptr,false);if(ownTwin)ownTwin->mirror(nullptr,false);   // the sample lives only for this tick
         stages.enter("gear",mod::nowUs());
         repWatch=useOwn?ownEntity:0;
@@ -2544,9 +2583,12 @@ struct Runtime final:ds::Transport {
                 if(resting!=localResting){localResting=resting;note(resting?"REST this porter sits down to rest\n":"REST this porter is up again\n");}}}
             // The porter's own animation controls (controls.h), every frame: a one-frame pulse is seen only so.
             stages.enter("controls",mod::nowUs());
-            controlsWanted.store(config.partnerAnimation&&cache.available&&sampler&&core&&core->connected(),std::memory_order_release);
-            if(config.partnerAnimation&&cache.available&&sampler&&core&&(core->connected()||twinMode==TwinMode::Echo)){auto a=anchorNow();
+            bool othersUp=others&&others->connected();   // other players (others.h) get the controls too, at their own rate
+            othersControls.store(othersUp,std::memory_order_relaxed);
+            controlsWanted.store(config.partnerAnimation&&cache.available&&sampler&&core&&(core->connected()||othersUp),std::memory_order_release);
+            if(config.partnerAnimation&&cache.available&&sampler&&core&&(core->connected()||othersUp||twinMode==TwinMode::Echo)){auto a=anchorNow();
                 std::lock_guard<std::mutex> controlsGuard(controlsLock);
+                if(!othersUp&&othersGather.ready())othersGather.reset();
                 std::array<uint8_t,ds::AnimationBoolBytes> held{};std::array<float,ds::AnimationFloats> floats{};
                 controlEntity=a.entity;
                 if(a.entity&&mod::controls::readPorter(*sampler,a.entity,animatorVtable,controlBinding,held,floats)){
@@ -2558,6 +2600,7 @@ struct Runtime final:ds::Transport {
                         if(echoHave)for(size_t k=0;k<held.size();++k)e.rose[k]=uint8_t(held[k]&~echoLast[k]);
                         echoLast=held;echoHave=true;echoControls.emplace_back(now,e);}
                     controlGather.add(held,floats);
+                    if(othersUp){othersGather.add(held,floats);others->animation(othersGather.current(),now);othersGather.sent();}
                     // What he holds in his hands, relative to his root: it moves with the mirrored arms (carry_visual).
                     stages.enter("hands",mod::nowUs());
                     {std::array<ds::HeldCase,ds::AnimationHands> hands{};uint8_t count=0;uint64_t manager=0;
@@ -2625,10 +2668,13 @@ struct Runtime final:ds::Transport {
                     cache.local.flags|=callReport.flags(now,callingNow);}
                 stages.enter("start",mod::nowUs());
             }
+            bool jumped=cache.available&&(cache.local.flags&ds::Teleport);   // the provider's own flag, on the tick it rose
             if(cache.available) {
                 // A jump flag must survive until a presence packet carrying it has been sent.
                 if(cache.local.flags&ds::Teleport)cache.stickyTeleport=true;else if(cache.stickyTeleport)cache.local.flags|=ds::Teleport;
             }
+            // The other players' sessions read this porter from here (each keeps the jump until it has sent it).
+            if(others){mod::others::Local l;l.state=cache.local;l.available=cache.available;l.gated=cache.gated;l.jumped=jumped;l.sampledAt=cache.sampledAt;others->local(l);}
             if(game){poseAvailable=cache.available;poseReason=game->reason();}
             // Read-only, explicit per-process command; also usable with the ordinary self-tick provider.
             if(vehicleMonitor) {
@@ -3291,6 +3337,7 @@ struct Runtime final:ds::Transport {
     ~Runtime() {
         running=false;if(ticker.joinable())ticker.join();if(worker.joinable())worker.join();
         if(core && socket!=INVALID_SOCKET) {try{core->disconnect(mod::nowMs());}catch(...){}}
+        if(others){try{others->clear(mod::nowMs());}catch(...){}}
         if(socket!=INVALID_SOCKET)closesocket(socket);
 #ifdef _WIN32
         if(wsa)WSACleanup();

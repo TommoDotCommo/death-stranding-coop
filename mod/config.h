@@ -4,6 +4,7 @@
 #include <string>
 #include <cstdint>
 namespace mod {
+constexpr unsigned OthersMax=32;   // others.h MaxOthers
 struct Config {
     unsigned slot=0, peerSlot=1;
     std::string role="none", progressMismatch="warn", joinMove="log", peer, nickname, provider, fault="none", bind;   // bind: local IPv4 for a non-loopback peer (empty = the route's)
@@ -13,6 +14,7 @@ struct Config {
     // How the partner is shown from the start, without a test command: "off" (default), "peer" (the game's resident
     // double) or "own" (a Sam the mod makes; the double until it exists). Requires puppet_probe and an explicit role.
     std::string partner="off";
+    unsigned others=0;         // the most other players shown besides the partner, presence only (others.h); 0: off
     bool partnerVehicle=false; // the partner's vehicle drawn under him while he rides (ride.h)
     bool partnerTag=false;     // the partner's name (their nickname) over the partner body (nametag.h)
     bool shareOrderUnits=false; // with share_orders: a cargo unit one player hands in is delivered for the partner too (a split delivery); not yet run with a real partial hand-in

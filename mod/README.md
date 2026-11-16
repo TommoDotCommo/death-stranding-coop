@@ -1127,9 +1127,76 @@ INFO_RANGE, STATE_HOLD, STEP, VITALS_CHANGED, VITALS_GAP, LABEL_GAP) and the sca
 
 `crowd <0..200>` in `puppet.double` makes that many more bodies beside the partner's own body (rings of 6, 12, 18 ...,
 2 m apart, at his height, or around this porter while no partner is shown), each with its own `OwnBody` and `Double`
-and the partner's animation sample; `crowd 0` removes them. One body is made every 300 ms. Every 5 s the log says
-`CROWD wanted N made M driving D given up G tick avg .. us worst .. us`. It is an experiment for the question "how
-many Sams does one game hold" (STATUS.md, "Many Sams in one game"); nothing of it is on the wire.
+and the partner's animation sample; `crowd 0` removes them. The game is asked for one new body every 300 ms. Every 5 s
+the log says `CROWD wanted N made M driving D given up G tick avg .. us worst .. us`. It is an experiment for the
+question "how many Sams does one game hold" (STATUS.md, "Many Sams in one game"); nothing of it is on the wire.
+
+Since the others were added (next section) the crowd's bodies are the same `Body` and `Bodies` classes the other
+players use (`others.h`); only where they stand and what animates them is the crowd's own. Two things differ from the
+code that ran live on 2026-11-16 and have not run live: after a load the bodies are made again one every 300 ms
+instead of all in one tick, and a crowd with nowhere to stand (no partner shown and no readable porter) waits hidden.
+
+## Other players (`others`, off by default; built game-free, not run live)
+
+Besides the one partner the mod can hold up to `"others": N` more remote players (0..32, default 0; requires
+`puppet_probe`), **presence only**. Each one has
+
+- a 64-bit id, given by whatever carries the datagrams;
+- a presence-core session of its own (`core/CORE.md`, "Several peers"): handshake, clock mapping, the interpolated
+  pose with speed and flags, the adaptive presentation delay, and the animation samples (kind 10) when they arrive;
+- the name it sends (its `nickname`, as the core's name events), kept with the session and logged; no label is
+  drawn over other players yet;
+- a body of its own, made like the partner's own body (`OwnBody`) and driven every game-thread tick by its own
+  `Double` to that player's pose with that player's animation sample.
+
+A body is hidden (asleep and invisible where it stands, still the mod's) while its player is not connected, is stale
+(the core's rule: no pose for 1.5 s), is in a private room or cutscene, or while this game is in a game event or
+loading. It is removed when the player leaves. After a load every body is made again in the new world, one every
+300 ms. A player who is down lies in the collapse pose, one caught by BTs in the drag pose, and a rider sits in the
+riding pose without a vehicle (as the partner does without `partner_vehicle`).
+
+Nothing else of the two-player layer exists for others: no cargo, structures, enemies, orders, story, time or rain,
+vehicles, gear copies, carts or carried-cargo visuals, no map pin and no notices. What this porter sends them is his
+pose and his animation controls (not what he holds, his wheels or his carts). The partner path is not touched by any
+of it: with `others` at 0, or with no transport attached, no session exists and nothing is sent.
+
+**The transport is not wired.** `others.h` talks to a `Link`:
+
+```cpp
+struct Link {std::function<void(uint64_t to,const uint8_t* data,size_t size)> send;};
+class Others {
+    bool entered(uint64_t id,uint64_t nowMs);          // that player is near
+    void left(uint64_t id,uint64_t nowMs);             // no longer
+    ds::Error received(uint64_t from,const uint8_t* data,size_t size,uint64_t nowMs);
+    void local(const Local&);                          // this porter, once per game-thread tick
+    void tick(uint64_t nowMs);                         // handshakes, pings, presence, names
+    bool animation(const ds::Animation&,uint64_t nowMs);
+    std::vector<Shown> frame(uint64_t nowMs);          // everybody as shown now
+    void clear(uint64_t nowMs);                        // everybody leaves
+};
+```
+
+Times are the mod's monotonic milliseconds, the clock the core uses. Every call must come from one thread at a time.
+In `mod.cpp` the seam is marked `SEAM`: `othersStart(self, link)`, `othersEntered`, `othersLeft`, `othersReceived`
+and `othersStop`, to be called under the runtime lock from the network thread, where the partner's socket is polled.
+Nothing calls them in this build, so the setting alone starts nothing. `MemoryHub` in `others.h` is a link in memory
+for tests.
+
+Limits to know before running it live:
+
+- A player over the limit is not shown; it is remembered and taken when somebody leaves.
+- Every pair has its own session, so this porter's upstream grows with the number of others (CORE.md).
+- Bodies exist only in the Windows build; on other builds the sessions run without bodies.
+- Whether many bodies each with a different animation hold as well as the crowd's 80 with one animation, how they
+  behave on uneven ground, and the cost of N sessions on the network thread are unknown until it runs.
+
+Tests: `others_test.cpp` with a fake world of bodies and several players on independent clocks over a link with
+delay and loss: several enter, walk, go stale, drop out and come back, leave and return; the limit; a datagram of one
+player given as another's; an unknown id; another build; a jump; animation samples and one-frame pulses per receiver;
+a new world; a plain core as the peer. Mutants (`mutants.py`, 15): OTHERS_CAP, OTHERS_UNKNOWN, OTHERS_BUILD,
+OTHERS_SELF, OTHERS_LEFT, OTHERS_ROLE, OTHERS_PAIR, OTHERS_STICKY, OTHERS_KINDS, OTHERS_STALE, BODIES_HIDE,
+BODIES_REMOVE, BODIES_ONCE, BODIES_RATE, BODIES_MIX; and CONFIG_OTHERS in the unit test. The glue in `mod.cpp` is
+compiled in every build but not exercised by a test, since nothing attaches a transport yet.
 
 ## The partner from the start (`partner`)
 

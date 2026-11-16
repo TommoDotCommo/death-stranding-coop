@@ -14,7 +14,7 @@ is going"). Measured against that:
 |---|---|
 | Private strand server | `world/` exists; two copies sign in and exchange built objects (see the `online_server` rows below). Not everything is drawn or kept yet. |
 | Real-time layer | Works for exactly two players over one direct link, with one partner body. |
-| Many players | One game holds many Sams (2026-11-16): 80 extra bodies made, dressed and animated beside the partner with no fault (row "Many Sams in one game" below). Not started: more than one partner on the wire, the link through the server, switching on by distance. |
+| Many players | One game holds many Sams (2026-11-16): 80 extra bodies made, dressed and animated beside the partner with no fault (row "Many Sams in one game" below). Built game-free, not run live (2026-11-16): the mod side of more than one remote player, presence only (`others`, off by default; mod/README.md "Other players"): a core session and a body per player behind a transport interface, tested with a fake world and a link in memory. No transport is attached to it yet, so nothing of it can be switched on in a game. Not started: the link through the server, switching on by distance. |
 | Linked servers | Not started. |
 | Story, order and reward sharing | Built as opt-in settings (rows below); no longer developed. |
 

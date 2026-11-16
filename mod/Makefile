@@ -4,8 +4,8 @@ CXX ?= g++
 MINGW ?= $(shell command -v x86_64-w64-mingw32-g++-posix >/dev/null 2>&1 && echo x86_64-w64-mingw32-g++-posix || echo x86_64-w64-mingw32-g++)
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = mule_goal.cpp enemy_poses.cpp rewards.cpp signals.cpp ui.cpp orderload.cpp carts.cpp wheels.cpp controls.cpp voidout.cpp passenger.cpp carry_place.cpp roads.cpp bts.cpp enemies.cpp orders.cpp story.cpp ../launcher/saves.cpp vitals.cpp online.cpp notice.cpp nametag.cpp likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = mule_goal.h enemy_poses.h rewards.h signals.h ui.h orderload.h carts.h wheels.h controls.h link.h guard_win.h voidout.h passenger.h carry_place.h roads.h bts.h enemies.h orders.h story.h ../launcher/saves.h vitals.h online.h notice.h nametag.h likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = others.cpp mule_goal.cpp enemy_poses.cpp rewards.cpp signals.cpp ui.cpp orderload.cpp carts.cpp wheels.cpp controls.cpp voidout.cpp passenger.cpp carry_place.cpp roads.cpp bts.cpp enemies.cpp orders.cpp story.cpp ../launcher/saves.cpp vitals.cpp online.cpp notice.cpp nametag.cpp likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = others.h mule_goal.h enemy_poses.h rewards.h signals.h ui.h orderload.h carts.h wheels.h controls.h link.h guard_win.h voidout.h passenger.h carry_place.h roads.h bts.h enemies.h orders.h story.h ../launcher/saves.h vitals.h online.h notice.h nametag.h likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -44,6 +44,7 @@ test: environment-test join-test vehicle-test game-thread-test discovery-test po
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_MARKER unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-marker && if ./build/unit-config-marker >/dev/null 2>&1; then echo SURVIVED CONFIG_MARKER; exit 1; else echo KILLED MUTANT_CONFIG_MARKER; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_ENEMY_POSITIONS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-enemy-positions && if ./build/unit-config-enemy-positions >/dev/null 2>&1; then echo SURVIVED CONFIG_ENEMY_POSITIONS; exit 1; else echo KILLED MUTANT_CONFIG_ENEMY_POSITIONS; fi
 	@$(CXX) $(FLAGS) -DMUTANT_PEER_ANY unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-peer-any && if ./build/unit-peer-any >/dev/null 2>&1; then echo SURVIVED PEER_ANY; exit 1; else echo KILLED MUTANT_PEER_ANY; fi
+	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_OTHERS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-others && if ./build/unit-config-others >/dev/null 2>&1; then echo SURVIVED CONFIG_OTHERS; exit 1; else echo KILLED MUTANT_CONFIG_OTHERS; fi
 	python3 -B test_probe.py
 	python3 -B -m unittest -q test_game_thread_api test_probe_puppet test_actor_resources test_actor_reader_windows
 	python3 -B test_actor_resource_mutants.py
@@ -144,6 +145,9 @@ build/mule-goal-test: $(MULEGOAL_SRC) mule_goal.h discovery.h | build
 	$(CXX) $(FLAGS) $(MULEGOAL_SRC) -o $@
 build/enemy-poses-test: $(ENEMYPOS_SRC) enemy_poses.h enemies.h ../core/core.h | build
 	$(CXX) $(FLAGS) $(ENEMYPOS_SRC) -o $@
+OTHERS_SRC = others_test.cpp others.cpp double.cpp puppet.cpp pose.cpp providers.cpp controls.cpp nametag.cpp discovery.cpp ../core/core.cpp
+build/others-test: $(OTHERS_SRC) others.h double.h puppet.h nametag.h controls.h providers.h ../core/core.h | build
+	$(CXX) $(FLAGS) $(OTHERS_SRC) -o $@
 build/orders-test: orders_test.cpp orders.cpp orders.h discovery.cpp | build
 	$(CXX) $(FLAGS) orders_test.cpp orders.cpp discovery.cpp -o $@
 build/guard-test: guard_test.cpp guard_win.h | build
@@ -190,7 +194,7 @@ build/wire-test: wire_test.cpp rewards.cpp rewards.h signals.cpp signals.h order
 	$(CXX) $(FLAGS) wire_test.cpp rewards.cpp signals.cpp orderload.cpp cargo.cpp discovery.cpp ../core/core.cpp -o $@
 build/rewards-test: rewards_test.cpp rewards.cpp rewards.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(CXX) $(FLAGS) rewards_test.cpp rewards.cpp discovery.cpp ../core/core.cpp -o $@
-game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/mule-goal-test build/passenger-test build/place-test build/roads-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test build/signals-test build/story-test build/enemy-poses-test
+game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/mule-goal-test build/passenger-test build/place-test build/roads-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test build/signals-test build/story-test build/enemy-poses-test build/others-test
 	./build/story-test
 	./build/wire-test
 	./build/rewards-test
@@ -235,6 +239,8 @@ game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderlo
 	python3 -B mutants.py --sources "$(ENEMYPOS_SRC)" --prefix build/mutant-enemypos- ENEMYPOS_AWAKE ENEMYPOS_RANGE ENEMYPOS_KEEP ENEMYPOS_NEAREST ENEMYPOS_KEYS ENEMYPOS_STALE ENEMYPOS_DOWN ENEMYPOS_FAST ENEMYPOS_REACH ENEMYPOS_LAND ENEMYPOS_FARCAP ENEMYPOS_DEADBAND ENEMYPOS_COOLDOWN ENEMYPOS_HOLD ENEMYPOS_BUDGET ENEMYPOS_VTABLE ENEMYPOS_LIVE ENEMYPOS_STEERHOLD ENEMYPOS_STEERROOM ENEMYPOS_STEERSNAP ENEMYPOS_STEERPULL ENEMYPOS_STEERBUDGET ENEMYPOS_STUCK ENEMYPOS_RIDES_HOST ENEMYPOS_RIDES_GUEST ENEMIES_RIDES && echo KILLED 25 enemy position mutants
 	./build/mule-goal-test
 	python3 -B mutants.py --sources "$(MULEGOAL_SRC)" --prefix build/mutant-mulegoal- MULEGOAL_COMPONENT MULEGOAL_CAPACITY MULEGOAL_KEY MULEGOAL_INDEX MULEGOAL_OFFSET MULEGOAL_NEAR MULEGOAL_DSCOMPONENT MULEGOAL_AGREE MULEGOAL_AI_VTABLE MULEGOAL_WALKING MULEGOAL_D_VTABLE MULEGOAL_WRITABLE MULEGOAL_SAME MULEGOAL_REACH MULEGOAL_RUNNING MULEGOAL_PENDING && echo KILLED 16 mule goal mutants
+	./build/others-test
+	python3 -B mutants.py --sources "$(OTHERS_SRC)" --prefix build/mutant-others- OTHERS_CAP OTHERS_UNKNOWN OTHERS_BUILD OTHERS_SELF OTHERS_LEFT OTHERS_ROLE OTHERS_PAIR OTHERS_STICKY OTHERS_KINDS OTHERS_STALE BODIES_HIDE BODIES_REMOVE BODIES_ONCE BODIES_RATE BODIES_MIX && echo KILLED 15 others mutants
 	./build/guard-test
 	./build/orders-test
 	./build/link-test

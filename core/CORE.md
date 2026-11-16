@@ -399,3 +399,39 @@ oversize, checksum, reserved, range (NaN, infinity, magnitude, zero, index,
 order), sessions (delay, pulse once, rates, ordering, freshness, nonce, reset)
 joints, carts and 100 lossy simulated sessions, with three named mutants (`animationRange`,
 `animationOrder`, `animationRose`).
+
+## Several peers (one core per pair)
+
+The core stays what it is: one configured peer, opposite roles, one shared session number. More than two players are
+handled outside it, by running one `Core` per other player (`mod/others.h`). Nothing in `core.h`, `core.cpp` or the
+wire format changed for this, so a pair of the two-player layer and a pair of others speak the same protocol.
+
+What the adapter chooses per pair:
+
+- **Role.** Every player has a 64-bit id on whatever carries the datagrams. In a pair the lower id is `Host`, the
+  higher `Client` (`pairRole`). The role only satisfies the core's rule that the two ends differ; the host-only
+  packets (ENVIRONMENT, ENEMIES) are never sent between others and are refused before the core if they arrive.
+- **Session.** `pairSession(session, a, b)`: the group's configured session number mixed with both ids (order does
+  not matter), never zero. Both ends compute the same value, and every pair has its own, so a datagram of one pair
+  handed to another pair's core is refused as `wrong session`. Like the checksum and the build pin this is a
+  consistency check, not authentication.
+- **Nonce.** Fresh from the OS for every session object, as before.
+- **Story progress.** Each player has an own save, so the handshake carries `unknown` progress and the `warn` policy:
+  the core never warns and never refuses between others.
+- **Build identity.** As in the two-player adapter: the adapter's wider identity travels in bytes 16..31, is checked
+  on arrival, and the core is given its own pin.
+- **Reliable events (CARGO).** Only the name (type 10) is sent. Any other type that arrives is acknowledged by the
+  core, so the sender's ordered stream does not stop, and then dropped by the adapter.
+- **Teleport flag.** The flag must reach every peer once. Each session keeps it until a PRESENCE carrying it has left
+  for that peer; a flag left set would run into the receiver's five-second teleport limit.
+
+Routing is the carrier's work, not the core's: it hands the adapter each datagram with the sender's id, and the
+adapter gives it to that id's core and to no other. A datagram from an id that is not present is dropped.
+
+Costs to know: every pair has its own handshake, pings, 20 Hz presence and animation samples, so a player among N
+others sends N times what one partner gets (128 bytes at up to 20 Hz each, plus animation samples of up to about
+1 kB at up to 20 Hz each). There is no fan-out packet: sending one presence to many would need a packet without the
+per-peer nonce echo, which is a protocol change that has not been made.
+
+Tests: `mod/others_test.cpp` runs several players over a link in memory (independent clocks, delay, loss), with a
+plain `Core` as one peer to show that an unchanged core on the other end pairs with it.
