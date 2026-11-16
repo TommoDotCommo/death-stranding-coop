@@ -3,8 +3,8 @@ CXX = x86_64-w64-mingw32-g++
 WINDRES ?= $(shell command -v x86_64-w64-mingw32-windres >/dev/null 2>&1 && echo x86_64-w64-mingw32-windres || echo windres)
 FLAGS = -std=c++17 -O2 -Wall -Wextra -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
 # -static: MSYS2's toolchain otherwise links libwinpthread-1.dll dynamically and the binaries fail to start (0xC000007B).
-SRC = core.cpp saves.cpp ../mod/config.cpp ../redirect/path_map.cpp
-HEADERS = core.h saves.h net_win.h launch_win.h firewall_win.h ../mod/config.h ../mod/identity.h ../redirect/startup_policy.h vendor/coop_invite.h vendor/coop_discover.h vendor/coop_discover_win.h
+SRC = core.cpp strand.cpp saves.cpp ../mod/config.cpp ../redirect/path_map.cpp
+HEADERS = core.h strand.h ../world/json.h saves.h net_win.h launch_win.h firewall_win.h ../mod/config.h ../mod/identity.h ../redirect/startup_policy.h vendor/coop_invite.h vendor/coop_discover.h vendor/coop_discover_win.h
 all: build/deathstranding-coop.exe build/net-fixture.exe build/discover-win-test.exe
 build:
 	mkdir -p build

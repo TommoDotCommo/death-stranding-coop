@@ -6,6 +6,8 @@
 #include "net_win.h"
 #include "launch_win.h"
 #include "firewall_win.h"
+#include "strand.h"
+#include "../world/json.h"
 #include <sstream>
 #include <memory>
 using namespace launcher;
@@ -23,8 +25,11 @@ std::wstring player=L"Porter",gameFolder;
 std::string pasted,lastState,lastRows,saveNote;   // saveNote: what happened to the guest's saves, kept on the lobby page
 uint32_t requestedSecret=0,lastScan=0,groupSecret=0;   // groupSecret: the key of the group this player hosts (settings)
 uint64_t playerNumber=0;                                // this player's number on a group's relay (core.h playerId; settings)
+std::string groupPolicy="friends";                      // the rules the host's launcher gives a new group world (settings)
+Session strandSession;bool haveStrand=false;            // the group server this launcher last hosted or joined: "My strand on this server"
 std::vector<HWND> controls[4];
-enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import,Remove,GroupHost};
+enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import,Remove,GroupHost,GroupPolicy,Strand};
+const char* PolicyNames[]={"friends","solo","public"};
 HWND child(int id){return GetDlgItem(window,id);}
 std::wstring text(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(n+1,0);GetWindowTextW(h,s.data(),n+1);s.resize(n);return s;}
 std::string utf8(const std::wstring& s){if(s.empty())return {};int n=WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),nullptr,0,nullptr,nullptr);std::string v(n,0);WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),v.data(),n,nullptr,nullptr);return v;}
@@ -90,11 +95,13 @@ void removeSetup(HWND h){
     if(!setupRemove(executable.parent_path(),gameFolder))throw std::runtime_error("The avrt.dll in the game folder is not this package's (another version or another mod). It was left alone.");
     MessageBoxW(h,L"Removed. The game starts without co-op.",L"Remove co-op",MB_OK);
 }
+// launcher.ini: the [launcher] settings, and a [server-ID] section per group server with the player's choices there.
+std::string readIni(){std::ifstream f(settingsFile,std::ios::binary);return std::string((std::istreambuf_iterator<char>(f)),{});}
 void writeSettings(){
     std::string name=utf8(player),game=utf8(gameFolder);
     if(name.find_first_of("\r\n")!=std::string::npos||game.find_first_of("\r\n")!=std::string::npos)return;
-    atomicWrite(settingsFile,"[launcher]\nname="+name+"\ngame="+game+"\nchoice="+std::to_string(choice)+"\nport="+std::to_string(port)+"\nlan="+std::to_string(lan)+"\ntailscale="+std::to_string(tailscale)+"\nprivacy="+std::to_string(privacy)+"\nworld="+std::to_string(sharedWorld)
-        +"\ngroup="+std::to_string(groupHost)+"\ngroup_secret="+std::to_string(groupSecret)+"\nplayer_id="+std::to_string(playerNumber)+"\n");
+    atomicWrite(settingsFile,settingsText(readIni(),{{"name",name},{"game",game},{"choice",std::to_string(choice)},{"port",std::to_string(port)},{"lan",std::to_string(lan)},{"tailscale",std::to_string(tailscale)},
+        {"privacy",std::to_string(privacy)},{"world",std::to_string(sharedWorld)},{"group",std::to_string(groupHost)},{"group_secret",std::to_string(groupSecret)},{"player_id",std::to_string(playerNumber)},{"group_policy",groupPolicy}}));
 }
 void saveSettings(){if(!initializing)writeSettings();}
 // Group play: this launcher's player number, made once and kept (never the Steam id), and the key of the group this
@@ -109,8 +116,137 @@ uint32_t groupKey(){if(!groupSecret){groupSecret=random32();writeSettings();}ret
 // Windows Firewall's verdict for the game's two UDP ports, read when the launcher starts and when a lobby opens.
 Firewall firewall=Firewall::Unknown;
 void readFirewallNow(){if(!gameFolder.empty())firewall=readFirewall(fs::path(gameFolder)/"ds.exe",{port,port+1});}
-Session chosenSession(){Session s;s.name=utf8(player);s.port=port;s.sharedWorld=sharedWorld;s.playerId=playerNumber;return s;}   // a guest's choice is replaced by the host's (net_win.h)
+Session chosenSession(){Session s;s.name=utf8(player);s.port=port;s.sharedWorld=sharedWorld;s.playerId=playerNumber;s.policy=groupPolicy;return s;}   // a guest's choice is replaced by the host's (net_win.h)
 void render();
+// ---- A group server's rules (strand.h): the join screen and "My strand on this server", each a window of its own
+// over the launcher, which is disabled while one is open. Built without being seen on a screen (README).
+struct Popup {HWND h=nullptr;bool done=false;int result=0;std::function<void(int)> command;};
+Popup* popup=nullptr;
+LRESULT CALLBACK popupProcedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
+    try{
+        if(msg==WM_COMMAND&&popup&&popup->h==h&&HIWORD(wp)==BN_CLICKED){popup->command(LOWORD(wp));return 0;}
+        if(msg==WM_CLOSE&&popup&&popup->h==h){popup->done=true;return 0;}
+    }catch(const std::exception& e){MessageBoxW(h,wtext(e.what()).c_str(),L"Death Stranding co-op - try again",MB_OK|MB_ICONERROR);}
+    return DefWindowProcW(h,msg,wp,lp);
+}
+HWND popupControl(HWND parent,int id,const wchar_t* klass,const wchar_t* label,DWORD style,int x,int y,int w,int h){
+    bool framed=wcscmp(klass,L"EDIT")==0||wcscmp(klass,L"LISTBOX")==0;
+    auto c=CreateWindowExW(framed?WS_EX_CLIENTEDGE:0,klass,label,WS_CHILD|WS_VISIBLE|(wcscmp(klass,L"STATIC")?WS_TABSTOP:0)|style,x,y,w,h,parent,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);
+    SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(font),TRUE);return c;}
+// One popup until it is closed (Esc or the close box: result 0). Its owner (the launcher, or the popup it was opened
+// from) waits meanwhile.
+int runPopup(Popup& p,const wchar_t* title,int width,int height,const std::function<void(HWND)>& build){
+    static bool registered=false;
+    if(!registered){WNDCLASSW cls{};cls.hInstance=GetModuleHandleW(nullptr);cls.lpszClassName=L"DeathStrandingCoopPopup";cls.lpfnWndProc=popupProcedure;cls.hCursor=LoadCursorW(nullptr,IDC_ARROW);cls.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);RegisterClassW(&cls);registered=true;}
+    HWND owner=popup?popup->h:window;RECT r;GetWindowRect(owner,&r);
+    p.h=CreateWindowExW(WS_EX_CONTROLPARENT|WS_EX_DLGMODALFRAME,L"DeathStrandingCoopPopup",title,WS_POPUP|WS_CAPTION|WS_SYSMENU,r.left+30,r.top+30,width,height,owner,nullptr,GetModuleHandleW(nullptr),nullptr);
+    if(!p.h)throw std::runtime_error("Cannot open the window.");
+    auto previous=popup;popup=&p;
+    try{build(p.h);}catch(...){popup=previous;DestroyWindow(p.h);throw;}
+    EnableWindow(owner,FALSE);ShowWindow(p.h,SW_SHOW);
+    MSG msg{};BOOL got=1;
+    while(!p.done&&(got=GetMessageW(&msg,nullptr,0,0))>0){
+        if(msg.message==WM_KEYDOWN&&msg.wParam==VK_ESCAPE){p.done=true;p.result=0;continue;}
+        if(!IsDialogMessageW(p.h,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
+    EnableWindow(owner,TRUE);DestroyWindow(p.h);popup=previous;SetForegroundWindow(owner);
+    if(got==0)PostQuitMessage(int(msg.wParam));   // the launcher was asked to close meanwhile
+    return p.result;
+}
+// The join screen, and "My choices": the server's rules in words, what the player has there, his two choices for
+// this server. true: he chose (in `c`); false: he cancelled.
+bool choicesScreen(const strand::Policy& rules,const std::string& mine,strand::Choices& c,const wchar_t* go){
+    enum {Rules=401,BuildYes,BuildNo,BuildAsk,OldYes,OldNo,Go,Cancel};
+    Popup pop;auto checked=[&](int id){return SendMessageW(GetDlgItem(pop.h,id),BM_GETCHECK,0,0)==BST_CHECKED;};
+    pop.command=[&](int id){
+        if(id==Go){c.offerBuilds=checked(BuildYes)?"yes":checked(BuildNo)?"no":"ask";c.offerOld=checked(OldYes)?"yes":"no";pop.result=1;pop.done=true;}
+        if(id==Cancel)pop.done=true;};
+    return runPopup(pop,L"Before you join: this server's rules",800,650,[&](HWND h){
+        popupControl(h,Rules,L"EDIT",wtext(rules.text()+"\r\n\r\n"+mine).c_str(),ES_READONLY|ES_MULTILINE|WS_VSCROLL,20,20,744,300);
+        popupControl(h,0,L"STATIC",L"Share what I build here:",SS_LEFT,20,335,744,24);
+        popupControl(h,BuildYes,L"BUTTON",L"Yes: the other players can be handed it, as the rules above say",BS_AUTORADIOBUTTON|WS_GROUP,40,362,720,26);
+        popupControl(h,BuildNo,L"BUTTON",L"No: keep it for me alone (a personal archive on this server)",BS_AUTORADIOBUTTON,40,390,720,26);
+        popupControl(h,BuildAsk,L"BUTTON",L"Ask me: it waits until I offer it (Play, My strand on this server)",BS_AUTORADIOBUTTON,40,418,720,26);
+        popupControl(h,0,L"STATIC",L"Let this server take my older strand (recorded only: nothing is taken over yet):",SS_LEFT,20,458,744,24);
+        popupControl(h,OldYes,L"BUTTON",L"Yes",BS_AUTORADIOBUTTON|WS_GROUP,40,485,120,26);popupControl(h,OldNo,L"BUTTON",L"No",BS_AUTORADIOBUTTON,180,485,120,26);
+        popupControl(h,Go,L"BUTTON",go,BS_DEFPUSHBUTTON|WS_GROUP,20,545,480,40);popupControl(h,Cancel,L"BUTTON",L"Cancel",0,520,545,244,40);
+        SendMessageW(GetDlgItem(h,c.offerBuilds=="no"?BuildNo:c.offerBuilds=="ask"?BuildAsk:BuildYes),BM_SETCHECK,BST_CHECKED,0);
+        SendMessageW(GetDlgItem(h,c.offerOld=="yes"?OldYes:OldNo),BM_SETCHECK,BST_CHECKED,0);SetFocus(GetDlgItem(h,Go));})==1;
+}
+// Before a joiner's game connects: the server's rules and his choices for it (remembered per server, sent to it).
+// false: he cancelled, nothing is started. An older server without rules to show is said so and joined.
+bool agreeToServer(const Session& s){
+    auto t=strand::target(s,steamAccount());
+    if(t.account.empty())throw std::runtime_error("Your Steam account is not known yet. Start Steam, then try again.");
+    auto send=strand::transport(t);strand::Policy rules;auto fetched=strand::fetchPolicy(t,send,rules);
+    if(fetched==strand::Fetch::Old){MessageBoxW(window,wtext(strand::fetchText(fetched)).c_str(),L"Group server",MB_OK|MB_ICONINFORMATION);return true;}
+    if(fetched!=strand::Fetch::Ok)throw std::runtime_error(strand::fetchText(fetched));
+    strand::Me me;std::string why;auto chosen=strand::remembered(readIni(),rules);
+    std::string mine=strand::fetchMe(t,send,me,why)?me.text():why;
+    if(me.known&&!me.offerBuilds.empty())chosen.offerBuilds=me.offerBuilds;   // what the server has for him, when he chose there before
+    if(me.known&&!me.offerOld.empty())chosen.offerOld=me.offerOld;
+    if(!choicesScreen(rules,mine,chosen,L"Join with these choices"))return false;
+    auto j=strand::join(t,send,readIni(),chosen);atomicWrite(settingsFile,j.ini);
+    if(!j.start)throw std::runtime_error(j.message);
+    saveNote=j.message;return true;
+}
+// "My strand on this server": what the player built on the group server he last hosted or joined, its state and
+// likes; his offer and withdrawal of the selected rows or of all; his choices there.
+void strandView(){
+    if(!haveStrand)throw std::runtime_error("Host or join a group server first.");
+    auto t=strand::target(strandSession,steamAccount());
+    if(t.account.empty())throw std::runtime_error("Your Steam account is not known yet. Start Steam, then try again.");
+    auto send=strand::transport(t);
+    enum {Info=501,List,Note,OfferSelected,WithdrawSelected,OfferAll,WithdrawAll,Mine,Refresh,Close};
+    Popup pop;strand::Policy rules;bool shown=false;strand::Me me;std::vector<strand::Object> rows;
+    auto item=[&](int id){return GetDlgItem(pop.h,id);};
+    auto note=[&](const std::string& text){SetWindowTextW(item(Note),wtext(text).c_str());};
+    auto refresh=[&]{
+        std::string why;auto fetched=strand::fetchPolicy(t,send,rules);shown=fetched==strand::Fetch::Ok;std::string info=shown?rules.text():strand::fetchText(fetched);
+        me=strand::Me();
+        if(shown&&strand::fetchMe(t,send,me,why))info+="\r\n\r\n"+me.text()+(me.known?"\r\nYour choices here: "+strand::choicesText({me.offerBuilds.empty()?rules.value("offer_builds"):me.offerBuilds,me.offerOld.empty()?rules.value("offer_old"):me.offerOld})+".":"");
+        SetWindowTextW(item(Info),wtext(info).c_str());
+        SendMessageW(item(List),LB_RESETCONTENT,0,0);rows.clear();
+        if(shown&&strand::fetchMine(t,send,rows,why)){for(auto& o:rows){auto w=wtext(o.text());SendMessageW(item(List),LB_ADDSTRING,0,reinterpret_cast<LPARAM>(w.c_str()));}
+            note(rows.empty()?"Nothing you built is on this server yet.":std::to_string(rows.size())+" of your objects on this server. Select rows, then Offer or Withdraw.");}
+        else note(shown?why:"");
+        for(int id:{OfferSelected,WithdrawSelected,OfferAll,WithdrawAll,Mine})EnableWindow(item(id),shown);};
+    auto act=[&](const char* call,bool all){
+        std::vector<std::string> ids;
+        if(all)ids.push_back("");
+        else{int n=int(SendMessageW(item(List),LB_GETSELCOUNT,0,0));std::vector<int> at(size_t(n>0?n:0));
+            if(n>0)SendMessageW(item(List),LB_GETSELITEMS,WPARAM(n),reinterpret_cast<LPARAM>(at.data()));
+            for(int i:at)if(i>=0&&size_t(i)<rows.size())ids.push_back(rows[size_t(i)].id);}
+        if(ids.empty())throw std::runtime_error("Select one or more rows first.");
+        if(std::string(call)=="withdraw"&&MessageBoxW(pop.h,rules.value("withdrawal")=="stay"
+                ?L"Take these back from this server?\n\nWhat you shared stays for the other players as a remnant under your name that nobody owns, not even you. The rest is removed. The server does not touch your save."
+                :L"Take these back from this server?\n\nThey are removed for every player. The server does not touch your save.",L"Withdraw",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
+        std::string said;
+        for(auto& id:ids){std::string result;strand::act(t,send,call,id,result);said+=(said.empty()?"":" ")+result;}
+        refresh();note(said);};
+    pop.command=[&](int id){
+        if(id==OfferSelected)act("offer",false);
+        if(id==WithdrawSelected)act("withdraw",false);
+        if(id==OfferAll)act("offer",true);
+        if(id==WithdrawAll)act("withdraw",true);
+        if(id==Refresh)refresh();
+        if(id==Close)pop.done=true;
+        if(id==Mine){
+            auto chosen=strand::remembered(readIni(),rules);
+            if(me.known&&!me.offerBuilds.empty())chosen.offerBuilds=me.offerBuilds;
+            if(me.known&&!me.offerOld.empty())chosen.offerOld=me.offerOld;
+            if(!choicesScreen(rules,me.text(),chosen,L"Save my choices for this server"))return;
+            auto j=strand::join(t,send,readIni(),chosen);atomicWrite(settingsFile,j.ini);refresh();note(j.message);
+            if(!j.start)throw std::runtime_error(j.message);}};
+    runPopup(pop,L"My strand on this server",860,700,[&](HWND h){
+        popupControl(h,Info,L"EDIT",L"",ES_READONLY|ES_MULTILINE|WS_VSCROLL,20,20,804,210);
+        popupControl(h,List,L"LISTBOX",L"",LBS_EXTENDEDSEL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|WS_VSCROLL,20,240,804,250);
+        popupControl(h,Note,L"STATIC",L"",SS_LEFT,20,498,804,44);
+        popupControl(h,OfferSelected,L"BUTTON",L"Offer selected",0,20,550,195,36);popupControl(h,WithdrawSelected,L"BUTTON",L"Withdraw selected",0,223,550,195,36);
+        popupControl(h,OfferAll,L"BUTTON",L"Offer all",0,426,550,195,36);popupControl(h,WithdrawAll,L"BUTTON",L"Withdraw all",0,629,550,195,36);
+        popupControl(h,Mine,L"BUTTON",L"My choices for this server",0,20,600,395,36);popupControl(h,Refresh,L"BUTTON",L"Refresh",0,426,600,195,36);
+        popupControl(h,Close,L"BUTTON",L"Close",BS_DEFPUSHBUTTON,629,600,195,36);
+        refresh();});
+}
 // Group play (README "A group on one server"). The host's invite: the group's key, the server's port and this PC's
 // addresses. It is the same every session while the key and the addresses stay the same.
 bool hostingGroup(){return groupHost&&choice==0&&!net->lobby;}
@@ -120,13 +256,15 @@ std::string groupCode(){
     return code;
 }
 void startGroup(){
-    Session s=chosenSession();s.group=Group::Host;s.secret=groupKey();options.game=gameFolder;launchGame(options,s);
+    Session s=chosenSession();s.group=Group::Host;s.secret=groupKey();options.game=gameFolder;launchGame(options,s);strandSession=s;haveStrand=true;
     net->status=options.prepareOnly?"Configuration prepared; no game started.":"Group server started on this PC; Steam launch requested using separate co-op saves. Friends can join with the invite at any time.";
 }
 void joinGroup(const ci_invite& invite){
     auto s=groupJoin(invite,groupRoute(invite,probeServers(invite)),chosenSession());
+    saveNote.clear();if(!agreeToServer(s)){net->status="Not joined: you cancelled before the game started.";return;}
+    strandSession=s;haveStrand=true;
     options.game=gameFolder;launchGame(options,s);
-    net->status=options.prepareOnly?"Configuration prepared; no game started.":"Joining the group's server at "+s.server+". Steam launch requested using separate co-op saves.";
+    net->status=(options.prepareOnly?"Configuration prepared; no game started.":"Joining the group's server at "+s.server+". Steam launch requested using separate co-op saves.")+(saveNote.empty()?"":" "+saveNote);
 }
 const wchar_t* primaryLabel(){return net->lobby?L"Start game":choice==0?(groupHost?L"Start group server and play":L"Open lobby"):choice==1?(pasteGroup?L"Join group":L"Join selected host"):L"Play solo";}
 // The report for a bug report (core.h `diagnostics`), saved in the co-op data folder. The header is what only the
@@ -168,7 +306,8 @@ void render(){
     if(selectedTab==0){
         place(200,30,115,120,24);place(Name,155,110,w-185,28);
         for(int i=0;i<3;++i){place(Host+i,30+i*(w-60)/3,155,(w-75)/3,56);SendMessageW(child(Host+i),BM_SETCHECK,i==choice?BST_CHECKED:BST_UNCHECKED,0);show(Host+i,!net->lobby);}
-        place(201,30,230,w-60,28);place(Paste,30,260,w-60,30);place(202,30,298,w-60,25);place(Rows,30,330,w-60,h-480);
+        bool strandShown=haveStrand&&!net->lobby;show(Strand,strandShown);place(Strand,30,h-182,w-60,40);
+        place(201,30,230,w-60,28);place(Paste,30,260,w-60,30);place(202,30,298,w-60,25);place(Rows,30,330,w-60,h-480-(strandShown?50:0));
         place(Status,30,h-132,w-60,50);place(Primary,30,h-70,w-60,40);
         bool join=choice==1&&!net->lobby;show(201,join);show(Paste,join);show(202,join);show(Rows,join);show(Primary,!net->lobby||net->hosting);
         set(Primary,primaryLabel());
@@ -185,8 +324,8 @@ void render(){
         set(Status,wtext(net->status));refreshRows();
     }
     if(selectedTab==1){place(210,30,120,w-60,65);place(211,30,200,w-60,180);place(OpenSaves,30,400,(w-75)/2,40);place(BackUp,45+(w-75)/2,400,(w-75)/2,40);place(Import,30,455,w-60,40);}
-    if(selectedTab==2){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(Lan,30,270,w-60,30);place(Tailscale,30,310,w-60,30);place(Privacy,30,350,w-60,30);place(World,30,390,w-60,30);place(GroupHost,30,430,w-60,30);place(Protocol,30,475,w-60,40);place(222,30,530,w-60,80);
-        bool edit=!net->lobby;for(int id:{GamePath,Port,Lan,Tailscale,Privacy,World,GroupHost})EnableWindow(child(id),edit);}
+    if(selectedTab==2){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(Lan,30,270,w-60,30);place(Tailscale,30,310,w-60,30);place(Privacy,30,350,w-60,30);place(World,30,390,w-60,30);place(GroupHost,30,430,w-60,30);place(223,30,472,330,25);place(GroupPolicy,370,468,w-400,120);place(Protocol,30,515,w-60,40);place(222,30,565,w-60,60);
+        bool edit=!net->lobby;for(int id:{GamePath,Port,Lan,Tailscale,Privacy,World,GroupHost,GroupPolicy})EnableWindow(child(id),edit);}
     if(selectedTab==3){place(230,30,120,w-60,240);place(Guide,30,390,w-60,40);place(Home,30,445,w-60,40);place(Diagnose,30,500,w-60,40);place(Remove,30,555,w-60,40);}
 }
 void copyInvite(){
@@ -261,6 +400,7 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
             if(id==Name&&event==EN_CHANGE){player=text(child(Name));saveSettings();}
             if(id==GamePath&&event==EN_CHANGE){gameFolder=text(child(GamePath));saveSettings();}
             if(id==Port&&event==EN_CHANGE){auto v=utf8(text(child(Port)));if(!v.empty()&&v.find_first_not_of("0123456789")==std::string::npos&&v.size()==5){auto p=std::stoul(v);if(p>=49000&&p<=49014){port=unsigned(p);saveSettings();}}}
+            if(id==GroupPolicy&&event==CBN_SELCHANGE){auto i=SendMessageW(child(GroupPolicy),CB_GETCURSEL,0,0);if(i>=0&&i<3){groupPolicy=PolicyNames[i];saveSettings();}}
             if(id==Paste&&event==EN_CHANGE){auto s=utf8(text(child(Paste)));cr_result r{};bool group=false;int kind=recognise(s,r,group);char desc[256];
                 pasteGroup=group&&(kind==CR_INVITE||kind==CR_LINK);
                 set(202,pasteGroup?wtext("Group invite: "+std::to_string(r.invite.n)+(r.invite.n==1?" route":" routes")+" to the group's server. Join starts your game there; there is no lobby."):wtext(cr_describe(&r,desc,sizeof(desc))));
@@ -268,6 +408,7 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
             if(event==BN_CLICKED){
                 if(id>=Host&&id<=Solo){choice=id-Host;saveSettings();render();scan(true);}
                 if(id==Primary)primary();
+                if(id==Strand)strandView();
                 if(id==Copy)copyInvite();
                 if(id==Leave){net->leave();render();}
                 if(id==Ready){net->setReady();render();}
@@ -297,7 +438,7 @@ void buildControls(){
     control(0,Host,L"BUTTON",L"Host a game",BS_AUTORADIOBUTTON|WS_GROUP);control(0,Join,L"BUTTON",L"Join a friend",BS_AUTORADIOBUTTON);control(0,Solo,L"BUTTON",L"Play solo",BS_AUTORADIOBUTTON);
     label(0,201,L"Paste an invite code, link, address or Tailscale name");control(0,Paste,L"EDIT",L"",ES_AUTOHSCROLL);SendMessageW(child(Paste),EM_SETLIMITTEXT,CR_INPUT_MAX,0);
     label(0,202,L"LAN and Tailscale hosts appear below.");control(0,Rows,L"LISTBOX",L"",LBS_NOTIFY|WS_VSCROLL|WS_BORDER);label(0,Status,L"");control(0,Primary,L"BUTTON",L"Open lobby",BS_DEFPUSHBUTTON);
-    label(0,203,L"");control(0,Invite,L"EDIT",L"",ES_READONLY|ES_MULTILINE);control(0,Copy,L"BUTTON",L"Copy invite");control(0,Leave,L"BUTTON",L"Leave lobby");control(0,Ready,L"BUTTON",L"Ready");control(0,HostSave,L"BUTTON",L"",BS_AUTOCHECKBOX|BS_MULTILINE|BS_TOP);
+    label(0,203,L"");control(0,Strand,L"BUTTON",L"My strand on this server");control(0,Invite,L"EDIT",L"",ES_READONLY|ES_MULTILINE);control(0,Copy,L"BUTTON",L"Copy invite");control(0,Leave,L"BUTTON",L"Leave lobby");control(0,Ready,L"BUTTON",L"Ready");control(0,HostSave,L"BUTTON",L"",BS_AUTOCHECKBOX|BS_MULTILINE|BS_TOP);
     label(1,210,L"Co-op saves\nOnly the separate co-op save trees are included in backups. Close the game first.");
     label(1,211,(L"Co-op data:\n"+options.data.wstring()+L"\n\nSave trees: redirect-data\\local, roaming, documents, savedgames, profile\n\nBackups: backups\\<time>\nYour ordinary game saves are opened only when you choose Copy my Steam saves, and then only read.").c_str());
     control(1,OpenSaves,L"BUTTON",L"Open co-op save folder");control(1,BackUp,L"BUTTON",L"Back up co-op saves");control(1,Import,L"BUTTON",L"Copy my Steam saves into co-op");
@@ -306,7 +447,10 @@ void buildControls(){
     control(2,Lan,L"BUTTON",L"Find games on my network",BS_AUTOCHECKBOX);control(2,Tailscale,L"BUTTON",L"Find friends on Tailscale",BS_AUTOCHECKBOX);control(2,Privacy,L"BUTTON",L"Invite only (host decides)",BS_AUTOCHECKBOX);control(2,World,L"BUTTON",L"Shared world (experimental; the host decides): each other's ladders and cairns through the game's own online layer",BS_AUTOCHECKBOX);
     SendMessageW(child(Lan),BM_SETCHECK,lan?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Tailscale),BM_SETCHECK,tailscale?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Privacy),BM_SETCHECK,privacy?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(World),BM_SETCHECK,sharedWorld?BST_CHECKED:BST_UNCHECKED,0);
     control(2,GroupHost,L"BUTTON",L"Group server (experimental): Host a game starts a server for many players, each in their own save, instead of a two-player lobby",BS_AUTOCHECKBOX);SendMessageW(child(GroupHost),BM_SETCHECK,groupHost?BST_CHECKED:BST_UNCHECKED,0);
-    control(2,Protocol,L"BUTTON",L"Open deathstranding-coop invite links in this launcher");label(2,222,L"Settings are saved on change. Each game uses two adjacent UDP ports.\nCo-op networking is always enforced offline. Other co-op rules, voice, controller navigation and router mapping are not available yet.");
+    label(2,223,L"Rules of a new group world:");control(2,GroupPolicy,L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL);
+    for(auto name:{L"Friends: everything shared",L"Solo archive: one player",L"Public: members, review, limits"})SendMessageW(child(GroupPolicy),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
+    for(int i=0;i<3;++i)if(groupPolicy==PolicyNames[i])SendMessageW(child(GroupPolicy),CB_SETCURSEL,i,0);
+    control(2,Protocol,L"BUTTON",L"Open deathstranding-coop invite links in this launcher");label(2,222,L"Settings are saved on change. Each game uses two adjacent UDP ports. A group world that exists keeps its own rules.\nCo-op networking is always enforced offline. Voice, controller navigation and router mapping are not available yet.");
     label(3,230,(L"Death Stranding co-op 0.1.0-dev\nSteam Director's Cut build 13300582\n\nExperimental; not a playable release. Native Windows launcher.\nCo-op mod standard: Play, Saves, Settings, About; DS invites and LAN/Tailscale discovery.\n\nInvite/discovery reference code: coop-mod-kit (MIT).\nNot affiliated with Kojima Productions or the game's publishers.\n\nWire version: "+wtext(wireVersion())).c_str());
     control(3,Guide,L"BUTTON",L"Quick guide (F1)");control(3,Home,L"BUTTON",L"Project and issue tracker");control(3,Diagnose,L"BUTTON",L"Save diagnostics for a bug report");control(3,Remove,L"BUTTON",L"Remove co-op from the game");
 }
@@ -320,8 +464,10 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         choice=int(GetPrivateProfileIntW(L"launcher",L"choice",0,settingsFile.c_str()));if(choice<0||choice>2)choice=0;
         port=GetPrivateProfileIntW(L"launcher",L"port",49000,settingsFile.c_str());if(port<49000||port>49014)port=49000;
         lan=GetPrivateProfileIntW(L"launcher",L"lan",1,settingsFile.c_str());tailscale=GetPrivateProfileIntW(L"launcher",L"tailscale",1,settingsFile.c_str());privacy=GetPrivateProfileIntW(L"launcher",L"privacy",0,settingsFile.c_str());sharedWorld=GetPrivateProfileIntW(L"launcher",L"world",0,settingsFile.c_str())!=0;groupHost=GetPrivateProfileIntW(L"launcher",L"group",0,settingsFile.c_str())!=0;
+        {auto kept=utf8(read(L"group_policy",L"friends"));for(auto name:PolicyNames)if(kept==name)groupPolicy=name;}
         bool registerOnly=false,devStart=false,diagnosticsOnly=false,firewallOnly=false,forceWorld=false,devSessionGiven=false;std::string devPeer="127.0.0.1",groupTarget;uint32_t devSession=1;fs::path takeSave;
         int groupMode=0;   // --group-host (1), --group-join INVITE-OR-ADDRESS (2)
+        strand::Choices given;std::string strandReport;bool policyGiven=false;   // --strand-builds, --strand-old, --strand-policy FILE|-; --group-policy
         int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);if(!argv)throw std::runtime_error("Cannot read launcher arguments.");
         for(int i=1;i<argc;++i){std::wstring a=argv[i];auto value=[&](){if(++i>=argc)throw std::runtime_error("Missing launcher option value.");return std::wstring(argv[i]);};
             if(a==L"--dev-direct")options.direct=true;
@@ -338,6 +484,10 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
             else if(a==L"--group-host")groupMode=1;
             else if(a==L"--group-join"){groupMode=2;groupTarget=utf8(value());}
             else if(a==L"--dev-client")choice=1;
+            else if(a==L"--strand-builds")given.offerBuilds=utf8(value());
+            else if(a==L"--strand-old")given.offerOld=utf8(value());
+            else if(a==L"--strand-policy")strandReport=utf8(value());
+            else if(a==L"--group-policy"){auto v=utf8(value());bool known=false;for(auto name:PolicyNames)known|=v==name;if(!known)throw std::runtime_error("--group-policy is friends, solo or public.");groupPolicy=v;policyGiven=true;}
             else if(a==L"--dev-take-save")takeSave=value();
             else if(a==L"--port"){auto raw=utf8(value());if(raw.size()!=5||raw.find_first_not_of("0123456789")!=std::string::npos)throw std::runtime_error("Host port must be 49000..49014.");auto v=std::stoul(raw);if(v<49000||v>49014)throw std::runtime_error("Host port must be 49000..49014.");port=unsigned(v);}
             else if(a.rfind(L"deathstranding-coop://",0)==0){pasted=utf8(a);choice=1;}
@@ -349,6 +499,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         auto defaultData=known(FOLDERID_LocalAppData)/"DeathStrandingCoop";
         if(!options.direct&&!equalPath(options.data,defaultData))throw std::runtime_error("Custom data folders require --dev-direct.");
         if(devStart&&!options.direct)throw std::runtime_error("--dev-start requires --dev-direct.");
+        if((!given.offerBuilds.empty()||!given.offerOld.empty()||!strandReport.empty())&&!(devStart&&groupMode==2))throw std::runtime_error("--strand-builds, --strand-old and --strand-policy go with --dev-direct --dev-start --group-join.");
+        if(policyGiven&&!(devStart&&groupMode==1))throw std::runtime_error("--group-policy goes with --dev-direct --dev-start --group-host.");
         if(options.direct&&equalPath(options.data,defaultData)&&!environment(L"COOP_MODULE_INSTANCE").empty())options.data=environment(L"COOP_MODULE_INSTANCE");
         wchar_t self[32768];GetModuleFileNameW(nullptr,self,32768);executable=self;options.world=executable.parent_path()/L"coop-world.exe";
         if(registerOnly){registerHandler(executable);return 0;}
@@ -378,6 +530,19 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
                     ci_invite v{};v.secret=devSession;v.port=uint16_t(r.port?r.port:worldPort(s));v.n=1;v.route[0].kind=CI_LAN;memcpy(v.route[0].ip,r.ip,4);
                     s=groupJoin(v,0,s);
                 } else throw std::runtime_error("--group-join needs a group invite (DSG-...) or the server's numeric address.");
+                // The server's rules and this player's choices before the game connects, without a window: the
+                // remembered choices with the flags over them, sent (also with --prepare-only), and a report.
+                auto t=strand::target(s,steamAccount());auto before=readIni();auto j=strand::join(t,strand::transport(t),before,given);
+                if(j.ini!=before)atomicWrite(settingsFile,j.ini);
+                if(!strandReport.empty()){
+                    const char* names[]={"ok","old","wrong-key","unreachable","bad"};
+                    json::Value report=json::Value::object();report.set("fetched",names[int(j.fetched)]);report.set("start",j.start);report.set("message",j.message);report.set("account",t.account);
+                    json::Value chosen=json::Value::object();chosen.set("offer_builds",j.choices.offerBuilds);chosen.set("offer_old",j.choices.offerOld);report.set("choices",chosen);
+                    json::Value policy;try{if(!j.raw.empty())policy=json::parse(j.raw);}catch(const std::exception&){}
+                    report.set("policy",policy);auto line=report.dump()+"\n";
+                    if(strandReport=="-"){DWORD n=0;HANDLE out=GetStdHandle(STD_OUTPUT_HANDLE);if(out&&out!=INVALID_HANDLE_VALUE)WriteFile(out,line.data(),DWORD(line.size()),&n,nullptr);}
+                    else{std::ofstream f(strandReport,std::ios::binary|std::ios::trunc);f<<line;if(!f)throw std::runtime_error("Cannot write the --strand-policy file.");}}
+                if(!j.start)return 3;   // refused: no game, no dialog
             }
             launchGame(options,s);return 0;
         }

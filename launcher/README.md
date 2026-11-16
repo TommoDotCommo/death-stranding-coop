@@ -94,15 +94,19 @@ talks to that server only (`../README.md`, "A group on one server"; `../mod/READ
 their own co-op save. Near each other, players see each other (presence only, with names); the server also carries
 the game's own online layer as under "Shared world".
 
-**Host.** Settings, "Group server". Then Play, Host a game shows the group invite and **Start group server and
-play** instead of a lobby:
+**Host.** Settings, "Group server", and "Rules of a new group world": Friends (everything shared), Solo archive (one
+player) or Public (members' builds only, the owner's review, 200 objects per player, withdrawn objects stay as
+remnants); `group_policy` in `launcher.ini`, `../world/README.md` "Server policy" for what each means. Then Play, Host
+a game shows the group invite and **Start group server and play** instead of a lobby:
 
 1. The launcher makes the group's key once (a random nonzero 32-bit number, `group_secret` in `launcher.ini`), so
    the invite stays good between sessions. Delete that line for a new key.
 2. It starts `coop-world.exe` (beside the launcher) with `--port P --bind 0.0.0.0 --prefix wKEY --data
-   world\world.json --idle-exit 21600 --relay-port P --relay-key wKEY`: the shared world on TCP port P and the relay on
-   UDP port P, P = 49100 + the slot of the port in Settings (49100 by default). A server already running keeps
-   serving; the second start leaves. It stops by itself six hours after the last player.
+   world\world.json --idle-exit 21600 --policy RULES --relay-port P --relay-key wKEY`: the shared world on TCP port P
+   and the relay on UDP port P, P = 49100 + the slot of the port in Settings (49100 by default). `--policy` gives a new
+   world its rules; a world that exists keeps its own (the owner changes them with `coop-world policy` while the
+   server is stopped). A server already running keeps serving; the second start leaves. It stops by itself six hours
+   after the last player.
 3. It writes the host's `mod.json`: no `peer`, `server` `127.0.0.1`, `relay` `127.0.0.1:P`, `relay_key` `wKEY`,
    `session` KEY, `player_id`, `others` 15, `partner_tag`, `online_server` `http://127.0.0.1:P/wKEY/auth/ds`, and
    the play setup's `game_thread`, `puppet_probe`, `required`. The proxy's peer list is `127.0.0.1`.
@@ -117,9 +121,11 @@ copied one is offered from the clipboard), **Join group**:
 1. The launcher tries a TCP connection to the server port on every address in the invite, all at once for at most
    1.5 s, and takes the first address in the invite's order (LAN before Tailscale) that answered. None: it says so
    and starts nothing.
-2. It writes the joiner's `mod.json`: the same keys as the host's with that address as `server`, in `relay` and in
+2. It shows the server's rules and asks for the joiner's choices there (below, "Before you join"). Cancel: nothing is
+   started.
+3. It writes the joiner's `mod.json`: the same keys as the host's with that address as `server`, in `relay` and in
    `online_server`, and the joiner's own `player_id`. The proxy's peer list is that one address.
-3. It starts the game. There is no Ready or Start and the host's launcher need not be open, only the server.
+4. It starts the game. There is no Ready or Start and the host's launcher need not be open, only the server.
 
 A joiner on the host's own PC (two copies, one Steam account) reaches the server on loopback and signs in to the
 shared world under a name made from its player id (`/k/p<id>`).
@@ -134,13 +140,69 @@ finds no host). Whoever has the invite can join; it is the only secret, and it t
 562949953421312, inside the 15 digits the mod's config takes) and kept. It is not the Steam id and says nothing about
 the player; two installs have two numbers.
 
+**Before you join: the server's rules.** The rule behind it: before a game connects, its player sees what the server
+will take from him and what it will show him; the server's owner sets the server's rules, the player sets the rules
+of his own contributions. So before the joiner's game starts, the launcher asks the server (its launcher API,
+`../world/README.md` "The launcher's API") and shows one screen:
+
+- The rules in words, one line per setting (whose builds are shared, whether the owner reviews them first, the limit
+  per player, what a withdrawal does, how many players, and the rest), with what the owner changed from the preset
+  and how many players the world has. Then: "Anyone who has this group's invite can act for any player here: there
+  are no player accounts yet. Join friends' servers only." Then what the joiner already has there (shared, waiting
+  for his answer or the owner's, held by the rules, kept, remnants, likes), or that he has not played there yet.
+- His two choices for this server: **Share what I build here**: Yes (the other players can be handed it, as the rules
+  say), No (kept for him alone, a personal archive on that server) or Ask me (it waits until he offers it, below);
+  **Let this server take my older strand**: Yes or No (recorded only: nothing is taken over yet). Ticked: what the
+  server has for him if he chose there before, else what this launcher remembers for this server, else the server's
+  own values for a player who chose nothing (its `offer_builds` and `offer_old`).
+- **Join with these choices**: they are remembered in `launcher.ini` under `[server-ID]` (the world's id, so a server
+  at another address is the same server) and sent to the server for the joiner's account, then the game starts.
+
+The account is the one the joiner's game signs in as: on another PC his Steam account (the 64-bit id of the account
+signed in to Steam; Steam must be running), on the host's PC the name in his sign-in address (`p<id>`), never the
+host's account. When it goes wrong, nothing is started and the launcher says why: the server does not answer, it does
+not know the group's key, its answer cannot be read, or it did not take the choices (a full world, for example). A
+server from before this change (it answers the game but has no launcher API) is said so ("it shares what every
+player builds with every player, and has no choices for you") and joined with its ways.
+
+The host gets no such screen: he chose the rules. His own choices are under "My choices for this server" (below).
+
+**My strand on this server.** After hosting or joining a group server, Play has **My strand on this server** (for the
+server this launcher last hosted or joined since it started). It opens a window with the server's rules, what the
+player has there and his choices, and the list of his objects built there: kind, area, state (shared, waits for
+your answer, waits for the owner, held by the rules and why, kept for you, remnant), likes and id. Select rows (Shift
+and Ctrl for several), then:
+
+- **Offer selected** / **Offer all**: what waits for his answer goes on (shared, or to the owner's review); what the
+  rules hold is shared only once they allow it, else the server says why and nothing changes.
+- **Withdraw selected** / **Withdraw all**: asks first, with what this server does with it (stays for the others as a
+  remnant nobody owns, or removed for everyone); the server does not touch his save.
+- **My choices for this server**: the same screen as before joining; saved, remembered and sent.
+- **Refresh**.
+
+Objects that came to the server from linked servers are not listed (their builder is what the other server says).
+The owner's actions (review, members, removing a player, the rules) have no screen: commands on the stopped server.
+
 Without the window, for tests (`--dev-direct --dev-start`, with `--prepare-only` to write the configuration only):
-`--group-host` hosts (key: `--dev-session N`, else the kept one), `--group-join DSG-...` joins by invite, and
-`--group-join A.B.C.D[:P]` joins a server by address with `--dev-session N` as the key, without the connection test.
+`--group-host` hosts (key: `--dev-session N`, else the kept one; `--group-policy friends|solo|public` for a new world's
+rules), `--group-join DSG-...` joins by invite, and `--group-join A.B.C.D[:P]` joins a server by address with
+`--dev-session N` as the key, without the connection test. A join reads the rules first and sends the remembered
+choices (also with `--prepare-only`); `--strand-builds yes|no|ask` and `--strand-old yes|no` choose instead, and
+`--strand-policy FILE` (or `-` for standard output) writes one line of JSON: `fetched` (`ok`, `old`, `wrong-key`,
+`unreachable`, `bad`), `start`, `message`, `account`, `choices` and the server's `policy` as it sent it. A join that
+is refused shows no dialog and exits 3.
+
+**Not seen on a screen.** The join screen, the "My strand on this server" window and the Settings list of rules were
+built and cross-compiled, and have not been looked at or clicked. The launcher's side of the API (`strand.cpp`) is
+tested on Linux sockets (below); on Windows it ran once without a window, against `coop-world.exe` on loopback: a
+server that did not answer (report `unreachable`, exit 3) and a full solo world (the rules read, the choices refused,
+exit 3, the choices remembered in `launcher.ini`). A join that goes on to start a game, and an older server, were not
+run on Windows.
 
 Limits today: 15 other players shown per game and 16 players in the shared world (`../world/README.md`); the
 two-player features (cargo, structures made in the session, vehicles, enemies, orders, rain) are not part of group
-play; no list of who is in the group, no way to leave except closing the game, no check of the host's firewall.
+play; no list of who is in the group, no way to leave except closing the game, no check of the host's firewall; no
+screen for the server owner's own actions (review, members, removing a player, changing the rules).
 
 ## Diagnostics for a bug report
 
@@ -236,8 +298,25 @@ PC (two players), and lets three stand-in players (`coop-swarm`) holding the key
 config meet through the relay; another key is not answered. Group mutants: `GROUP_PEER` (a two-player config
 written), `GROUP_PEERS` (the proxy lists the partner instead of the server), `GROUP_NO_RELAY`, `GROUP_KEY` (the
 games' key is not the server's), `GROUP_ID` (a player number the config refuses), `GROUP_ROUTE` (a route that did not
-answer), `GROUP_INVITE_KIND` (a group invite taken for a lobby invite), `GROUP_SAME_PC`, `DIAG_GROUP_KEY`; three of
-them must also fail the socket test.
+answer), `GROUP_INVITE_KIND` (a group invite taken for a lobby invite), `GROUP_SAME_PC`, `DIAG_GROUP_KEY`, `GROUP_POLICY`
+(the host's rules not given to a new world).
+
+The server's rules (`strand.h`): `core_test.cpp` checks the account a game signs in as, the policy read (and eleven
+documents refused), the rules in words with what the owner changed, choices kept per server beside the launcher's
+own settings, and the join against answers given in the test: the rules read and the choices sent, remembered choices
+with given ones over them, a full server, no account, an older server (joined), a wrong key, no answer, an unreadable
+answer and a server error (not joined); the strand view's rows, offer, withdraw and a refusal in the server's words.
+`test_group.py` does it on real sockets: the group server started with the host's rules (public), the joiner's
+choices read, remembered and sent for the account his game signs in as and found on the server, his object listed as
+held by the rules, his offer refused in the server's words, the host's account refused his object, his withdrawal;
+then a wrong key, nobody listening and a full solo world (not joined), and a small HTTP server standing in for a
+coop-world from before the API (joined, said so). Mutants: `STRAND_ACCOUNT` (a joiner on the host's PC acts as the
+host's account), `STRAND_PARSE`, `STRAND_WRONG_KEY` (a server without the key taken for an older one),
+`STRAND_OLD_SERVER` (an older server refused), `STRAND_SEND_FAIL` (the game started though the choices were refused),
+`STRAND_DEFAULTS` (fixed choices instead of the server's), `STRAND_PER_SERVER` (one server's choices for another),
+`STRAND_SETTINGS_KEEP` (saving the settings drops the choices); `GROUP_KEY`, `GROUP_NO_RELAY`, `GROUP_SAME_PC`,
+`GROUP_POLICY`, `STRAND_ACCOUNT`, `STRAND_WRONG_KEY`, `STRAND_OLD_SERVER` and `STRAND_SEND_FAIL` must also fail the
+socket test.
 
 The kit's portable suites are vendored and reused (20,000 invite and 10,000
 discovery fuzz rounds). Mutants cover config role, lobby secret, backup links and
@@ -313,8 +392,8 @@ established by the portable tests or cross-build.
 ## Remaining standard work
 
 Group play (above) is outside the standard's two-player lobby flow: it has no lobby, roster, ready state or
-discovery row, and its window parts (the Settings box, the invite on the Host page, Join group) were built without
-being seen on a screen. This is a launcher foundation, not full A–K compliance. Steam friend/lobby SDK
+discovery row, and its window parts (the Settings box and list of rules, the invite on the Host page, Join group, the
+join screen with the server's rules, My strand on this server) were built without being seen on a screen. This is a launcher foundation, not full A–K compliance. Steam friend/lobby SDK
 integration, UPnP/NAT-PMP, a firewall fix (the status is checked), chat/voice, controller and
 Deck navigation, update UI, save metadata/slot management, recent-host
 rename/pin/forget, automatic lobby return after game exit, and in-game discovery
