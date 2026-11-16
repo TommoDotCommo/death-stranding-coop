@@ -150,7 +150,12 @@ Fetched get(uint32_t address,uint16_t port,const std::string& target,const std::
     char host[32];unsigned char b[4]={uint8_t(address>>24),uint8_t(address>>16),uint8_t(address>>8),uint8_t(address)};
     std::snprintf(host,sizeof host,"%u.%u.%u.%u:%u",b[0],b[1],b[2],b[3],unsigned(port));
     const std::string request="GET "+target+" HTTP/1.1\r\nHost: "+host+"\r\nX-Coop-Token: "+token+"\r\nConnection: close\r\n\r\n";
-    for(size_t at=0;at<request.size();){auto n=send(s,request.data()+at,int(request.size()-at),0);if(n<=0){closeSock(s);return out;}at+=size_t(n);}
+#ifdef _WIN32
+    const int flags=0;
+#else
+    const int flags=MSG_NOSIGNAL;   // a server that went away is a failed read, never a signal to the process
+#endif
+    for(size_t at=0;at<request.size();){auto n=send(s,request.data()+at,int(request.size()-at),flags);if(n<=0){closeSock(s);return out;}at+=size_t(n);}
     std::string in;char chunk[8192];
     while(in.size()<=MaxAnswerBytes+16*1024){auto n=recv(s,chunk,sizeof chunk,0);if(n<=0)break;in.append(chunk,size_t(n));}
     closeSock(s);
