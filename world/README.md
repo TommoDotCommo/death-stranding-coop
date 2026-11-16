@@ -177,7 +177,7 @@ Sams around one game copy once the mod speaks to the relay, and it loads a serve
 ```
 coop-swarm --relay 127.0.0.1:8090 --count 20 --centre X Y Z --radius 15 [--mode pairs|broadcast] [--key TEXT]
            [--session N] [--speed 1.6] [--area N] [--first-id 1001] [--only ID] [--role auto|host|client]
-           [--seconds N] [--stop FILE] [--require-connected] [--replay FILE [--with-animation]]
+           [--seconds N] [--stop FILE] [--require-connected] [--replay FILE [--with-animation]] [--names]
 ```
 
 `--mode broadcast` makes every stand-in a player of the relay's broadcast mode (the mod's `relay_mode`): one broadcast
@@ -189,7 +189,8 @@ second's traffic per stand-in on average, `in=24.6 in_bytes=11718 out=22.2 out_b
 bytes from and to the relay; heard: the stand-in and player pairs a presence sample arrived for), and a
 `SWARM traffic` line before the last gives the same over the whole run, so the two modes can be compared under the
 same crowd (those numbers: 8 stand-ins on a 10 m circle in broadcast; in pairs they received and sent about 160
-datagrams, 23 kB, a second each).
+datagrams, 23 kB, a second each). With `--names` (broadcast) the last lines give every player near a stand-in and the
+name he shows, read from his state as the mod reads it: `SWARM name id=1203948 "Sam 1001 · north"`.
 
 `--centre` is in the core's axes (metres; x, y up, z). `--session` is the core session number every pair shares
 (default 1); of two players the lower id is the host unless `--role` says otherwise. `--only ID` makes the stand-ins
@@ -214,7 +215,8 @@ took, and their sizes together), and with `--replay` the last line says how far 
 
 Two groups, each with a server of its own, can hand each other what their players built: once, through a file, or
 continuously while both servers run. It is off unless asked for, and each direction has a filter. Built and tested
-without a game (2026-11-16): no game has been handed an imported object yet.
+without a game (2026-11-16): no game has been handed an imported object yet. Two linked servers that run the relay can
+also show each other's players ("Presence across linked servers", 2026-11-17).
 
 ### What travels, and the filters
 
@@ -353,41 +355,115 @@ taken from another server). Player ids travel with the objects; a player id is a
 someone who has an id can test guesses of the Steam id behind it. Whoever has the key can read everything the
 export filter passes. The server connects out only to the addresses given with `--link-url`.
 
-### Co-op across linked servers (designed, not built)
+### Presence across linked servers (`--link-presence`)
 
-The real-time layer across two servers ("players on linked servers who stand near each other see each other") is
-not built. The relay today knows only the players who say HELLO to it. The design:
+Two linked servers that both run the relay can also show each other's broadcast players: a player of one server who
+stands near a player of the other sees him (body, animation, gear, carried cases, and his name with his server's) as
+he sees the players of his own server, and the other way round. It is off unless both servers ask for it on that link.
+Built and tested without a game (2026-11-17): no game has seen a player of a linked server yet; players written by the
+tests and `coop-swarm` stand-ins have.
 
-- **Player ids.** A player's relay id (`player_id`, 49 random bits made once by the launcher) is the same number on
-  every server and is not remapped: both games compute a pair's core session from the two ids
-  (`ds::relay::pairSession`), so both must know each other under the same number. Two different players with one
-  id is as unlikely across servers as on one; if it happens, each server keeps its own player and does not
-  announce the other's, and a HELLO for an id a remote player holds is refused as "id in use".
-- **One session number.** `pairSession` also takes the group's `session` number from each game's config. Version 1
-  of the envelope has no place to tell a game another number for one player, so two linked groups must run with
-  the same `session` (and the same build of the mod: the core refuses another wire identity). Lifting that needs a
-  per-player session in ROSTER, which is a new envelope version.
-- **Positions.** The two relays talk UDP to each other on their relay ports, the link key in a server HELLO
-  (address learned only from it, as for players). Twice a second each sends the other its local players that have
-  a position: id, area, position, nickname (about 60 bytes a player, 20 to a datagram). A server keeps the other's
-  players as remote entries that time out like players.
-- **Who is near.** Each local-remote pair is judged by one server only, the one with the lower server id, with the
-  same enter and leave distances as for local pairs; it tells the other server (a numbered, repeated event stream
-  like ROSTER), and both send their own player ENTER or LEAVE. Two judges would disagree at the edge. Two remote
-  players are never a pair here.
-- **DATA.** A player's DATA for a remote player is passed to the other server in a server envelope that carries
-  both ids (8 bytes more than RELAYED, 1276 bytes at most), and delivered there as RELAYED only when that server
-  also holds the pair as near and the source id belongs to that link. The source id is the sending server's own
-  record, as today.
-- **Cost.** One more hop for every datagram of a cross-server pair, and all of that traffic on the one path between
-  the servers: per pair the same rate as today (the relay's cap is 200 datagrams a second per pair and direction),
-  so a link needs a cap of its own. Positions cost 2 x players x 60 bytes a second each way, whether or not anybody
-  is near. A crowd split over two servers still runs one core session per pair.
-- **Not solved by this:** more than two servers in one place (a pair of remote players of two different servers
-  would need those two servers linked as well), and NAT (both relays must reach each other).
+```
+coop-world --port 8089 --relay-port 8090 ... --link NAME --link-key KEY --link-presence yes
+           [--link-relay ADDRESS:PORT] [--link-presence-budget BYTES] [--link-presence-players N]
+```
 
-It was left out because it changes the relay's state machine (remote players, a second event stream, a second
-envelope) rather than sitting behind it, and nothing in a game uses the object side yet.
+- `--link-presence yes`: exchange broadcast players with that server (default `no`). It needs `--relay-port` here, and
+  `--link-presence yes` on that server's link to this one, with the same key. Objects (`--link-export`,
+  `--link-import`) are independent of it.
+- `--link-relay`: that server's relay (its `--bind` address and `--relay-port`), a numeric IPv4 address. One of the two
+  needs the other's; the side without it learns the address from the first HELLO that carries the link's tag, so a
+  server behind NAT can be that side. With it, nothing from another address is taken.
+- `--link-presence-budget` (bytes a second, 2000..100000000, default 250000): the most this server sends that one,
+  everything counted; a second's worth can be saved up.
+- `--link-presence-players` (1..1024, default 64): the most players this server sends that one, and takes from it.
+
+The two servers of the example above, with presence as well (the south does not need the north's relay address):
+
+```
+coop-world ... --relay-port 8090 --link south --link-key one-key-for-this-pair --link-presence yes --link-relay 10.0.0.3:8090
+coop-world ... --relay-port 8090 --link north --link-key one-key-for-this-pair --link-presence yes
+```
+
+How it works:
+
+- **Transport: UDP between the two relays, on their relay ports.** The relay already is one thread on one UDP socket
+  with a clock and the broadcast mode's packing; an update is worth nothing late (a lost one is replaced 50 ms later),
+  where a TCP stream would hold every later update behind a lost one. The datagrams are envelope version 3 on the
+  relay's port (`presence.h`): a 32-byte header, a body and an 8-byte tag. Updates, shown state and its repair travel
+  as version 2 datagrams (FRAME, SHARE, FETCH) inside, read by the same parser as the players' own.
+- **Who is sent (interest, on the sending side).** Twice a second each server tells the other where its broadcast
+  players stand: the 8 m cells, per area, and nothing else. A server sends a player of its own while he is within the
+  other's leave distance plus 25 m of one of those cells, and goes on until 25 m more, nearest first, at most
+  `--link-presence-players`. A player far from all of them, in another area or without a position is not sent at
+  all, not even his name. Twice a second, and at once when it changes, it sends the list of the players it sends: id,
+  area, place, state generation, game and mod build, nickname.
+- **What is sent of them.** Their updates, thinned as the broadcast mode thins them for a receiver at the nearest of
+  the other's cells (every update within its full distance plus 25 m, beyond that one in half its interval, animation
+  within its animation distance plus 25 m, a teleport always, the pulses of left-out samples carried by the next one),
+  packed into datagrams of at most 1160 bytes within the flush time; their shown state: all of it when a player starts
+  to be sent, each change, and all of it again when the other side asks (FETCH, when the generation in the list is not
+  the one it holds).
+- **The budget.** An update of a player beyond the other's full distance is sent only while a quarter of a second's
+  budget is left, less the longer that player has waited (nothing reserved once he has waited a second), so the nearest
+  players keep their rate and every player sent gets about one update a second. An update that does not fit loses its
+  animation first (its pulses go with the next one), then is left out.
+- **On the receiving side (interest again).** A linked server's player is a player of this relay like the others:
+  near this server's players by this server's own distances (placed by the list until his updates come), told by ENTER
+  and LEAVE, sent in FRAMEs with the same thinning, his state handed out on ENTER, on a change and on FETCH, kept apart
+  from players of another mode or build. He is never sent anything, never near another linked server's player, and
+  never sent on. His stamps are taken onto this server's clock (the offset of the quickest of the last 16 HELLO round
+  trips between the relays) and checked as any player's: in order, at most 2 s behind and 0.5 s ahead.
+- **His id** is one of this server's: made from his id there and a key of the link's, the next one when that is taken.
+  A player of this server who says HELLO with an id a linked player holds takes it; the linked player leaves and comes
+  back under another with the next list. Two servers' players with the same id are therefore no problem.
+- **His name is his shown state.** The receiving server adds his home: his name (from his name state, kind 1, or his
+  nickname when that is no name), " · " and the name this server gave the link (`--link`), so `Bea · north`. It goes
+  into his ROSTER nickname and his name state, which the mod shows over his body unchanged. The link's name is cut to
+  12 bytes, then his name so that everything fits the label's 24 characters and a nickname's 32 bytes. The suffix is
+  this server's: the linked server can neither change it nor leave it out.
+
+What it holds to (`relay.cpp`, "Linked servers' presence"):
+
+| Rule | Why |
+|---|---|
+| Every datagram ends in a tag (SipHash-2-4, 64 bits) under a key made from the link key; one without the link's tag changes nothing (counted as forged) | only a server with the key speaks for the link; the key never travels on this port |
+| A session is taken only from a HELLO naming this side's own session, never one given up before; anything else only in the session held, naming this side's, from the address held, with a sequence not taken before (a window of 64) | a recorded datagram played again changes nothing; a server that starts again is a new session, and the old one's players leave |
+| A linked server's player has an id of this server's, never one held here, and a player here takes his id back | a linked player is never shown under a local player's id, and never keeps one out |
+| Updates and state from a link change only that link's players, found by their ids there | a linked server cannot touch a local player's state |
+| A linked server's player keeps his own build and mode; a server that pins its build does not take another | the build and mode separation holds across servers |
+| A server sends only its own players | no loops (A to B to C to A): a player is one hop from his home server |
+| A player near none of the other side's cells is not sent; a sent one is near a player here only by this server's distances | interest on both sides |
+| The bytes a second sent on a link stay within its budget, the nearest players first | bounded bandwidth per link |
+| A player no longer in the list leaves at once; a link silent for 3 s loses all its players (LEAVE to everyone near them) | nobody stands frozen where a player was |
+| At most `--link-presence-players` from a link, 4000 of its datagrams a second, every message read by a strict parser | bounded work for whatever a linked server sends |
+
+Costs. One player near one of the other server costs the link about 2.6 kB a second each way with his animation, the
+lists and the HELLOs (`presence_test.cpp`); the list costs about 54 bytes per player sent, twice a second. Thirty
+walking, animating players near one player of the other server would take about 51 kB a second; on a 35 kB budget the
+link sent 36.5 kB a second over 4 s, the ten nearest got 78 or more of their 80 updates each and every one of the
+twenty farther ones 7 to 20. Over loopback (`test_presence.py`) thirty stand-ins on a 20000-byte link: 8, 23 and 21 kB
+a second in the server's 5 s reports (a full second's worth saved up lets one window reach 1.2 times the budget), and
+the other server's four stand-ins kept every one of the thirty live. The relay stays one thread.
+
+Changed from the design that was here before: there, one server judged each pair across the link with a second event
+stream, and every core datagram of a pair crossed with both ids kept (version 1 needs them for each pair's session).
+In broadcast mode a player's update crosses once whoever is near, each server judges nearness for its own players with
+its own distances (the sender only chooses coarsely, by cells), and ids can be this server's, since nothing is derived
+from them. Places cross only for players near the other server, not for everyone twice a second.
+
+What is not protected: the datagrams are clear UDP, like the relay's own port (where the group's key travels in the
+clear). Anyone on the path reads the places, names and state of the players sent, and the cells where the other
+server's players stand; the tag stops forging and replay, not reading. The link key does travel in the clear on the
+HTTP side when objects are pulled (`Authorization: Link KEY`, "What is not protected" above): whoever reads it there
+can make tags too; a link for presence only never sends it. A linked server is trusted for what it says of its own
+players (where they are, what they show, their builds, within the caps); it cannot reach this server's players' ids,
+states or addresses. A server sends link datagrams only to `--link-relay` or to the address of a HELLO with the tag.
+
+Not done (presence): more than two servers in one place need every pair linked (a player is shown only through the
+links of his own server: in a line A, B, C the players of A and C do not see each other); pairs-mode players are not
+sent (they publish nothing to copy); both servers behind NAT; IPv4 only; the sequence of one session does not wrap
+(about four billion datagrams, 50 days at a thousand a second); no game has seen a linked server's player.
 
 ### Not done (linked servers)
 
@@ -860,6 +936,28 @@ byte in Python: options out of range refused; 16 in a group, 8 on a ring 80 m ou
 every update with its animation within 30 m, one in 200 ms and no animation beyond, a STATE handed to the 23 players
 near and nobody else, an update naming another player sent nowhere, a pairs player in the group near nobody, and a
 server that pins the build refusing another.
+
+Presence across linked servers: `presence_test.cpp` runs two and three relays in memory, each on a clock of its own
+(up to 7 s apart), linked to each other, with real players' sides (`ds::broadcast::Client`) on each: the tag's
+reference vectors, every byte of a datagram changed, the replay window, a list of 300 players in 22 parts, the name
+state as the mod writes it and names that are cut; Bea in the north and Carl in the south seeing each other (ids of
+the other server, names with the server's name, every update with its animation, every pulse, shown where they are)
+while Fay far away in the north is never sent and Dup, who has Bea's id in the south, stays himself; a player sent
+while near and not once he walks away or into another area; 30 players on a 35 kB budget (the ten nearest at their
+full rate, every other one now and then); the link cut (its players gone after 3 s, back when it returns), a player's
+BYE (gone at once), a server that starts again, a link of which only one side knows the address; a triangle and a
+line of three servers; Hal of another build sent and not near, a server that pins its build, a pairs player not sent,
+gear changes, half the link's datagrams lost, a game that starts again, Gus taking back the id a linked player had; a
+list played again, a forged one, one with the key from another address, a server with the wrong key. Thirteen mutants
+must fail it (`LINK_PRESENCE_MAC`, `LINK_PRESENCE_REPLAY`, `LINK_PRESENCE_REMAP`, `LINK_PRESENCE_LOCAL_FIRST`,
+`LINK_PRESENCE_STATE_ANY`, `LINK_PRESENCE_BUILD`, `LINK_PRESENCE_NAME`, `LINK_PRESENCE_INTEREST`, `LINK_PRESENCE_BUDGET`,
+`LINK_PRESENCE_TIMEOUT`, `LINK_PRESENCE_GONE`, `LINK_PRESENCE_REEXPORT`, `LINK_PRESENCE_CLOCK`). `test_presence.py` runs
+two built servers on loopback, one knowing the other's relay: eight option lines that are refused; Bea, Fay and Carl
+written byte by byte (each sees the other once, under another id, as `Bea · north` and `Carl · south`, about 20
+updates a second; Fay never reaches the south); the north stopped and Carl losing Bea 3 s later; a new north and
+`coop-swarm --mode broadcast --names` stand-ins with the same ids on both servers, each seeing its own four and the
+other's four, whose names read as the mod reads them end with ` · north` (or ` · south`); thirty stand-ins in the north
+on a 20000-byte link, within it and all live on the other side.
 
 ## Not done
 

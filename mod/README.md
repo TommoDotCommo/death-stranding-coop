@@ -663,7 +663,8 @@ so the two modes can be compared under the same crowd. With `--replay FILE [--wi
 at the speed of a recorded player and send his recorded animation samples (a presence log made with the lab option
 `record_animation`, the file `coop-partner --replay` reads), each stand-in a share of the recording further on, so a
 game shows many differently animated Sams instead of gliding ones; that has not been run against a game. The
-stand-ins also read the animation frames a game sends them and count them. Usage and what it prints:
+stand-ins also read the animation frames a game sends them and count them. With `--names` (broadcast) it prints at the
+end every player near a stand-in with the name he shows, read from his name state as `Crowd` reads it. Usage and what it prints:
 [`world/README.md`](../world/README.md), "A swarm of stand-in players"; every option is in the comment at the top of
 `swarm.cpp`. `world`'s `make test` runs it against the built server. The pure parts (`CircleWalker`,
 `AnimationCursor`, `controlsOnly`, `fromWireLong` in `partner.h`) are pinned by `partner_test.cpp` with the mutants
@@ -1274,6 +1275,11 @@ private room or cutscene, or while this game is in a game event or loading. What
 - every other check of a session's presence (the core's decoder for every value, order, freshness, impossible motion,
   one teleport in five seconds) is made per source by the client, and the source of every update is the server's own
   record of who sent it.
+
+Players of a linked server (`world/README.md`, "Presence across linked servers") arrive as ordinary broadcast
+players and need nothing here: the server gives each an id of its own, keeps his build, and puts his home server
+into his name state (`Bea · north`, at most 24 characters), so his label shows it. Built and tested without a game
+(2026-11-17), with `coop-swarm` stand-ins on two linked servers; no game has seen one.
 
 The log says `OTHERS ready (broadcast)`, `RELAY online (broadcast)`, `RELAY refused this player: the server wants
 another build`, and every 10 s `RELAY broadcast online near N taken N in .. (.. bytes) out .. (.. bytes) frames ..
