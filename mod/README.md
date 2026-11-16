@@ -613,6 +613,14 @@ unchanged suite to fail. Native Windows `test_actor_reader_windows.py` also
 checks process identity, the actual OS-granted query/read rights, region layout
 and an independently allocated fixture buffer.
 
+## Many stand-in players for a relay (`coop-swarm`)
+
+`swarm.cpp` (`build/coop-swarm`, `build/coop-swarm.exe`) is K stand-in players in one process for the server's relay:
+each says HELLO, walks a circle around a given point and runs the real protocol core, with this mod's wire identity,
+with every player the relay says is near. The mod itself does not speak to the relay yet. Usage and what it prints:
+[`world/README.md`](../world/README.md), "A swarm of stand-in players"; every option is in the comment at the top of
+`swarm.cpp`. `world`'s `make test` runs it against the built server.
+
 ## A stand-in partner for one game copy (`coop-partner`)
 
 Two copies of the game on one GPU cost each other about half their frame rate even with the GPU half idle, so playing
