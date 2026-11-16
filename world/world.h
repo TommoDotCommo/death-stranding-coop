@@ -25,6 +25,9 @@ constexpr size_t MaxWorldFileBytes=512u*1024*1024;
 // RelayTokenIdleSeconds after the last one. A new one of either kind ends the player's older one.
 constexpr int64_t TicketUnusedSeconds=1800,TicketGraceSeconds=120,RelayTokenUnusedSeconds=1800,RelayTokenIdleSeconds=300;
 constexpr size_t PassBytes=32;                      // a ticket or relay token: at most this many letters and digits
+// Who a player sees (README, "How many players one player sees"): at most MaxFriends on his friend list, and a cap of
+// at most MaxNearCap players near him shown at once (the relay's own limit of players).
+constexpr size_t MaxFriends=256;constexpr int64_t MaxNearCap=1024;
 struct Reply { int status=200;std::string body="{}"; };
 // What may travel between two servers. Text form: "all", "none", or terms separated by ';':
 //   types=l,rope,e   owners=NAME,zygo_...   areas=226,227   max-age=30d (s, m, h, d)   likes=no   imported=yes
@@ -64,9 +67,10 @@ struct ImportResult { size_t added=0,updated=0,unchanged=0,removed=0,filtered=0,
 //   offer_builds yes|no|ask, offer_old yes|no: what a player who chose nothing has chosen
 //   order newest|liked, per_builder N (0 = none), spread METRES (0 = off): which objects a game is handed (curate)
 //   identity none|keys: keys refuses every sign-in but a launcher's ticket, and every API call that is not signed
+//   near_cap N (0 = none): the most players near one broadcast player he is shown on the relay
 struct Policy {
     std::string preset="friends",join="invite",build="everyone",acceptOffers="auto",withdrawal="go",offerBuilds="yes",offerOld="no",order="newest",identity="none";
-    int64_t limit=0,players=int64_t(MaxPlayers),perBuilder=0,spread=20;
+    int64_t limit=0,players=int64_t(MaxPlayers),perBuilder=0,spread=20,nearCap=32;
 };
 Policy presetPolicy(const std::string& name);       // friends, solo or public; throws for anything else
 void setPolicy(Policy&,const std::string& keyValue); // "KEY=VALUE"; throws with the reason and leaves it as it was
@@ -182,12 +186,24 @@ public:
     json::Value apiMe(const std::string& key) const;
     json::Value apiMine(const std::string& key) const;
     void apiChoices(const std::string& key,const std::string& offerBuilds,const std::string& offerOld);
+    // Who a player sees on the relay (README, "How many players one player sees"): his friend list (account keys; a
+    // short key "a1b2 c3d4 e5f6 a7b8" names the one player of this world whose key begins so) and his choice
+    // `show_others` everyone|friends|nobody|default ("" leaves it). Throws std::runtime_error with the reason when
+    // refused, and then changed nothing; makes the player when the key is new, as apiChoices does.
+    json::Value apiFriends(const std::string& key) const;
+    void apiSetFriends(const std::string& key,const std::vector<std::string>& add,const std::vector<std::string>& remove,const std::string& show);
+    // What the relay holds for a broadcast player (relay.h RelayViewer), by his relay id. Only under identity keys is a
+    // relay id someone's (made from his key: identity::relayId): there, his choice ("" none) and the relay ids of the
+    // friends on his list who have keys. Elsewhere nothing but the cap. `cap`: the policy's near_cap.
+    struct Viewer { std::string show;std::set<uint64_t> friends;int64_t cap=0; };
+    Viewer relayViewer(uint64_t relayId) const;
     // For tests.
     size_t objects() const {std::lock_guard<std::mutex> g(lock_);return objects_.size();}
     std::string playerOf(const std::string& token) const;
 private:
     // offerBuilds, offerOld: "" when the player chose nothing (the policy's value applies).
-    struct Player { std::string id,name,key,offerBuilds,offerOld;bool member=false; };
+    // friends: account keys; showOthers: everyone|friends|nobody, "" when he chose nothing here.
+    struct Player { std::string id,name,key,offerBuilds,offerOld,showOthers;bool member=false;std::set<std::string> friends; };
     // An imported object keeps where it was first built (originServer, originId), which server handed it over (via),
     // its builder's name there and the like count it arrived with; `likes` is that count plus what was given here.
     // `name` is the builder's name when it was built (kept for a remnant); `share` is "" for an object every player
@@ -223,7 +239,9 @@ private:
     std::map<std::string,std::map<int64_t,Picks>> picks_;   // player id -> area -> picks
     Candidate candidateOf(const Object&) const;
     void remember(const std::string& player,int64_t area,const std::vector<std::string>& ids,int64_t now);
-    std::set<std::string> friendsOf(const std::string&) const {return {};}   // no friend list exists yet
+    std::set<std::string> friendsOf(const std::string& player) const;   // the player ids of a player's friends (curate)
+    std::string friendEntry(const std::string& key,const std::string& entry) const;   // an account key for a list entry, or it throws
+    mutable std::map<std::string,uint64_t> relayIds_;    // account of a key -> its relay id (relayViewer)
     std::string versionLocked() const {return epoch_+"-"+std::to_string(changes_);}
     bool servedTo(const Object&,const std::string& player) const;          // may this player be handed it
     std::string shareAfterOffer() const;                                   // what an offered upload becomes

@@ -4,9 +4,11 @@ publishing its presence and an animation sample 20 times a second. Every FRAME f
 player near, players within the full distance get every update with its animation, players beyond it one in the
 interval and no animation, entries share datagrams, a STATE reaches everyone near and nobody else, an update naming
 another player goes nowhere, a pairs player in the group is near nobody, and a server that pins the build refuses
-another one. Prints what each player received a second."""
+another one. Prints what each player received a second. Then 100 stand-ins (coop-swarm --mode broadcast) walking in one
+place, on a server that shows each player at most 16 of the players near him and on one without a cap: what one
+receives a second, and that with the cap he is sent the updates of 16 players and no more."""
 import collections,math,select,socket,struct,subprocess,sys,time
-exe=sys.argv[1]
+exe=sys.argv[1];swarm=sys.argv[2] if len(sys.argv)>2 else None
 GAME,BUILD=13300582,bytes(range(0xa0,0xb0))
 FULL,INTERVAL,ANIMATION,BUDGET,FLUSH=30,200,50,600,25
 def free_port(kind=socket.SOCK_STREAM):
@@ -83,7 +85,7 @@ p=subprocess.Popen([exe,'--port',str(port),'--relay-port',str(relay),'--prefix',
                     '--broadcast-animation',str(ANIMATION),'--broadcast-budget',str(BUDGET),'--broadcast-flush',str(FLUSH)],stdout=subprocess.PIPE,text=True)
 try:
     lines=[p.stdout.readline() for _ in range(3)]
-    assert 'speaks pairs and broadcast (every update within 30 m, beyond it one in 200 ms, animation within 50 m, frames of 600 bytes within 25 ms)' in lines[2],lines
+    assert 'speaks pairs and broadcast (every update within 30 m, beyond it one in 200 ms, animation within 50 m, frames of 600 bytes within 25 ms, at most the policy\'s near_cap players near shown to each (32 now))' in lines[2],lines
     group=[Player(1000+i,(10*math.cos(i*math.pi/8),0,10*math.sin(i*math.pi/8)),relay) for i in range(16)]
     ring=[Player(2000+i,(80*math.cos(i*math.pi/4),0,80*math.sin(i*math.pi/4)),relay) for i in range(8)]
     apart=[Player(3000,(5000,0,0),relay),Player(3001,(5005,0,0),relay)]
@@ -153,4 +155,26 @@ try:
     u.send(hello(7,2,0,0,(0,0,0),1));w=u.recv(2000);assert len(w)==76 and w[6]==2,w
 finally:
     p.kill();p.wait()
+# 100 stand-ins walking within 10 m of each other: with a cap of 16 each is sent 16 players' updates, without one 99.
+def crowd(near):
+    port,relay=free_port(),free_port(socket.SOCK_DGRAM)
+    p=subprocess.Popen([exe,'--port',str(port),'--relay-port',str(relay),'--prefix','abc','--relay-players','128','--broadcast-near',str(near)],stdout=subprocess.PIPE,text=True)
+    try:
+        lines=[p.stdout.readline() for _ in range(3)]
+        assert ('at most %d players near shown to each'%near if near else 'every player near shown to each') in lines[2],lines
+        r=subprocess.run([swarm,'--relay','127.0.0.1:%d'%relay,'--key','abc','--count','100','--centre','0','0','0','--radius','10','--mode','broadcast','--seconds','6'],
+                         capture_output=True,text=True,timeout=60)
+        assert r.returncode==0,r.stderr
+        last=[l for l in r.stdout.splitlines() if l.startswith('SWARM t=')][-1]
+        values=dict(x.split('=',1) for x in last.split()[1:])
+        return int(values['near']),float(values['heard']),float(values['in']),float(values['in_bytes'])
+    finally:
+        p.kill();p.wait()
+if swarm:
+    capped,uncapped=crowd(16),crowd(0)
+    print('broadcast socket test: 100 players in one place, each receives %.0f datagrams and %.0f bytes a second shown 16 of them, %.0f and %.0f shown all 99'
+          %(capped[2],capped[3],uncapped[2],uncapped[3]))
+    assert capped[0]==1600 and capped[1]==1600 and uncapped[0]==9900 and uncapped[1]>=9800,(capped,uncapped)
+    # 16 players' presence at 20 a second (80-byte entries in FRAMEs of 1200 bytes): about 26 kB a second, whatever the crowd.
+    assert capped[3]<=16*20*80*1.3 and capped[3]*4<uncapped[3],(capped,uncapped)
 print('broadcast socket test passed')

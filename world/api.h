@@ -7,6 +7,8 @@
 //   POST [/PREFIX]/coop/choices   {"player":KEY,"offer_builds":"yes|no|ask|default","offer_old":"yes|no|default"}
 //   POST [/PREFIX]/coop/offer     {"player":KEY,"object":ID} or {"player":KEY,"all":true}, and "answer":"no" to keep
 //   POST [/PREFIX]/coop/withdraw  {"player":KEY,"object":ID} or {"player":KEY,"all":true}
+//   GET  [/PREFIX]/coop/friends?player=KEY                         his friend list and his choice of who he sees
+//   POST [/PREFIX]/coop/friends   {"player":KEY,"add":[KEY|SHORT,...],"remove":[...],"show_others":"everyone|friends|nobody|default"}
 //   POST [/PREFIX]/coop/ticket       {"player":KEY}   signed, identity keys: a sign-in ticket for his game (world.h)
 //   POST [/PREFIX]/coop/relay-token  {"player":KEY}   signed, identity keys: a relay token for his relay id (identity.h)
 // The owner's calls, signed with the owner's key (World::owner):
@@ -18,11 +20,15 @@
 // keys the account of his key (identity.h). Under identity none an unsigned call may act for any player (there is no
 // identity). A signed call (identity.h) acts for its signer only; under identity keys every call but the policy is
 // signed. `signer` is the account of the verified key ("" for an unsigned call; Front checks the signature).
+#include "relay.h"
 #include "world.h"
 namespace world {
 bool accountKeyText(const std::string&);    // 1..MaxKeyBytes letters, digits, '_', '-', '.'
 // `call` is what follows /coop/ ("policy"); `player` is the address's ?player= (decoded), for the two GET calls.
 Reply launcherApi(World&,const std::string& method,const std::string& call,const std::string& player,const std::string& body,const std::string& signer={},int64_t now=0);
+// What the relay holds for a broadcast player (relay.h RelayViewer), from what the world holds (World::relayViewer):
+// the relay's `viewer`. `capGiven`: the relay was given its cap (--broadcast-near), else the policy's near_cap is it.
+RelayViewer relayViewer(const World&,uint64_t relayId,bool capGiven);
 // One setting's value in words, for a player deciding whether to join (`players`: how many the world has now).
 std::string settingText(const std::string& key,const std::string& value,size_t players);
 }

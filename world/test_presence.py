@@ -166,7 +166,9 @@ with tempfile.TemporaryDirectory() as d:
         a,b=swarms(north,south,12,30)
         reports=[(int(x),int(y)) for x,y in re.findall(r'link south: presence, 5 s: sent \d+ datagrams, \d+ bytes \((\d+) a second, budget 20000\), \d+ updates, (\d+) left out',north.text())]
         assert reports and all(rate<=20000*1.25 for rate,_ in reports) and any(left>0 for _,left in reports),reports
-        done=[l for l in b.splitlines() if l.startswith('SWARM done')];assert done and 'online=4/4 near=132 live=132' in done[0],(done,reports)
+        # Each of the four has 33 players near (3 of his own server, 30 of the north) and is shown 32 of them, the
+        # near_cap of a friends server: the linked server's players count for it like the others, and all are live.
+        done=[l for l in b.splitlines() if l.startswith('SWARM done')];assert done and 'online=4/4 near=128 live=128' in done[0],(done,reports)
         print('presence socket test: stand-ins with the same ids on both servers see 8 each; with 30 in the north the link sent %s bytes a second (budget 20000)'%[r for r,_ in reports])
     finally:
         north.stop();south.stop()

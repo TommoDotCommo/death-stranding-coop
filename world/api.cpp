@@ -34,6 +34,8 @@ std::string settingText(const std::string& key,const std::string& value,size_t p
                                  "At most "+value+" objects of one builder of each kind in what a game is handed at once.";
     if(key=="spread")return value=="0"?"Objects are handed however close together they stand.":
                             "An object closer than "+value+" m to one of its kind already handed is left out of that answer.";
+    if(key=="near_cap")return value=="0"?"Every player near you is shown to you, however many there are.":
+                              "At most "+value+" of the players near you are shown to you at once: your friends first, then the nearest.";
     if(key=="identity")return value=="keys"?"Players are known by the key their launcher made: nobody signs in, builds or withdraws in another player's name (the traffic is not encrypted).":
                               "No player keys: whoever has the group's key can sign in or act as any player. For friends only.";
     return key+" "+value;
@@ -123,6 +125,75 @@ void World::apiChoices(const std::string& key,const std::string& offerBuilds,con
     if(!offerOld.empty())p.offerOld=offerOld=="default"?"":offerOld;
     dirty_=true;++changes_;note("choices of "+p.id+": offer_builds "+(p.offerBuilds.empty()?"(server)":p.offerBuilds)+", offer_old "+(p.offerOld.empty()?"(server)":p.offerOld));
 }
+// ---- Who a player sees (README, "How many players one player sees") ---------------------------------------------
+// A list entry: a short key "a1b2 c3d4 e5f6 a7b8" is the one player of this world whose key begins so; anything else is
+// an account key as the API takes it. The caller holds the lock.
+std::string World::friendEntry(const std::string& key,const std::string& entry) const {
+    std::string e=entry;for(auto& c:e)if(c>='A'&&c<='F')c=char(c-'A'+'a');
+    if(e.size()==19&&e[4]==' '&&e[9]==' '&&e[14]==' '){
+        std::string found;
+        for(auto& p:players_){
+            identity::PublicKey k{};if(!identity::keyOf(p.first,k)||identity::shortText(k)!=e)continue;
+            if(!found.empty())bad("two players of this world have keys that begin "+e+": name the whole key");
+            found=p.first;}
+        if(found.empty())bad("no player of this world has the key "+e);
+        e=found;}
+    else if(!accountKeyText(e))bad("a friend is a player's account key (ed25519- and 64 hex digits) or the short form of his key (a1b2 c3d4 e5f6 a7b8)");
+    if(e==key)bad("a player is not his own friend");
+    return e;}
+json::Value World::apiFriends(const std::string& key) const {
+    std::lock_guard<std::mutex> g(lock_);
+    auto found=players_.find(key);const Player* p=found==players_.end()?nullptr:&found->second;
+    Value out=Value::object();out.set("format",1);out.set("player",playerId(key));out.set("known",p!=nullptr);
+    out.set("show_others",p?p->showOthers:std::string());
+    Value list=Value::array();
+    if(p)for(auto& f:p->friends){
+        Value v=Value::object();v.set("key",f);v.set("id",playerId(f));identity::PublicKey k{};v.set("short",identity::keyOf(f,k)?identity::shortText(k):std::string());
+        auto them=players_.find(f);v.set("known",them!=players_.end());v.set("name",them!=players_.end()?them->second.name:std::string());list.push(v);}
+    out.set("friends",list);return out;
+}
+void World::apiSetFriends(const std::string& key,const std::vector<std::string>& add,const std::vector<std::string>& remove,const std::string& show){
+    if(!oneOf(show,{"","everyone","friends","nobody","default"}))bad("show_others is everyone, friends, nobody or default");
+    if(add.empty()&&remove.empty()&&show.empty())bad("nothing chosen (add, remove, show_others)");
+    if(add.size()+remove.size()>MaxFriends)bad("at most "+std::to_string(MaxFriends)+" friends");
+    std::lock_guard<std::mutex> g(lock_);
+    std::set<std::string> adding;for(auto& a:add)adding.insert(friendEntry(key,a));
+    auto found=players_.find(key);
+    std::set<std::string> next=found==players_.end()?std::set<std::string>{}:found->second.friends;
+    for(auto& r:remove){
+        std::string e=r;for(auto& c:e)if(c>='A'&&c<='F')c=char(c-'A'+'a');
+        if(e.size()==19&&e[4]==' '&&e[9]==' '&&e[14]==' '){
+            for(auto it=next.begin();it!=next.end();){identity::PublicKey k{};if(identity::keyOf(*it,k)&&identity::shortText(k)==e)it=next.erase(it);else ++it;}}
+        else if(accountKeyText(e))next.erase(e);
+        else bad("remove: an account key or the short form of a key");}
+    next.insert(adding.begin(),adding.end());
+    if(next.size()>MaxFriends)bad("at most "+std::to_string(MaxFriends)+" friends");
+    if(found==players_.end()){
+        size_t room=std::min(MaxPlayers,size_t(policy_.players));
+        if(players_.size()>=room){note("friends refused: world is full ("+std::to_string(room)+" players)");bad("this world has all its players");}
+        Player p;p.key=key;p.id=playerId(key);p.name="Porter";found=players_.emplace(key,p).first;note("new player "+p.id+" (friends from the launcher)");}
+    Player& p=found->second;p.friends=std::move(next);
+    if(!show.empty())p.showOthers=show=="default"?"":show;
+    dirty_=true;++changes_;note("friends of "+p.id+": "+std::to_string(p.friends.size())+", show_others "+(p.showOthers.empty()?"(his game's)":p.showOthers));
+}
+World::Viewer World::relayViewer(uint64_t relayId) const {
+    std::lock_guard<std::mutex> g(lock_);
+    Viewer v;v.cap=policy_.nearCap;
+    if(policy_.identity!="keys")return v;   // a relay id is whatever the game says: nobody's choice or friends
+    auto idOf=[&](const std::string& account)->uint64_t{
+        auto it=relayIds_.find(account);if(it!=relayIds_.end())return it->second;
+        identity::PublicKey k{};uint64_t id=identity::keyOf(account,k)?identity::relayId(k):0;relayIds_[account]=id;return id;};
+    for(auto& p:players_){
+        if(idOf(p.first)!=relayId)continue;
+        v.show=p.second.showOthers;
+        for(auto& f:p.second.friends)if(uint64_t id=idOf(f))v.friends.insert(id);
+        break;}
+    return v;
+}
+RelayViewer relayViewer(const World& w,uint64_t relayId,bool capGiven){
+    auto v=w.relayViewer(relayId);RelayViewer r;r.chosen=!v.show.empty();
+    r.show=v.show=="nobody"?ds::broadcast::Show::Nobody:v.show=="friends"?ds::broadcast::Show::Friends:ds::broadcast::Show::Everyone;
+    r.friends=std::move(v.friends);r.cap=capGiven?-1:long(v.cap);return r;}
 namespace {
 // One JSON object with exactly these fields, each text (or `flags` true, `lists` an array of text): checked before
 // anything changes. Empty `why`: the body is good.
@@ -176,7 +247,8 @@ Reply ownerApi(World& w,const std::string& method,const std::string& call,const 
 }
 Reply launcherApi(World& w,const std::string& method,const std::string& call,const std::string& player,const std::string& text,const std::string& signer,int64_t now){
     if(call.compare(0,6,"owner/")==0)return ownerApi(w,method,call.substr(6),text,signer);
-    const bool read=call=="policy"||call=="me"||call=="mine",change=call=="choices"||call=="offer"||call=="withdraw",pass=call=="ticket"||call=="relay-token";
+    const bool friends=call=="friends";   // GET reads the list, POST changes it
+    const bool read=call=="policy"||call=="me"||call=="mine"||(friends&&method=="GET"),change=call=="choices"||call=="offer"||call=="withdraw"||(friends&&method!="GET"),pass=call=="ticket"||call=="relay-token";
 #ifndef MUTANT_API_METHOD
     if((read&&method!="GET")||((change||pass)&&method!="POST")||(!read&&!change&&!pass))return answer(404,"not found");   // a change is never a GET
 #else
@@ -204,8 +276,23 @@ Reply launcherApi(World& w,const std::string& method,const std::string& call,con
 #ifndef MUTANT_API_KEY
         if(!accountKeyText(player))return answer(400,"player: the account key his game signs in with");
 #endif
+#ifdef MUTANT_API_FRIENDS_ANY
+        if(friends)return ok(w.apiFriends(player));
+#endif
         if(int r=actor(player))return refusal(r);
-        return ok(call=="me"?w.apiMe(player):w.apiMine(player));}
+        return ok(call=="me"?w.apiMe(player):friends?w.apiFriends(player):w.apiMine(player));}
+    if(friends){
+        // {"player":KEY,"add":[...],"remove":[...],"show_others":"everyone|friends|nobody|default"}, one or more of the last three.
+        std::string why;Value in=body(text,{"player","show_others"},why,{},{"add","remove"});if(!why.empty())return answer(400,why);
+        const std::string key=in.get("player").string();
+        if(!accountKeyText(key))return answer(400,"player: the account key his game signs in with");
+#ifndef MUTANT_API_FRIENDS_ANY
+        if(int r=actor(key))return refusal(r);
+#endif
+        std::vector<std::string> add,remove;for(auto& i:in.get("add").items())add.push_back(i.string());for(auto& i:in.get("remove").items())remove.push_back(i.string());
+        try{w.apiSetFriends(key,add,remove,in.get("show_others").string());}
+        catch(const std::exception& e){std::string m=e.what();return answer(m.find("all its players")!=std::string::npos||m.find("no player of this world")!=std::string::npos||m.find("two players")!=std::string::npos?403:400,m);}
+        return ok(w.apiFriends(key));}
     // A change: one JSON object with exactly the fields of this call, all of them checked before anything changes.
     Value in;
     try{if(text.size()>MaxApiBody)bad("too long");in=json::parse(text);if(!in.isObject())bad("not an object");}

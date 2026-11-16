@@ -2,7 +2,8 @@
 // sign-in ticket and signed API calls; a signed call acts for its signer only, once, for this server; a player is made
 // by his first signed call; tickets and relay tokens belong to one player, end when he takes a new one, and expire; the
 // owner's calls need the owner's key; the world file keeps it all; identity none is as before, except that an account
-// of the key form is acted for only with its key.
+// of the key form is acted for only with its key. A friend list and the choice of who a player sees are his own to
+// set, by his key; the relay takes them for his relay id, and the friends by theirs.
 #include "front.h"
 #include "api.h"
 #include "relay.h"
@@ -39,7 +40,7 @@ struct Server {
 static std::string body(const id::Keys& k,const std::string& more=""){return "{\"player\":\""+id::account(k.pub)+"\""+more+"}";}
 static void signIns(){
     Server s;auto p=json::parse(s.api(nullptr,"GET","policy").body);
-    CHECK(p.get("settings").items().size()==12&&p.get("settings").items()[11].get("key").string()=="identity"&&p.get("settings").items()[11].get("value").string()=="keys");
+    CHECK(p.get("settings").items().size()==13&&p.get("settings").items()[11].get("key").string()=="identity"&&p.get("settings").items()[11].get("value").string()=="keys");
     CHECK(p.get("time").integer()==Now&&!p.get("owner").boolean());
     // No sign-in but a launcher's ticket: not by a name in the address, not by a Steam ticket, not by a key's name.
     const std::string steam="?provider=steam&display_name=Ann&code=14000000aabbccddeeff00117856341201001001"+std::string(40,'0');
@@ -200,8 +201,44 @@ static void saved(){
         Server x("friends");bool refused=false;try{x.w.restore(json::parse(bad));}catch(const std::exception&){refused=true;}CHECK(refused);}
     CHECK([&]{try{s.w.setOwner("ann");}catch(const std::exception&){return s.w.owner()==id::account(o.pub);}return false;}());
 }
+// The friend list and the choice of who he sees: only his own key sets or reads them; a short key names a player of this
+// world; the relay takes them for his relay id (made from his key) and his friends by theirs, with the policy's cap.
+static void friends(){
+    Server s;auto a=id::makeKeys(),b=id::makeKeys(),c=id::makeKeys(),d=id::makeKeys();const std::string A=id::account(a.pub),B=id::account(b.pub);
+    auto ta=s.token(a),tb=s.token(b),tc=s.token(c),td=s.token(d);
+    const std::string add=body(a,",\"add\":[\""+id::shortText(b.pub)+"\"],\"show_others\":\"friends\"");
+    auto before=s.w.snapshot().dump();
+    CHECK(s.post(nullptr,"friends",add).status==401&&s.post(&b,"friends",add).status==403&&s.w.snapshot().dump()==before);
+    CHECK(s.api(nullptr,"GET","friends?player="+A).status==401&&s.api(&b,"GET","friends?player="+A).status==403);
+    auto r=s.post(&a,"friends",add);CHECK(r.status==200);
+    auto f=json::parse(r.body);CHECK(f.get("friends").items().size()==1&&f.get("friends").items()[0].get("key").string()==B&&f.get("show_others").string()=="friends");
+    CHECK(json::parse(s.api(&a,"GET","friends?player="+A).body).get("friends").items()[0].get("short").string()==id::shortText(b.pub));
+    // The world's view for the relay: his choice and his friend's relay id, the policy's cap; nothing for an id nobody has.
+    auto v=s.w.relayViewer(id::relayId(a.pub));CHECK(v.show=="friends"&&v.friends==std::set<uint64_t>{id::relayId(b.pub)}&&v.cap==16);
+    CHECK(s.w.relayViewer(id::relayId(c.pub)).show.empty()&&s.w.relayViewer(12345).friends.empty());
+    {Server f2("friends");CHECK(f2.post(nullptr,"friends","{\"player\":\"ann\",\"add\":[\"bea\"],\"show_others\":\"nobody\"}").status==200);
+     auto none=f2.w.relayViewer(id::relayId(a.pub));CHECK(none.show.empty()&&none.friends.empty()&&none.cap==32);}
+    // Through a relay as the server runs it: four broadcast players in one place, Ann sees Bea only.
+    int64_t now=Now;RelayConfig config;config.token="group";config.admit=[&](uint64_t i,const std::string& t){return s.w.relayAdmit(i,t,"group",now);};
+    config.viewer=[&](uint64_t i){return relayViewer(s.w,i,false);};
+    Relay relay(config,[](const RelayAddress&,const uint8_t*,size_t){});
+    uint32_t sequence=0;uint64_t ms=1000;
+    auto hello=[&](const id::Keys& k,const std::string& token,uint32_t at){
+        ds::broadcast::Hello h;h.base.id=id::relayId(k.pub);h.base.token=token;h.base.nickname="P";h.base.sequence=++sequence;h.base.stream=0;
+        h.base.havePosition=true;h.base.position={double(at),0,0};h.t0=ms;auto b2=ds::broadcast::encode(h);relay.receive({0x0a000001u+at,uint16_t(40000+at)},b2.data(),b2.size(),ms);};
+    auto round=[&]{ms+=500;hello(a,ta,0);hello(b,tb,1);hello(c,tc,2);hello(d,td,3);};
+    round();round();
+    const uint64_t ia=id::relayId(a.pub),ib=id::relayId(b.pub),ic=id::relayId(c.pub),idd=id::relayId(d.pub);
+    CHECK(relay.areNear(ia,ic)&&relay.shows(ia,ib)&&!relay.shows(ia,ic)&&!relay.shows(ia,idd)&&relay.shows(ic,ia)&&relay.shown(ic)==3);
+    // Everyone, on a server whose policy shows one at most: the nearest (Bea, 1 m).
+    CHECK(s.post(&a,"friends",body(a,",\"show_others\":\"everyone\",\"remove\":[\""+B+"\"]")).status==200);
+    {Policy p=s.w.policy();setPolicy(p,"near_cap=1");s.w.setPolicy(p);}
+    round();CHECK(relay.shown(ia)==1&&relay.shows(ia,ib)&&relay.shown(ic)==1);
+    // Kept with the world.
+    World back([]{return std::string("x");});back.restore(s.w.snapshot());CHECK(back.apiFriends(A).get("show_others").string()=="everyone"&&back.apiFriends(A).get("friends").items().empty());
+}
 int main(){
-    signIns();calls();none();relay();owner();saved();
+    signIns();calls();none();relay();owner();saved();friends();
     if(failures)return 1;
     std::puts("identity keys tests passed");return 0;
 }

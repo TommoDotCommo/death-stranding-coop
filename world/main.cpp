@@ -4,7 +4,7 @@
 //              [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS]
 //               [--relay-players N] [--relay-rate N] [--broadcast-full METRES] [--broadcast-interval MS]
 //               [--broadcast-animation METRES] [--broadcast-budget BYTES] [--broadcast-flush MS] [--broadcast-rate N]
-//               [--broadcast-build GAME:HEX]]
+//               [--broadcast-build GAME:HEX] [--broadcast-near N] [--broadcast-near-margin METRES]]
 //              [--link NAME --link-key KEY [--link-url http://ADDRESS:PORT[/PREFIX]] [--link-export FILTER] [--link-import FILTER]
 //               [--link-every SECONDS] [--link-presence yes|no [--link-relay ADDRESS:PORT] [--link-presence-budget BYTES]
 //               [--link-presence-players N]]]...
@@ -17,6 +17,7 @@
 // Plain HTTP/1.1 with keep-alive, one thread per connection, bounded sizes. It only answers, except for the linked
 // servers it was given an address for (--link-url): those it asks for objects, and nothing else is ever connected to.
 // With --relay-port it is also the relay of the real-time layer (relay.h): one UDP socket on the same address, one thread.
+#include "api.h"
 #include "front.h"
 #include "relay.h"
 #include <algorithm>
@@ -340,7 +341,7 @@ bool parseBuild(const std::string& text,world::RelayConfig& c){
 }
 int main(int argc,char** argv){
     if(argc>1&&argv[1][0]!='-')return offline(argc,argv);
-    std::string bind="127.0.0.1",prefix,relayKey;int port=0,relayPort=0;long idleExit=0;bool haveRelayKey=false;world::RelayConfig relayConfig;
+    std::string bind="127.0.0.1",prefix,relayKey;int port=0,relayPort=0;long idleExit=0;bool haveRelayKey=false,nearGiven=false;world::RelayConfig relayConfig;
     std::vector<world::LinkConfig> links;
     struct Presence {std::string on,relay;long budget=250000,players=64;};std::vector<Presence> presence;   // per link: --link-presence and its options
     std::string policyPreset,owner,name;bool naming=false;std::vector<std::string> policySets;
@@ -361,6 +362,8 @@ int main(int argc,char** argv){
         else if(a=="--broadcast-budget")relayConfig.budget=size_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));
         else if(a=="--broadcast-flush")relayConfig.flushMs=uint32_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));
         else if(a=="--broadcast-rate")relayConfig.broadcastRate=uint32_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));
+        else if(a=="--broadcast-near"){relayConfig.nearCap=size_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));nearGiven=true;}
+        else if(a=="--broadcast-near-margin")relayConfig.nearMargin=std::atof(next().c_str());
         else if(a=="--broadcast-build"){if(!parseBuild(next(),relayConfig)){std::cerr<<"--broadcast-build GAME:HEX (the game build and the 32 hex digits of the mod's wire identity)\n";return 2;}}
         else if(a=="--link"){links.emplace_back();links.back().name=next();presence.emplace_back();}
         else if(a=="--link-key")link(a).key=next();else if(a=="--link-url")link(a).url=next();
@@ -376,7 +379,8 @@ int main(int argc,char** argv){
                         "                  [--policy friends|solo|public] [--policy-set KEY=VALUE]...\n"
                         "                  [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS] [--relay-players N] [--relay-rate N]]\n"
                         "                   [--broadcast-full METRES] [--broadcast-interval MS] [--broadcast-animation METRES] [--broadcast-budget BYTES]\n"
-                        "                   [--broadcast-flush MS] [--broadcast-rate N] [--broadcast-build GAME:HEX]]\n"
+                        "                   [--broadcast-flush MS] [--broadcast-rate N] [--broadcast-build GAME:HEX] [--broadcast-near N]\n"
+                        "                   [--broadcast-near-margin METRES]]\n"
                         "                  [--link NAME --link-key KEY [--link-url http://ADDRESS:PORT[/PREFIX]] [--link-export FILTER] [--link-import FILTER] [--link-every SECONDS]\n"
                         "                   [--link-presence yes|no [--link-relay ADDRESS:PORT] [--link-presence-budget BYTES] [--link-presence-players N]]]...\n"
                       <<OfflineUsage;return 2;}}
@@ -433,6 +437,9 @@ int main(int argc,char** argv){
         relayConfig.seed=std::random_device{}();relayConfig.serverId=w.serverId();
         // Who may say HELLO for a player id: the group's key, or under identity keys a relay token of that player.
         relayConfig.admit=[&w,key=relayConfig.token](uint64_t id,const std::string& token){return w.relayAdmit(id,token,key,nowSeconds());};
+        // Who a broadcast player is shown (README, "How many players one player sees"): his choice and friends as the
+        // world holds them (under identity keys), and the policy's near_cap unless --broadcast-near gives the cap.
+        relayConfig.viewer=[&w,nearGiven](uint64_t id){return world::relayViewer(w,id,nearGiven);};
         try{world::Relay check(relayConfig,[](const world::RelayAddress&,const uint8_t*,size_t){});}
         catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 2;}
         sockaddr_in relayAddress=address;relayAddress.sin_port=htons(uint16_t(relayPort));
@@ -463,7 +470,9 @@ int main(int argc,char** argv){
         line("link "+l.name+": presence of broadcast players with the relay at "+(l.peer.ip?std::to_string(l.peer.ip>>24)+"."+std::to_string((l.peer.ip>>16)&255)+"."+std::to_string((l.peer.ip>>8)&255)+"."+std::to_string(l.peer.ip&255)+":"+std::to_string(l.peer.port):std::string("the address of its first HELLO"))
              +" (at most "+std::to_string(l.budget)+" bytes a second and "+std::to_string(l.players)+" players each way)");
     if(relayPort)line("coop-world relay speaks pairs and broadcast (every update within "+std::to_string(int(relayConfig.fullMetres))+" m, beyond it one in "+std::to_string(relayConfig.intervalMs)+" ms, animation within "
-                      +std::to_string(int(relayConfig.animationMetres))+" m, frames of "+std::to_string(relayConfig.budget)+" bytes within "+std::to_string(relayConfig.flushMs)+" ms"+(relayConfig.pinBuild?", one build":"")+")");
+                      +std::to_string(int(relayConfig.animationMetres))+" m, frames of "+std::to_string(relayConfig.budget)+" bytes within "+std::to_string(relayConfig.flushMs)+" ms"+(relayConfig.pinBuild?", one build":"")
+                      +(nearGiven?relayConfig.nearCap?", at most "+std::to_string(relayConfig.nearCap)+" players near shown to each":", every player near shown to each"
+                                  :", at most the policy's near_cap players near shown to each ("+std::to_string(w.policy().nearCap)+" now)")+")");
     line(policyText(w.policy(),false)+policyNote);
     if(!w.owner().empty())line("owner key "+w.owner().substr(8,16)+"... (signed calls of this key are the owner's)");
     if(!w.name().empty())line("server name "+w.name()+" (the home of its builders on linked servers)");

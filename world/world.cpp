@@ -45,6 +45,11 @@ std::vector<std::string> split(const std::string& s,char by){std::vector<std::st
 const std::pair<const char*,char> TypeNames[]={{"post",'p'},{"charger",'c'},{"safehouse",'s'},{"watchtower",'w'},{"bridge",'b'},{"shelter",'n'},{"rope",'r'},
     {"ladder",'l'},{"bike",'v'},{"cairn",'e'},{"road",'o'},{"mushroom",'x'},{"chiralbridge",'g'},{"jumpstand",'j'}};
 bool oneOf(const std::string& s,std::initializer_list<const char*> allowed){for(auto a:allowed)if(s==a)return true;return false;}
+// An account key as the API takes it (api.h accountKeyText): 1..MaxKeyBytes letters, digits, '_', '-', '.'.
+bool keyText(const std::string& k){
+    if(k.empty()||k.size()>MaxKeyBytes)return false;
+    for(char c:k)if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='-'||c=='.'))return false;
+    return true;}
 bool wholeNumber(const std::string& s,int64_t& out){
     if(s.empty()||s.size()>18)return false;
     size_t i=s[0]=='-'?1:0;
@@ -106,6 +111,15 @@ std::string playerId(const std::string& key){
 }
 World::World(std::function<std::string()> randomToken):random_(randomToken?std::move(randomToken):defaultToken),serverId_(randomHex(16)),epoch_(randomHex(8)){}
 const World::Player* World::playerById(const std::string& id) const {for(auto& p:players_)if(p.second.id==id)return &p.second;return nullptr;}
+// A friend's objects come first where the policy orders by likes (curate): his friends by their player ids.
+std::set<std::string> World::friendsOf(const std::string& player) const {
+    std::set<std::string> out;
+#ifndef MUTANT_CURATE_FRIENDS_NONE
+    if(auto* p=playerById(player))for(auto& f:p->friends)out.insert(playerId(f));
+#else
+    (void)player;
+#endif
+    return out;}
 std::string World::playerOf(const std::string& token) const {std::lock_guard<std::mutex> g(lock_);auto t=tokens_.find(token);return t==tokens_.end()?std::string():t->second;}
 Reply World::signIn(const std::string& key,const std::string& displayName,const std::string& gateway){
     std::lock_guard<std::mutex> g(lock_);
@@ -411,6 +425,10 @@ json::Value World::snapshot() const {
         if(!p.second.offerBuilds.empty())v.set("offer_builds",p.second.offerBuilds);
         if(!p.second.offerOld.empty())v.set("offer_old",p.second.offerOld);
         if(p.second.member)v.set("member",true);
+#ifndef MUTANT_FRIENDS_SAVE_LOST
+        if(!p.second.showOthers.empty())v.set("show_others",p.second.showOthers);
+        if(!p.second.friends.empty()){Value f=Value::array();for(auto& x:p.second.friends)f.push(x);v.set("friends",f);}
+#endif
         players.push(v);}
     out.set("players",players);
     Value tokens=Value::object();for(auto& t:tokens_)tokens.set(t.first,t.second);out.set("sessions",tokens);
@@ -467,7 +485,10 @@ void World::restore(const json::Value& v){
     nextObject_=uint64_t(std::max<int64_t>(1,v.get("next_object").integer()));
     for(auto& p:v.get("players").items()){Player pl;pl.key=p.get("key").string();pl.id=p.get("id").string();pl.name=p.get("name").string();
         pl.offerBuilds=p.get("offer_builds").string();pl.offerOld=p.get("offer_old").string();pl.member=p.get("member").boolean();
-        if(pl.key.empty()||pl.id!=playerId(pl.key)||!oneOf(pl.offerBuilds,{"","yes","no","ask"})||!oneOf(pl.offerOld,{"","yes","no"}))throw std::runtime_error("world file: bad player");
+        pl.showOthers=p.get("show_others").string();
+        for(auto& f:p.get("friends").items()){if(!f.isString()||!keyText(f.string())||f.string()==pl.key)throw std::runtime_error("world file: bad friend");pl.friends.insert(f.string());}
+        if(pl.key.empty()||pl.id!=playerId(pl.key)||!oneOf(pl.offerBuilds,{"","yes","no","ask"})||!oneOf(pl.offerOld,{"","yes","no"})||!oneOf(pl.showOthers,{"","everyone","friends","nobody"})
+           ||(p.has("friends")&&!p.get("friends").isArray())||pl.friends.size()>MaxFriends)throw std::runtime_error("world file: bad player");
         players_[pl.key]=pl;}
     for(auto& t:v.get("sessions").members())if(playerById(t.second.string()))tokens_[t.first]=t.second.string();
     for(auto* passes:{&tickets_,&relayTokens_})
@@ -843,7 +864,7 @@ Policy presetPolicy(const std::string& name){
     Policy p;p.preset=name;
     if(name=="friends")return p;
     if(name=="solo"){p.players=1;return p;}
-    if(name=="public"){p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";return p;}
+    if(name=="public"){p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";p.nearCap=16;return p;}
     bad("policy: unknown preset '"+name+"' (friends, solo or public)");
 }
 void setPolicy(Policy& p,const std::string& keyValue){
@@ -866,12 +887,13 @@ void setPolicy(Policy& p,const std::string& keyValue){
     else if(key=="per_builder")number(p.perBuilder,0,1000);
     else if(key=="spread")number(p.spread,0,1000);
     else if(key=="identity")pick(p.identity,{"none","keys"});
-    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity)");
+    else if(key=="near_cap")number(p.nearCap,0,MaxNearCap);
+    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap)");
 }
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy& p){
     return {{"join",p.join},{"build",p.build},{"accept_offers",p.acceptOffers},{"limit",std::to_string(p.limit)},{"withdrawal",p.withdrawal},
             {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld},
-            {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity}};
+            {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity},{"near_cap",std::to_string(p.nearCap)}};
 }
 void World::setPolicy(const Policy& p){std::lock_guard<std::mutex> g(lock_);policy_=p;dirty_=true;++changes_;}
 bool World::servedTo(const Object& o,const std::string& player) const {

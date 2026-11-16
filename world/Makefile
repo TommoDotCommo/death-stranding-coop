@@ -23,7 +23,7 @@ MONO := ../vendor/monocypher/monocypher.c ../vendor/monocypher/monocypher-ed2551
 KEYS := identity.cpp identity.h signatures.cpp signatures.h $(MONO) ../vendor/monocypher/monocypher.h ../vendor/monocypher/monocypher-ed25519.h
 build/identity-test: identity_test.cpp $(KEYS) | build
 	$(CXX) $(FLAGS) identity_test.cpp identity.cpp signatures.cpp $(MONO) -o $@
-API := api.cpp api.h $(KEYS)
+API := api.cpp api.h relay.h presence.h ../core/relay.h ../core/broadcast.h $(KEYS)
 build/front-test: front_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h | build
 	$(CXX) $(FLAGS) front_test.cpp front.cpp api.cpp link.cpp world.cpp identity.cpp signatures.cpp $(MONO) -o $@
 build/api-test: api_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h | build
@@ -65,7 +65,7 @@ test: build/identity-test build/world-test build/policy-test build/curate-test b
 	python3 -B test_link.py build/coop-world
 	python3 -B test_names.py build/coop-world
 	python3 -B test_relay.py build/coop-world ../mod/build/coop-swarm
-	python3 -B test_broadcast.py build/coop-world
+	python3 -B test_broadcast.py build/coop-world ../mod/build/coop-swarm
 	python3 -B test_presence.py build/coop-world ../mod/build/coop-swarm
 	python3 -B test_mutants.py
 all: build/coop-world.exe

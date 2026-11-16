@@ -1,6 +1,8 @@
 // The launcher's API (api.h) through the HTTP surface: the policy in words, one player's choices, counts and objects,
 // his offer and withdrawal while the server runs; under the prefix only, changes by POST only, a body that names
 // nothing changes nothing, nobody acts on another's objects or on an import, member and the policy stay the owner's.
+// A player's friend list and his choice of who he sees: set before his game signs in, kept with the world, strict
+// bodies, and his friends' objects first where the policy orders by likes.
 #include "front.h"
 #include "api.h"
 #include <cstdio>
@@ -33,16 +35,16 @@ static void policy(){
     auto p=s.doc(s.get("policy"));
     CHECK(p.get("format").integer()==1&&p.get("server").string()==s.w.serverId()&&p.get("preset").string()=="friends");
     CHECK(p.get("players").get("count").integer()==0&&p.get("players").get("limit").integer()==16);
-    auto& settings=p.get("settings").items();CHECK(settings.size()==12);
+    auto& settings=p.get("settings").items();CHECK(settings.size()==13);
     for(auto& item:settings)CHECK(item.get("text").string().size()>20&&item.get("value").string()==item.get("preset").string());
-    CHECK(settings.size()==12&&settings[1].get("key").string()=="build"&&settings[1].get("text").string()=="What any player builds here may be shared with the others.");
+    CHECK(settings.size()==13&&settings[1].get("key").string()=="build"&&settings[1].get("text").string()=="What any player builds here may be shared with the others.");
     Server pub("public",{"limit=50"});
     auto q=pub.doc(pub.get("policy"));auto& qs=q.get("settings").items();
-    CHECK(q.get("preset").string()=="public"&&qs.size()==12&&qs[1].get("value").string()=="members"&&qs[3].get("value").string()=="50"&&qs[3].get("preset").string()=="200");
-    CHECK(qs.size()==12&&qs[3].get("text").string().find("At most 50 of your objects")==0&&qs[2].get("text").string().find("owner's review")!=std::string::npos&&qs[4].get("text").string().find("remnant")!=std::string::npos);
+    CHECK(q.get("preset").string()=="public"&&qs.size()==13&&qs[1].get("value").string()=="members"&&qs[3].get("value").string()=="50"&&qs[3].get("preset").string()=="200");
+    CHECK(qs.size()==13&&qs[3].get("text").string().find("At most 50 of your objects")==0&&qs[2].get("text").string().find("owner's review")!=std::string::npos&&qs[4].get("text").string().find("remnant")!=std::string::npos);
     Server solo("solo");solo.signIn("a","A");auto r=solo.doc(solo.get("policy"));
     CHECK(r.get("players").get("count").integer()==1&&r.get("players").get("limit").integer()==1&&r.get("settings").items()[5].get("text").string()=="One player only: a personal archive. It has 1 now.");
-    for(const char* k:{"join","build","accept_offers","limit","withdrawal","players","offer_builds","offer_old","order","per_builder","spread","identity"})CHECK(settingText(k,"x",0).size()>20);
+    for(const char* k:{"join","build","accept_offers","limit","withdrawal","players","offer_builds","offer_old","order","per_builder","spread","identity","near_cap"})CHECK(settingText(k,"x",0).size()>20);
     CHECK(qs[8].get("text").string().find("most liked")!=std::string::npos&&qs[9].get("text").string().find("At most 3 ")==0&&settings[10].get("text").string().find("20 m")!=std::string::npos);
 }
 static void choices(){
@@ -127,8 +129,52 @@ static void objects(){
     Server g("friends");auto c=g.signIn("cat","Cat"),d=g.signIn("dan","Dan");auto c1=g.make(c);
     CHECK(g.found(d)==1&&g.doc(g.post("withdraw","{\"player\":\"cat\",\"object\":\""+c1+"\"}")).get("removed").integer()==1&&g.found(d)==0&&g.mine("cat").empty());
 }
+static void friends(){
+    Server s("public");
+    // Nobody is made by asking; a list and a choice before his game signs in make him, as choices do.
+    auto f=s.doc(s.get("friends","ann"));CHECK(!f.get("known").boolean()&&f.get("friends").items().empty()&&f.get("show_others").string()==""&&s.players()==0);
+    f=s.doc(s.post("friends","{\"player\":\"ann\",\"add\":[\"bea\",\"cy\"],\"show_others\":\"friends\"}"));
+    CHECK(f.get("known").boolean()&&f.get("show_others").string()=="friends"&&f.get("friends").items().size()==2&&s.players()==1);
+    CHECK(f.get("friends").items()[0].get("key").string()=="bea"&&f.get("friends").items()[0].get("id").string()==playerId("bea")&&!f.get("friends").items()[0].get("known").boolean());
+    auto bea=s.signIn("bea","Bea");auto cy=s.signIn("cy","Cy");
+    f=s.doc(s.get("friends","ann"));CHECK(f.get("friends").items()[0].get("name").string()=="Bea"&&f.get("friends").items()[0].get("known").boolean());
+    f=s.doc(s.post("friends","{\"player\":\"ann\",\"remove\":[\"cy\",\"nobody-here\"],\"show_others\":\"default\"}"));
+    CHECK(f.get("friends").items().size()==1&&f.get("show_others").string()=="");
+    // Bodies that are refused change nothing: an unknown field, lists that are not lists of text, a choice that is none,
+    // nothing at all, himself, a short key nobody here has, a key that is none, too many; a change by GET is a read.
+    auto before=s.w.snapshot().dump();
+    for(const char* bad:{"{\"player\":\"ann\",\"add\":[\"x\"],\"member\":\"yes\"}","{\"player\":\"ann\",\"add\":\"bea\"}","{\"player\":\"ann\",\"add\":[1]}",
+                         "{\"player\":\"ann\",\"show_others\":\"some\"}","{\"player\":\"ann\"}","{\"player\":\"ann\",\"add\":[\"ann\"]}","{\"player\":\"ann\",\"add\":[\"a b\"]}",
+                         "{\"player\":\"\",\"add\":[\"x\"]}","{\"player\":\"ann\",\"show_others\":true}","[]","{\"player\":\"ann\",\"remove\":[\"a b\"]}"})
+        CHECK(s.post("friends",bad).status==400);
+    CHECK(s.post("friends","{\"player\":\"ann\",\"add\":[\"a1b2 c3d4 e5f6 a7b8\"]}").status==403);
+    {std::string many="{\"player\":\"ann\",\"add\":[";for(size_t i=0;i<MaxFriends;++i)many+=(i?",\"f":"\"f")+std::to_string(i)+"\"";CHECK(s.post("friends",many+"]}").status==400);}
+    CHECK(s.raw("PUT","/s3cret/coop/friends","{\"player\":\"ann\",\"add\":[\"x\"]}").status==404&&s.raw("GET","/s3cret/coop/friends").status==400);
+    CHECK(s.w.snapshot().dump()==before);
+    // Kept with the world: a restored world has the list and the choice; files with a list in the wrong form are refused.
+    s.doc(s.post("friends","{\"player\":\"ann\",\"show_others\":\"nobody\"}"));
+    {World back([]{return std::string("t");});back.restore(s.w.snapshot());auto list=back.apiFriends("ann");
+     CHECK(list.get("show_others").string()=="nobody"&&list.get("friends").items().size()==1&&list.get("friends").items()[0].get("key").string()=="bea");}
+    for(const char* wrong:{"[\"a b\"]","\"bea\"","[\"ann\"]","[3]"}){
+        auto text=s.w.snapshot().dump();auto at=text.find("\"friends\":[\"bea\"]");CHECK(at!=std::string::npos);
+        text.replace(at,std::string("\"friends\":[\"bea\"]").size(),std::string("\"friends\":")+wrong);
+        World x([]{return std::string("t");});bool refused=false;try{x.restore(json::parse(text));}catch(const std::exception&){refused=true;}CHECK(refused);}
+    {auto text=s.w.snapshot().dump();auto at=text.find("\"show_others\":\"nobody\"");CHECK(at!=std::string::npos);text.replace(at,24,"\"show_others\":\"maybe\"");
+     World x([]{return std::string("t");});bool refused=false;try{x.restore(json::parse(text));}catch(const std::exception&){refused=true;}CHECK(refused);}
+    // His friends' objects first (the public preset orders by likes): Bea's two older cairns for Ann, Cy's two newer
+    // ones for Dan, who has no friends.
+    Server o("public",{"build=everyone","accept_offers=auto"});auto b=o.signIn("bea","Bea"),c=o.signIn("cy","Cy"),ann=o.signIn("ann","Ann"),dan=o.signIn("dan","Dan");
+    auto cairn=[&](const std::string& token,int x,int64_t when){auto r=o.w.call(token,"createObject","{\"t\":\"e\",\"q\":226,\"px\":"+std::to_string(x*100)+",\"py\":0,\"pz\":0}",when);CHECK(r.status==200);return json::parse(r.body).get("id").string();};
+    std::set<std::string> ofBea{cairn(b,0,100),cairn(b,50,101)},ofCy{cairn(c,100,200),cairn(c,150,201)};
+    CHECK(o.doc(o.post("friends","{\"player\":\"ann\",\"add\":[\"bea\"]}")).get("friends").items().size()==1);
+    auto two=[&](const std::string& token){std::set<std::string> out;auto answer=json::parse(o.w.call(token,"findQpidObjects","{\"q\":226,\"o\":{\"ct\":{\"e\":2}}}",300).body);
+        for(auto& x:answer.get("n").get("oa").items())out.insert(x.get("id").string());
+        return out;};
+    CHECK(two(ann)==ofBea&&two(dan)==ofCy);
+    (void)bea;(void)cy;
+}
 int main(){
-    try{policy();choices();objects();}
+    try{policy();choices();objects();friends();}
     catch(const std::exception& e){std::fprintf(stderr,"api oracle: refused: %s\n",e.what());return 1;}
     if(failures)return 1;
     std::puts("launcher API tests passed");return 0;
