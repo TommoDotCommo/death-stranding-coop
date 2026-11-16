@@ -1605,7 +1605,10 @@ Nothing of this has run with the game. What could not be determined without it:
 - whether the catcher command (0) starts a fight in a visitor's game where his own world has no active BT area (no
   rain there, a cleared sphere, another episode's map state); live it started one "with no fight running and outside
   every cleared sphere" (`game_offsets.md`, "BTs: what destroys a gazer, and the catcher command live"), always
-  where the area was active through shared rain;
+  where the area was active through shared rain. Live 2026-11-17 (second run): with rain at the owner's game only and
+  no active area at the visitor's, the visitor's copy started, took hits both ways and ended cleared like the first
+  run; his cleared spheres stayed 0 (the owner's went to 1). Other episodes and a visitor inside a cleared sphere are
+  still not looked at;
 - which catcher the visitor's game brings (its type, `+0x28`) and whether it matches the owner's (the life is shared by
   ordinal, in the manager's record order; a fight with several catchers, or of different types, is not checked);
 - the place: the owner's fight is placed where its porter stood when it started, and offered within 300 m of that
