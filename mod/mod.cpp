@@ -56,6 +56,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "nametag.h"
 #include "notice.h"
 #include "strand_notices.h"
+#include "received.h"
 #include "weather.h"
 #include "environment.h"
 #include "auto_continue.h"
@@ -1079,6 +1080,21 @@ struct Runtime final:ds::Transport {
             onlineSeen=st;
             note(("ONLINE login task state "+std::to_string(st.taskState)+" step "+std::to_string(st.step)+" error "+std::to_string(st.error)+(st.signedIn()?" (signed in)":"")+"\n").c_str());}
         if(onlineAsk.tick(now,st))note(onlineApi->request()?"ONLINE sign-in asked\n":"ONLINE sign-in not asked: no login task\n");
+    }
+    // --- Received structures built (received.h): opt-in `build_received`. While the game is signed in to the server
+    // the config names, every tick on the game thread looks at the construction records in state 0 and, for one the
+    // game has just made from that server's answer, writes the one flag byte that skips its range and placement checks,
+    // once per record. The walker then builds it in the game's own frame.
+    mod::received::Builder receivedBuilder;mod::received::Builder::Write receivedWrite;bool receivedOn=false,receivedTimed=false;
+    void tickReceived() {
+        bool on=sampler&&mod::received::active(config.buildReceived,!config.onlineServer.empty(),onlineSeen.signedIn());
+        if(on!=receivedOn){receivedOn=on;if(config.buildReceived)note(on?"RECEIVED on: structures this server hands the game are built at once\n":"RECEIVED off: not signed in to the server\n");}
+        if(!on)return;
+        if(!receivedWrite)receivedWrite=mod::received::nativeWrite();
+        if(!imageSize)for(auto& sec:sampler->sections)imageSize=std::max(imageSize,sec.address+sec.size-sampler->base);
+        auto t0=mod::nowUs();
+        for(auto& c:receivedBuilder.step(*sampler,sampler->base,imageSize,receivedWrite))note(mod::received::Builder::line(c).c_str());
+        if(!receivedTimed){receivedTimed=true;std::ostringstream o;o<<"RECEIVED first scan: "<<(mod::nowUs()-t0)/1000.<<" ms\n";note(o.str().c_str());}
     }
     // --- What the game is told about this player's builds on the server (strand_notices.h): opt-in `strand_notices`.
     // The server's API is read on a thread of its own with the notice token the launcher took (`strand_token`); its
@@ -3203,6 +3219,8 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickSignals(now);
             stage="online";stages.enter("online",mod::nowUs());
             if(gameContext)tickOnline(now);
+            stage="received";stages.enter("received",mod::nowUs());
+            if(gameContext)tickReceived();
             stage="notices";stages.enter("notices",mod::nowUs());
             if(gameContext)tickNotices(now);
             stage="cargo command";stages.enter("cargo command",mod::nowUs());
@@ -3945,6 +3963,7 @@ unsigned mod_status(char* out,unsigned cap) {
           <<",\"hosted\":"<<k.hosted<<",\"visits\":"<<k.joined<<",\"released\":"<<k.released<<",\"states\":"<<k.states<<",\"reports\":"<<k.reports
           <<",\"states_taken\":"<<k.statesTaken<<",\"reports_taken\":"<<k.reportsTaken<<",\"damage_applied\":"<<k.damageApplied<<",\"gazers_applied\":"<<k.gazersApplied
           <<",\"kills_taken\":"<<k.killsTaken<<",\"kills_refused\":"<<k.killsRefused<<",\"own_first\":"<<k.ownFirst<<",\"commands\":"<<k.commands<<",\"writes\":"<<k.writes<<"}";}
+        o<<",\"received\":{\"on\":"<<(r.receivedOn?"true":"false")<<",\"built\":"<<r.receivedBuilder.changed()<<",\"skipped\":"<<r.receivedBuilder.skipped()<<"}";
         {mod::strand::Poller::Counters k;if(r.strandPoller)k=r.strandPoller->counters();
          o<<",\"strand\":{\"on\":"<<(r.strandPoller?"true":"false")<<",\"reads\":"<<k.reads<<",\"answers\":"<<k.answers<<",\"failures\":"<<k.failures<<",\"told\":"<<k.told
           <<",\"known\":"<<k.known<<",\"refused\":"<<(k.refused?"true":"false")<<",\"pending\":"<<(r.notices?r.notices->pending():0)<<"}";}
