@@ -186,6 +186,13 @@ int main() {
       assert(mod::serverApiBase("http://10.1.2.3:49100/w77/auth/ds")==std::string("/w77")&&mod::serverApiBase("http://10.1.2.3:49100/w77/k/ann/auth/ds")==std::string("/w77"));
       assert(mod::serverApiBase("http://10.1.2.3:49100/w77/t/T1/auth/ds")==std::string("/w77")&&mod::serverApiBase("http://1.2.3.4:80/auth/ds")==std::string()&&mod::serverApiBase("http://1.2.3.4:80/k/ann/auth/ds")==std::string());
       for(auto bad:{"http://1.2.3.4:80/a/b/auth/ds","http://1.2.3.4:80/w77/x/y/auth/ds","http://1.2.3.4:80/w77//auth/ds","http://1.2.3.4:80/w77/auth/dsx","http://1.2.3.4:80","ftp://1.2.3.4:80/auth/ds"})assert(!mod::serverApiBase(bad));}
+     // Received structures built (received.h): off by default, only with the server the game signs in to.
+     {auto online=withKeys(game,"\"online_server\":\"http://10.1.2.3:49100/w77/auth/ds\"");
+      assert(!mod::parseConfig(online).buildReceived&&mod::parseConfig(withKeys(online,"\"build_received\":true")).buildReceived);
+      assert(!mod::parseConfig(withKeys(online,"\"build_received\":false")).buildReceived);
+      assert(refused(withKeys(game,"\"build_received\":true")));                                       // no online server
+      assert(!mod::parseConfig(withKeys(game,"\"build_received\":false")).buildReceived);
+      assert(refused(withKeys(online,"\"build_received\":1"))&&refused(withKeys(online,"\"build_received\":\"true\"")));}
      assert(mod::onlineAddress("http://10.1.2.3:80/a",0x7f000001,0x0a010203)&&!mod::onlineAddress("http://10.1.2.4:80/a",0x7f000001,0x0a010203)&&!mod::onlineAddress("http://10.1.2.3:80/a",0x7f000001));
      // A partner and a server on a third PC: both addresses are listed, nothing else.
      auto both=withKeys(probe,"\"others\":4,\"server\":\"10.1.2.3\"");

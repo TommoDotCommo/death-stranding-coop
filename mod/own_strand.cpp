@@ -14,12 +14,15 @@ static std::string text(const discovery::Sampler& s,uint64_t p){
     std::string out(n,'\0');if(!s.read(p,out.data(),n))return {};
     return out;
 }
-std::vector<Structure> readStructures(const discovery::Sampler& s,uint64_t base,uint64_t imageSize){
+std::vector<Structure> readStructures(const discovery::Sampler& s,uint64_t base,uint64_t imageSize,Select select){
     std::vector<Structure> out;uint64_t manager=0;
     if(!s.read(base+ConstructionGlobal,&manager,8)||!manager)return out;
     for(auto& r:structures::readTable(s,manager,base,imageSize)){
-        Structure x;x.record=r;uint64_t id=0;
-        if(!s.read(r.object+0xb2,&x.owner,1)||!s.read(r.object+0xb4,&x.creator,4)||!s.read(r.object+0xb8,&id,8))continue;
+        if(select.record&&!select.record(r))continue;
+        Structure x;x.record=r;uint64_t id=0;unsigned char f[0x18];
+        if(!s.read(r.object+ObjectFields,f,sizeof f))continue;
+        std::memcpy(x.flags.data(),f,4);x.owner=f[0xb2-ObjectFields];std::memcpy(&x.creator,f+(0xb4-ObjectFields),4);std::memcpy(&id,f+(0xb8-ObjectFields),8);
+        if(select.object&&!select.object(x))continue;
         x.online=text(s,id);out.push_back(x);
     }
     return out;

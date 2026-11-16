@@ -1,0 +1,55 @@
+#pragma once
+// Received structures built (config `build_received`, off by default; game_offsets.md, "Received structures built").
+// A structure the game makes from a server's answer is a Net construction record (owner byte +0xb2 == 2) that starts in
+// state 0 with object +0xaa 0x20 (still needs the online placement check) and without 0x10 (skip the range test). The
+// game's pending-list walker builds it only when the porter is far enough away (1000 m for bridges, safe houses and
+// jump stands, 50 m for the rest), then runs the placement check, and a failed check marks it for removal (+0xaa |=
+// 0x40, +0xab |= 1). So a served bridge stays pending while the porter is near it, and a served rain shelter is taken
+// down within seconds. With the option the mod sets +0xaa = (+0xaa | 0x10) & ~0x20 on such a record as soon as it
+// sees it: the walker builds it at once (live, a 30 m bridge, by an outside reader). Both checks are skipped, so a
+// received structure may overlap one of this world. Only the one byte is written, on the game thread, once per record.
+// What it leaves alone: Player and Stage records, the save's records (they carry 0x10 already), records marked for
+// removal, records in any state but 0, and Net records without an online id (the mod's own copies of a partner's
+// structures, made with CreateConstruction, are not from a server).
+#include "own_strand.h"
+#include <cstdint>
+#include <functional>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
+namespace mod::received {
+constexpr uint64_t Flags=0xaa,Removal=0xab;          // object offsets (object = record - 0x18)
+constexpr uint8_t Placement=0x20,NoRange=0x10,Removing=0x40,RemovingBit=1;
+// Whether the mod looks at all: the option on, a server in the config (`online_server`, the players' own: a modded copy
+// never signs in anywhere else) and the game signed in to it.
+bool active(bool option,bool server,bool signedIn);
+// The cheap part, before the object is read (own_strand::Select): state 0.
+bool pending(const structures::Record&);
+// Owner and flags, before the online id is read: Net, +0xaa 0x20 without 0x10 and 0x40, +0xab bit 0 clear.
+bool candidate(const own_strand::Structure&);
+// A record the game made from a server's answer and has not dealt with yet: both of the above and an online id.
+bool fresh(const own_strand::Structure&);
+constexpr uint8_t built(uint8_t flags){return uint8_t((flags|NoRange)&~Placement);}
+struct Change { uint64_t object=0; uint32_t id=0; uint8_t type=0; std::string online; uint8_t before=0,after=0; };
+class Builder {
+public:
+    using Write=std::function<bool(uint64_t address,uint8_t value)>;
+    // One look at the construction records: the fresh ones to change, each record once (by record id and online id).
+    std::vector<Change> look(const std::vector<own_strand::Structure>&);
+    // The glue's step on the game thread: reads the pending records (own_strand::readStructures), decides, reads each
+    // chosen record's two flag bytes again and writes +0xaa with `write` only while they are as they were seen.
+    // Returns what was written.
+    std::vector<Change> step(const discovery::Sampler&,uint64_t base,uint64_t imageSize,const Write&);
+    unsigned changed() const {return changed_;}
+    unsigned skipped() const {return skipped_;}   // chosen, then not written: the bytes had changed or the write failed
+    // The log line for a change.
+    static std::string line(const Change&);
+private:
+    std::set<std::pair<uint32_t,std::string>> done_;unsigned changed_=0,skipped_=0;
+};
+// What a construction type is called in the log ("bridge", "rain shelter"...; "structure" when not known).
+const char* name(uint8_t constructionType);
+// One byte into committed read-write memory (Windows); elsewhere every write fails.
+Builder::Write nativeWrite();
+}

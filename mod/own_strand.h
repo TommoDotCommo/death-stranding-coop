@@ -10,7 +10,8 @@
 //   EDSNetSyncObjectType, +0x11 state, +0x14 creator user id). The game files an element whose creator is user 1 in
 //   the second list, everything else in the first, and moves failed ones (state 4 and up) to the third.
 // Likes per object are not read from the game (where it keeps them is unknown); a server's counts can be merged in by
-// online id. Not wired into the running mod yet: a reader for the launcher's "My strand" and for a live probe.
+// online id. As a whole not wired into the running mod yet: a reader for the launcher's "My strand" and for a live
+// probe. Its structure reader is what `build_received` scans with (received.h).
 #include "discovery.h"
 #include "structures.h"
 #include <array>
@@ -25,10 +26,16 @@ constexpr uint8_t Game=0,Player=1,Net=2;             // owner byte at object +0x
 constexpr uint8_t NoKind=24;                         // EDSNetSyncObjectType "none"
 constexpr uint8_t Failed=4;                          // element states from here up are Fail, AlwaysFail, Removed
 constexpr unsigned MaxAreas=4096,MaxPerList=4096,MaxId=64;
-struct Structure { structures::Record record; uint8_t owner=0; uint32_t creator=0; std::string online; };
+// flags: the object's bytes +0xa8..+0xab (+0xaa 0x20: still needs the online placement check, 0x10: skip the range
+// test, 0x40 and +0xab bit 0: marked for removal; game_offsets.md, "Received structures built").
+struct Structure { structures::Record record; uint8_t owner=0; uint32_t creator=0; std::string online; std::array<uint8_t,4> flags{}; };
 struct Online { std::string id; uint32_t area=0; uint8_t kind=NoKind,state=0,list=0; uint32_t creator=0; uint64_t address=0; };
-// Every construction record with its owner byte, creator and online id (objects that cannot be read are left out).
-std::vector<Structure> readStructures(const discovery::Sampler&,uint64_t base,uint64_t imageSize);
+// Which records are read further: `record` is asked before the object is read, `object` before the online id is;
+// what either refuses is left out. Empty: every record.
+struct Select { bool(*record)(const structures::Record&)=nullptr; bool(*object)(const Structure&)=nullptr; };
+constexpr uint64_t ObjectFields=0xa8;                // flags +0xa8, owner +0xb2, creator +0xb4, online id +0xb8: one read
+// Every construction record with its flags, owner byte, creator and online id (objects that cannot be read are left out).
+std::vector<Structure> readStructures(const discovery::Sampler&,uint64_t base,uint64_t imageSize,Select={});
 // Every element of every area's three lists.
 std::vector<Online> readOnline(const discovery::Sampler&,uint64_t base);
 bool mine(const Structure&);   // a built Player variant

@@ -72,6 +72,9 @@ struct Config {
     // player built is not shared on that server (held, kept, waiting) and when it becomes shared. The mod reads his
     // own objects' states with `strand_token`, a notice token the launcher took for him (world/README.md).
     bool strandNotices=false;std::string strandToken;
+    // With online_server: structures other players built, as the game makes them from that server's answer, are built
+    // at once instead of held by the game's range test or taken down by its placement check (received.h). Not run live.
+    bool buildReceived=false;
     unsigned presenceLogMaxMiB=8;
     std::string shareEnvironment="off"; // "host": the host's time and rain; "rain": its rain only (weather.h)
     discovery::Options discoveryOptions;

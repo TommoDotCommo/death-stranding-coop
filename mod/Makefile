@@ -4,8 +4,8 @@ CXX ?= g++
 MINGW ?= $(shell command -v x86_64-w64-mingw32-g++-posix >/dev/null 2>&1 && echo x86_64-w64-mingw32-g++-posix || echo x86_64-w64-mingw32-g++)
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = strand_notices.cpp others.cpp crowd.cpp fights.cpp ../core/broadcast_client.cpp mule_goal.cpp enemy_poses.cpp rewards.cpp signals.cpp ui.cpp orderload.cpp carts.cpp wheels.cpp controls.cpp voidout.cpp passenger.cpp carry_place.cpp roads.cpp bts.cpp enemies.cpp orders.cpp story.cpp ../launcher/saves.cpp vitals.cpp online.cpp notice.cpp nametag.cpp likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = strand_notices.h ../world/json.h others.h crowd.h fights.h ../core/broadcast.h ../core/broadcast_client.h ../core/relay.h mule_goal.h enemy_poses.h rewards.h signals.h ui.h orderload.h carts.h wheels.h controls.h link.h guard_win.h voidout.h passenger.h carry_place.h roads.h bts.h enemies.h orders.h story.h ../launcher/saves.h vitals.h online.h notice.h nametag.h likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = received.cpp own_strand.cpp strand_notices.cpp others.cpp crowd.cpp fights.cpp ../core/broadcast_client.cpp mule_goal.cpp enemy_poses.cpp rewards.cpp signals.cpp ui.cpp orderload.cpp carts.cpp wheels.cpp controls.cpp voidout.cpp passenger.cpp carry_place.cpp roads.cpp bts.cpp enemies.cpp orders.cpp story.cpp ../launcher/saves.cpp vitals.cpp online.cpp notice.cpp nametag.cpp likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = received.h own_strand.h strand_notices.h ../world/json.h others.h crowd.h fights.h ../core/broadcast.h ../core/broadcast_client.h ../core/relay.h mule_goal.h enemy_poses.h rewards.h signals.h ui.h orderload.h carts.h wheels.h controls.h link.h guard_win.h voidout.h passenger.h carry_place.h roads.h bts.h enemies.h orders.h story.h ../launcher/saves.h vitals.h online.h notice.h nametag.h likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -80,7 +80,7 @@ test: environment-test join-test vehicle-test game-thread-test discovery-test po
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_OTHERS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-others && if ./build/unit-config-others >/dev/null 2>&1; then echo SURVIVED CONFIG_OTHERS; exit 1; else echo KILLED MUTANT_CONFIG_OTHERS; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_RELAY_ADDRESS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-relay-address && if ./build/unit-config-relay-address >/dev/null 2>&1; then echo SURVIVED CONFIG_RELAY_ADDRESS; exit 1; else echo KILLED MUTANT_CONFIG_RELAY_ADDRESS; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_RELAY_NEEDS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-relay-needs && if ./build/unit-config-relay-needs >/dev/null 2>&1; then echo SURVIVED CONFIG_RELAY_NEEDS; exit 1; else echo KILLED MUTANT_CONFIG_RELAY_NEEDS; fi
-	python3 -B mutants.py --sources "unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp" --prefix build/mutant-unit- CONFIG_GROUP CONFIG_SERVER_ANY CONFIG_OTHERS_SHOW CONFIG_RELAY_MODE CONFIG_SHOW_OTHERS CONFIG_STRAND CONFIG_FIGHTS && echo KILLED MUTANT_CONFIG_GROUP MUTANT_CONFIG_SERVER_ANY MUTANT_CONFIG_OTHERS_SHOW MUTANT_CONFIG_RELAY_MODE MUTANT_CONFIG_SHOW_OTHERS MUTANT_CONFIG_STRAND MUTANT_CONFIG_FIGHTS
+	python3 -B mutants.py --sources "unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp" --prefix build/mutant-unit- CONFIG_GROUP CONFIG_SERVER_ANY CONFIG_OTHERS_SHOW CONFIG_RELAY_MODE CONFIG_SHOW_OTHERS CONFIG_STRAND CONFIG_FIGHTS CONFIG_RECEIVED && echo KILLED MUTANT_CONFIG_GROUP MUTANT_CONFIG_SERVER_ANY MUTANT_CONFIG_OTHERS_SHOW MUTANT_CONFIG_RELAY_MODE MUTANT_CONFIG_SHOW_OTHERS MUTANT_CONFIG_STRAND MUTANT_CONFIG_FIGHTS MUTANT_CONFIG_RECEIVED
 	python3 -B test_probe.py
 	python3 -B -m unittest -q test_game_thread_api test_probe_puppet test_actor_resources test_actor_reader_windows
 	python3 -B test_actor_resource_mutants.py
@@ -177,6 +177,9 @@ build/roads-test: roads_test.cpp roads.cpp roads.h discovery.cpp | build
 # The player's own strand (own_strand.h): a reader not wired into the mod yet.
 build/own-strand-test: own_strand_test.cpp own_strand.cpp own_strand.h structures.cpp structures.h discovery.cpp | build
 	$(CXX) $(FLAGS) own_strand_test.cpp own_strand.cpp structures.cpp discovery.cpp -o $@
+# Received structures built (received.h, config build_received): the decision and the scan over fake memory.
+build/received-test: received_test.cpp received.cpp received.h own_strand.cpp own_strand.h structures.cpp structures.h discovery.cpp | build
+	$(CXX) $(FLAGS) received_test.cpp received.cpp own_strand.cpp structures.cpp discovery.cpp -o $@
 
 build/carts-test: carts_test.cpp carts.cpp carts.h carry_place.cpp carry_place.h discovery.cpp | build
 	$(CXX) $(FLAGS) carts_test.cpp carts.cpp carry_place.cpp discovery.cpp -o $@
@@ -254,7 +257,7 @@ build/wire-test: wire_test.cpp rewards.cpp rewards.h signals.cpp signals.h order
 	$(CXX) $(FLAGS) wire_test.cpp rewards.cpp signals.cpp orderload.cpp cargo.cpp discovery.cpp ../core/core.cpp -o $@
 build/rewards-test: rewards_test.cpp rewards.cpp rewards.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(CXX) $(FLAGS) rewards_test.cpp rewards.cpp discovery.cpp ../core/core.cpp -o $@
-game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/mule-goal-test build/passenger-test build/place-test build/roads-test build/own-strand-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test build/strand-notices-test build/signals-test build/story-test build/enemy-poses-test build/others-test build/crowd-test build/fights-test
+game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/mule-goal-test build/passenger-test build/place-test build/roads-test build/own-strand-test build/received-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test build/strand-notices-test build/signals-test build/story-test build/enemy-poses-test build/others-test build/crowd-test build/fights-test
 	./build/story-test
 	./build/wire-test
 	./build/rewards-test
@@ -292,6 +295,7 @@ game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderlo
 	./build/place-test
 	./build/roads-test
 	./build/own-strand-test
+	./build/received-test
 	./build/bts-test
 	./build/carts-test
 	for m in CARTS_VTABLE CARTS_ANY CARTS_ECHO CARTS_MANY; do $(CXX) $(FLAGS) -DMUTANT_$$m carts_test.cpp carts.cpp carry_place.cpp discovery.cpp -o build/carts-mutant && if ./build/carts-mutant >/dev/null 2>&1; then echo SURVIVED $$m; exit 1; else echo KILLED MUTANT_$$m; fi; done
