@@ -12,6 +12,9 @@ build/policy-test: policy_test.cpp world.cpp world.h json.h | build
 	$(CXX) $(FLAGS) policy_test.cpp world.cpp -o $@
 build/curate-test: curate_test.cpp world.cpp world.h json.h | build
 	$(CXX) $(FLAGS) curate_test.cpp world.cpp -o $@
+# Builder names (README "Builder names"): display names, the label lookup gives, the home in exports.
+build/names-test: names_test.cpp world.cpp world.h json.h | build
+	$(CXX) $(FLAGS) names_test.cpp world.cpp -o $@
 LINK := link.cpp link.h
 build/link-test: link_test.cpp $(LINK) world.cpp world.h json.h | build
 	$(CXX) $(FLAGS) link_test.cpp link.cpp world.cpp -o $@
@@ -42,11 +45,12 @@ build/coop-world.exe: main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.
 ../mod/build/coop-swarm: FORCE
 	$(MAKE) -C ../mod build/coop-swarm
 FORCE:
-test: build/identity-test build/world-test build/policy-test build/curate-test build/link-test build/front-test build/api-test build/keys-test build/relay-test build/broadcast-test build/coop-world ../mod/build/coop-swarm
+test: build/identity-test build/world-test build/policy-test build/curate-test build/names-test build/link-test build/front-test build/api-test build/keys-test build/relay-test build/broadcast-test build/coop-world ../mod/build/coop-swarm
 	./build/identity-test
 	./build/world-test
 	./build/policy-test
 	./build/curate-test
+	./build/names-test
 	./build/link-test
 	./build/front-test
 	./build/api-test
@@ -55,6 +59,7 @@ test: build/identity-test build/world-test build/policy-test build/curate-test b
 	./build/broadcast-test
 	python3 -B test_server.py build/coop-world
 	python3 -B test_link.py build/coop-world
+	python3 -B test_names.py build/coop-world
 	python3 -B test_relay.py build/coop-world ../mod/build/coop-swarm
 	python3 -B test_broadcast.py build/coop-world
 	python3 -B test_mutants.py

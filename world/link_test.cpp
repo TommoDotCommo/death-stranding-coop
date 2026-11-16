@@ -66,10 +66,11 @@ static void importAndIds(){
     auto ids=b.ids();CHECK(ids.size()==2);
     for(auto& id:ids){CHECK(id.size()==13&&(id[0]=='l'||id[0]=='r')&&id!=ladder&&id!=rope);for(char c:id)CHECK(std::isalnum(static_cast<unsigned char>(c)));}
     CHECK(ids.size()==2&&ids[0][0]!=ids[1][0]);
-    // The players here are handed them like any other player's object, with the builder's id and name from over there.
+    // The players here are handed them like any other player's object, with the builder's id and name from over there
+    // (his server's display name after it: that one has none, so the first characters of its id; names_test.cpp).
     CHECK(b.found(bea,226)==2);
     auto users=json::parse(b.w.call(bea,"lookup","{\"ids\":[\""+playerId("steam-a")+"\"]}",1).body).get("users");
-    CHECK(users.items().size()==1&&users.items()[0].get("displayName").string()=="Ann"&&users.items()[0].get("boundAccount").string().empty());
+    CHECK(users.items().size()==1&&users.items()[0].get("displayName").string()=="Ann \xC2\xB7 serverA1"&&users.items()[0].get("boundAccount").string().empty());
     // The same export again: nothing is added, nothing changes.
     auto before=b.w.snapshot().dump();
     r=b.w.importObjects(document,parseFilter("all"),false,400);CHECK(r.added==0&&r.updated==0&&r.unchanged==2&&b.w.objects()==2&&b.w.snapshot().dump()==before);

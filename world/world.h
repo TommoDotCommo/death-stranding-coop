@@ -36,9 +36,19 @@ struct Filter {
     bool likes=true,imported=false;
 };
 Filter parseFilter(const std::string& text);        // throws std::runtime_error with the reason
-// One object on its way between servers: `server` and `id` are where it was first built and its id there.
+// The names a game shows for a builder (README, "Builder names"). Each world may have a short display name (`--name`):
+// 1..MaxHomeChars characters, at most MaxHomeBytes bytes of UTF-8, no control characters, no space at either end.
+// `lookup` answers this server's own players with their name only, and the builder of an imported object with
+// "Name · Home", Home the display name of the server it was first built on; the whole label is at most MaxLabelChars
+// characters and MaxLabelBytes bytes (the game's label holds no more), and only the name part is cut to fit.
+constexpr size_t MaxHomeChars=12,MaxHomeBytes=16,MaxLabelChars=24,MaxLabelBytes=32,HomeIdChars=8;
+bool serverNameText(const std::string&);
+std::string cutText(const std::string&,size_t chars,size_t bytes);   // whole UTF-8 characters, then no space at the end
+std::string builderLabel(const std::string& name,const std::string& home);   // "Name · Home"; `home` "": the name only
+// One object on its way between servers: `server` and `id` are where it was first built and its id there; `home` that
+// server's display name ("" when it has none: the form from before, which the taking side names itself).
 struct Shared {
-    std::string server,id,creator,name;int64_t updated=0,likes=0;json::Value post;
+    std::string server,id,creator,name,home;int64_t updated=0,likes=0;json::Value post;
     std::string type() const {return post.get("t").string();}
     int64_t area() const {return post.get("q").integer();}
 };
@@ -111,6 +121,13 @@ public:
     // Linked servers. This world's own id is made once and saved with it.
     std::string serverId() const {std::lock_guard<std::mutex> g(lock_);return serverId_;}
     void setServerId(const std::string& id);
+    // This world's display name ("" none; serverNameText, else it throws). Saved with the world and given with what it
+    // exports. `setLinkName`: the name a live link gives the server it takes from (--link NAME), the name its builders'
+    // home has here while that server gives none of its own. Not saved: the link names it again at every start.
+    std::string name() const {std::lock_guard<std::mutex> g(lock_);return name_;}
+    void setName(const std::string&);
+    void setLinkName(const std::string& server,const std::string& name);
+    std::string homeName(const std::string& server) const;   // a server's display name here: its own, else its link's, else its id's first characters
     // Changes whenever anything an export could hold changes, and with every start of the process.
     std::string version() const {std::lock_guard<std::mutex> g(lock_);return versionLocked();}
     // The objects that pass `f`, as a document: the ones after id `after`, at most `limit` and about `bytes` of them
@@ -133,7 +150,8 @@ public:
     // A player's own choices, "KEY=VALUE": offer_builds yes|no|ask|default, offer_old yes|no|default, member yes|no.
     void setPlayer(const std::string& id,const std::string& keyValue);
     // One line per player of this world, then one per builder known here only from imports (known=false).
-    struct PlayerInfo { std::string id,name,offerBuilds,offerOld;bool known=true,member=false;size_t shared=0,pending=0,kept=0,held=0,remnants=0,imported=0; };
+    // `key`: his account key; `likes`: on his objects built here that are still his (a remnant's are nobody's).
+    struct PlayerInfo { std::string id,name,key,offerBuilds,offerOld;bool known=true,member=false;size_t shared=0,pending=0,kept=0,held=0,remnants=0,imported=0;int64_t likes=0; };
     std::vector<PlayerInfo> playerList() const;
     // The objects that wait: for their builder's answer (offer_builds ask), or for the owner (accept_offers review),
     // and the ones held because the policy does not let them be shared (`held`: build, member or limit).
@@ -177,8 +195,9 @@ private:
     // "held" (its builder's only because the policy does not let it be shared: `held` says why, build, member or
     // limit; `heldAsk`: its builder is still to be asked).
     // A remnant was withdrawn by its builder and stayed: nobody changes it, and its likes go to no one.
+    // `home`: the display name of its first server as the record that brought it gave it ("" none given).
     struct Object { std::string id,creator;json::Value post;int64_t updated=0;int64_t likes=0;
-                    std::string originServer,originId,via,originName;int64_t originLikes=0;
+                    std::string originServer,originId,via,originName,home;int64_t originLikes=0;
                     std::string name,share,held;bool remnant=false,heldAsk=false; };
     struct Like { std::string to,from,object,type;int64_t time=0,points=0,autoPoints=0; };   // to: the object's builder
     mutable std::mutex lock_;
@@ -189,6 +208,8 @@ private:
     std::vector<Like> likes_;                       // oldest first, at most MaxLikes
     uint64_t nextObject_=1;bool dirty_=false;
     std::string serverId_,epoch_;uint64_t changes_=0;
+    std::string name_;std::map<std::string,std::string> linkNames_;   // this world's display name; server id -> link name
+    std::string homeLocked(const std::string& server,const std::string& given) const;
     std::map<std::pair<std::string,std::string>,std::string> byOrigin_;   // (origin server, id there) -> id here
     Policy policy_;
     // Identity: the owner's account, and the tickets and relay tokens the launchers took (by text).
