@@ -7,6 +7,7 @@
 #include "launch_win.h"
 #include "firewall_win.h"
 #include "strand.h"
+#include "owner.h"
 #include "../world/json.h"
 #include <sstream>
 #include <memory>
@@ -29,7 +30,7 @@ std::string groupPolicy="friends";                      // the rules the host's 
 Session strandSession;bool haveStrand=false;            // the group server this launcher last hosted or joined: "My strand on this server"
 world::identity::Keys keys;                             // this install's key pair (player.key beside launcher.ini; core.h playerKeys)
 std::vector<HWND> controls[4];
-enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import,Remove,GroupHost,GroupPolicy,Strand};
+enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import,Remove,GroupHost,GroupPolicy,Strand,Owner};
 const char* PolicyNames[]={"friends","solo","public"};
 HWND child(int id){return GetDlgItem(window,id);}
 std::wstring text(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(n+1,0);GetWindowTextW(h,s.data(),n+1);s.resize(n);return s;}
@@ -105,6 +106,10 @@ void writeSettings(){
         {"privacy",std::to_string(privacy)},{"world",std::to_string(sharedWorld)},{"group",std::to_string(groupHost)},{"group_secret",std::to_string(groupSecret)},{"player_id",std::to_string(playerNumber)},{"group_policy",groupPolicy}}));
 }
 void saveSettings(){if(!initializing)writeSettings();}
+// A headless report (one line of JSON): to standard output for "-", else to that file.
+void writeReport(const std::string& where,const std::string& line){
+    if(where=="-"){DWORD n=0;HANDLE out=GetStdHandle(STD_OUTPUT_HANDLE);if(out&&out!=INVALID_HANDLE_VALUE)WriteFile(out,line.data(),DWORD(line.size()),&n,nullptr);return;}
+    std::ofstream f(where,std::ios::binary|std::ios::trunc);f<<line;if(!f)throw std::runtime_error("Cannot write the report file.");}
 // Group play: this launcher's player number, made once and kept (never the Steam id), and the key of the group this
 // player hosts, made the first time it is needed and kept, so the group's invite stays good between sessions.
 uint64_t settingNumber(const wchar_t* key){wchar_t b[32];GetPrivateProfileStringW(L"launcher",key,L"",b,32,settingsFile.c_str());auto v=utf8(b);
@@ -262,6 +267,90 @@ void strandView(){
         popupControl(h,Close,L"BUTTON",L"Close",BS_DEFPUSHBUTTON,629,600,195,36);
         refresh();});
 }
+// "Server owner": the owner's actions on the group server this launcher hosts and gave its key as the owner's
+// (owner.h): the players with their counts, members, removing all of a player's objects, the review queue and the
+// rules, each a call signed with this install's key. Built without being seen on a screen (README).
+void ownerView(){
+    if(!haveStrand||!owner::available(strandSession,keys))throw std::runtime_error("Host a group server from this launcher first: only its owner key makes these calls.");
+    auto t=targetOf(strandSession);auto send=strand::transport(t);
+    {strand::Policy first;std::string why;if(!owner::connect(t,send,first,why))throw std::runtime_error(why);}
+    enum {Info=601,Players,MemberYes,MemberNo,AcceptPlayer,RejectPlayer,RemovePlayer,Queue,AcceptSelected,RejectSelected,Rules,Value,SetRule,Preset,UsePreset,Note,Refresh,Close};
+    Popup pop;owner::View view;bool shown=false;
+    auto item=[&](int id){return GetDlgItem(pop.h,id);};
+    auto note=[&](const std::string& text){SetWindowTextW(item(Note),wtext(text).c_str());};
+    auto fill=[&](int id,const std::vector<std::string>& rows){SendMessageW(item(id),LB_RESETCONTENT,0,0);for(auto& r:rows){auto w=wtext(r);SendMessageW(item(id),LB_ADDSTRING,0,reinterpret_cast<LPARAM>(w.c_str()));}};
+    auto refresh=[&]{
+        std::string why;shown=owner::fetch(t,send,view,why);
+        std::string info=shown?"Server "+(view.name.empty()?std::string("without a name"):"\""+view.name+"\"")+" ("+view.policy.server+"), "+view.policy.preset+" preset, "
+                               +std::to_string(view.policy.players)+" of "+std::to_string(view.policy.limit)+" players. You are its owner: every action here is a call signed with your key."
+                         :why;
+        SetWindowTextW(item(Info),wtext(info).c_str());
+        std::vector<std::string> rows;
+        if(shown)for(auto& p:view.players)rows.push_back(p.text());
+        fill(Players,rows);rows.clear();
+        if(shown)for(auto& w:view.waiting)rows.push_back(w.text());
+        fill(Queue,rows);
+        fill(Rules,shown?owner::rules(view.policy):std::vector<std::string>());
+        for(int id:{MemberYes,MemberNo,AcceptPlayer,RejectPlayer,RemovePlayer,AcceptSelected,RejectSelected,SetRule,UsePreset})EnableWindow(item(id),shown);};
+    auto player=[&]()->const owner::Player&{
+        int i=int(SendMessageW(item(Players),LB_GETCURSEL,0,0));
+        if(i<0||size_t(i)>=view.players.size())throw std::runtime_error("Select a player first.");
+        return view.players[size_t(i)];};
+    auto run=[&](const owner::Action& a){auto done=owner::act(t,send,a);refresh();note(done.message);};
+    pop.command=[&](int id){
+        if(id==Close){pop.done=true;return;}
+        if(id==Refresh){refresh();note("");return;}
+        if(id==MemberYes||id==MemberNo||id==AcceptPlayer){
+            auto& p=player();if(!p.known)throw std::runtime_error(p.name+" is a builder from a linked server, not a player of this server.");
+            run({id==AcceptPlayer?"accept-player":"member",p.id,id==AcceptPlayer?"":id==MemberYes?"yes":"no","",{}});}
+        if(id==RejectPlayer){
+            auto& p=player();
+            if(MessageBoxW(pop.h,wtext("Reject everything of "+p.name+" that waits for you?\n\nIt is kept for him alone, not removed, and nobody else is handed it.").c_str(),L"Reject all of a player",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
+            run({"reject-player",p.id,"","",{}});}
+        if(id==RemovePlayer){
+            auto& p=player();
+            if(MessageBoxW(pop.h,wtext(owner::removalText(view.policy,p)).c_str(),L"Remove all of a player's objects",MB_YESNO|MB_ICONWARNING|MB_DEFBUTTON2)!=IDYES)return;
+            run({"remove",p.id,"","",{}});}
+        if(id==AcceptSelected||id==RejectSelected){
+            int n=int(SendMessageW(item(Queue),LB_GETSELCOUNT,0,0));std::vector<int> at(size_t(n>0?n:0));
+            if(n>0)SendMessageW(item(Queue),LB_GETSELITEMS,WPARAM(n),reinterpret_cast<LPARAM>(at.data()));
+            std::vector<owner::Waiting> chosen;for(int i:at)if(i>=0&&size_t(i)<view.waiting.size())chosen.push_back(view.waiting[size_t(i)]);
+            if(chosen.empty())throw std::runtime_error("Select one or more objects first.");
+            std::string said;int skipped=0;
+            for(auto& w:chosen){
+                if(w.waitingFor=="builder"){++skipped;continue;}   // its builder answers first, not the owner
+                auto done=owner::act(t,send,{id==AcceptSelected?"accept":"reject",w.id,"","",{}});said+=(said.empty()?"":" ")+done.message;}
+            if(skipped)said+=(said.empty()?"":" ")+std::to_string(skipped)+" wait for their builder's answer first: not yours to answer.";
+            refresh();note(said);}
+        if(id==SetRule){
+            int i=int(SendMessageW(item(Rules),LB_GETCURSEL,0,0));
+            if(i<0||size_t(i)>=view.policy.settings.size())throw std::runtime_error("Select a rule first.");
+            auto value=utf8(text(item(Value)));if(value.empty())throw std::runtime_error("Type the rule's new value first.");
+            run({"policy","","","",{view.policy.settings[size_t(i)].key+"="+value}});}
+        if(id==UsePreset){
+            auto i=SendMessageW(item(Preset),CB_GETCURSEL,0,0);if(i<0||i>2)throw std::runtime_error("Choose a preset first.");
+            if(MessageBoxW(pop.h,wtext(std::string("Use the ")+PolicyNames[i]+" preset? Every setting becomes the preset's; what you changed is lost. It applies to uploads from now on.").c_str(),L"Server rules",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
+            run({"policy","","",PolicyNames[i],{}});}};
+    runPopup(pop,L"Server owner",940,700,[&](HWND h){
+        popupControl(h,Info,L"EDIT",L"",ES_READONLY|ES_MULTILINE,20,15,884,52);
+        popupControl(h,0,L"STATIC",L"Players (select one):",SS_LEFT,20,74,884,22);
+        popupControl(h,Players,L"LISTBOX",L"",LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|WS_VSCROLL|WS_HSCROLL,20,96,884,126);
+        int x=20;for(auto b:std::initializer_list<std::pair<int,const wchar_t*>>{{MemberYes,L"Make member"},{MemberNo,L"Not a member"},{AcceptPlayer,L"Accept all of player"},{RejectPlayer,L"Reject all of player"},{RemovePlayer,L"Remove all of player..."}}){
+            popupControl(h,b.first,L"BUTTON",b.second,0,x,228,170,32);x+=178;}
+        popupControl(h,0,L"STATIC",L"Waiting for you, or held by the rules (Shift and Ctrl select several):",SS_LEFT,20,268,884,22);
+        popupControl(h,Queue,L"LISTBOX",L"",LBS_EXTENDEDSEL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|WS_VSCROLL|WS_HSCROLL,20,290,884,110);
+        popupControl(h,AcceptSelected,L"BUTTON",L"Accept selected",0,20,406,220,32);popupControl(h,RejectSelected,L"BUTTON",L"Reject selected (kept for its builder)",0,248,406,330,32);
+        popupControl(h,0,L"STATIC",L"Rules (select one, type its new value, Set):",SS_LEFT,20,446,884,22);
+        popupControl(h,Rules,L"LISTBOX",L"",LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|WS_VSCROLL|WS_HSCROLL,20,468,884,100);
+        popupControl(h,Value,L"EDIT",L"",ES_AUTOHSCROLL,20,574,160,30);popupControl(h,SetRule,L"BUTTON",L"Set selected rule",0,188,574,200,30);
+        auto combo=popupControl(h,Preset,L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL,450,574,220,120);
+        for(auto name:{L"Friends",L"Solo archive",L"Public"})SendMessageW(combo,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
+        popupControl(h,UsePreset,L"BUTTON",L"Use this preset",0,678,574,226,30);
+        popupControl(h,Note,L"STATIC",L"",SS_LEFT,20,612,560,44);
+        popupControl(h,Refresh,L"BUTTON",L"Refresh",0,590,614,150,36);popupControl(h,Close,L"BUTTON",L"Close",BS_DEFPUSHBUTTON,750,614,154,36);
+        SendMessageW(item(Players),LB_SETHORIZONTALEXTENT,1600,0);SendMessageW(item(Queue),LB_SETHORIZONTALEXTENT,1600,0);SendMessageW(item(Rules),LB_SETHORIZONTALEXTENT,2400,0);
+        refresh();});
+}
 // Group play (README "A group on one server"). The host's invite: the group's key, the server's port and this PC's
 // addresses. It is the same every session while the key and the addresses stay the same.
 bool hostingGroup(){return groupHost&&choice==0&&!net->lobby;}
@@ -322,7 +411,8 @@ void render(){
     if(selectedTab==0){
         place(200,30,115,120,24);place(Name,155,110,w-185,28);
         for(int i=0;i<3;++i){place(Host+i,30+i*(w-60)/3,155,(w-75)/3,56);SendMessageW(child(Host+i),BM_SETCHECK,i==choice?BST_CHECKED:BST_UNCHECKED,0);show(Host+i,!net->lobby);}
-        bool strandShown=haveStrand&&!net->lobby;show(Strand,strandShown);place(Strand,30,h-182,w-60,40);
+        bool strandShown=haveStrand&&!net->lobby,ownerShown=strandShown&&owner::available(strandSession,keys);show(Strand,strandShown);show(Owner,ownerShown);
+        place(Strand,30,h-182,ownerShown?(w-75)/2:w-60,40);place(Owner,45+(w-75)/2,h-182,(w-75)/2,40);
         place(201,30,230,w-60,28);place(Paste,30,260,w-60,30);place(202,30,298,w-60,25);place(Rows,30,330,w-60,h-480-(strandShown?50:0));
         place(Status,30,h-132,w-60,50);place(Primary,30,h-70,w-60,40);
         bool join=choice==1&&!net->lobby;show(201,join);show(Paste,join);show(202,join);show(Rows,join);show(Primary,!net->lobby||net->hosting);
@@ -425,6 +515,7 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
                 if(id>=Host&&id<=Solo){choice=id-Host;saveSettings();render();scan(true);}
                 if(id==Primary)primary();
                 if(id==Strand)strandView();
+                if(id==Owner)ownerView();
                 if(id==Copy)copyInvite();
                 if(id==Leave){net->leave();render();}
                 if(id==Ready){net->setReady();render();}
@@ -454,7 +545,7 @@ void buildControls(){
     control(0,Host,L"BUTTON",L"Host a game",BS_AUTORADIOBUTTON|WS_GROUP);control(0,Join,L"BUTTON",L"Join a friend",BS_AUTORADIOBUTTON);control(0,Solo,L"BUTTON",L"Play solo",BS_AUTORADIOBUTTON);
     label(0,201,L"Paste an invite code, link, address or Tailscale name");control(0,Paste,L"EDIT",L"",ES_AUTOHSCROLL);SendMessageW(child(Paste),EM_SETLIMITTEXT,CR_INPUT_MAX,0);
     label(0,202,L"LAN and Tailscale hosts appear below.");control(0,Rows,L"LISTBOX",L"",LBS_NOTIFY|WS_VSCROLL|WS_BORDER);label(0,Status,L"");control(0,Primary,L"BUTTON",L"Open lobby",BS_DEFPUSHBUTTON);
-    label(0,203,L"");control(0,Strand,L"BUTTON",L"My strand on this server");control(0,Invite,L"EDIT",L"",ES_READONLY|ES_MULTILINE);control(0,Copy,L"BUTTON",L"Copy invite");control(0,Leave,L"BUTTON",L"Leave lobby");control(0,Ready,L"BUTTON",L"Ready");control(0,HostSave,L"BUTTON",L"",BS_AUTOCHECKBOX|BS_MULTILINE|BS_TOP);
+    label(0,203,L"");control(0,Strand,L"BUTTON",L"My strand on this server");control(0,Owner,L"BUTTON",L"Server owner");control(0,Invite,L"EDIT",L"",ES_READONLY|ES_MULTILINE);control(0,Copy,L"BUTTON",L"Copy invite");control(0,Leave,L"BUTTON",L"Leave lobby");control(0,Ready,L"BUTTON",L"Ready");control(0,HostSave,L"BUTTON",L"",BS_AUTOCHECKBOX|BS_MULTILINE|BS_TOP);
     label(1,210,L"Co-op saves\nOnly the separate co-op save trees are included in backups. Close the game first.");
     label(1,211,(L"Co-op data:\n"+options.data.wstring()+L"\n\nSave trees: redirect-data\\local, roaming, documents, savedgames, profile\n\nBackups: backups\\<time>\nYour ordinary game saves are opened only when you choose Copy my Steam saves, and then only read.").c_str());
     control(1,OpenSaves,L"BUTTON",L"Open co-op save folder");control(1,BackUp,L"BUTTON",L"Back up co-op saves");control(1,Import,L"BUTTON",L"Copy my Steam saves into co-op");
@@ -485,6 +576,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         bool registerOnly=false,devStart=false,diagnosticsOnly=false,firewallOnly=false,forceWorld=false,devSessionGiven=false;std::string devPeer="127.0.0.1",groupTarget;uint32_t devSession=1;fs::path takeSave;
         int groupMode=0;   // --group-host (1), --group-join INVITE-OR-ADDRESS (2)
         strand::Choices given;std::string strandReport;bool policyGiven=false;   // --strand-builds, --strand-old, --strand-policy FILE|-; --group-policy
+        owner::Action ownerAction;std::string ownerReport;   // --owner-... (one action) and --owner-report FILE|-: the server owner's calls without the window
+        auto ownerKind=[&](const char* kind){if(!ownerAction.kind.empty()&&ownerAction.kind!=kind)throw std::runtime_error("One --owner-... action at a time.");ownerAction.kind=kind;};
         int argc=0;auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);if(!argv)throw std::runtime_error("Cannot read launcher arguments.");
         for(int i=1;i<argc;++i){std::wstring a=argv[i];auto value=[&](){if(++i>=argc)throw std::runtime_error("Missing launcher option value.");return std::wstring(argv[i]);};
             if(a==L"--dev-direct")options.direct=true;
@@ -506,6 +599,16 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
             else if(a==L"--strand-policy")strandReport=utf8(value());
             else if(a==L"--group-policy"){auto v=utf8(value());bool known=false;for(auto name:PolicyNames)known|=v==name;if(!known)throw std::runtime_error("--group-policy is friends, solo or public.");groupPolicy=v;policyGiven=true;}
             else if(a==L"--dev-take-save")takeSave=value();
+            else if(a==L"--owner-list")ownerKind("list");
+            else if(a==L"--owner-member"){ownerKind("member");ownerAction.target=utf8(value());ownerAction.value=utf8(value());}
+            else if(a==L"--owner-remove"){ownerKind("remove");ownerAction.target=utf8(value());}
+            else if(a==L"--owner-accept"){ownerKind("accept");ownerAction.target=utf8(value());}
+            else if(a==L"--owner-reject"){ownerKind("reject");ownerAction.target=utf8(value());}
+            else if(a==L"--owner-accept-player"){ownerKind("accept-player");ownerAction.target=utf8(value());}
+            else if(a==L"--owner-reject-player"){ownerKind("reject-player");ownerAction.target=utf8(value());}
+            else if(a==L"--owner-preset"){ownerKind("policy");ownerAction.preset=utf8(value());}
+            else if(a==L"--owner-set"){ownerKind("policy");ownerAction.sets.push_back(utf8(value()));}
+            else if(a==L"--owner-report")ownerReport=utf8(value());
             else if(a==L"--port"){auto raw=utf8(value());if(raw.size()!=5||raw.find_first_not_of("0123456789")!=std::string::npos)throw std::runtime_error("Host port must be 49000..49014.");auto v=std::stoul(raw);if(v<49000||v>49014)throw std::runtime_error("Host port must be 49000..49014.");port=unsigned(v);}
             else if(a.rfind(L"deathstranding-coop://",0)==0){pasted=utf8(a);choice=1;}
             else throw std::runtime_error("Unknown launcher option.");
@@ -518,6 +621,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         if(devStart&&!options.direct)throw std::runtime_error("--dev-start requires --dev-direct.");
         if((!given.offerBuilds.empty()||!given.offerOld.empty()||!strandReport.empty())&&!(devStart&&groupMode==2))throw std::runtime_error("--strand-builds, --strand-old and --strand-policy go with --dev-direct --dev-start --group-join.");
         if(policyGiven&&!(devStart&&groupMode==1))throw std::runtime_error("--group-policy goes with --dev-direct --dev-start --group-host.");
+        if((!ownerAction.kind.empty()||!ownerReport.empty())&&(!options.direct||devStart||groupMode||ownerAction.kind.empty()||ownerReport.empty()))
+            throw std::runtime_error("--owner-... is one action with --owner-report FILE (or -) and --dev-direct, without --dev-start.");
         if(options.direct&&equalPath(options.data,defaultData)&&!environment(L"COOP_MODULE_INSTANCE").empty())options.data=environment(L"COOP_MODULE_INSTANCE");
         wchar_t self[32768];GetModuleFileNameW(nullptr,self,32768);executable=self;options.world=executable.parent_path()/L"coop-world.exe";
         if(registerOnly){registerHandler(executable);return 0;}
@@ -537,6 +642,14 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
             if(!devStart)return 0;
         }
         identity();
+        if(!ownerAction.kind.empty()) {   // the server owner's call on the group server this launcher hosts, without the window
+            Session s=chosenSession();s.group=Group::Host;s.ownerKey=world::identity::hex(keys.pub);
+            if(!devSessionGiven&&!groupSecret)throw std::runtime_error("This launcher has hosted no group server yet: give its key with --dev-session N.");
+            s.secret=devSessionGiven?devSession:groupSecret;
+            auto t=targetOf(s);auto report=owner::run(t,strand::transport(t),ownerAction);
+            writeReport(ownerReport,report.dump()+"\n");
+            return report.get("ok").boolean()?0:3;   // refused: no dialog
+        }
         if(devStart&&groupMode) {   // group play without the window: host the server, or join one by invite or by address
             Session s=chosenSession();
             if(groupMode==1){s.group=Group::Host;s.secret=devSessionGiven?devSession:groupKey();s.ownerKey=world::identity::hex(keys.pub);launchGame(options,s,false,hostIdentity);return 0;}
@@ -556,9 +669,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
                     json::Value report=json::Value::object();report.set("fetched",names[int(j.fetched)]);report.set("start",j.start);report.set("message",j.message);report.set("account",j.target.account);report.set("keyed",j.keyed);
                     json::Value chosen=json::Value::object();chosen.set("offer_builds",j.choices.offerBuilds);chosen.set("offer_old",j.choices.offerOld);report.set("choices",chosen);
                     json::Value policy;try{if(!j.raw.empty())policy=json::parse(j.raw);}catch(const std::exception&){}
-                    report.set("policy",policy);auto line=report.dump()+"\n";
-                    if(strandReport=="-"){DWORD n=0;HANDLE out=GetStdHandle(STD_OUTPUT_HANDLE);if(out&&out!=INVALID_HANDLE_VALUE)WriteFile(out,line.data(),DWORD(line.size()),&n,nullptr);}
-                    else{std::ofstream f(strandReport,std::ios::binary|std::ios::trunc);f<<line;if(!f)throw std::runtime_error("Cannot write the --strand-policy file.");}}
+                    report.set("policy",policy);writeReport(strandReport,report.dump()+"\n");}
                 if(!j.start)return 3;   // refused: no game, no dialog
                 if(j.keyed)strand::usePasses(s,j.passes);
             }

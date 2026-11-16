@@ -1,5 +1,7 @@
 #include "core.h"
 #include "strand.h"
+#include "owner.h"
+#include <array>
 #include "../world/signatures.h"   // the server's check of a signed call, standing in for the server
 #include <chrono>
 #include <fstream>
@@ -80,6 +82,18 @@ int main(int argc,char** argv) {
             for(auto& h:wid::signRequest(keys,argv[4],target,p.server,argv[6],p.time?p.time:int64_t(std::time(nullptr)),wid::newNonce()))std::cout<<"header "<<h.first<<' '<<h.second<<'\n';
             return 0;}
         return 2;
+    }
+    // For test_owner.py: the owner's calls as the launcher's --dev-direct --owner-... path makes them (owner::run), on a
+    // real socket, from the host's launcher: PORT SECRET KIND [TARGET [VALUE] | PRESET|- SET...] KEYFILE; the report.
+    if(argc>=6&&std::string(argv[1])=="--owner-run") {
+        namespace ow=launcher::owner;auto keys=launcher::playerKeys(argv[argc-1]);
+        launcher::Session h;h.name="Host";h.port=unsigned(std::stoul(argv[2]));h.secret=uint32_t(std::stoul(argv[3]));h.group=launcher::Group::Host;h.playerId=77;h.policy="public";
+        h.ownerKey=world::identity::hex(keys.pub);
+        ow::Action a;a.kind=argv[4];std::vector<std::string> rest(argv+5,argv+argc-1);
+        if(a.kind=="policy"){if(!rest.empty()&&rest[0]!="-")a.preset=rest[0];if(!rest.empty())a.sets.assign(rest.begin()+1,rest.end());}
+        else{if(rest.size()>0)a.target=rest[0];if(rest.size()>1)a.value=rest[1];}
+        auto t=launcher::strand::target(h,0);t.keys=&keys;
+        std::cout<<ow::run(t,launcher::strand::transport(t,2000),a).dump()<<'\n';return 0;
     }
     check(argc==2,"temporary test root required");fs::path root=argv[1];fs::create_directories(root);
     launcher::Session s;s.peer="100.90.1.2";s.name="Porter";s.port=49003;s.secret=0x12345678;
@@ -299,6 +313,79 @@ int main(int argc,char** argv) {
          check(st::hostPasses(host,server(sv),1,p,k2,why)&&k2&&p.ticket.size()==32&&host.account==acct,"the host's own game takes its passes too");
          Server old;old.answers["policy"]={200,doc};st::Passes q;auto h2=u;check(st::hostPasses(h2,server(old),1,q,k2,why)&&!k2&&q.ticket.empty(),"a host server without keys: no passes");
          Fake nobody;nobody.reach=false;auto h3=u;check(!st::hostPasses(h3,fake(nobody),2,q,k2,why)&&why.find("did not answer")!=std::string::npos,"a host server that does not start: said so");}
+        // The server owner (owner.h): only the host who started the server with this key; every owner call signed with
+        // it on the server's clock, also on a server without player keys; the lists, the actions and the refusals.
+        namespace ow=launcher::owner;auto withKey=[&]{auto x=t;x.keys=&keys;return x;};
+        {launcher::Session hs=h;hs.ownerKey=wid::hex(keys.pub);check(ow::available(hs,keys),"the host who gave the server his key is its owner");
+         auto otherKeys=wid::makeKeys();check(!ow::available(hs,otherKeys),"another key is not the owner");
+         launcher::Session js=launcher::groupJoin(v,0,me);js.ownerKey=hs.ownerKey;check(!ow::available(js,keys),"a joiner is never the owner");
+         launcher::Session pair;pair.ownerKey=hs.ownerKey;check(!ow::available(pair,keys),"nor a two-player session");
+         launcher::Session none=h;check(!ow::available(none,keys),"nor a host whose server has no owner key");}
+        struct Owned {wid::Checker checker;std::string policy;std::vector<std::string> sent,signers;std::vector<std::array<std::string,3>> queue;bool refuse=false;};
+        const std::string players=R"({"format":1,"players":[{"id":"zygo_ann","name":"Ann","known":true,"member":false,"key":"a1b2 c3d4 e5f6 a7b8","likes":4,"offer_builds":"","offer_old":"","shared":3,"waiting":2,"kept":1,"held":1,"remnants":2,"imported":0},)"
+                                  R"({"id":"zygo_far","name":"Far · North","known":false,"member":false,"key":"","likes":0,"offer_builds":"","offer_old":"","shared":0,"waiting":0,"kept":0,"held":0,"remnants":0,"imported":5}]})";
+        auto owned=[&](Owned& o){return st::Transport([&o,&acct,players](const std::string& method,const std::string& path,const st::Headers& headers,const std::string& body,st::Http& out){
+            if(path.find("/coop/policy")!=std::string::npos){out={200,o.policy};return true;}
+            std::map<std::string,std::string> hd;for(auto& x:headers){std::string n=x.first;for(auto& c:n)c=char(std::tolower(static_cast<unsigned char>(c)));hd[n]=x.second;}
+            std::string who,why;auto r=o.checker.check(hd,method,path,body,"a1b2c3d4e5f6a7b8",int64_t(std::time(nullptr))+1000,who,why);
+            o.sent.push_back(method+" "+path+" "+body);o.signers.push_back(r==wid::Checker::Result::Ok?who:"");
+            if(r!=wid::Checker::Result::Ok){out={401,"{\"message\":\"the owner's calls are signed with the owner's key\"}"};return true;}
+            if(who!=acct||o.refuse){out={403,"{\"message\":\"only the owner's key does this\"}"};return true;}
+            if(path.find("/coop/owner/players")!=std::string::npos){out={200,players};return true;}
+            if(path.find("/coop/owner/review")!=std::string::npos&&method=="GET"){
+                std::string list;for(auto& q:o.queue)list+=std::string(list.empty()?"":",")+R"({"id":")"+q[0]+R"(","creator":")"+q[1]+R"(","name":"Ann","type":"l","kind":"ladder","area":226,"updated":5,"held":"","waiting_for":")"+q[2]+"\"}";
+                out={200,"{\"format\":1,\"waiting\":["+list+"]}"};return true;}
+            if(path.find("/coop/owner/review")!=std::string::npos){
+                auto in=json::parse(body);for(size_t i=0;i<o.queue.size();++i)if(o.queue[i][0]==in.get("reject").string()||o.queue[i][0]==in.get("accept").string()){o.queue.erase(o.queue.begin()+long(i));break;}
+                out={200,"{\"accepted\":1,\"rejected\":1}"};return true;}
+            if(path.find("/coop/owner/remove-player")!=std::string::npos){out={200,"{\"removed\":9}"};return true;}
+            if(path.find("/coop/owner/member")!=std::string::npos){out={200,"{\"players\":[]}"};return true;}
+            if(path.find("/coop/owner/policy")!=std::string::npos){out={200,o.policy};return true;}
+            return false;});};
+        // A server without player keys (friends): the owner's calls are signed all the same, on the server's clock.
+        const std::string friendsDoc=edit("\"preset\":\"public\",","\"preset\":\"public\",\"name\":\"North\",\"time\":"+std::to_string(int64_t(std::time(nullptr))+1000)+",");
+        {Owned o;o.policy=friendsDoc;o.queue={{"lA1","zygo_ann","owner"},{"lA2","zygo_ann","owner"},{"lA3","zygo_ann","builder"},{"lB1","zygo_bob","owner"}};
+         auto ot=t;ot.keys=&keys;st::Policy pol;std::string why;
+         check(ow::connect(ot,owned(o),pol,why)&&ot.sign&&ot.server=="a1b2c3d4e5f6a7b8","the owner's target signs, also where players' calls are not signed");
+         ow::View view;check(ow::fetch(ot,owned(o),view,why)&&view.name=="North"&&view.players.size()==2&&view.waiting.size()==4,"the players and the review queue read");
+         check(o.signers.size()==2&&o.signers[0]==acct&&o.signers[1]==acct,"every owner call signed by the key on the server's clock");
+         check(view.players[0].text()=="Ann  [a1b2 c3d4 e5f6 a7b8]  not a member  shared 3, waiting 2, held 1, kept 1, remnants 2; 4 likes  (zygo_ann)"
+               &&view.players[1].text()=="Far \xC2\xB7 North  from linked servers: 5 objects  (zygo_far)","a player's row: key short, counts and likes; a builder from a linked server by his home");
+         check(view.waiting[2].text()=="ladder  area 226  by Ann  waits for its builder's answer  (lA3)"&&view.waiting[0].text()=="ladder  area 226  by Ann  waits for you  (lA1)","a waiting object's row");
+         auto done=ow::act(ot,owned(o),{"reject-player","zygo_ann","","",{}});
+         check(done.ok&&done.message.find("Rejected 2 objects")!=std::string::npos&&o.queue.size()==2&&o.queue[0][0]=="lA3"&&o.queue[1][0]=="lB1","rejecting all of one player: his that wait for the owner, nobody else's, not what waits for him");
+         done=ow::act(ot,owned(o),{"member","zygo_ann","yes","",{}});
+         check(done.ok&&o.sent.back()=="POST /w305419896/coop/owner/member {\"player\":\"zygo_ann\",\"member\":\"yes\"}","make a member");
+         done=ow::act(ot,owned(o),{"remove","zygo_ann","","",{}});
+         check(done.ok&&done.message.find("Removed 9 objects")!=std::string::npos&&done.message.find("His account stays")!=std::string::npos&&o.sent.back().find("remove-player {\"player\":\"zygo_ann\"}")!=std::string::npos,"remove a player's objects");
+         done=ow::act(ot,owned(o),{"accept","lB1","","",{}});check(done.ok&&o.sent.back().find("review {\"accept\":\"lB1\"}")!=std::string::npos,"accept one");
+         done=ow::act(ot,owned(o),{"accept-player","zygo_bob","","",{}});check(done.ok&&o.sent.back().find("review {\"accept_player\":\"zygo_bob\"}")!=std::string::npos,"accept all of a player");
+         done=ow::act(ot,owned(o),{"policy","","","friends",{"limit=5","withdrawal=stay"}});
+         check(done.ok&&o.sent.back().find("policy {\"preset\":\"friends\",\"set\":[\"limit=5\",\"withdrawal=stay\"]}")!=std::string::npos,"the rules changed");
+         for(auto wrong:std::vector<ow::Action>{{"ban","zygo_ann","","",{}},{"member","zygo_ann","maybe","",{}},{"remove","","","",{}},{"policy","","","",{}},{"accept","x","yes","",{}}}){
+             auto before=o.sent.size();check(!ow::act(ot,owned(o),wrong).ok&&o.sent.size()==before,"not an action of the owner's: nothing sent");}
+         auto report=ow::run(withKey(),owned(o),{"list","","","",{}});
+         check(report.get("ok").boolean()&&report.get("name").string()=="North"&&report.get("players").items().size()==2&&report.get("waiting").items().size()==1&&report.get("policy").get("server").string()=="a1b2c3d4e5f6a7b8","the report without a window");
+         // Refused: the server's words, and nothing reported as done.
+         o.refuse=true;done=ow::act(ot,owned(o),{"member","zygo_ann","no","",{}});
+         check(!done.ok&&done.message=="Refused: only the owner's key does this.","a refusal in the server's words");
+         check(!ow::act(ot,owned(o),{"reject-player","zygo_ann","","",{}}).ok&&!ow::act(ot,owned(o),{"policy","","","public",{}}).ok,"no refused action is reported as done");
+         report=ow::run(withKey(),owned(o),{"remove","zygo_ann","","",{}});check(!report.get("ok").boolean()&&report.get("message").string().find("Refused")!=std::string::npos,"a refused report");
+         auto nokey=t;nokey.keys=nullptr;check(!ow::connect(nokey,owned(o),pol,why)&&why.find("no player key")!=std::string::npos,"no key: not the owner");
+         Fake older;older.answers["GET /w305419896/coop/policy"]={404,"{}"};older.answers["GET /w305419896/gate/e/getVersion"]={401,"{}"};
+         auto ot2=t;ot2.keys=&keys;check(!ow::connect(ot2,fake(older),pol,why)&&why.find("from before the owner's calls")!=std::string::npos,"an older server: said so");}
+        // The lists, strictly; what removal means, in the server's own rule.
+        rejects([&]{ow::parsePlayers("[]");});rejects([&]{ow::parsePlayers("{\"format\":2,\"players\":[]}");});rejects([&]{ow::parsePlayers("{\"format\":1,\"players\":[{\"id\":\"\"}]}");});
+        rejects([&]{ow::parsePlayers("{\"format\":1,\"players\":[{\"id\":\"zygo_a\",\"shared\":\"3\"}]}");});rejects([&]{ow::parsePlayers("{\"format\":1,\"players\":[{\"id\":\"zygo_a\\u0007\"}]}");});
+        rejects([&]{ow::parseWaiting("{\"format\":1,\"waiting\":[{\"id\":\"l1\",\"creator\":\"zygo_a\",\"waiting_for\":\"nobody\"}]}");});rejects([&]{ow::parseWaiting("{\"waiting\":[]}");});
+        {st::Policy stay,go;stay.settings={{"withdrawal","stay","stay","If you take back what you shared, it stays."}};go.settings={{"withdrawal","go","stay","If you take back what you built, it is removed for everyone."}};
+         stay.preset=go.preset="public";
+         ow::Player ann;ann.name="Ann";ann.shared=3;ann.waiting=1;ann.remnants=2;ann.imported=1;
+         auto a=ow::removalText(stay,ann),b=ow::removalText(go,ann);
+         check(a.find("7 objects")!=std::string::npos&&a.find("\"stay\"")!=std::string::npos&&a.find("remnant")!=std::string::npos&&a.find("nothing stays")!=std::string::npos,"removal under withdrawal stay: what stay means, and that nothing stays");
+         check(b.find("\"go\"")!=std::string::npos&&b.find("removed for everyone")!=std::string::npos&&a!=b,"removal under withdrawal go");
+         check(a.find("This is not a ban")!=std::string::npos&&b.find("This is not a ban")!=std::string::npos,"removal is not a ban, either way");
+         auto rows=ow::rules(go);check(rows.size()==1&&rows[0]=="withdrawal = go (preset public: stay)   If you take back what you built, it is removed for everyone.","a rule's row: the value, the preset's where it differs, its words");}
     }
     for(auto peer:{"0.0.0.0","example.com","255.255.255.255","192.168.01.2","224.0.0.1"}) {s.peer=peer;rejects([&]{launcher::config(s);});}s.peer="127.0.0.1";
     for(auto port:{0u,48999u,49015u,65535u}) {s.port=port;rejects([&]{launcher::config(s);});}s.port=49000;

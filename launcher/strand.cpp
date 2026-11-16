@@ -26,19 +26,18 @@ namespace {
 constexpr size_t MaxAnswer=16u*1024*1024;
 bool oneOf(const std::string& s,std::initializer_list<const char*> allowed){for(auto a:allowed)if(s==a)return true;return false;}
 [[noreturn]] void bad(const char* why){throw std::runtime_error(std::string("policy: ")+why);}
-std::string base(const Target& t){return t.prefix.empty()?std::string():"/"+t.prefix;}
 bool plain(const std::string& s){for(unsigned char c:s)if(c<0x20||c==0x7f)return false;return true;}
 std::string section(const std::string& server){return "server-"+server;}
 std::string trim(const std::string& s){size_t b=0,e=s.size();while(b<e&&(s[b]==' '||s[b]=='\t'||s[b]=='\r'))++b;while(e>b&&(s[e-1]==' '||s[e-1]=='\t'||s[e-1]=='\r'))--e;return s.substr(b,e-b);}
 bool passText(const std::string& s){if(s.empty()||s.size()>32)return false;for(unsigned char c:s)if(!std::isalnum(c))return false;return true;}
-// One call to the API: signed with the target's key when the server takes keys (identify()).
+}
+std::string base(const Target& t){return t.prefix.empty()?std::string():"/"+t.prefix;}
 bool call(const Target& t,const Transport& send,const std::string& method,const std::string& path,const std::string& body,Http& out){
     Headers h;
     if(t.sign&&t.keys)for(auto& x:world::identity::signRequest(*t.keys,method,path,t.server,body,int64_t(std::time(nullptr))+t.clockOffset,world::identity::newNonce()))h.push_back(x);
     return send(method,path,h,body,out);}
 std::string message(const Http& h){try{auto v=json::parseFile(h.body,MaxAnswer);if(v.get("message").isString()&&plain(v.get("message").string()))return v.get("message").string();}catch(const std::exception&){}
     return "the server answered "+std::to_string(h.status);}
-}
 std::string account(const Session& s,uint32_t steamAccount){
     auto address=worldAddress(s);
 #ifndef MUTANT_STRAND_ACCOUNT
