@@ -14,7 +14,8 @@ def check(ok,what):
 def free(port):
     try:
         for kind in (socket.SOCK_STREAM,socket.SOCK_DGRAM):
-            s=socket.socket(socket.AF_INET,kind);s.bind(('0.0.0.0',port));s.close()
+            # As the server binds (SO_REUSEADDR): a port whose earlier connections are still closing is free for it.
+            s=socket.socket(socket.AF_INET,kind);s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind(('0.0.0.0',port));s.close()
         return True
     except OSError:return False
 def run(*args):
