@@ -1984,6 +1984,19 @@ counts are merged in by online id. Static research only: nothing of it has been 
 Game-free: `own_strand_test.cpp` over a fake process memory, eleven mutants (family `own` in
 `test_game_thread_mutants.py`).
 
+### Offering the existing strand (`offer_strand.h`; not wired into the mod)
+
+How the structures a save already holds could be put on our server (`game_offsets.md`, "Offering the player's
+existing strand"; static research only). The game uploads them itself when asked on its game thread while signed in:
+`0x2c9ed40(object)` queues its own `createObject` for an own record with no online id (the game does the same by
+itself when the porter passes within 15 m), and the online object manager's slot `0x68` queues its "re-create" (the
+same body with `"id"`) for a record with an id of the original service. `plan` says which records to offer and how
+(built by this player, built, not refused by the game, a kind the game uploads, and for a re-create an id of the
+game's shape); `read` takes the fields from a construction object; `body` makes the body the game would send (map
+cell from `cell`, angles from `angles`, the f32 arithmetic of the game) for a mod that does not call the game; not for
+climbing ropes, and without `mt`, `rmt`, `tags` and `ci`. Game-free: `offer_strand_test.cpp` over a fake process
+memory, eight mutants (family `offer` in `test_game_thread_mutants.py`).
+
 ## The partner is down or caught (`vitals.h`, with `notices`)
 
 Every tenth of a second the mod reads, read-only, whether its porter is dead (the entity's dead bit or the animation

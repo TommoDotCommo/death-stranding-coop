@@ -34,6 +34,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('place',['ORDER','RESTLESS'],['carry_place_test.cpp','carry_place.cpp','structures.cpp','discovery.cpp']),
           ('road',['TOTAL_ADDS','LOAD','LESS','ECHO','TWICE','AMOUNT'],['roads_test.cpp','roads.cpp','discovery.cpp']),
           ('own',['IDBOUND','LIST','PENDING','OWNER','ROAD','OTHERS','FAILED','LETTER','AREA','TWICE','LIKES'],['own_strand_test.cpp','own_strand.cpp','structures.cpp','discovery.cpp']),
+          ('offer',['OWNER','PENDING','HELD','SHAPE','CLAMP','POLE','FLOAT','BRIDGE'],['offer_strand_test.cpp','offer_strand.cpp','discovery.cpp']),
           ('bt',['ALL_ALIVE','HEAL','KILL','HURT_ECHO','ECHO','UNSEEN','DYNAMIC','MASS','CLEARED_ANY','FAR','END_IDLE'],['bts_test.cpp','bts.cpp','discovery.cpp']),
           ('order',['STORY','ECHO','ANY_STATE','UNIT_ANY','UNIT_ECHO','STORY_BACK','STORY_IN','STORY_FAIL','WATCH_ANY'],['orders_test.cpp','orders.cpp','discovery.cpp']),
           ('story',['EMPTY','NONCE','UNASKED','GAP','EVENT','STALE','HASTY','SUM','OLD','KEYLESS','ASK_FLOOD','BUSY_LOAD','EVENT_LEFT','KEEP','FETCH_FOREVER','SIZE_BOUND'],['story_test.cpp','story.cpp','../launcher/saves.cpp','discovery.cpp','../core/core.cpp']),
