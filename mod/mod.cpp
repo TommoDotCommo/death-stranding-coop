@@ -2758,7 +2758,14 @@ struct Runtime final:ds::Transport {
                         if(echoHave)for(size_t k=0;k<held.size();++k)e.rose[k]=uint8_t(held[k]&~echoLast[k]);
                         echoLast=held;echoHave=true;echoControls.emplace_back(now,e);}
                     controlGather.add(held,floats);
-                    if(othersUp){othersGather.add(held,floats);others->animation(othersGather.current(),now);othersGather.sent();}
+                    // Lab (record_animation): a sent sample into the presence log, on its clock, for a stand-in to replay.
+                    auto record=[this](const ds::Animation& sent){if(!config.recordAnimation||!presence||presence->stopped())return;
+                        auto pay=ds::encodeAnimationPayload(sent);
+                        static const char hex[]="0123456789abcdef";std::string h;h.reserve(pay.size()*2);for(auto b:pay){h+=hex[b>>4];h+=hex[b&15];}
+                        writePresence("{\"t_us\":"+std::to_string(mod::nowUs())+",\"animation\":\""+h+"\"}\n");};
+                    if(othersUp){othersGather.add(held,floats);auto mine=othersGather.current();
+                        if(others->animation(mine,now)&&!core->connected())record(mine);   // with no partner, what the others were sent
+                        othersGather.sent();}
                     // What he holds in his hands, relative to his root: it moves with the mirrored arms (carry_visual).
                     stages.enter("hands",mod::nowUs());
                     {std::array<ds::HeldCase,ds::AnimationHands> hands{};uint8_t count=0;uint64_t manager=0;
@@ -2785,10 +2792,7 @@ struct Runtime final:ds::Transport {
 #endif
                     }
                     if(core->connected()&&core->sendAnimation(sample,now)){controlGather.sent();
-                        // Lab: the sample into the presence log, on its clock, for the stand-in to replay.
-                        if(config.recordAnimation&&presence&&!presence->stopped()){auto pay=ds::encodeAnimationPayload(sample);
-                            static const char hex[]="0123456789abcdef";std::string h;h.reserve(pay.size()*2);for(auto b:pay){h+=hex[b>>4];h+=hex[b&15];}
-                            writePresence("{\"t_us\":"+std::to_string(mod::nowUs())+",\"animation\":\""+h+"\"}\n");}}}}
+                        record(sample);}}}
             stages.enter("start",mod::nowUs());
             // A bounded, read-only observation; never writes story or save state.
             if(game&&cache.available&&sampler&&now>=nextProgressRead){
