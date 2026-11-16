@@ -110,6 +110,18 @@ int main() {
     assert(refused(withKeys(probe,"\"others\":33")));assert(refused(withKeys(probe,"\"others\":true")));assert(refused(withKeys(probe,"\"others\":\"4\"")));
     assert(refused(withKeys(threaded,"\"others\":4")));                                    // no puppet_probe
     assert(mod::parseConfig(withKeys(threaded,"\"others\":0")).others==0);
+    // The relay for other players: numeric address on loopback (or the partner's), a key, an id, and others on.
+    {auto o=withKeys(probe,"\"others\":4");auto r=[&](const char* more){return withKeys(o,more);};
+     auto c=mod::parseConfig(r("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"group-1\",\"player_id\":77"));
+     assert(c.relayAddress==0x7f000001&&c.relayPort==8090&&c.relayKey=="group-1"&&c.playerId==77);
+     assert(refused(r("\"relay\":\"10.1.2.3:8090\",\"relay_key\":\"k\",\"player_id\":77")));      // neither loopback nor the partner
+     assert(refused(r("\"relay\":\"localhost:8090\",\"relay_key\":\"k\",\"player_id\":77")));
+     assert(refused(r("\"relay\":\"127.0.0.1:0\",\"relay_key\":\"k\",\"player_id\":77")));
+     assert(refused(r("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\"")));                         // no id
+     assert(refused(r("\"relay\":\"127.0.0.1:8090\",\"player_id\":77")));                            // no key
+     assert(refused(r("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"a b\",\"player_id\":77")));
+     assert(refused(r("\"relay_key\":\"k\"")));
+     assert(refused(withKeys(probe,"\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":77")));}   // others off
     assert(mod::parseConfig(withKeys(threaded,"\"virtual_pad\":true,\"required\":true")).virtualPad);
     assert(mod::parseConfig(withKeys(good,"\"virtual_pad\":true,\"required\":true,\"self_tick\":true")).virtualPad);
     assert(refused(withKeys(threaded,"\"virtual_pad\":true")));

@@ -67,6 +67,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "outfit.h"
 #include "structures.h"
 #include "others.h"
+#include "../core/relay.h"
 #ifdef MOD_FAKE_NETWORK
 #include "fake_memory.h"
 #endif
@@ -285,6 +286,57 @@ struct Runtime final:ds::Transport {
     void othersEntered(uint64_t id){if(others)others->entered(id,mod::nowMs());}
     void othersLeft(uint64_t id){if(others)others->left(id,mod::nowMs());}
     void othersReceived(uint64_t from,const uint8_t* data,size_t size){if(others)others->received(from,data,size,mod::nowMs());}
+    // The relay (core/relay.h; config relay, relay_key, player_id): a second UDP socket connected to the players' own
+    // server, which says who is near and carries the datagrams of those pairs. Polled by the network thread under `mutex`.
+#ifndef MOD_FAKE_NETWORK
+    SOCKET relaySocket=INVALID_SOCKET;
+#endif
+    std::unique_ptr<ds::relay::Client> relayClient;bool relayOnline=false;uint64_t relayIn=0,relayOut=0,relayNotedAt=0;
+    void relayStart(){
+#ifndef MOD_FAKE_NETWORK
+        if(config.relay.empty()||!config.others)return;
+        relaySocket=::socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);if(relaySocket==INVALID_SOCKET)throw std::runtime_error("relay UDP socket failed");
+        sockaddr_in to{};to.sin_family=AF_INET;to.sin_port=htons(config.relayPort);to.sin_addr.s_addr=htonl(config.relayAddress);
+        // Connected: the socket takes datagrams from the relay's address and port only, and is bound to the route to it.
+        if(connect(relaySocket,reinterpret_cast<sockaddr*>(&to),sizeof(to)))throw std::runtime_error("relay address unreachable");
+#ifdef _WIN32
+        u_long nonblock=1;if(ioctlsocket(relaySocket,FIONBIO,&nonblock))throw std::runtime_error("nonblocking relay UDP failed");
+#else
+        if(fcntl(relaySocket,F_SETFL,O_NONBLOCK)<0)throw std::runtime_error("nonblocking relay UDP failed");
+#endif
+        ds::relay::ClientConfig rc;rc.id=config.playerId;rc.token=config.relayKey;rc.nickname=ds::relay::nicknameText(config.nickname)?config.nickname:std::string();
+        relayClient=std::make_unique<ds::relay::Client>(rc,[this](const uint8_t* d,size_t n){::send(relaySocket,reinterpret_cast<const char*>(d),int(n),0);});
+        mod::others::Link link;link.send=[this](uint64_t to2,const uint8_t* d,size_t n){if(relayClient&&relayClient->sendTo(to2,d,n))++relayOut;};
+        othersStart(config.playerId,std::move(link));
+        note(("RELAY "+config.relay+" as player "+std::to_string(config.playerId)+"\n").c_str());
+#endif
+    }
+    void relayPoll(uint64_t now){
+#ifndef MOD_FAKE_NETWORK
+        if(!relayClient)return;
+        // Where this porter is: the relay decides from it who is near. No place while there is no pose (loading, cutscene).
+        if(cache.available&&!cache.gated)relayClient->setPosition({{cache.local.position[0],cache.local.position[1],cache.local.position[2]}});
+        else relayClient->clearPosition();
+        relayClient->tick(now);
+        for(unsigned budget=0;budget<256;++budget){
+            char raw[2048];int n=recv(relaySocket,raw,sizeof(raw),0);if(n<=0)break;
+            uint64_t from=0;const uint8_t* payload=nullptr;size_t size=0;
+            if(relayClient->receive(reinterpret_cast<const uint8_t*>(raw),size_t(n),now,from,payload,size)){++relayIn;othersReceived(from,payload,size);}
+        }
+        for(auto& e:relayClient->takeEvents()){if(e.enter)othersEntered(e.id);else othersLeft(e.id);}
+        if(relayClient->online()!=relayOnline){relayOnline=relayClient->online();
+            note(relayOnline?"RELAY online\n":relayClient->refusal()!=ds::relay::Refusal::None?"RELAY refused this player\n":"RELAY offline: everybody near has left\n");}
+        if(now-relayNotedAt>=10000){relayNotedAt=now;std::ostringstream o;o<<"RELAY "<<(relayOnline?"online":"offline")<<" near "<<relayClient->nearby().size()<<" in "<<relayIn<<" out "<<relayOut<<"\n";note(o.str().c_str());}
+#else
+        (void)now;
+#endif
+    }
+    void relayStop(){
+#ifndef MOD_FAKE_NETWORK
+        if(relayClient){try{relayClient->bye();}catch(...){}relayClient.reset();}
+        if(relaySocket!=INVALID_SOCKET){closesocket(relaySocket);relaySocket=INVALID_SOCKET;}
+#endif
+    }
     // The other players' bodies (game thread, after the partner's): each goes to its own player's interpolated pose with
     // that player's animation sample; hidden while the player is stale, away or in a private room and during a local
     // game event; removed when the player has left.
@@ -2021,6 +2073,7 @@ struct Runtime final:ds::Transport {
                 core->tick(now);paired|=core->connected();
                 // SEAM (others.h): the transport for other players is polled here, under this lock, and feeds
                 // othersEntered / othersLeft / othersReceived; then their sessions tick like the partner's.
+                relayPoll(now);
                 if(others)others->tick(now);}
                 cadence.wait();
             }
@@ -2293,6 +2346,7 @@ struct Runtime final:ds::Transport {
         if(fcntl(socket,F_SETFL,O_NONBLOCK)<0) throw std::runtime_error("nonblocking UDP failed");
 #endif
         #endif
+        relayStart();
         ds::Config c;c.role=(config.role=="host"||(config.role=="none"&&config.slot<config.peerSlot))?ds::Role::Host:ds::Role::Client;
         c.progressPolicy=config.progressMismatch=="refuse"?ds::ProgressPolicy::Refuse:ds::ProgressPolicy::Warn;c.session=config.session;c.nonce=nonce();
         core=std::make_unique<ds::Core>(c,cache,*this);
@@ -3338,6 +3392,7 @@ struct Runtime final:ds::Transport {
         running=false;if(ticker.joinable())ticker.join();if(worker.joinable())worker.join();
         if(core && socket!=INVALID_SOCKET) {try{core->disconnect(mod::nowMs());}catch(...){}}
         if(others){try{others->clear(mod::nowMs());}catch(...){}}
+        relayStop();
         if(socket!=INVALID_SOCKET)closesocket(socket);
 #ifdef _WIN32
         if(wsa)WSACleanup();

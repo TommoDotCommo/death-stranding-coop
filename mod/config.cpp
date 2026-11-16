@@ -20,7 +20,7 @@ Config parseConfig(const std::string& s) {
         ws();if(at==s.size() || s[at]!=',') break;++at;
     }
     take('}');ws();if(at!=s.size()) throw std::runtime_error("trailing JSON");
-    for(auto& kv:values) if(!std::set<std::string>{"slot","share_story_orders","share_rewards","story_resync","story_key","share_environment","share_enemies","share_enemy_positions","enemy_position_pull","enemy_position_goal","share_orders","share_order_units","share_order_load","share_roads","share_saved_structures","body_update_link","passenger_key","partner_poses","partner_animation","partner_cart","record_animation","join_move","carry_visual","partner","partner_gear","partner_marker","partner_vehicle","partner_likes","partner_tag","notices","online_server","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","link","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host","partner_shout","partner_shout_voice","partner_scan","partner_vitals","others"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
+    for(auto& kv:values) if(!std::set<std::string>{"slot","relay","relay_key","player_id","share_story_orders","share_rewards","story_resync","story_key","share_environment","share_enemies","share_enemy_positions","enemy_position_pull","enemy_position_goal","share_orders","share_order_units","share_order_load","share_roads","share_saved_structures","body_update_link","passenger_key","partner_poses","partner_animation","partner_cart","record_animation","join_move","carry_visual","partner","partner_gear","partner_marker","partner_vehicle","partner_likes","partner_tag","notices","online_server","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","link","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host","partner_shout","partner_shout_voice","partner_scan","partner_vitals","others"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
     auto text=[&](const char* k){if(!strings.count(k)) throw std::runtime_error(std::string("missing/string expected: ")+k);return values.at(k);};
     auto number=[&](const char* k){auto v=values[k];if(strings.count(k)||v.empty()||v.size()>15||v.find_first_not_of("0123456789")!=std::string::npos||(v.size()>1&&v[0]=='0')) throw std::runtime_error(std::string("invalid integer: ")+k);return std::stoull(v);};
     auto boolean=[&](const char* k,bool d){if(!values.count(k)) return d;auto v=values[k];if(strings.count(k)||(v!="true"&&v!="false")) throw std::runtime_error("boolean expected");return v=="true";};
@@ -131,6 +131,28 @@ Config parseConfig(const std::string& s) {
 #endif
         c.others=unsigned(n);
     }
+    // The relay other players are reached through (core/relay.h, the players' own server): numeric IPv4 and port, on
+    // loopback or at the partner's address like online_server; with it go the group's key and this player's id there.
+    if(values.count("relay")){
+        c.relay=text("relay");auto colon=c.relay.rfind(':');uint32_t address=0;unsigned long port=0;
+        bool ok=colon!=std::string::npos&&colon+1<c.relay.size()&&c.relay.size()-colon-1<=5&&c.relay.find_first_not_of("0123456789",colon+1)==std::string::npos;
+        if(ok){port=std::stoul(c.relay.substr(colon+1));unsigned parts=0,value=0,digits=0;
+            for(size_t k=0;k<=colon&&ok;++k){char ch=k<colon?c.relay[k]:'.';
+                if(ch>='0'&&ch<='9'){value=value*10+unsigned(ch-'0');if(++digits>3||value>255)ok=false;}
+                else if(ch=='.'&&digits){address=(address<<8)|value;++parts;value=digits=0;}else ok=false;}
+            ok=ok&&parts==4&&port>=1&&port<=65535;}
+#ifndef MUTANT_CONFIG_RELAY_ADDRESS
+        if(!ok||!((address>>24)==127||address==c.peerAddress))throw std::runtime_error("relay must be ADDRESS:PORT (numeric IPv4) on loopback or the partner's address");
+#endif
+        c.relayAddress=address;c.relayPort=uint16_t(port);
+        c.relayKey=values.count("relay_key")?text("relay_key"):std::string();c.playerId=values.count("player_id")?number("player_id"):0;
+#ifndef MUTANT_CONFIG_RELAY_NEEDS
+        if(!c.others)throw std::runtime_error("relay requires others");
+        if(!c.playerId)throw std::runtime_error("relay requires a nonzero player_id");
+        if(c.relayKey.empty()||c.relayKey.size()>32||c.relayKey.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")!=std::string::npos)
+            throw std::runtime_error("relay requires relay_key (letters, digits, - and _, at most 32)");
+#endif
+    } else if(values.count("relay_key")||values.count("player_id"))throw std::runtime_error("relay_key and player_id require relay");
     c.partnerGear=boolean("partner_gear",false);
     if(c.partnerGear&&c.provider!="game")throw std::runtime_error("partner_gear requires game provider");
     c.carryVisual=boolean("carry_visual",false);

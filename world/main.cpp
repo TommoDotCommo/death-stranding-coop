@@ -1,8 +1,14 @@
 // coop-world: the players' own server for the game's shared world (README.md). One process, one world file.
 //   coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] [--log events.log] [--trace calls.log]
 //              [--idle-exit SECONDS]
+//              [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS]
+//               [--relay-players N] [--relay-rate N]]
 // Plain HTTP/1.1 with keep-alive, one thread per connection, bounded sizes. It only answers; it never connects out.
+// With --relay-port it is also the relay of the real-time layer (relay.h): one UDP socket on the same address, one thread.
 #include "front.h"
+#include "relay.h"
+#include <algorithm>
+#include <random>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -80,14 +86,36 @@ void serve(sock_t s,world::Front& front,world::World& w){
         std::string out="HTTP/1.1 "+std::to_string(reply.status)+" "+reason(reply.status)+"\r\nContent-Type: application/json\r\nContent-Length: "+std::to_string(reply.body.size())+"\r\n"+(close?"Connection: close\r\n":"")+"\r\n"+reply.body;
         if(!sendAll(s,out)||close)return;}
 }
+uint64_t nowMs(){return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());}
+// The relay's socket: datagrams in and out, the clock, and nothing else. All of the relay's state lives on this thread.
+void serveRelay(sock_t s,world::RelayConfig config){
+    world::Relay relay(std::move(config),[s](const world::RelayAddress& to,const uint8_t* data,size_t size){
+        sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(to.port);a.sin_addr.s_addr=htonl(to.ip);
+        sendto(s,reinterpret_cast<const char*>(data),int(size),0,reinterpret_cast<const sockaddr*>(&a),sizeof a);});
+    relay.log=[](const std::string& text){line(text);};
+    std::vector<uint8_t> buffer(ds::relay::MaxDatagram+1);uint64_t nextTick=0;   // one byte more: a longer datagram is seen as too long
+    while(true){
+        sockaddr_in from{};socklen_t size=sizeof from;
+        auto n=recvfrom(s,reinterpret_cast<char*>(buffer.data()),int(buffer.size()),0,reinterpret_cast<sockaddr*>(&from),&size);
+        auto now=nowMs();
+        if(n>0&&from.sin_family==AF_INET)relay.receive({ntohl(from.sin_addr.s_addr),ntohs(from.sin_port)},buffer.data(),size_t(n),now);
+        else if(n<0)std::this_thread::sleep_for(std::chrono::milliseconds(1));   // the receive timeout, or an error: never spin
+        if(now>=nextTick){relay.tick(now);nextTick=now+250;if(relay.players())lastRequest=nowSeconds();}}
+}
 }
 int main(int argc,char** argv){
-    std::string bind="127.0.0.1",prefix;int port=0;long idleExit=0;
+    std::string bind="127.0.0.1",prefix,relayKey;int port=0,relayPort=0;long idleExit=0;bool haveRelayKey=false;world::RelayConfig relayConfig;
     for(int i=1;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc){std::cerr<<"missing value for "<<a<<"\n";std::exit(2);}return std::string(argv[++i]);};
         if(a=="--port")port=std::atoi(next().c_str());else if(a=="--bind")bind=next();else if(a=="--data")dataPath=next();
         else if(a=="--prefix")prefix=next();else if(a=="--log")logPath=next();else if(a=="--trace")tracePath=next();else if(a=="--idle-exit")idleExit=std::atol(next().c_str());
-        else{std::cerr<<"usage: coop-world --port N [--bind ADDRESS] [--data FILE] [--prefix SECRET] [--log FILE] [--trace FILE] [--idle-exit SECONDS]\n";return 2;}}
+        else if(a=="--relay-port")relayPort=std::atoi(next().c_str());else if(a=="--relay-key"){relayKey=next();haveRelayKey=true;}
+        else if(a=="--relay-enter")relayConfig.enterMetres=std::atof(next().c_str());else if(a=="--relay-leave")relayConfig.leaveMetres=std::atof(next().c_str());
+        else if(a=="--relay-timeout")relayConfig.timeoutMs=uint32_t(std::min(std::max(std::atol(next().c_str()),0L),100000L)*1000);
+        else if(a=="--relay-players")relayConfig.maxPlayers=size_t(std::max(std::atol(next().c_str()),0L));
+        else if(a=="--relay-rate")relayConfig.ratePerPeer=uint32_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));
+        else{std::cerr<<"usage: coop-world --port N [--bind ADDRESS] [--data FILE] [--prefix SECRET] [--log FILE] [--trace FILE] [--idle-exit SECONDS]\n"
+                        "                  [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS] [--relay-players N] [--relay-rate N]]\n";return 2;}}
     if(port<1||port>65535){std::cerr<<"--port 1..65535 required\n";return 2;}
     for(char c:prefix)if(!std::isalnum(static_cast<unsigned char>(c))&&c!='-'&&c!='_'){std::cerr<<"--prefix: letters, digits, - and _ only\n";return 2;}
 #ifdef _WIN32
@@ -102,6 +130,25 @@ int main(int argc,char** argv){
     world::Front front(w,prefix);
     sockaddr_in address{};address.sin_family=AF_INET;address.sin_port=htons(uint16_t(port));
     if(inet_pton(AF_INET,bind.c_str(),&address.sin_addr)!=1){std::cerr<<"--bind needs a numeric IPv4 address\n";return 2;}
+    if(relayPort){
+        // The relay listens on the same address as the rest, on its own UDP port. Its key is the group's secret: the
+        // prefix unless another is given, and never empty beyond loopback.
+        if(relayPort<1||relayPort>65535){std::cerr<<"--relay-port 1..65535\n";return 2;}
+        relayConfig.token=haveRelayKey?relayKey:prefix;
+        if(relayConfig.token.empty()&&(ntohl(address.sin_addr.s_addr)>>24)!=127){std::cerr<<"the relay needs --relay-key (or --prefix) when it listens beyond loopback\n";return 2;}
+        relayConfig.seed=std::random_device{}();
+        try{world::Relay check(relayConfig,[](const world::RelayAddress&,const uint8_t*,size_t){});}
+        catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 2;}
+        sockaddr_in relayAddress=address;relayAddress.sin_port=htons(uint16_t(relayPort));
+        sock_t relaySocket=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
+#ifdef _WIN32
+        DWORD wait=250;setsockopt(relaySocket,SOL_SOCKET,SO_RCVTIMEO,reinterpret_cast<const char*>(&wait),sizeof wait);
+#else
+        timeval wait{0,250000};setsockopt(relaySocket,SOL_SOCKET,SO_RCVTIMEO,&wait,sizeof wait);
+#endif
+        if(::bind(relaySocket,reinterpret_cast<sockaddr*>(&relayAddress),sizeof relayAddress)!=0){std::cerr<<"cannot listen on "<<bind<<":"<<relayPort<<" (UDP)\n";return 1;}
+        std::thread([relaySocket,relayConfig]{serveRelay(relaySocket,relayConfig);}).detach();
+    }
     sock_t listener=socket(AF_INET,SOCK_STREAM,0);int yes=1;
 #ifndef _WIN32
     setsockopt(listener,SOL_SOCKET,SO_REUSEADDR,reinterpret_cast<const char*>(&yes),sizeof yes);
@@ -112,6 +159,7 @@ int main(int argc,char** argv){
         lastRequest=nowSeconds();
         std::thread([idleExit,&w]{while(true){std::this_thread::sleep_for(std::chrono::seconds(5));if(nowSeconds()-lastRequest.load()>=idleExit){save(w);line("idle: leaving");std::_Exit(0);}}}).detach();}
     line("coop-world listening on "+bind+":"+std::to_string(port)+(prefix.empty()?"":" (secret prefix set)"));
+    if(relayPort)line("coop-world relay on "+bind+":"+std::to_string(relayPort)+" (UDP; near from "+std::to_string(int(relayConfig.enterMetres))+" m to "+std::to_string(int(relayConfig.leaveMetres))+" m, "+std::to_string(relayConfig.maxPlayers)+" players)");
     while(true){
         sock_t s=accept(listener,nullptr,nullptr);
 #ifdef _WIN32

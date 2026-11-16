@@ -12,7 +12,7 @@ identity:
 	python3 -B generate_discovery_signatures.py
 	python3 build_id.py
 	python3 ../core/build_id.py
-all: identity build/puppet-test.exe build/mod.dll build/mod_probe.exe build/mod-no-build.dll build/mod-no-interpolation.dll build/coop-partner.exe
+all: identity build/puppet-test.exe build/mod.dll build/mod_probe.exe build/mod-no-build.dll build/mod-no-interpolation.dll build/coop-partner.exe build/coop-swarm.exe
 build/mod.dll: $(SRC) $(HEADERS) | build
 	$(MINGW) $(WINFLAGS) -shared $(SRC) -o $@ -lws2_32 -lbcrypt -lwinmm
 build/mod-no-build.dll: $(SRC) $(HEADERS) | build
@@ -45,6 +45,8 @@ test: environment-test join-test vehicle-test game-thread-test discovery-test po
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_ENEMY_POSITIONS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-enemy-positions && if ./build/unit-config-enemy-positions >/dev/null 2>&1; then echo SURVIVED CONFIG_ENEMY_POSITIONS; exit 1; else echo KILLED MUTANT_CONFIG_ENEMY_POSITIONS; fi
 	@$(CXX) $(FLAGS) -DMUTANT_PEER_ANY unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-peer-any && if ./build/unit-peer-any >/dev/null 2>&1; then echo SURVIVED PEER_ANY; exit 1; else echo KILLED MUTANT_PEER_ANY; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_OTHERS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-others && if ./build/unit-config-others >/dev/null 2>&1; then echo SURVIVED CONFIG_OTHERS; exit 1; else echo KILLED MUTANT_CONFIG_OTHERS; fi
+	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_RELAY_ADDRESS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-relay-address && if ./build/unit-config-relay-address >/dev/null 2>&1; then echo SURVIVED CONFIG_RELAY_ADDRESS; exit 1; else echo KILLED MUTANT_CONFIG_RELAY_ADDRESS; fi
+	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_RELAY_NEEDS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-relay-needs && if ./build/unit-config-relay-needs >/dev/null 2>&1; then echo SURVIVED CONFIG_RELAY_NEEDS; exit 1; else echo KILLED MUTANT_CONFIG_RELAY_NEEDS; fi
 	python3 -B test_probe.py
 	python3 -B -m unittest -q test_game_thread_api test_probe_puppet test_actor_resources test_actor_reader_windows
 	python3 -B test_actor_resource_mutants.py
@@ -186,6 +188,12 @@ build/coop-partner: environment.cpp environment.h partner.cpp partner_logic.cpp 
 	$(CXX) $(FLAGS) partner.cpp partner_logic.cpp environment.cpp structures.cpp carry_visual.cpp signals.cpp discovery.cpp ../core/core.cpp -o $@
 build/coop-partner.exe: environment.cpp environment.h partner.cpp partner_logic.cpp partner.h identity.h structures.cpp structures.h carry_visual.cpp carry_visual.h signals.cpp signals.h discovery.cpp ../core/core.cpp ../core/core.h | build
 	$(MINGW) $(WINFLAGS) partner.cpp partner_logic.cpp environment.cpp structures.cpp carry_visual.cpp signals.cpp discovery.cpp ../core/core.cpp -o $@ -lws2_32 -lbcrypt
+# coop-swarm: many stand-in players for one relay (swarm.cpp; world/README.md, "The relay").
+SWARM = swarm.cpp partner_logic.cpp partner.h identity.h ../core/core.cpp ../core/core.h ../core/relay.h
+build/coop-swarm: $(SWARM) | build
+	$(CXX) $(FLAGS) swarm.cpp partner_logic.cpp ../core/core.cpp -o $@
+build/coop-swarm.exe: $(SWARM) | build
+	$(MINGW) $(WINFLAGS) swarm.cpp partner_logic.cpp ../core/core.cpp -o $@ -lws2_32
 build/orderload-test: orderload_test.cpp orderload.cpp orderload.h cargo.cpp cargo.h discovery.cpp | build
 	$(CXX) $(FLAGS) orderload_test.cpp orderload.cpp cargo.cpp discovery.cpp -o $@
 build/story-test: story_test.cpp story.cpp story.h ../launcher/saves.cpp ../launcher/saves.h ../launcher/saves_vectors.h discovery.cpp ../core/core.cpp ../core/core.h | build

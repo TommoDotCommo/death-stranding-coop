@@ -14,6 +14,7 @@ struct Config {
     // How the partner is shown from the start, without a test command: "off" (default), "peer" (the game's resident
     // double) or "own" (a Sam the mod makes; the double until it exists). Requires puppet_probe and an explicit role.
     std::string partner="off";
+    std::string relay,relayKey;uint32_t relayAddress=0;uint16_t relayPort=0;uint64_t playerId=0;   // the relay for other players (core/relay.h); empty = none
     unsigned others=0;         // the most other players shown besides the partner, presence only (others.h); 0: off
     bool partnerVehicle=false; // the partner's vehicle drawn under him while he rides (ride.h)
     bool partnerTag=false;     // the partner's name (their nickname) over the partner body (nametag.h)

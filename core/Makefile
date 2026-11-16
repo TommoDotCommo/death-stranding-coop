@@ -14,7 +14,7 @@ $(BUILD)/net.o: $(FUZZ)/src/net.cpp $(FUZZ)/include/coopfuzz/net.h $(FUZZ)/inclu
 	$(CXX) $(CXXFLAGS) -I$(FUZZ)/include -c $< -o $@
 $(BUILD)/tests: tests/test.cpp core.cpp core.h build_id.h $(BUILD)/net.o | $(BUILD)
 	$(CXX) $(CXXFLAGS) -DDS_TESTING -I$(FUZZ)/include tests/test.cpp core.cpp $(BUILD)/net.o -o $@
-test: check-build $(BUILD)/core.o $(BUILD)/tests environment-test animation-test enemies-test
+test: check-build $(BUILD)/core.o $(BUILD)/tests environment-test animation-test enemies-test relay-test
 	python3 tests/run.py $(BUILD)/tests
 	$(MAKE) -C ../mod test
 $(BUILD)/core-win64.o: core.cpp core.h build_id.h | $(BUILD)
@@ -46,3 +46,12 @@ $(BUILD)/enemies-tests: tests/enemies.cpp core.cpp core.h build_id.h $(BUILD)/ne
 enemies-test: $(BUILD)/enemies-tests
 	python3 tests/environment_run.py $(BUILD)/enemies-tests enemiesRange enemiesRole enemiesOrder enemiesFresh enemiesStale enemiesRate
 .PHONY: enemies-test
+
+# The relay envelope and the player's side of the relay (relay.h, header only), with a mutant for every refusal.
+$(BUILD)/relay-tests: tests/relay.cpp relay.h | $(BUILD)
+	$(CXX) $(CXXFLAGS) tests/relay.cpp -o $@
+relay-test: $(BUILD)/relay-tests
+	./$(BUILD)/relay-tests
+	python3 -B ../mod/mutants.py --sources tests/relay.cpp --prefix $(BUILD)/mutant- RELAY_WIRE_VERSION RELAY_WIRE_LENGTH RELAY_WIRE_RANGE RELAY_WIRE_TEXT RELAY_WIRE_PAYLOAD RELAY_CLIENT_SILENT RELAY_CLIENT_STREAM RELAY_CLIENT_ORDER RELAY_CLIENT_STRANGER
+	@echo relay mutants killed: 9
+.PHONY: relay-test

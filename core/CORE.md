@@ -435,3 +435,89 @@ per-peer nonce echo, which is a protocol change that has not been made.
 
 Tests: `mod/others_test.cpp` runs several players over a link in memory (independent clocks, delay, loss), with a
 plain `Core` as one peer to show that an unchanged core on the other end pairs with it.
+
+## Relay envelope (`relay.h`, envelope version 1)
+
+For many players the core's datagrams no longer travel over one direct link: each game sends them to the players' own
+server (`world/`, `coop-world --relay-port`), which passes them on to the players who are near. `relay.h` is the
+envelope around a core datagram and the player's side of that conversation. It is header-only and game-free, shared
+by the server, the mod and the test tools; it is not yet used by the mod and is not part of `build_id.py`'s manifest.
+The core itself is unchanged: a `Core` is still one session with one peer, and a game that sees three players near
+runs three of them.
+
+Every datagram starts with the same 8 bytes. Integers are little endian, reserved bytes are zero.
+
+| Offset | Bytes | Field |
+|---|---:|---|
+| 0 | 4 | Magic ASCII `DSR1` |
+| 4 | 2 | Envelope version, exactly 1 |
+| 6 | 1 | Type, 1..7 (below) |
+| 7 | 1 | Reserved zero |
+
+| Type | Direction | Size | After the 8 bytes |
+|---|---|---:|---|
+| HELLO 1 | player to server | 112 | u64 player id (not 0); token[32]; u32 hello sequence; u32 roster stream; u32 roster ack; u32 area; u8 flags (1 = a position is given); reserved[3]; i32 x3 position in centimetres; nickname[32] |
+| WELCOME 2 | server to player | 32 | u64 player id; u32 the HELLO's sequence; u32 roster stream; u16 enter metres; u16 leave metres; u16 timeout seconds; u16 players near now |
+| REFUSED 3 | server to player | 24 | u64 player id; u32 the HELLO's sequence; u8 reason (1 server full, 2 id in use at another address); reserved[3] |
+| ROSTER 4 | server to player | 20 + events | u32 roster stream; u32 sequence of the first event; u8 count 1..24; reserved[3]; then count times: u8 event (1 enter, 2 leave), u64 player id, u8 n (0..32), nickname[n] |
+| DATA 5 | player to server | 16 + payload | u64 destination player id; payload, 1..1252 bytes (one core datagram, not looked at) |
+| RELAYED 6 | server to player | 16 + payload | u64 source player id; payload |
+| BYE 7 | player to server | 48 | u64 player id; token[32] |
+
+- **Token**: the group's secret, at most 32 letters, digits, `-` and `_`, zero padded. It travels in the clear, like the
+  server's path prefix: it keeps strangers who reach the address from joining, not someone who can read the traffic.
+- **Position**: the axes of the core's `State` (metres, Y up), as centimetres within 100 km on each axis, like PRESENCE.
+  It is integers on the wire for the same reason as there (no float bit patterns). Without the flag the three
+  fields are zero and the player is near nobody (loading, a cutscene).
+- **Area**: a number for the map the player is in; players in different areas are never near each other. The core
+  has no such identifier today, so the adapter defines it; 0 when it has none.
+- **Nickname**: at most 32 bytes, no control bytes, zero padded in HELLO. The server only passes it on in ENTER.
+- **Player id**: 64 bits chosen by the player, stable for a session. Which id each game uses is the adapter's decision.
+
+Refused whole (`parse` returns the reason, nothing is read from the datagram): shorter than 8 or longer than 1268
+bytes, another magic, version or type, a nonzero reserved byte, any fixed-size type that is not exactly its size,
+player id 0, a position outside the envelope or given without its flag, text with a forbidden byte or with bytes
+after its padding began, an empty or oversized payload, a ROSTER whose events do not fill the datagram exactly.
+The encoders throw for the same things.
+
+The overhead on a core datagram is 16 bytes. The longest core datagram (ANIMATION at 1252 bytes, sized for a
+1280-byte path MTU with IPv4 and UDP headers) therefore becomes 1268 bytes, 1296 with headers: over that budget by 16
+bytes. Nothing was changed in the core for this; `AnimationWireMax` would have to drop by 16 to keep the budget.
+
+### The roster is a reliable stream
+
+A lost ENTER would leave two players near each other with no session, so ENTER and LEAVE are not fire-and-forget.
+The server numbers a player's events from 1 within a *stream* and repeats the unacknowledged ones (up to 24 in one
+datagram, oldest first) when an event happens and with every WELCOME; the player applies only the next sequence and
+puts the last one applied (`ack`) and the stream number into every HELLO. A WELCOME with another stream number means
+the server began again from nothing for this player (he timed out there, or the server restarted): the player forgets
+everyone (a LEAVE for each) and starts at 0. A HELLO with stream 0 asks the server for that (a game that started
+again on the same port). WELCOME and REFUSED carry the sequence of the HELLO they answer; the player takes them in
+that order, once, and never one that answers a HELLO it did not send.
+
+### The player's side (`ds::relay::Client`)
+
+No sockets and no clock of its own, like the core: the adapter gives it a send function for the relay's address,
+hands it only datagrams that came from that address, and calls `tick(now)`.
+
+- `setPosition(position, area)` / `clearPosition()`: what the next HELLO reports. HELLO goes out every 500 ms and
+  at once after a ROSTER (the acknowledgement).
+- `takeEvents()`: ENTER and LEAVE in order. The adapter starts a core session on ENTER and ends it on LEAVE.
+- `sendTo(player, datagram)`: wraps one core datagram; refused for a player who is not in the roster.
+- `receive(...)`: returns true with the source player and the payload for a RELAYED datagram from a player in the
+  roster; everything else is handled inside or dropped.
+- No WELCOME for 5 s: the relay is gone; everyone near leaves and the next HELLO starts a new stream.
+- `bye()`: tells the server once and forgets everyone.
+
+Pairing two players' cores is the adapter's job. The stand-in swarm (`mod/swarm.cpp`) uses one rule that needs no
+negotiation: the same session number for everyone, and of two players the one with the lower id takes the host role.
+
+### Tests
+
+`make -C core relay-test` (part of `make test`): `tests/relay.cpp` pins the layout byte for byte, sends every message
+through the wire and back, refuses every sample cut short at each length or one byte longer, each bad field, and
+40,000 damaged datagrams; then it drives a `Client` with hand-made server messages (order, repeats, gaps, another
+stream, a late WELCOME, a new stream, a refusal, five seconds of silence, BYE). Nine mutants must fail it:
+`RELAY_WIRE_VERSION`, `RELAY_WIRE_LENGTH`, `RELAY_WIRE_RANGE`, `RELAY_WIRE_TEXT`, `RELAY_WIRE_PAYLOAD`,
+`RELAY_CLIENT_SILENT`, `RELAY_CLIENT_STREAM`, `RELAY_CLIENT_ORDER`, `RELAY_CLIENT_STRANGER`. The server's side and
+both sides together are tested in `world/` (README there, "The relay").

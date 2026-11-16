@@ -1,4 +1,5 @@
 #include "others.h"
+#include "../core/relay.h"
 #include "controls.h"
 #include "providers.h"
 #include <algorithm>
@@ -81,13 +82,11 @@ void Bodies::drive(const std::vector<Want>& wants,const puppet::Anchor& porter,u
 
 // ---- Sessions -------------------------------------------------------------------------------------------------------
 uint64_t pairSession(uint64_t session,uint64_t a,uint64_t b){
-    auto mix=[](uint64_t x){x+=0x9e3779b97f4a7c15ull;x=(x^(x>>30))*0xbf58476d1ce4e5b9ull;x=(x^(x>>27))*0x94d049bb133111ebull;return x^(x>>31);};
 #ifndef MUTANT_OTHERS_PAIR
-    uint64_t v=mix(mix(mix(session)^std::min(a,b))^std::max(a,b));
+    return ds::relay::pairSession(session,a,b);   // one rule for the mod, the stand-ins and anything else on the relay
 #else
-    uint64_t v=session;(void)a;(void)b;(void)mix;
+    (void)a;(void)b;return session?session:1;
 #endif
-    return v?v:1;
 }
 Drive drive(const Shown& shown,bool poses){
     Drive d;
