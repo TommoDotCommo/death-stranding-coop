@@ -273,8 +273,8 @@ struct Runtime final:ds::Transport {
     // Whatever carries the datagrams between players (a relay) calls them, always under `mutex`; the network thread's
     // loop() is the place (poll the relay beside the partner's socket, see the mark there):
     //   othersStart(self, link)            this player's id on the link is known; link.send(to, data, size) sends one datagram
-    //   othersEntered(id), othersLeft(id)  who is near
-    //   othersReceived(from, data, size)   one datagram from that player, as it was sent
+    //   othersEntered(id, now), othersLeft(id, now)  who is near
+    //   othersReceived(from, data, size, now)        one datagram from that player, as it was sent
     //   othersStop()                       the link is gone: everybody leaves
     void othersStart(uint64_t self,mod::others::Link link){
         if(!config.others||!self)return;
@@ -283,9 +283,13 @@ struct Runtime final:ds::Transport {
         note(("OTHERS ready: up to "+std::to_string(config.others)+" other players"+(otherBodies?"\n":" (no bodies in this build)\n")).c_str());
     }
     void othersStop(){if(!others)return;others->clear(mod::nowMs());others.reset();note("OTHERS stopped\n");}
-    void othersEntered(uint64_t id){if(others)others->entered(id,mod::nowMs());}
-    void othersLeft(uint64_t id){if(others)others->left(id,mod::nowMs());}
-    void othersReceived(uint64_t from,const uint8_t* data,size_t size){if(others)others->received(from,data,size,mod::nowMs());}
+    // `now` is the network loop's time for this pass, the one its tick is given: a later reading here would put a
+    // session's last receive after the tick's time, and the core's timeout (an unsigned difference) would fire at once
+    // (live 2026-11-16: sessions dropped and reconnected all the time).
+    void othersEntered(uint64_t id,uint64_t now){if(others)others->entered(id,now);}
+    void othersLeft(uint64_t id,uint64_t now){if(others)others->left(id,now);}
+    ds::Error othersLastError=ds::Error::None;
+    void othersReceived(uint64_t from,const uint8_t* data,size_t size,uint64_t now){if(others){auto e=others->received(from,data,size,now);if(e!=ds::Error::None)othersLastError=e;}}
     // The relay (core/relay.h; config relay, relay_key, player_id): a second UDP socket connected to the players' own
     // server, which says who is near and carries the datagrams of those pairs. Polled by the network thread under `mutex`.
 #ifndef MOD_FAKE_NETWORK
@@ -321,12 +325,15 @@ struct Runtime final:ds::Transport {
         for(unsigned budget=0;budget<256;++budget){
             char raw[2048];int n=recv(relaySocket,raw,sizeof(raw),0);if(n<=0)break;
             uint64_t from=0;const uint8_t* payload=nullptr;size_t size=0;
-            if(relayClient->receive(reinterpret_cast<const uint8_t*>(raw),size_t(n),now,from,payload,size)){++relayIn;othersReceived(from,payload,size);}
+            if(relayClient->receive(reinterpret_cast<const uint8_t*>(raw),size_t(n),now,from,payload,size)){++relayIn;othersReceived(from,payload,size,now);}
         }
-        for(auto& e:relayClient->takeEvents()){if(e.enter)othersEntered(e.id);else othersLeft(e.id);}
+        for(auto& e:relayClient->takeEvents()){if(e.enter)othersEntered(e.id,now);else othersLeft(e.id,now);}
         if(relayClient->online()!=relayOnline){relayOnline=relayClient->online();
             note(relayOnline?"RELAY online\n":relayClient->refusal()!=ds::relay::Refusal::None?"RELAY refused this player\n":"RELAY offline: everybody near has left\n");}
-        if(now-relayNotedAt>=10000){relayNotedAt=now;std::ostringstream o;o<<"RELAY "<<(relayOnline?"online":"offline")<<" near "<<relayClient->nearby().size()<<" in "<<relayIn<<" out "<<relayOut<<"\n";note(o.str().c_str());}
+        if(now-relayNotedAt>=10000){relayNotedAt=now;std::ostringstream o;o<<"RELAY "<<(relayOnline?"online":"offline")<<" near "<<relayClient->nearby().size()<<" in "<<relayIn<<" out "<<relayOut;
+            if(others){auto& k=others->counters();o<<" accepted "<<k.accepted<<" refused "<<k.refused<<" unknown "<<k.unknown<<" malformed "<<k.malformed<<" other build "<<k.foreignBuild<<" other kind "<<k.kind
+                <<" last refusal \""<<ds::reason(othersLastError)<<"\"";}
+            o<<"\n";note(o.str().c_str());}
 #else
         (void)now;
 #endif
