@@ -166,6 +166,12 @@ static void owner(){
     CHECK(s.post(&a,"owner/review","{\"accept\":\""+obj+"\"}").status==403&&found()==0);
     CHECK(s.post(&o,"owner/review","{\"accept\":\""+obj+"\",\"reject\":\""+obj+"\"}").status==400&&s.post(&o,"owner/review","{}").status==400);
     auto r=s.post(&o,"owner/review","{\"accept\":\""+obj+"\"}");CHECK(r.status==200&&json::parse(r.body).get("accepted").integer()==1&&found()==1);
+    // The owner's list: each player's key in its short form, his counts and the likes on what is his.
+    s.w.call(sb,"sendLike","{\"oid\":\""+obj+"\",\"lp\":3,\"lp2\":0,\"lt\":\"\"}",Now);
+    bool listed=false;auto players=json::parse(s.api(&o,"GET","owner/players").body);
+    for(auto& p:players.get("players").items())
+        if(p.get("id").string()==playerId(A))listed=p.get("key").string()==id::shortText(a.pub)&&p.get("likes").integer()==3&&p.get("shared").integer()==1&&p.get("member").boolean();
+    CHECK(listed);
     // The policy, as the owner sets it; a value that is none changes nothing.
     auto before=s.w.policy();
     CHECK(s.post(&a,"owner/policy","{\"set\":[\"limit=5\"]}").status==403&&s.post(&o,"owner/policy","{\"set\":[\"limit=-1\"]}").status==400&&s.post(&o,"owner/policy","{}").status==400);

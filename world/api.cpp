@@ -42,6 +42,7 @@ json::Value World::apiPolicy(int64_t now) const {
     std::lock_guard<std::mutex> g(lock_);
     Value out=Value::object();out.set("format",1);out.set("server",serverId_);out.set("preset",policy_.preset);
     out.set("time",now);out.set("owner",!owner_.empty());   // the server's clock, for a launcher whose clock is off
+    out.set("name",name_);                                    // this world's display name ("" none; README "Builder names")
     Value players=Value::object();players.set("count",int64_t(players_.size()));players.set("limit",int64_t(std::min<int64_t>(int64_t(MaxPlayers),policy_.players)));out.set("players",players);
     auto items=policyItems(policy_),preset=policyItems(presetPolicy(policy_.preset));Value settings=Value::array();
     for(size_t i=0;i<items.size();++i){
@@ -90,6 +91,8 @@ json::Value World::apiMine(const std::string& key) const {
 json::Value World::apiPlayers() const {
     auto list=playerList();Value players=Value::array();
     for(auto& i:list){Value v=Value::object();v.set("id",i.id);v.set("name",i.name);v.set("known",i.known);v.set("member",i.member);
+        identity::PublicKey k{};v.set("key",identity::keyOf(i.key,k)?identity::shortText(k):std::string());   // a player's key, short; no other account is shown
+        v.set("likes",i.likes);
         v.set("offer_builds",i.offerBuilds);v.set("offer_old",i.offerOld);v.set("shared",int64_t(i.shared));v.set("waiting",int64_t(i.pending));
         v.set("kept",int64_t(i.kept));v.set("held",int64_t(i.held));v.set("remnants",int64_t(i.remnants));v.set("imported",int64_t(i.imported));players.push(v);}
     Value out=Value::object();out.set("format",1);out.set("players",players);return out;

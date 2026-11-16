@@ -52,6 +52,42 @@ bool wholeNumber(const std::string& s,int64_t& out){
     for(size_t k=i;k<s.size();++k)if(s[k]<'0'||s[k]>'9')return false;
     out=std::stoll(s);return true;}
 Value triple(const Value& post,const char* a,const char* b,const char* c){Value v=Value::array();v.push(post.get(a).integer());v.push(post.get(b).integer());v.push(post.get(c).integer());return v;}
+// UTF-8: how many bytes the character that starts with `c` has (a byte that starts none counts as one), and how many
+// characters a text has.
+size_t charBytes(unsigned char c){return c<0x80?1:(c>>5)==6?2:(c>>4)==14?3:(c>>3)==30?4:1;}
+size_t chars(const std::string& s){size_t n=0;for(unsigned char c:s)if((c>>6)!=2)++n;return n;}
+// Well-formed UTF-8 without control characters.
+bool utf8Text(const std::string& s){
+    for(size_t i=0;i<s.size();){
+        unsigned char c=static_cast<unsigned char>(s[i]);size_t n=charBytes(c);
+        if(c<0x20||c==0x7f||(c>=0x80&&n==1)||i+n>s.size())return false;
+        for(size_t k=1;k<n;++k)if((static_cast<unsigned char>(s[i+k])>>6)!=2)return false;
+        i+=n;}
+    return true;}
+}
+bool serverNameText(const std::string& s){
+    return !s.empty()&&s.front()!=' '&&s.back()!=' '&&s.size()<=MaxHomeBytes&&utf8Text(s)&&chars(s)<=MaxHomeChars;}
+std::string cutText(const std::string& s,size_t most,size_t bytes){
+    std::string out;size_t n=0;
+    for(size_t i=0;i<s.size();){
+        size_t len=1,want=charBytes(static_cast<unsigned char>(s[i]));
+        while(len<want&&i+len<s.size()&&(static_cast<unsigned char>(s[i+len])>>6)==2)++len;
+        if(n+1>most||out.size()+len>bytes)break;
+        out.append(s,i,len);++n;i+=len;}
+    while(!out.empty()&&out.back()==' ')out.pop_back();
+    return out;
+}
+std::string builderLabel(const std::string& name,const std::string& home){
+    const std::string h=cutText(home,MaxHomeChars,MaxHomeBytes),dot=" \xC2\xB7 ";   // " · "
+    if(h.empty())return name;
+#ifndef MUTANT_LOOKUP_CUT
+    // The name part is cut, never the server's: a long name still says where its builder is from.
+    std::string n=cutText(name,MaxLabelChars-3-chars(h),MaxLabelBytes-dot.size()-h.size());
+    if(n.empty())n="Porter";
+    return n+dot+h;
+#else
+    return cutText((name.empty()?std::string("Porter"):name)+dot+h,MaxLabelChars,MaxLabelBytes);
+#endif
 }
 std::string heldText(const std::string& why){
     return why=="build"?"nobody builds on this server":why=="member"?"only members build on this server":why=="limit"?"this server's limit of objects per player":why;}
@@ -321,12 +357,25 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
         Value users=Value::array();
         for(auto& id:in.get(name=="lookup"?"ids":"bs").items())for(auto& p:players_){
             if((name=="lookup"?p.second.id:p.second.key)!=id.string())continue;
-            Value u=Value::object();u.set("account",p.second.id);u.set("boundAccount",p.second.key);u.set("displayName",p.second.name);u.set("provider","steam");users.push(u);}
-        // The builders of imported objects: their name as their own server gave it, and no account.
+            // This server's own players: their name only.
+#ifndef MUTANT_LOOKUP_LOCAL_SUFFIX
+            const std::string shown=p.second.name;
+#else
+            const std::string shown=builderLabel(p.second.name,homeLocked(serverId_,name_));
+#endif
+            Value u=Value::object();u.set("account",p.second.id);u.set("boundAccount",p.second.key);u.set("displayName",shown);u.set("provider","steam");users.push(u);}
+        // The builders of imported objects: their name as their own server gave it with that server's display name
+        // ("Name · Home", README "Builder names"), and no account.
         if(name=="lookup"&&!byOrigin_.empty())for(auto& id:in.get("ids").items()){
             if(playerById(id.string()))continue;
             for(auto& o:objects_)if(!o.second.originServer.empty()&&o.second.creator==id.string()){
-                Value u=Value::object();u.set("account",o.second.creator);u.set("boundAccount","");u.set("displayName",o.second.originName.empty()?"Porter":o.second.originName);u.set("provider","steam");users.push(u);break;}}
+                const std::string builder=o.second.originName.empty()?"Porter":o.second.originName;
+#ifndef MUTANT_LOOKUP_HOME_MISSING
+                const std::string shown=builderLabel(builder,homeLocked(o.second.originServer,o.second.home));
+#else
+                const std::string shown=builder;
+#endif
+                Value u=Value::object();u.set("account",o.second.creator);u.set("boundAccount","");u.set("displayName",shown);u.set("provider","steam");users.push(u);break;}}
         Value out=Value::object();out.set("users",users);return ok(out);}
     if(name=="getRankingSchedules"){Value out=Value::object();out.set("rs",Value::array());out.set("ut",now);return ok(out);}
     if(name=="getWastedBaggages"){Value out=Value::object();out.set("ws",Value::array());out.set("ud",now);return ok(out);}
@@ -351,6 +400,7 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
 json::Value World::snapshot() const {
     std::lock_guard<std::mutex> g(lock_);
     Value out=Value::object();out.set("format",2);out.set("server_id",serverId_);out.set("next_object",int64_t(nextObject_));
+    if(!name_.empty())out.set("name",name_);
     Value policy=Value::object();policy.set("preset",policy_.preset);
     for(auto& item:policyItems(policy_)){int64_t n=0;if(wholeNumber(item.second,n))policy.set(item.first,n);else policy.set(item.first,item.second);}
 #ifndef MUTANT_POLICY_SAVE_LOST
@@ -381,7 +431,7 @@ json::Value World::snapshot() const {
 #endif
         if(o.second.remnant)v.set("remnant",true);
         if(!o.second.originServer.empty()){Value from=Value::object();from.set("server",o.second.originServer);from.set("id",o.second.originId);from.set("via",o.second.via);
-            from.set("name",o.second.originName);from.set("likes",o.second.originLikes);v.set("origin",from);}
+            from.set("name",o.second.originName);from.set("likes",o.second.originLikes);if(!o.second.home.empty())from.set("home",o.second.home);v.set("origin",from);}
         objects.push(v);}
     out.set("objects",objects);
     Value likes=Value::array();
@@ -407,9 +457,10 @@ void World::restore(const json::Value& v){
             // A world file from before identity keys: no keys, whatever its preset says now.
             if(!v.get("policy").has("identity"))policy.identity="none";
         }catch(const std::exception& e){throw std::runtime_error(std::string("world file: ")+e.what());}}
-    const std::string owner=v.get("owner").string();
+    const std::string owner=v.get("owner").string(),worldName=v.get("name").string();
     if(!owner.empty()&&!identity::accountIsKey(owner))throw std::runtime_error("world file: bad owner");
-    players_.clear();tokens_.clear();objects_.clear();byOrigin_.clear();tickets_.clear();relayTokens_.clear();++changes_;policy_=policy;owner_=owner;
+    if(v.has("name")&&!serverNameText(worldName))throw std::runtime_error("world file: bad server name");
+    players_.clear();tokens_.clear();objects_.clear();byOrigin_.clear();tickets_.clear();relayTokens_.clear();++changes_;policy_=policy;owner_=owner;name_=worldName;
     // A world file from before linked servers has no id: it keeps the one made for this process, and is saved with it.
     bool hadId=v.has("server_id");
     if(hadId){if(!serverIdText(v.get("server_id").string()))throw std::runtime_error("world file: bad server id");serverId_=v.get("server_id").string();}
@@ -429,8 +480,9 @@ void World::restore(const json::Value& v){
         if(ob.id.empty()||!ob.post.isObject()||!oneOf(ob.share,{"","kept","ask","review","held"})||(o.has("origin")&&(ob.remnant||!ob.share.empty()))
            ||(ob.share=="held")!=oneOf(ob.held,{"build","member","limit"})||(ob.heldAsk&&ob.share!="held"))throw std::runtime_error("world file: bad object");
         if(o.has("origin")){const Value& from=o.get("origin");ob.originServer=from.get("server").string();ob.originId=from.get("id").string();ob.via=from.get("via").string();
-            ob.originName=from.get("name").string();ob.originLikes=from.get("likes").integer();
-            if(!serverIdText(ob.originServer)||!serverIdText(ob.via)||!objectIdText(ob.originId)||ob.originServer==serverId_||!byOrigin_.emplace(std::make_pair(ob.originServer,ob.originId),ob.id).second)
+            ob.originName=from.get("name").string();ob.originLikes=from.get("likes").integer();ob.home=from.get("home").string();
+            if(!serverIdText(ob.originServer)||!serverIdText(ob.via)||!objectIdText(ob.originId)||ob.originServer==serverId_||ob.home.size()>MaxNameBytes||!utf8Text(ob.home)
+               ||!byOrigin_.emplace(std::make_pair(ob.originServer,ob.originId),ob.id).second)
                 throw std::runtime_error("world file: bad imported object");}
         objects_[ob.id]=ob;}
     likes_.clear();
@@ -507,9 +559,14 @@ bool passes(const Filter& f,const Shared& s,bool imported,int64_t now){
     return true;
 }
 json::Value writeShared(const Shared& s){
-    Value v=Value::object();v.set("server",s.server);v.set("id",s.id);v.set("creator",s.creator);v.set("name",s.name);v.set("updated",s.updated);v.set("likes",s.likes);v.set("post",s.post);return v;}
+    Value v=Value::object();v.set("server",s.server);v.set("id",s.id);v.set("creator",s.creator);v.set("name",s.name);v.set("updated",s.updated);v.set("likes",s.likes);v.set("post",s.post);
+    if(!s.home.empty())v.set("home",s.home);   // only when its server has a display name: the form from before otherwise
+    return v;}
 Shared readShared(const json::Value& v){
-    if(!v.isObject()||v.members().size()!=7)bad("import: an object is not in the export form");
+    // Seven fields, or eight with `home` (since display names): a document from before is read as it was.
+    if(!v.isObject()||!(v.members().size()==7||(v.members().size()==8&&v.has("home"))))bad("import: an object is not in the export form");
+    if(v.has("home")&&(!v.get("home").isString()||v.get("home").string().empty()||v.get("home").string().size()>MaxNameBytes||!utf8Text(v.get("home").string())))
+        bad("import: an object's home server name is not a name");
     for(const char* k:{"server","id","creator","name"})if(!v.get(k).isString())bad(std::string("import: an object has no ")+k);
     Shared s;s.server=v.get("server").string();s.id=v.get("id").string();s.creator=v.get("creator").string();s.name=v.get("name").string();
     if(!serverIdText(s.server))bad("import: bad origin server id");
@@ -520,7 +577,7 @@ Shared readShared(const json::Value& v){
     if(!v.get("updated").isInt()||!v.get("likes").isInt())bad("import: an object's time or likes is not a whole number");
     s.updated=v.get("updated").integer();s.likes=v.get("likes").integer();
     if(s.updated<0||s.likes<0||s.likes>1000000000000ll)bad("import: an object's time or likes is out of range");
-    s.post=v.get("post");
+    s.post=v.get("post");s.home=v.get("home").string();
     if(!s.post.isObject())bad("import: an object has no data");
     const Value& t=s.post.get("t");
     if(!t.isString()||t.string().size()!=1||t.string()[0]<'a'||t.string()[0]>'z')bad("import: object type must be one letter");
@@ -533,9 +590,26 @@ Shared readShared(const json::Value& v){
 void World::setServerId(const std::string& id){
     std::lock_guard<std::mutex> g(lock_);if(!serverIdText(id))bad("server id: 4 to 32 letters and digits");
     serverId_=id;dirty_=true;}
+void World::setName(const std::string& n){
+    if(!n.empty()&&!serverNameText(n))bad("server name: 1 to "+std::to_string(MaxHomeChars)+" characters (at most "+std::to_string(MaxHomeBytes)+" bytes of UTF-8), no control characters, no space at either end");
+    std::lock_guard<std::mutex> g(lock_);
+    if(name_!=n){name_=n;dirty_=true;++changes_;note(n.empty()?"no server name":"server name "+n);}   // what an export carries changed
+}
+void World::setLinkName(const std::string& server,const std::string& n){std::lock_guard<std::mutex> g(lock_);if(serverIdText(server)&&!n.empty())linkNames_[server]=n;}
+std::string World::homeLocked(const std::string& server,const std::string& given) const {
+    if(!given.empty())return given;
+    auto l=linkNames_.find(server);if(l!=linkNames_.end())return l->second;
+    return server.substr(0,HomeIdChars);
+}
+std::string World::homeName(const std::string& server) const {
+    std::lock_guard<std::mutex> g(lock_);
+    for(auto& o:objects_)if(o.second.originServer==server&&!o.second.home.empty())return homeLocked(server,o.second.home);   // what it calls itself
+    return homeLocked(server,{});
+}
 Shared World::sharedOf(const Object& o) const {
     Shared s;bool imported=!o.originServer.empty();
     s.server=imported?o.originServer:serverId_;s.id=imported?o.originId:o.id;s.creator=o.creator;s.updated=o.updated;s.likes=o.likes;s.post=o.post;
+    s.home=imported?o.home:name_;   // an import passes on what its first server said of itself, nothing made up here
     if(imported)s.name=o.originName;else if(o.remnant)s.name=o.name;else if(auto* p=playerById(o.creator))s.name=p->name;else s.name=o.name;
     return s;
 }
@@ -558,6 +632,7 @@ json::Value World::exportObjects(const Filter& f,const std::string& forServer,in
         // What the other side would refuse never leaves: an object of a shape or size the travelling form does not allow.
         if(!objectIdText(s.id)||s.type().size()!=1||s.type()[0]<'a'||s.type()[0]>'z'||(s.post.has("q")&&!s.post.get("q").isInt()))continue;
         if(s.name.size()>MaxNameBytes)s.name.clear();
+        if(s.home.size()>MaxNameBytes||!utf8Text(s.home))s.home.clear();
         Value v=writeShared(s);size_t n=v.dump().size();
         if(s.post.dump().size()>MaxSharedPostBytes)continue;
         if(list.items().size()>=limit||(size+n>bytes&&!list.items().empty())){more=true;break;}
@@ -621,17 +696,17 @@ ImportResult World::importShared(const std::string& via,const std::vector<Shared
             if(o.id[0]==s->type()[0]){
                 // Held already. From another server than the one it was taken from, only a newer state replaces it.
                 if(o.via!=via&&s->updated<=o.updated){++r.unchanged;continue;}
-                if(o.updated==s->updated&&o.originLikes==likes&&o.creator==s->creator&&o.originName==s->name&&o.post.dump()==s->post.dump()){++r.unchanged;continue;}
+                if(o.updated==s->updated&&o.originLikes==likes&&o.creator==s->creator&&o.originName==s->name&&o.home==s->home&&o.post.dump()==s->post.dump()){++r.unchanged;continue;}
 #ifndef MUTANT_LINK_LIKES
                 o.likes=std::max<int64_t>(0,o.likes+likes-o.originLikes);   // the likes given here stay
 #else
                 o.likes=likes;
 #endif
-                o.originLikes=likes;o.creator=s->creator;o.originName=s->name;o.updated=s->updated;o.post=s->post;++r.updated;continue;}
+                o.originLikes=likes;o.creator=s->creator;o.originName=s->name;o.home=s->home;o.updated=s->updated;o.post=s->post;++r.updated;continue;}
             objects_.erase(found->second);byOrigin_.erase(found);   // another kind now: another id (the id says the kind)
         }
         Object o;o.id=importedId(s->type()[0],k);o.creator=s->creator;o.post=s->post;o.updated=s->updated;o.likes=o.originLikes=likes;
-        o.originServer=k.first;o.originId=k.second;o.via=via;o.originName=s->name;
+        o.originServer=k.first;o.originId=k.second;o.via=via;o.originName=s->name;o.home=s->home;
         byOrigin_[k]=o.id;objects_[o.id]=std::move(o);++r.added;}
 #ifndef MUTANT_LINK_NO_PRUNE
     if(prune)for(auto it=objects_.begin();it!=objects_.end();){
@@ -853,14 +928,17 @@ void World::setPlayer(const std::string& id,const std::string& keyValue){
 }
 std::vector<World::PlayerInfo> World::playerList() const {
     std::lock_guard<std::mutex> g(lock_);std::vector<PlayerInfo> out;std::map<std::string,size_t> at;
-    for(auto& p:players_){PlayerInfo i;i.id=p.second.id;i.name=p.second.name;i.offerBuilds=p.second.offerBuilds;i.offerOld=p.second.offerOld;i.member=p.second.member;
+    for(auto& p:players_){PlayerInfo i;i.id=p.second.id;i.name=p.second.name;i.key=p.second.key;i.offerBuilds=p.second.offerBuilds;i.offerOld=p.second.offerOld;i.member=p.second.member;
         at[i.id]=out.size();out.push_back(i);}
     for(auto& o:objects_){
         const Object& ob=o.second;auto found=at.find(ob.creator);
-        if(found==at.end()){PlayerInfo i;i.id=ob.creator;i.name=ob.originServer.empty()?ob.name:ob.originName;i.known=false;found=at.emplace(ob.creator,out.size()).first;out.push_back(i);}
+        // A builder known here only from imports is named as the game names him ("Name · Home").
+        if(found==at.end()){PlayerInfo i;i.id=ob.creator;i.name=ob.originServer.empty()?ob.name:builderLabel(ob.originName.empty()?"Porter":ob.originName,homeLocked(ob.originServer,ob.home));
+            i.known=false;found=at.emplace(ob.creator,out.size()).first;out.push_back(i);}
         PlayerInfo& i=out[found->second];
         if(!ob.originServer.empty())++i.imported;else if(ob.remnant)++i.remnants;else if(ob.share.empty())++i.shared;else if(ob.share=="kept")++i.kept;
-        else if(ob.share=="held")++i.held;else ++i.pending;}
+        else if(ob.share=="held")++i.held;else ++i.pending;
+        if(ob.originServer.empty()&&!ob.remnant)i.likes+=ob.likes;}
     return out;
 }
 std::vector<World::Waiting> World::waiting() const {

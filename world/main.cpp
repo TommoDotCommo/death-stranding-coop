@@ -1,6 +1,6 @@
 // coop-world: the players' own server for the game's shared world (README.md). One process, one world file.
 //   coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] [--log events.log] [--trace calls.log]
-//              [--idle-exit SECONDS] [--owner KEY]
+//              [--idle-exit SECONDS] [--owner KEY] [--name TEXT]
 //              [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS]
 //               [--relay-players N] [--relay-rate N] [--broadcast-full METRES] [--broadcast-interval MS]
 //               [--broadcast-animation METRES] [--broadcast-budget BYTES] [--broadcast-flush MS] [--broadcast-rate N]
@@ -13,6 +13,7 @@
 //   coop-world forget  --data world.json --server ID
 //   coop-world origins --data world.json
 //   coop-world policy|players|player-set|offer|withdraw|remove-player|review --data world.json ...   (README, "Server policy")
+//   coop-world policy --data world.json --name TEXT                    this world's display name (README, "Builder names")
 // Plain HTTP/1.1 with keep-alive, one thread per connection, bounded sizes. It only answers, except for the linked
 // servers it was given an address for (--link-url): those it asks for objects, and nothing else is ever connected to.
 // With --relay-port it is also the relay of the real-time layer (relay.h): one UDP socket on the same address, one thread.
@@ -153,6 +154,8 @@ void serveLink(world::World& w,world::LinkConfig c,world::LinkEndpoint e){
     while(true){
         Result r=puller.poll(nowSeconds());auto& n=puller.last();
         bool good=r==Result::Same||r==Result::Synced,moved=r==Result::Synced&&(n.added||n.updated||n.removed);
+        // The link's name is what its builders' home is called here while that server gives no name of its own.
+        if(good)w.setLinkName(puller.peer(),c.name);
         if(first||good!=wasGood||(!good&&r!=last)||moved){
             std::string text="link "+c.name+": "+world::Puller::text(r);
             if(good)text+=" with server "+puller.peer();
@@ -178,7 +181,7 @@ const char* OfflineUsage="usage: coop-world export  --data FILE --out FILE [--fi
                          "       coop-world import  --data FILE --in FILE [--filter FILTER] [--prune]\n"
                          "       coop-world forget  --data FILE --server ID\n"
                          "       coop-world origins --data FILE\n"
-                         "       coop-world policy        --data FILE [--preset friends|solo|public] [--set KEY=VALUE]...\n"
+                         "       coop-world policy        --data FILE [--preset friends|solo|public] [--set KEY=VALUE]... [--name TEXT]\n"
                          "       coop-world players       --data FILE\n"
                          "       coop-world player-set    --data FILE --player ID KEY=VALUE...   (offer_builds=yes|no|ask|default offer_old=yes|no|default member=yes|no)\n"
                          "       coop-world offer         --data FILE --player ID (--object ID | --all) [--no]\n"
@@ -201,12 +204,13 @@ std::string policyText(const world::Policy& p,bool table){
 int policyCommand(int argc,char** argv){
     const std::string command=argv[1];
     if(command!="policy"&&command!="players"&&command!="player-set"&&command!="offer"&&command!="withdraw"&&command!="remove-player"&&command!="review")return -1;
-    std::string preset,player,object,accept,reject,acceptPlayer;std::vector<std::string> sets;bool all=false,no=false;
+    std::string preset,player,object,accept,reject,acceptPlayer,name;std::vector<std::string> sets;bool all=false,no=false,naming=false;
     for(int i=2;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc){std::cerr<<"missing value for "<<a<<"\n";std::exit(2);}return std::string(argv[++i]);};
         if(a=="--data")dataPath=next();else if(a=="--preset")preset=next();else if(a=="--set")sets.push_back(next());else if(a=="--player")player=next();
         else if(a=="--object")object=next();else if(a=="--all")all=true;else if(a=="--no")no=true;
         else if(a=="--accept")accept=next();else if(a=="--reject")reject=next();else if(a=="--accept-player")acceptPlayer=next();
+        else if(a=="--name"&&command=="policy"){name=next();naming=true;}
         else if(command=="player-set"&&a.find('=')!=std::string::npos&&a.compare(0,2,"--")!=0)sets.push_back(a);
         else{std::cerr<<OfflineUsage;return 2;}}
     const bool needsPlayer=command=="player-set"||command=="offer"||command=="withdraw"||command=="remove-player";
@@ -216,7 +220,7 @@ int policyCommand(int argc,char** argv){
               &&(command=="review"||(accept.empty()&&reject.empty()&&acceptPlayer.empty()))&&(!accept.empty())+(!reject.empty())+(!acceptPlayer.empty())<=1;
     if(!fits){std::cerr<<OfflineUsage;return 2;}
     world::World w;
-    if(command=="policy"&&!preset.empty()&&!std::ifstream(dataPath,std::ios::binary).good()){if(loadWorld(w,false))return 1;}   // a new world, made with its policy
+    if(command=="policy"&&(!preset.empty()||naming)&&!std::ifstream(dataPath,std::ios::binary).good()){if(loadWorld(w,false))return 1;}   // a new world, made with its policy
     else if(loadWorld(w,true))return 1;
     try{
         if(command=="policy"){
@@ -224,7 +228,8 @@ int policyCommand(int argc,char** argv){
                 world::Policy p=preset.empty()?w.policy():world::presetPolicy(preset);
                 for(auto& s:sets)world::setPolicy(p,s);
                 w.setPolicy(p);save(w);}
-            std::cout<<policyText(w.policy(),true);return 0;}
+            if(naming){w.setName(name);save(w);}
+            std::cout<<policyText(w.policy(),true)<<"server name: "<<(w.name().empty()?"(none: other servers name it by their link, or by its id)":w.name())<<"\n";return 0;}
         if(command=="players"){
             auto p=w.policy();
             for(auto& i:w.playerList()){
@@ -289,7 +294,7 @@ int offline(int argc,char** argv){
         }catch(const std::exception& e){std::cerr<<"refused, nothing changed: "<<e.what()<<"\n";return 1;}}
     if(command=="forget"){auto n=w.forget(server);save(w);std::cout<<"forgot "<<n<<" objects of server "<<server<<"\n";return 0;}
     std::cout<<"this server "<<w.serverId()<<": "<<w.objects()-w.imported()<<" objects built here, "<<w.imported()<<" imported\n";
-    for(auto& o:w.origins())std::cout<<"from server "<<o.server<<(o.via==o.server?std::string():" by way of "+o.via)<<": "<<o.objects<<" objects\n";
+    for(auto& o:w.origins())std::cout<<"from server "<<o.server<<(o.via==o.server?std::string():" by way of "+o.via)<<": "<<o.objects<<" objects (its builders' home: "<<w.homeName(o.server)<<")\n";
     return 0;
 }
 uint64_t nowMs(){return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());}
@@ -338,7 +343,7 @@ int main(int argc,char** argv){
     std::string bind="127.0.0.1",prefix,relayKey;int port=0,relayPort=0;long idleExit=0;bool haveRelayKey=false;world::RelayConfig relayConfig;
     std::vector<world::LinkConfig> links;
     struct Presence {std::string on,relay;long budget=250000,players=64;};std::vector<Presence> presence;   // per link: --link-presence and its options
-    std::string policyPreset,owner;std::vector<std::string> policySets;
+    std::string policyPreset,owner,name;bool naming=false;std::vector<std::string> policySets;
     auto link=[&](const std::string& option)->world::LinkConfig&{if(links.empty()){std::cerr<<option<<" comes after --link NAME\n";std::exit(2);}return links.back();};
     auto filter=[](const std::string& option,const std::string& text){
         try{return world::parseFilter(text);}catch(const std::exception& e){std::cerr<<option<<": "<<e.what()<<"\n";std::exit(2);}};
@@ -366,7 +371,8 @@ int main(int argc,char** argv){
         else if(a=="--link-presence-players"){link(a);presence.back().players=std::min(std::max(std::atol(next().c_str()),0L),100000L);}
         else if(a=="--policy")policyPreset=next();else if(a=="--policy-set")policySets.push_back(next());
         else if(a=="--owner"){owner=world::identity::AccountPrefix+next();if(!world::identity::accountIsKey(owner)){std::cerr<<"--owner: the owner's public key, 64 hex digits\n";return 2;}}
-        else{std::cerr<<"usage: coop-world --port N [--bind ADDRESS] [--data FILE] [--prefix SECRET] [--log FILE] [--trace FILE] [--idle-exit SECONDS] [--owner KEY]\n"
+        else if(a=="--name"){name=next();naming=true;if(!world::serverNameText(name)){std::cerr<<"--name: 1 to "<<world::MaxHomeChars<<" characters (at most "<<world::MaxHomeBytes<<" bytes of UTF-8), no control characters, no space at either end\n";return 2;}}
+        else{std::cerr<<"usage: coop-world --port N [--bind ADDRESS] [--data FILE] [--prefix SECRET] [--log FILE] [--trace FILE] [--idle-exit SECONDS] [--owner KEY] [--name TEXT]\n"
                         "                  [--policy friends|solo|public] [--policy-set KEY=VALUE]...\n"
                         "                  [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS] [--relay-players N] [--relay-rate N]]\n"
                         "                   [--broadcast-full METRES] [--broadcast-interval MS] [--broadcast-animation METRES] [--broadcast-budget BYTES]\n"
@@ -413,6 +419,8 @@ int main(int argc,char** argv){
     // The owner's key (the host's launcher gives its own): his signed calls are the owner's actions (README, "Identity").
     // Whoever starts the server with the world file is its owner, so a new key replaces the one the world had.
     if(!owner.empty()&&owner!=w.owner()){w.setOwner(owner);save(w);}
+    // This world's display name, saved with it (README, "Builder names").
+    if(naming&&name!=w.name()){w.setName(name);save(w);}
     world::Front front(w,prefix,links);
     sockaddr_in address{};address.sin_family=AF_INET;address.sin_port=htons(uint16_t(port));
     if(inet_pton(AF_INET,bind.c_str(),&address.sin_addr)!=1){std::cerr<<"--bind needs a numeric IPv4 address\n";return 2;}
@@ -458,6 +466,7 @@ int main(int argc,char** argv){
                       +std::to_string(int(relayConfig.animationMetres))+" m, frames of "+std::to_string(relayConfig.budget)+" bytes within "+std::to_string(relayConfig.flushMs)+" ms"+(relayConfig.pinBuild?", one build":"")+")");
     line(policyText(w.policy(),false)+policyNote);
     if(!w.owner().empty())line("owner key "+w.owner().substr(8,16)+"... (signed calls of this key are the owner's)");
+    if(!w.name().empty())line("server name "+w.name()+" (the home of its builders on linked servers)");
     while(true){
         sock_t s=accept(listener,nullptr,nullptr);
 #ifdef _WIN32

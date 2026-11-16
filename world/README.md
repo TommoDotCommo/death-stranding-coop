@@ -14,7 +14,7 @@ other (see "Not done" for what is missing).
 
 ```
 coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] [--log events.log] [--trace calls.log] [--idle-exit SECONDS]
-           [--owner KEY]
+           [--owner KEY] [--name TEXT]
 ```
 
 (The relay's options are under "The relay", the ones for other servers under "Linked servers".)
@@ -29,6 +29,9 @@ coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] 
 - `--owner KEY`: the owner's public key (64 hex digits; the host's launcher gives its own). Saved with the world; a
   start with another key replaces it (whoever starts the server with the world file is its owner). The owner's signed
   calls are the owner's actions on the running server ("Identity").
+- `--name TEXT`: this world's display name, the home its builders are shown with on linked servers ("Builder names"):
+  1 to 12 characters, at most 16 bytes of UTF-8, no control characters, no space at either end. Saved with the world;
+  `coop-world policy --data world.json --name TEXT` gives it to a stopped server.
 
 The launcher does all of this for a session when "Shared world" is on in its Settings (`launcher/README.md`). For a
 group of more than two it starts the server with the relay as well ("Group server" in Settings): one port number for
@@ -54,7 +57,8 @@ loopback, a LAN or a VPN.
 | `…/gate/e/getVersion` | major 0, minor 12 (the game refuses anything else) |
 | `createObject`, `updateObject`, `deleteObject` | stored; the new id is the type letter and 12 characters (the game reads the kind from that letter); only the builder changes or removes an object; an upload the server policy does not let be shared is answered the same way and held for its builder ("Server policy"); over 4000 objects of one player, 403 |
 | `findQpidObjects` | the other players' objects in that area that every player is handed ("Server policy"), at most the asked number per type, never the asker's own, chosen as "Which objects a game is handed" says |
-| `getQpidObjects`, `lookup`, `reverseLookup` | from the stored objects and players |
+| `getQpidObjects`, `reverseLookup` | from the stored objects and players |
+| `lookup` | a builder's name: this server's players by name only, a builder from a linked server as "Name · Home" ("Builder names") |
 | `sendLike`, `getLikeHistory` | a like is added to the object and to its builder's history (the last 2000 likes are kept); a player reads only his own history, after the time he names |
 | `getRankingSchedules`, `getWastedBaggages`, `findMissions`, `getOrderedMissions`, … | empty lists |
 | anything else | `{}` and an `unhandled NAME` line in the log |
@@ -261,7 +265,36 @@ everywhere:
   different people called `/k/ann` on two linked servers count as one porter and do not see each other's objects.
 - Nobody on the taking server can change or remove an imported object through the game (`updateObject` and
   `deleteObject` answer 403, also for the same account): it changes when its own server changes it.
-- The builder's name is given to the game's `lookup` call; his account key is not known here.
+- The builder's name is given to the game's `lookup` call with his server's display name, "Name · Home" ("Builder
+  names"); his account key is not known here.
+
+### Builder names
+
+A game shows a builder's name from the server's `lookup` answer (`displayName`). This server's own players get their
+name only. The builder of an object from a linked server gets **"Name · Home"**: his name as his server gave it, a
+middle dot, and the display name of the server the object was first built on (also when it came by way of another).
+Home is, in this order:
+
+1. the name that server gives itself (`--name`), carried by every object it exports (`home`) and passed on unchanged
+   by a server that gives the object onward;
+2. else the name of the live link to that server here (`--link NAME`): a server without a name of its own is called
+   what the group that takes from it calls it;
+3. else the first eight characters of that server's id.
+
+The whole label is at most 24 characters and 32 bytes of UTF-8, so the game's name label does not cut it. When it is
+longer, the name is cut (whole characters, never half of one) and the server's name is not; a home longer than 12
+characters is cut to that first. The owner's list (`players`, `owner/players`) names a builder known only from linked
+servers the same way.
+
+The travelling form: an object exported by a server with a display name has an eighth field, `home`; one without a
+name exports the seven fields of before, and a document from before (no `home`) is imported as it was, its builders
+named by rules 2 and 3. A server that renames itself changes the name with the next import, and nothing else. A
+`coop-world` from before refuses an object with `home` (an unknown field), so a server with a name needs this
+version on the taking side. The world file keeps the name (`name`) and every import's `home` (in `origin`); `origins`
+prints the home of each server.
+
+Not done: no game has shown a builder from a linked server yet, so whether the game's label shows the middle dot and
+a 32-byte name in full is unknown (the limits come from the label's size, not from a live check).
 
 ### Through a file
 
@@ -600,7 +633,8 @@ coop-world remove-player --data world.json --player ID
 ```
 
 `players` lists every player (id, name, how many of his objects are shared, waiting, kept, remnants, from linked
-servers; member; his choices, `(server)` where he chose nothing), then every builder known here only from imports.
+servers; member; his choices, `(server)` where he chose nothing), then every builder known here only from imports
+("Name · Home", "Builder names").
 `remove-player` removes everything one builder has here: built here in any state, remnants, and what came from him
 through linked servers (only his: the other builders of the same server stay), and the likes history for those
 objects. The account stays: he can sign in and build again. An imported builder's objects come back with the next
@@ -631,7 +665,7 @@ shows the policy before a player's game connects, sends his choices, and lists, 
 
 | Call | Answer |
 |---|---|
-| `GET …/coop/policy` | `format` 1, the world's `server` id, `preset`, `players` (`count`, `limit`) and `settings`: every setting as `key`, `value`, the preset's value (`preset`) and one line in words (`text`) |
+| `GET …/coop/policy` | `format` 1, the world's `server` id, its display `name` (`""` for none), `preset`, `players` (`count`, `limit`) and `settings`: every setting as `key`, `value`, the preset's value (`preset`) and one line in words (`text`) |
 | `GET …/coop/me?player=KEY` | that player's id, `known` (has he signed in or chosen here), `name`, `member`, `choices` (his own, `""` for none), what `applies`, and counts of his objects built here: `shared`, `waiting_you`, `waiting_owner`, `held` by reason (`build`, `member`, `limit`), `kept`, `remnants`, and `likes` (on what is still his: a remnant's are nobody's) |
 | `GET …/coop/mine?player=KEY` | his objects built here: `id`, `type` and `kind` (ladder, cairn, …), `area`, `state` (`shared`, `waiting`, `held`, `kept`, `remnant`), `waiting_for` (`you` or `owner`), `held` and `held_text` (why), `likes`, `updated`. Objects that came from linked servers are not his here, whatever builder id the other server names, and are not listed |
 | `POST …/coop/choices` `{"player":KEY,"offer_builds":"yes\|no\|ask\|default","offer_old":"yes\|no\|default"}` | sets his choices (one or both) and answers as `me`. A key the world does not have yet becomes a player, as a sign-in would (within `players`), so the choices are in place before his game first signs in |
@@ -667,7 +701,8 @@ What it holds to:
 | `mine` and `me` count only his objects built here; `offer` and `withdraw` take only those (the world's own checks) | nobody acts on another's objects or on an import |
 
 Owner actions (review, remove-player, members, policy) are commands on the world file while the server is stopped, and
-signed calls of the owner's key while it runs ("Identity").
+signed calls of the owner's key while it runs ("Identity"), which the host's launcher makes from its Server owner window
+(`../launcher/README.md`, "Server owner").
 
 ### Not built (server policy)
 
@@ -677,8 +712,8 @@ signed calls of the owner's key while it runs ("Identity").
   There these rules hold against honest mistakes, not against a player who wants to break them. `identity keys`
   (public) closes that, within what "Identity" says it does not protect.
 - Screens: the launcher shows the policy and sets a player's choices, offers and withdrawals through the launcher's
-  API (built game-free, not seen on a screen); the owner's actions have no screen: commands on the stopped server, or
-  the owner's signed calls (no launcher window makes them yet). The game itself cannot ask (it does not know of them).
+  API, and the host's launcher has a Server owner window for the owner's signed calls (`../launcher/README.md`,
+  "Server owner"); both built game-free and not seen on a screen. The game itself cannot ask (it does not know of them).
 - `join` and `offer_old` are recorded only. There is no ban: `remove-player` does not stop anyone building again.
 - What a game does when its upload is refused (403) after it built the structure is not known in full: live, once,
   it did not ask again and stayed up; whether it took the structure out of the player's world was not checked. The
@@ -723,7 +758,7 @@ Built and tested without a game (2026-11-17).
 
 | Call | Answer |
 |---|---|
-| `GET …/coop/owner/players` | every player as `coop-world players` lists them: `id`, `name`, counts, `member`, his choices |
+| `GET …/coop/owner/players` | every player as `coop-world players` lists them: `id`, `name`, `key` (a player's key short, `""` for an account that is no key), counts, `likes` (on what is still his), `member`, his choices |
 | `GET …/coop/owner/review` | what waits or is held, as `coop-world review` lists it, with `waiting_for` (`builder` or `owner`) |
 | `POST …/coop/owner/review` `{"accept":ID}`, `{"reject":ID}` or `{"accept_player":PLAYER}` | as `coop-world review --accept`, `--reject`, `--accept-player` |
 | `POST …/coop/owner/remove-player` `{"player":PLAYER}` | as `coop-world remove-player` |
@@ -759,7 +794,7 @@ rate limit per key), and the owner trusting a linked server ("Linked servers").
 Not done: tickets are taken for a game that may sign in again later in a session; whether the game ever does is
 unknown (the mod asks it to sign in at most five times until it is signed in, 30 s apart), and one that does after
 the ticket's two minutes is refused until it is started again from the launcher. No game has signed in with a ticket
-yet, and no launcher window makes the owner's calls.
+yet. The owner's calls have a launcher window (`../launcher/README.md`, "Server owner"), not seen on a screen.
 
 ## Which objects a game is handed
 
@@ -896,6 +931,19 @@ it (`IDENTITY_NAME_SIGN_IN`, `IDENTITY_KEY_NAME`, `IDENTITY_OLD_SESSION`, `TICKE
 `TICKET_REPLACE`, `RELAY_TOKEN_ID`, `RELAY_TOKEN_GROUP_KEY`, `RELAY_TOKEN_EXPIRY`, `RELAY_ADMIT`, `API_UNSIGNED`,
 `API_SIGNER_PLAYER`, `API_OWNER`). The loopback test with the built server and the launcher's side is
 `../launcher/test_identity.py`. The other tests run their public servers with `identity=none`.
+
+Builder names: `names_test.cpp` (display names that are and are not one; cutting in whole characters; the label for
+short and long names in letters of one, two and four bytes and for a home longer than twelve; this server's players by
+name only, with and without a name; an export with `home` and one of seven fields from a server without a name; an
+import named by its server, a document from before named by the link and else by the id, the server's own name over
+the link's, an object passed on with its first server's name, a renamed server, a long name cut with the home kept,
+the owner's list, the saved world and three world files that are refused, five records whose `home` is none and one
+with another eighth field). Three mutants must fail it (`LOOKUP_HOME_MISSING`, `LOOKUP_LOCAL_SUFFIX`, `LOOKUP_CUT`).
+`test_names.py` runs two built servers on loopback that take from each other, one with `--name North` and one without:
+each game is told its own players by name only, a builder from the other as "Ann · North" and "Bea · south" (the
+link's name), a long name cut with the home kept; the name in the policy and the world file, every import's home,
+`origins`, `policy --name` on the stopped server, and five names refused at the start and one on the stopped server. `keys_test.cpp` checks the owner's
+list (a key short, likes).
 
 Linked servers: `link_test.cpp` (every filter term on the giving and on the taking side; ids of the game's shape
 that differ from the original and are the same in every world; the same export twice; an id that collides with a

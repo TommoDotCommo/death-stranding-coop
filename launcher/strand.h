@@ -36,6 +36,11 @@ using Transport=std::function<bool(const std::string& method,const std::string& 
 std::string request(const Target&,const std::string& method,const std::string& path,const Headers& headers,const std::string& body);
 bool parseResponse(const std::string& raw,Http& out);
 Transport transport(const Target&,unsigned ms=3000);   // a TCP connection per exchange, at most `ms` for each step
+std::string base(const Target&);                       // "/PREFIX", or "" without a prefix
+// One call to the API (path with the prefix): signed with the target's key when `sign` is set (identify(), or the
+// owner's calls: owner.h), on the server's clock. false when no answer in HTTP form came.
+bool call(const Target&,const Transport&,const std::string& method,const std::string& path,const std::string& body,Http& out);
+std::string message(const Http&);                      // the server's reason in its answer, else its status
 // Reading the policy. Old: the server answers the game (its gateway knows the key) but has no /coop/ (a coop-world
 // from before the launcher's API): it shares what everyone builds and has no choices. WrongKey: it does not know the
 // group's key. Unreachable: no answer. Bad: an answer this launcher cannot read.

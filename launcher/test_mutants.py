@@ -19,7 +19,7 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
     def one(name):
         exe = work/name
         result = run(['g++', '-std=c++17', '-O1', '-Wall', '-Wextra', '-Werror', '-DMUTANT_'+name,
-                      'core_test.cpp', 'core.cpp', 'strand.cpp', '../mod/config.cpp', '../redirect/path_map.cpp', *KEYS, '../world/signatures.cpp', '-o', str(exe)])
+                      'core_test.cpp', 'core.cpp', 'strand.cpp', 'owner.cpp', '../mod/config.cpp', '../redirect/path_map.cpp', *KEYS, '../world/signatures.cpp', '-o', str(exe)])
         if result.returncode:
             raise SystemExit(result.stderr)
         with tempfile.TemporaryDirectory(dir=work) as fixture:
@@ -31,6 +31,7 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
                                       'GROUP_POLICY', 'STRAND_ACCOUNT', 'STRAND_PARSE', 'STRAND_WRONG_KEY', 'STRAND_OLD_SERVER', 'STRAND_SEND_FAIL', 'STRAND_DEFAULTS', 'STRAND_PER_SERVER', 'STRAND_SETTINGS_KEEP', 'BACKUP_LINKS', 'OUTPUT_LINKS',
                                       'MISSING_CONFIG_CLOSES', 'TICKET_TARGET', 'TICKET_EXPIRY', 'TICKET_NETWORK',
                                       'KEYS_KEEP', 'STRAND_SIGN', 'STRAND_NO_PASSES', 'GROUP_TICKET', 'GROUP_RELAY_TOKEN', 'DIAG_TICKET',
+                                      'OWNER_UNSIGNED', 'OWNER_CLOCK', 'OWNER_REJECT_ALL', 'OWNER_REFUSAL', 'OWNER_REMOVE_TEXT', 'OWNER_HOST_ONLY', 'OWNER_PARSE',
                                       'BACKUP_RUNNING', 'NESTED_LAB', 'NESTED_RELEASE',
                                       'DIAG_SECRET', 'DIAG_ADDRESS', 'DIAG_USER', 'DIAG_BOUND', 'FIREWALL_BLOCK_WINS', 'FIREWALL_ANY_PROGRAM', 'SETUP_OVERWRITE', 'SETUP_REMOVE_ANY']):
         print('killed', name)
@@ -52,6 +53,14 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
         return name
     for name in map(keyed, ['GROUP_TICKET', 'GROUP_RELAY_TOKEN', 'STRAND_SIGN', 'KEYS_KEEP']):
         print('killed', name, '(identity socket test)')
+    # The owner's calls on the real server (test_owner.py): signed with the owner key, one player's objects only, refusals.
+    def owned(name):
+        result = run([sys.executable, '-B', 'test_owner.py', str(work/name), '../world/build/coop-world'])
+        if result.returncode != 1 or 'owner oracle:' not in result.stderr:
+            raise SystemExit(f'SURVIVED or crashed {name} (owner socket test): {result.returncode}\n{result.stdout}\n{result.stderr}')
+        return name
+    for name in map(owned, ['OWNER_UNSIGNED', 'OWNER_REJECT_ALL', 'OWNER_REFUSAL']):
+        print('killed', name, '(owner socket test)')
     def save(name):
         exe = work/name
         result = run(['g++', '-std=c++17', '-O1', '-Wall', '-Wextra', '-Werror', '-DMUTANT_'+name,
