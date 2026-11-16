@@ -53,6 +53,12 @@ Reply Front::handle(const Request& r,int64_t now){
 #endif
         if(!link){if(world_.log)world_.log("link request refused: no link has that key");return notFound();}
         return world_.linkPull(link->exportFilter,r.body,now);}
+    // The mod's read of its player's own objects (world.h notices): its notice token is the only credential it has,
+    // in a header (never in the address, which --trace writes), and the token reads and does nothing else.
+    if(path=="/coop/notices"){
+        if(r.method!="GET")return notFound();
+        auto token=r.headers.find("x-coop-token");
+        return world_.notices(token==r.headers.end()?std::string():token->second,query(q,"since"),now);}
     // The launcher's API (api.h): under the prefix, never under /k/NAME, never the game's.
     if(path.compare(0,6,"/coop/")==0){
         // A signed call is checked whole (identity.h) before the API sees it: the signer is the player it may act for.

@@ -66,6 +66,10 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-group-') as d:
         kept=open(ini).read();check('[launcher]\nname=Joiner\n' in kept and '[server-%s]\noffer_builds=yes\noffer_old=no\n'%policy['server'] in kept,'the choices remembered for this server: '+kept)
         j=strand('--strand','127.0.0.1',str(port),key,account,ini,'ask','yes')
         check(j['start']==['1'] and open(ini).read().count('offer_builds=')==1 and 'offer_builds=ask\noffer_old=yes' in open(ini).read(),'other choices replace the remembered ones')
+        # A notice token for his game (what it is told about his builds there): his own, a new one with each join.
+        notice=j['notice'][0];check(len(notice)>=16,'a notice token for the joiner\'s game: %r'%j)
+        c.request('GET','/%s/coop/notices'%key,headers={'X-Coop-Token':notice});r=c.getresponse();told=json.loads(r.read())
+        check(r.status==200 and told['full'] and told['objects']==[],'the token reads his own builds there: %r'%told)
         c.request('GET','/%s/coop/me?player=%s'%(key,account));r=c.getresponse();me=json.loads(r.read())
         check(r.status==200 and me['choices']=={'offer_builds':'ask','offer_old':'yes'} and me['player']==join['user']['id'],'the server has his choices: %r'%me)
         # My strand on this server: what he built there, with its state; his offer and his withdrawal.

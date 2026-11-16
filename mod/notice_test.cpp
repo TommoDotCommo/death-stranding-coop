@@ -162,6 +162,24 @@ int main(){
         run(true,1);run(false,80);CHECK(h.shown.size()==3);
         Hud g;auto m=g.make();m.scan(1000,false);for(uint64_t u=1000;u<6000;u+=50)m.tick(u,true,false,"");CHECK(g.shown.empty());
     }
+    {   // Group play: no partner is expected, so a minute alone in the world says nothing; lines about this player's
+        // builds on the server (strand_notices.h) arrive finished, wait for the world, and keep the gap and the bound.
+        Hud h;auto n=h.make();n.partnerless();uint64_t t=0;
+        for(;t<2*Notifier::AloneMs;t+=100)n.tick(t,true,false,"");
+        CHECK(h.shown.empty());
+        n.strand(u"Your ladder is not shared on North: only members' builds are shared here.",t);
+        for(int i=0;i<10;++i)n.tick(t+=100,false,false,"");
+        CHECK(h.shown.empty()&&n.pending()==1);                                                                // a cutscene: it waits
+        n.tick(t+=100,true,false,"");
+        CHECK(h.shown.size()==1&&h.shown[0]==u"Your ladder is not shared on North: only members' builds are shared here."&&h.icons[0]==PlainIcon&&h.log.back()=="NOTICE shown: strand\n");
+        for(int i=0;i<6;++i)n.strand(u"line "+std::u16string(1,char16_t(u'0'+i)),t);
+        CHECK(n.pending()==Notifier::MaxPending);
+        n.tick(t+=100,true,false,"");CHECK(h.shown.size()==1);                                                 // 2.5 s apart
+        for(uint64_t end=t+20000;t<end;)n.tick(t+=100,true,false,"");
+        CHECK(h.shown.size()==5&&h.shown[1]==u"line 2"&&h.shown[4]==u"line 5");                               // the newest four
+        // With a partner expected (two-player play), the hint is still given.
+        Hud g;auto m=g.make();for(uint64_t u=0;u<Notifier::AloneMs+5000;u+=100)m.tick(u,true,false,"");CHECK(g.shown.size()==1);
+    }
     if(!failures)std::puts("notice checks passed");
     return failures?1:0;
 }

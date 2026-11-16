@@ -50,12 +50,16 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-identity-') as d:
         j=run('--keyed-join','127.0.0.1',str(port),secret,ini,joinKey)
         check(j.get('start')==['1'] and j.get('keyed')==['1'] and one(j,'account')==one(joiner,'account'),'the joiner joins as his key: %r'%j)
         check('/t/' in one(j,'online') and '/k/' not in one(j,'online') and one(j,'player')==one(joiner,'relay') and one(j,'key') not in (prefix,one(h,'key')),'the joiner\'s game: his own ticket and token: %r'%j)
+        check(h.get('strand')==['1'] and j.get('strand')==['1'] and len(one(h,'token'))>=16 and one(h,'token')!=one(j,'token'),'each game reads its own builds with a token of its own: %r %r'%(h,j))
         c=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
         def get(path,headers={}):
             c.request('GET',path,headers=headers);r=c.getresponse();return r.status,json.loads(r.read() or b'{}')
         def post(path,body,headers={}):
             c.request('POST',path,body=body,headers=headers);r=c.getresponse();return r.status,json.loads(r.read() or b'{}')
         def sign_in(address,name):return get(address[len('http://127.0.0.1:%d'%port):]+'?provider=steam&display_name='+name+'&code='+TICKET)
+        for game in (h,j):
+            status,told=get('/%s/coop/notices'%prefix,{'X-Coop-Token':one(game,'token')});check(status==200 and told['full'],'a game\'s notice token reads, unsigned: %r'%told)
+        check(get('/%s/coop/notices'%prefix,{'X-Coop-Token':'0123456789abcdef'})[0]==403,'a made-up notice token reads nothing')
         status,hs=sign_in(one(h,'online'),'Host');check(status==200 and hs['user']['providerId']==one(host,'account'),'the host signs in with his ticket, as his key: %r'%hs)
         status,js=sign_in(one(j,'online'),'Joiner');check(status==200 and js['user']['providerId']==one(joiner,'account') and js['user']['id']!=hs['user']['id'],'the joiner too, as another player')
         # Nobody signs in by a name in the address or a Steam ticket; a made-up ticket is no ticket.

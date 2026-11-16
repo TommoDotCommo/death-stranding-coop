@@ -54,11 +54,16 @@ bool identify(Target&,const Policy&,int64_t localNow,std::string& why);
 // What a game needs on a server that takes keys (world/README.md, "Identity"): a sign-in ticket for its online_server
 // address and a relay token for its relay key, both short-lived and taken by a signed call just before the game
 // starts; the relay id is the one made from the key (identity::relayId), checked against the server's.
-struct Passes { std::string ticket,relayToken;uint64_t relayId=0; };
+// `noticeToken`: what the game is told (../mod/README.md "Strand notices"), under every identity: the token its mod reads
+// this player's builds' states with. Taken after the passes; a server that gives none (an older one) only means no
+// such notices, never a game that does not start.
+struct Passes { std::string ticket,relayToken;uint64_t relayId=0;std::string noticeToken; };
 bool takePasses(const Target&,const Transport&,Passes&,std::string& why);
+bool takeNoticeToken(const Target&,const Transport&,std::string& token,std::string& why);
 void usePasses(Session&,const Passes&);   // the game's config then signs in with the ticket and says HELLO with the token
+void useNoticeToken(Session&,const Passes&);   // the game's config then reads its builds' states (any identity)
 // The host's own game, on the server his launcher just started: read its policy (up to `tries` times, half a second
-// apart, while it starts), and on a server that takes keys take the passes. `keyed`: whether it does.
+// apart, while it starts), on a server that takes keys take the passes, and a notice token. `keyed`: whether it does.
 bool hostPasses(Target&,const Transport&,unsigned tries,Passes&,bool& keyed,std::string& why);
 // The player's choices for one server: offer_builds yes|no|ask, offer_old yes|no.
 struct Choices { std::string offerBuilds,offerOld; };

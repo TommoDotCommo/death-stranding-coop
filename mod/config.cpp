@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <cctype>
 #include <set>
+#include <vector>
 namespace mod {
 Config parseConfig(const std::string& s) {
     if(s.size()>4096) throw std::runtime_error("config exceeds 4096 bytes");
@@ -20,7 +21,7 @@ Config parseConfig(const std::string& s) {
         ws();if(at==s.size() || s[at]!=',') break;++at;
     }
     take('}');ws();if(at!=s.size()) throw std::runtime_error("trailing JSON");
-    for(auto& kv:values) if(!std::set<std::string>{"slot","server","relay","relay_key","relay_mode","show_others","player_id","share_story_orders","share_rewards","story_resync","story_key","share_environment","share_enemies","share_enemy_positions","enemy_position_pull","enemy_position_goal","share_orders","share_order_units","share_order_load","share_roads","share_saved_structures","body_update_link","passenger_key","partner_poses","partner_animation","partner_cart","record_animation","join_move","carry_visual","partner","partner_gear","others_gear","others_carry","partner_marker","partner_vehicle","partner_likes","partner_tag","notices","online_server","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","link","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host","partner_shout","partner_shout_voice","partner_scan","partner_vitals","others"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
+    for(auto& kv:values) if(!std::set<std::string>{"slot","server","relay","relay_key","relay_mode","show_others","player_id","share_story_orders","share_rewards","story_resync","story_key","share_environment","share_enemies","share_enemy_positions","enemy_position_pull","enemy_position_goal","share_orders","share_order_units","share_order_load","share_roads","share_saved_structures","body_update_link","passenger_key","partner_poses","partner_animation","partner_cart","record_animation","join_move","carry_visual","partner","partner_gear","others_gear","others_carry","partner_marker","partner_vehicle","partner_likes","partner_tag","notices","online_server","strand_notices","strand_token","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","link","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","bind","progress_mismatch","join_at_host","partner_shout","partner_shout_voice","partner_scan","partner_vitals","others"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
     auto text=[&](const char* k){if(!strings.count(k)) throw std::runtime_error(std::string("missing/string expected: ")+k);return values.at(k);};
     auto number=[&](const char* k){auto v=values[k];if(strings.count(k)||v.empty()||v.size()>15||v.find_first_not_of("0123456789")!=std::string::npos||(v.size()>1&&v[0]=='0')) throw std::runtime_error(std::string("invalid integer: ")+k);return std::stoull(v);};
     auto boolean=[&](const char* k,bool d){if(!values.count(k)) return d;auto v=values[k];if(strings.count(k)||(v!="true"&&v!="false")) throw std::runtime_error("boolean expected");return v=="true";};
@@ -138,6 +139,15 @@ Config parseConfig(const std::string& s) {
         if(c.provider!="game"||!c.gameThread)throw std::runtime_error("online_server requires the game provider and game_thread");
         if(!onlineAddress(c.onlineServer,c.peerAddress,c.serverAddress))throw std::runtime_error("online_server must be http://ADDRESS:PORT/path on loopback, at the partner's address or at the listed server");
     }
+    // What the game is told about this player's builds on that server: read with the notice token the launcher took.
+    c.strandNotices=boolean("strand_notices",false);
+    if(values.count("strand_token"))c.strandToken=text("strand_token");
+#ifndef MUTANT_CONFIG_STRAND
+    if(c.strandNotices&&(c.onlineServer.empty()||!serverApiBase(c.onlineServer)))throw std::runtime_error("strand_notices requires online_server (http://ADDRESS:PORT[/PREFIX]/auth/ds)");
+    if(c.strandNotices&&(c.strandToken.empty()||c.strandToken.size()>32||c.strandToken.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")!=std::string::npos))
+        throw std::runtime_error("strand_notices requires strand_token (letters and digits, at most 32)");
+    if(!c.strandNotices&&values.count("strand_token"))throw std::runtime_error("strand_token requires strand_notices");
+#endif
     if(values.count("others")){
         auto n=number("others");
 #ifndef MUTANT_CONFIG_OTHERS
@@ -242,6 +252,21 @@ std::optional<uint32_t> peerAddress(const std::string& t){
     if(first==0||first>=224)return std::nullopt;   // 0/8, multicast 224/4, reserved 240/4 and broadcast
 #endif
     return a;
+}
+std::optional<std::string> serverApiBase(const std::string& url){
+    const std::string scheme="http://",signIn="/auth/ds";
+    size_t slash=url.compare(0,scheme.size(),scheme)==0?url.find('/',scheme.size()):std::string::npos;
+    if(slash==std::string::npos||url.size()<slash+signIn.size()||url.compare(url.size()-signIn.size(),signIn.size(),signIn)!=0)return std::nullopt;
+    const std::string path=url.substr(slash,url.size()-signIn.size()-slash);   // "", "/PREFIX", "/PREFIX/k/NAME", ...
+    std::vector<std::string> parts;   // its elements
+    for(size_t at=0;at<path.size();){
+        size_t end=path.find('/',at+1);if(end==std::string::npos)end=path.size();
+        if(path[at]!='/'||end==at+1)return std::nullopt;
+        parts.push_back(path.substr(at+1,end-at-1));at=end;}
+    // The account: /k/NAME (two games on one PC) or /t/TICKET (a launcher's ticket); the prefix before it, if any.
+    if(parts.size()>=2&&(parts[parts.size()-2]=="k"||parts[parts.size()-2]=="t"))parts.resize(parts.size()-2);
+    if(parts.size()>1)return std::nullopt;
+    return parts.empty()?std::string():"/"+parts[0];
 }
 std::optional<std::string> onlineAddress(const std::string& url,uint32_t peer,uint32_t server){
     const std::string scheme="http://";

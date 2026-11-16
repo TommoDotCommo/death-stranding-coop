@@ -168,6 +168,35 @@ with tempfile.TemporaryDirectory() as d:
     finally:
         p.kill();p.wait()
     assert json.load(open(api_world))['objects'][0]['remnant'] is True
+    # What the game is told: the mod's read with its notice token (a header, never written by --trace), the player's own
+    # objects only, from where it left off, and again after a restart (a first read there: every one).
+    told=os.path.join(d,'told.json');trace=os.path.join(d,'calls.log')
+    port=free_port();p=start(port,'--policy-set','build=members','--name','North','--trace',trace,path=told)
+    try:
+        c=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
+        def read(token,since=''):
+            c.request('GET','/abc/coop/notices'+('?since='+since if since else ''),headers={'X-Coop-Token':token});r=c.getresponse();return r.status,json.loads(r.read() or b'{}')
+        status,given=coop('POST','notice-token',{'player':'ann'});assert status==200 and len(given['token'])>=16,given
+        token=given['token'];(ann,_),(bob,_)=sign_in('ann'),sign_in('bob')
+        status,first=read(token);assert status==200 and first['full'] and first['name']=='North' and first['objects']==[],first
+        status,made=gate(ann,'createObject',{'t':'l','q':226,'px':1,'py':2,'pz':3});assert status==200
+        assert gate(bob,'createObject',{'t':'e','q':226,'px':9,'py':2,'pz':3})[0]==200
+        status,after=read(token,first['version']);assert status==200 and not after['full'] and after['objects']==[{'id':made['id'],'kind':'ladder','state':'held','why':'member'}],after
+        assert read(token,after['version'])[1]['objects']==[] and read('wrong')[0]==403
+        c.request('GET','/abc/coop/notices?token='+token);r=c.getresponse();r.read();assert r.status==403
+        c.close()
+    finally:
+        p.kill();p.wait()
+    traced=[row for row in open(trace) if '?token=' not in row];assert '/coop/notices' in ''.join(traced) and not any(token in row for row in traced),traced   # (the test's own address with it aside)
+    r=run('player-set','--data',told,'--player',json.load(open(told))['players'][0]['id'],'member=yes');assert r.returncode==0,r.stderr
+    r=run('review','--data',told,'--accept-player',json.load(open(told))['players'][0]['id']);assert r.returncode==0,r.stderr
+    port=free_port();p=start(port,path=told)
+    try:
+        c=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
+        status,again=read(token,after['version']);assert status==200 and again['full'] and again['objects']==[{'id':made['id'],'kind':'ladder','state':'shared','why':''}],again
+        c.close()
+    finally:
+        p.kill();p.wait()
     # --idle-exit: a server nobody asks anything leaves by itself.
     port=free_port();p=subprocess.Popen([exe,'--port',str(port),'--idle-exit','1'],stdout=subprocess.PIPE,text=True)
     try:assert p.wait(timeout=20)==0

@@ -15,6 +15,8 @@ families=[('world_test.cpp',['world.cpp'],['WORLD_NO_TOKEN','WORLD_OWNER','WORLD
           ('front_test.cpp',['front.cpp','api.cpp','link.cpp','world.cpp','identity.cpp','signatures.cpp','../vendor/monocypher/monocypher.c','../vendor/monocypher/monocypher-ed25519.c'],['FRONT_PREFIX','FRONT_BEARER','FRONT_LINK_KEY']),
           ('api_test.cpp',['front.cpp','api.cpp','link.cpp','world.cpp','identity.cpp','signatures.cpp','../vendor/monocypher/monocypher.c','../vendor/monocypher/monocypher-ed25519.c'],['API_METHOD','API_KEY','API_STRICT','API_CHOICES_MEMBER','API_CHOICES_ROOM','API_ALL_IMPLIED','API_MINE_OTHERS','API_MINE_IMPORTS','FRONT_PREFIX',
                                                                                                                                                                          'FRIENDS_SAVE_LOST','CURATE_FRIENDS_NONE']),
+          ('notices_test.cpp',['front.cpp','api.cpp','link.cpp','world.cpp','identity.cpp','signatures.cpp','../vendor/monocypher/monocypher.c','../vendor/monocypher/monocypher-ed25519.c'],
+           ['NOTICES_OTHERS','NOTICES_IMPORTS','NOTICES_TOKEN_TICKET','NOTICES_EXPIRY','NOTICES_STAMP','NOTICES_SINCE','NOTICES_KEPT_WHY','NOTICES_EPOCH','NOTICES_SAVE','TICKET_REPLACE']),
           ('identity_test.cpp',['identity.cpp','signatures.cpp','../vendor/monocypher/monocypher.c','../vendor/monocypher/monocypher-ed25519.c'],
            ['SIGN_NO_VERIFY','SIGN_REPLAY','SIGN_WINDOW','SIGN_BODY','SIGN_TARGET','SIGN_SERVER','SIGN_NONCE_CAP']),
           ('keys_test.cpp',['front.cpp','api.cpp','link.cpp','world.cpp','relay.cpp','identity.cpp','signatures.cpp','../vendor/monocypher/monocypher.c','../vendor/monocypher/monocypher-ed25519.c'],
