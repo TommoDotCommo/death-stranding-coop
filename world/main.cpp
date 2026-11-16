@@ -2,7 +2,9 @@
 //   coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] [--log events.log] [--trace calls.log]
 //              [--idle-exit SECONDS]
 //              [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS]
-//               [--relay-players N] [--relay-rate N]]
+//               [--relay-players N] [--relay-rate N] [--broadcast-full METRES] [--broadcast-interval MS]
+//               [--broadcast-animation METRES] [--broadcast-budget BYTES] [--broadcast-flush MS] [--broadcast-rate N]
+//               [--broadcast-build GAME:HEX]]
 //              [--link NAME --link-key KEY [--link-url http://ADDRESS:PORT[/PREFIX]] [--link-export FILTER] [--link-import FILTER]
 //               [--link-every SECONDS]]...
 //   coop-world export  --data world.json --out FILE [--filter FILTER]
@@ -32,6 +34,7 @@ static void closeSocket(sock_t s){closesocket(s);}
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -216,13 +219,29 @@ void serveRelay(sock_t s,world::RelayConfig config){
     relay.log=[](const std::string& text){line(text);};
     std::vector<uint8_t> buffer(ds::relay::MaxDatagram+1);uint64_t nextTick=0;   // one byte more: a longer datagram is seen as too long
     while(true){
-        sockaddr_in from{};socklen_t size=sizeof from;
-        auto n=recvfrom(s,reinterpret_cast<char*>(buffer.data()),int(buffer.size()),0,reinterpret_cast<sockaddr*>(&from),&size);
-        auto now=nowMs();
-        if(n>0&&from.sin_family==AF_INET)relay.receive({ntohl(from.sin_addr.s_addr),ntohs(from.sin_port)},buffer.data(),size_t(n),now);
-        else if(n<0)std::this_thread::sleep_for(std::chrono::milliseconds(1));   // the receive timeout, or an error: never spin
+        // Wait for a datagram, at most until the next FRAME of the broadcast mode is due (and a quarter second).
+        auto now=nowMs();uint64_t due=relay.flushDue(),waitMs=std::min<uint64_t>(250,due>now?due-now:0);
+        fd_set readable;FD_ZERO(&readable);FD_SET(s,&readable);timeval wait{0,long(waitMs*1000)};
+        int ready=select(int(s)+1,&readable,nullptr,nullptr,&wait);
+        if(ready>0){
+            sockaddr_in from{};socklen_t size=sizeof from;
+            auto n=recvfrom(s,reinterpret_cast<char*>(buffer.data()),int(buffer.size()),0,reinterpret_cast<sockaddr*>(&from),&size);
+            now=nowMs();
+            if(n>0&&from.sin_family==AF_INET)relay.receive({ntohl(from.sin_addr.s_addr),ntohs(from.sin_port)},buffer.data(),size_t(n),now);
+            else if(n<0)std::this_thread::sleep_for(std::chrono::milliseconds(1));   // an error: never spin
+        }else if(ready<0)std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        now=nowMs();
+        if(now>=relay.flushDue())relay.flush(now);
         if(now>=nextTick){relay.tick(now);nextTick=now+250;if(relay.players())lastRequest=nowSeconds();}}
 }
+// --broadcast-build GAME:HEX32, the one build broadcast players may have.
+bool parseBuild(const std::string& text,world::RelayConfig& c){
+    auto colon=text.find(':');if(colon==std::string::npos||text.size()-colon-1!=32)return false;
+    char* end=nullptr;unsigned long game=std::strtoul(text.c_str(),&end,10);if(end!=text.c_str()+colon||!game||game>0xffffffffUL)return false;
+    for(size_t i=0;i<16;++i){
+        auto digit=[](char ch)->int{return ch>='0'&&ch<='9'?ch-'0':ch>='a'&&ch<='f'?ch-'a'+10:ch>='A'&&ch<='F'?ch-'A'+10:-1;};
+        int hi=digit(text[colon+1+2*i]),lo=digit(text[colon+2+2*i]);if(hi<0||lo<0)return false;c.build[i]=uint8_t(hi*16+lo);}
+    c.game=uint32_t(game);c.pinBuild=true;return true;}
 }
 int main(int argc,char** argv){
     if(argc>1&&argv[1][0]!='-')return offline(argc,argv);
@@ -240,12 +259,20 @@ int main(int argc,char** argv){
         else if(a=="--relay-timeout")relayConfig.timeoutMs=uint32_t(std::min(std::max(std::atol(next().c_str()),0L),100000L)*1000);
         else if(a=="--relay-players")relayConfig.maxPlayers=size_t(std::max(std::atol(next().c_str()),0L));
         else if(a=="--relay-rate")relayConfig.ratePerPeer=uint32_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));
+        else if(a=="--broadcast-full")relayConfig.fullMetres=std::atof(next().c_str());else if(a=="--broadcast-animation")relayConfig.animationMetres=std::atof(next().c_str());
+        else if(a=="--broadcast-interval")relayConfig.intervalMs=uint32_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));
+        else if(a=="--broadcast-budget")relayConfig.budget=size_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));
+        else if(a=="--broadcast-flush")relayConfig.flushMs=uint32_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));
+        else if(a=="--broadcast-rate")relayConfig.broadcastRate=uint32_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));
+        else if(a=="--broadcast-build"){if(!parseBuild(next(),relayConfig)){std::cerr<<"--broadcast-build GAME:HEX (the game build and the 32 hex digits of the mod's wire identity)\n";return 2;}}
         else if(a=="--link"){links.emplace_back();links.back().name=next();}
         else if(a=="--link-key")link(a).key=next();else if(a=="--link-url")link(a).url=next();
         else if(a=="--link-export")link(a).exportFilter=filter(a,next());else if(a=="--link-import")link(a).importFilter=filter(a,next());
         else if(a=="--link-every")link(a).everySeconds=std::atoi(next().c_str());
         else{std::cerr<<"usage: coop-world --port N [--bind ADDRESS] [--data FILE] [--prefix SECRET] [--log FILE] [--trace FILE] [--idle-exit SECONDS]\n"
                         "                  [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS] [--relay-players N] [--relay-rate N]]\n"
+                        "                   [--broadcast-full METRES] [--broadcast-interval MS] [--broadcast-animation METRES] [--broadcast-budget BYTES]\n"
+                        "                   [--broadcast-flush MS] [--broadcast-rate N] [--broadcast-build GAME:HEX]]\n"
                         "                  [--link NAME --link-key KEY [--link-url http://ADDRESS:PORT[/PREFIX]] [--link-export FILTER] [--link-import FILTER] [--link-every SECONDS]]...\n"
                       <<OfflineUsage;return 2;}}
     if(port<1||port>65535){std::cerr<<"--port 1..65535 required\n";return 2;}
@@ -307,6 +334,8 @@ int main(int argc,char** argv){
         line("link "+links[i].name+": "+(links[i].exportFilter.none?"gives nothing":"gives objects")+", "+(links[i].importFilter.none?"takes nothing":"takes objects from "+links[i].url)+" (this server is "+w.serverId()+")");
         if(!links[i].url.empty()&&!links[i].importFilter.none)std::thread([&w,l=links[i],e=linkEndpoints[i]]{serveLink(w,l,e);}).detach();}
     if(relayPort)line("coop-world relay on "+bind+":"+std::to_string(relayPort)+" (UDP; near from "+std::to_string(int(relayConfig.enterMetres))+" m to "+std::to_string(int(relayConfig.leaveMetres))+" m, "+std::to_string(relayConfig.maxPlayers)+" players)");
+    if(relayPort)line("coop-world relay speaks pairs and broadcast (every update within "+std::to_string(int(relayConfig.fullMetres))+" m, beyond it one in "+std::to_string(relayConfig.intervalMs)+" ms, animation within "
+                      +std::to_string(int(relayConfig.animationMetres))+" m, frames of "+std::to_string(relayConfig.budget)+" bytes within "+std::to_string(relayConfig.flushMs)+" ms"+(relayConfig.pinBuild?", one build":"")+")");
     while(true){
         sock_t s=accept(listener,nullptr,nullptr);
 #ifdef _WIN32

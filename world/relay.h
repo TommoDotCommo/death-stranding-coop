@@ -13,7 +13,17 @@
 //   - at most `maxPlayers` players, `ratePerPeer` datagrams a second per player for each player near him (at least one
 //     player's worth; a second's worth can be saved up), and no datagram longer than the envelope allows.
 // One datagram in makes at most one DATA datagram out; the relay answers nothing to a sender without the token.
-#include "../core/relay.h"
+//
+// Broadcast mode (envelope version 2, core/broadcast.h), for players whose HELLO says so: a player publishes one update
+// a tick and the relay copies it to every player near him, the source id taken from its own record of the sender's
+// address and the stamp checked against its own clock (WELCOME tells each player the server's time). Updates for one
+// receiver are packed into FRAMEs of at most `budget` bytes, each sent within `flushMs`. Interest: every update of a
+// player within `fullMetres`, beyond that at most one every `intervalMs` (a teleport always), animation only within
+// `animationMetres` (the one-frame pulses of the updates left out are carried by the next one sent). The state a player
+// only shows (name, gear, carried cases and their places) is kept, the latest version of each kind, and handed out: to
+// a player who comes near, to everyone near when it changes, and again to a player who asks (FETCH) for a player near.
+// Players of the two modes are never near each other, nor broadcast players of different builds.
+#include "../core/broadcast.h"
 #include <deque>
 #include <functional>
 #include <map>
@@ -26,6 +36,7 @@ struct RelayAddress {
     bool operator==(const RelayAddress& o) const {return ip==o.ip&&port==o.port;}
 };
 constexpr size_t RelayPlayersMax=1024,RelayPendingMax=4096;
+constexpr uint32_t BroadcastStampAheadMs=500,BroadcastStampBehindMs=2000,BroadcastFetchEveryMs=250;
 struct RelayConfig {
     std::string token;                       // the group's secret; every HELLO must carry it
     double enterMetres=150,leaveMetres=200;  // 1..65535, leave >= enter
@@ -33,8 +44,24 @@ struct RelayConfig {
     size_t maxPlayers=64;                    // 1..RelayPlayersMax
     uint32_t ratePerPeer=200;                // datagrams a second, for each player near the sender
     uint32_t seed=1;                         // roster stream numbers start here: random in the server, fixed in tests
+    // Broadcast mode.
+    double fullMetres=30;                    // every update of a player this near (0..65535)
+    uint32_t intervalMs=200;                 // farther: at most one update in this many ms (0..5000; 0: every update)
+    double animationMetres=50;               // animation samples only this near (0..65535)
+    size_t budget=1200;                      // the most bytes in one FRAME (256..1200)
+    uint32_t flushMs=25;                     // the longest an update waits for others to share its datagram (0..200; 0: at once)
+    uint32_t broadcastRate=100;              // datagrams a second a broadcast player may send (10..100000)
+    bool pinBuild=false;uint32_t game=0;ds::broadcast::BuildId build{};   // set: broadcast players of another build are refused
 };
-struct RelayStats { uint64_t received=0,malformed=0,badToken=0,unknownSource=0,rateDropped=0,notNear=0,forwarded=0,refused=0,timedOut=0; };
+struct RelayStats {
+    uint64_t received=0,malformed=0,badToken=0,unknownSource=0,rateDropped=0,notNear=0,forwarded=0,refused=0,timedOut=0;
+    // Broadcast mode.
+    uint64_t wrongMode=0;        // a message of the other mode from a known player
+    uint64_t spoofed=0;          // a PUBLISH, STATE or FETCH naming another player than its address belongs to
+    uint64_t published=0,staleUpdates=0,badStamps=0;   // updates taken; refused for their order; for their stamp
+    uint64_t entries=0,thinned=0,frames=0,frameBytes=0;   // entries sent; left out by interest; FRAMEs and their bytes
+    uint64_t states=0,staleStates=0,shares=0,fetches=0;
+};
 class Relay {
 public:
     using Send=std::function<void(const RelayAddress&,const uint8_t*,size_t)>;
@@ -44,6 +71,8 @@ public:
     size_t players() const {return players_.size();}
     bool known(uint64_t id) const {return players_.count(id)!=0;}
     bool areNear(uint64_t a,uint64_t b) const;
+    void flush(uint64_t nowMs);       // sends every FRAME that has waited flushMs (tick does it too)
+    uint64_t flushDue() const;        // when the next FRAME is due (UINT64_MAX: none waiting)
     const RelayStats& stats() const {return stats_;}
     std::function<void(const std::string&)> log;   // one line when a player joins or goes
 private:
@@ -53,11 +82,29 @@ private:
         uint32_t lastHello=0,area=0; bool have=false; std::array<double,3> position{};
         std::set<uint64_t> nearby;
         uint32_t stream=0,acked=0; std::deque<ds::relay::RosterEvent> pending;   // pending.front() has sequence acked+1
+        // Broadcast mode (mode 2).
+        uint16_t mode=1; uint32_t game=0; ds::broadcast::BuildId build{};
+        bool havePublish=false,haveAt=false; uint32_t publishSequence=0; uint64_t publishStamp=0; std::array<double,3> at{};
+        struct Blob {uint32_t version=0; ds::relay::Buffer bytes;};
+        std::array<Blob,ds::broadcast::StateKinds> states; uint16_t generation=0;
+        // What this player has been sent of each source near him: when, and the pulses of the samples left out since.
+        struct Feed {uint64_t lastSent=0,fetchAt=0; bool sent=false; std::array<uint8_t,32> rose{}; uint8_t roseBytes=0;};
+        std::map<uint64_t,Feed> feeds;
+        ds::relay::Buffer batch; uint64_t batchSince=0;
     };
     bool allow(Player&,uint64_t now);
     bool rightToken(const std::string&) const;
-    void hello(const RelayAddress&,const ds::relay::Hello&,uint64_t now);
-    void refuse(const RelayAddress&,const ds::relay::Hello&,ds::relay::Refusal);
+    void hello(const RelayAddress&,const ds::relay::Hello&,uint64_t now,const ds::broadcast::Hello* v2=nullptr);
+    void refuse(const RelayAddress&,uint64_t id,uint32_t sequence,uint8_t reason,uint16_t mode);
+    bool compatible(const Player&,const Player&) const;
+    void receiveBroadcast(const RelayAddress&,Player*,const uint8_t*,size_t,uint64_t now);
+    void publish(Player&,const ds::broadcast::Update&,uint64_t now);
+    void state(Player&,const ds::broadcast::StatePost&);
+    void fetch(Player&,uint64_t source,uint64_t now);
+    void share(Player& to,const Player& from,size_t kind);
+    void enqueue(Player&,const ds::broadcast::Update&,uint64_t now);
+    void sendBatch(Player&,uint64_t now);
+    std::array<double,3> where(const Player& p) const {return p.haveAt?p.at:p.position;}
     void remove(uint64_t id,const char* why);
     void restartStream(Player&);
     void event(Player& to,bool enter,const Player& who);
@@ -65,6 +112,7 @@ private:
     void place(Player&);
     void note(const std::string& s) const {if(log)log(s);}
     RelayConfig config_;Send send_;RelayStats stats_;uint32_t streams_=0;
+    std::vector<std::pair<uint64_t,uint64_t>> entered_;   // (to, from) pairs that came near in this HELLO: states to hand out
     std::map<uint64_t,Player> players_;std::map<RelayAddress,uint64_t> byAddress_;ds::relay::Buffer out_;
 };
 }
