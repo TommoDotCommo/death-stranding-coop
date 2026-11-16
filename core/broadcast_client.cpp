@@ -28,7 +28,7 @@ template<class T> T percentile(std::deque<T> v,unsigned p){std::sort(v.begin(),v
 Client::Client(ClientConfig c,Send send):config_(std::move(c)),send_(std::move(send)){
     relay::detail::need(config_.id!=0,"broadcast: player id 0");relay::detail::need(relay::tokenText(config_.token),"broadcast: token");
     relay::detail::need(relay::nicknameText(config_.nickname),"broadcast: nickname");relay::detail::need(config_.helloMs>0,"broadcast: hello interval");
-    relay::detail::need(config_.delayMs<=1000,"broadcast: delay");
+    relay::detail::need(config_.delayMs<=1000,"broadcast: delay");relay::detail::need(config_.show<=Show::Nobody,"broadcast: show");
 }
 bool Client::setPosition(const std::array<double,3>& p,uint32_t area){
     area_=area;if(!relay::positionValid(p)){have_=false;return false;}
@@ -67,7 +67,7 @@ uint64_t Client::serverNow(uint64_t now) const {
 void Client::sendHello(uint64_t now){
     Hello h;h.base.id=config_.id;h.base.token=config_.token;h.base.nickname=config_.nickname;h.base.sequence=++helloSequence_;
     h.base.stream=stream_;h.base.ack=applied_;h.base.area=area_;h.base.havePosition=have_;if(have_)h.base.position=position_;
-    h.game=config_.game;h.build=config_.build;h.t0=std::min<uint64_t>(now,1ull<<53);
+    h.game=config_.game;h.build=config_.build;h.t0=std::min<uint64_t>(now,1ull<<53);h.show=config_.show;
     helloTimes_.push_back({h.base.sequence,h.t0});while(helloTimes_.size()>ClockSamples)helloTimes_.pop_front();
     sendDatagram(encode(h));sentHello_=true;nextHello_=now+config_.helloMs;}
 void Client::tick(uint64_t now){

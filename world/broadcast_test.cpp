@@ -5,6 +5,9 @@
 // the shown state handed out on ENTER, on a change and on FETCH, and never older; FETCH for a player who is not near;
 // a sender naming another player and a sender who never said HELLO; the order and the stamp of updates; pairs and
 // broadcast players, and two builds, kept apart; FRAMEs within the budget and the flush time; 24 players in one place.
+// How many one player sees: at most the cap, the nearest, kept while about as near (no flapping), friends first,
+// only friends or nobody by choice (the server's record before the HELLO's), state handed out to whoever starts being
+// shown, and nothing at all of the players near who are not shown; 100 players in one place with and without a cap.
 #include "relay.h"
 #include "../core/broadcast_client.h"
 #include <cmath>
@@ -59,8 +62,8 @@ struct Sim {
         p->skew=int64_t((peers.size()*7919)%6000)-3000;   // every player's clock is its own
         byAddress[p->address]=raw;peers.push_back(std::move(p));return *raw;}
     bc::Client::Send sender(Peer* p){return [this,p](const uint8_t* d,size_t n){up.push_back({p->address,Buffer(d,d+n)});};}
-    Peer& add(uint64_t id,const std::string& nickname,std::array<double,3> at,bc::BuildId build=buildOf(1),uint32_t game=ds::GameBuild){
-        auto& p=place(id);bc::ClientConfig c;c.id=id;c.token="group";c.nickname=nickname;c.build=build;c.game=game;
+    Peer& add(uint64_t id,const std::string& nickname,std::array<double,3> at,bc::BuildId build=buildOf(1),uint32_t game=ds::GameBuild,bc::Show show=bc::Show::Everyone){
+        auto& p=place(id);bc::ClientConfig c;c.id=id;c.token="group";c.nickname=nickname;c.build=build;c.game=game;c.show=show;
         p.client=std::make_unique<bc::Client>(c,sender(&p));p.client->setPosition(at);return p;}
     Peer& addPairs(uint64_t id,const std::string& nickname,std::array<double,3> at){
         auto& p=place(id);ds::relay::ClientConfig c;c.id=id;c.token="group";c.nickname=nickname;
@@ -298,8 +301,114 @@ static void crowd(){
                 N,entries,frames,double(entries)/double(frames),largest,double(s.relay->stats().frameBytes-bytes)/double(N)/2.);
 }
 
+static std::set<uint64_t> ids(const std::map<uint64_t,std::string>& near){std::set<uint64_t> out;for(auto& e:near)out.insert(e.first);return out;}
+static std::function<ds::State(double)> still(std::array<double,3> at){return [at](double){return standing(at);};}
+
+// At most the cap, the nearest; nothing at all of the others near; a slot that is freed goes to the next nearest.
+static void nearCap(){
+    RelayConfig config;config.nearCap=4;Sim s(config);
+    auto& r=s.add(1,"Ray",{0,0,0});
+    // Ten walking, animating players 5 to 50 m away, the nearest with the highest ids (nearest is no id order).
+    for(unsigned i=0;i<10;++i){std::array<double,3> at{5.+5*i,0,0};auto& p=s.add(200-i,"Sam"+std::to_string(i),at);p.pose=circle(at);p.animate=true;
+        CHECK(p.client->setState(bc::StateKind::Name,{uint8_t('a'+i)}));}
+    s.run(1500);
+    const std::set<uint64_t> nearest{200,199,198,197};
+    CHECK(ids(r.client->nearby())==nearest&&s.relay->shown(1)==4&&r.client->welcome().base.nearby==4);
+    for(unsigned i=0;i<10;++i)CHECK(s.relay->areNear(1,200-i)&&s.relay->shows(1,200-i)==(i<4));
+    // Everyone else near is shown his own four nearest, Ray among them only for those he is one of the four.
+    CHECK(s.peers[1]->sees(1)&&!s.peers[10]->sees(1)&&s.peers[10]->client->nearby().size()==4);
+    s.clear();auto unshown=s.relay->stats().unshown;s.run(2000);
+    // Every update and the animation of the four, nothing of the six: no entry, no SHARE, no ROSTER naming them.
+    for(unsigned i=0;i<10;++i){auto got=r.seen(200-i);if(i<4)CHECK(got.size()>=36);else CHECK(got.empty()&&r.count(bc::Type::Share,200-i)==0);}
+    CHECK(s.relay->stats().unshown>=unshown+6*36&&r.client->counters().unknown==0);
+    for(unsigned i=0;i<4;++i)CHECK(!r.pulsesGot[200-i].empty());
+    // A state change of a player not shown is not sent to him; one of a player shown is.
+    s.clear();CHECK(s.peers[10]->client->setState(bc::StateKind::Gear,{9})&&s.peers[1]->client->setState(bc::StateKind::Gear,{8}));s.run(100);
+    CHECK(r.count(bc::Type::Share,191)==0&&r.count(bc::Type::Share,200)==1);
+    // FETCH for a player near who is not shown: nothing.
+    auto notNear=s.relay->stats().notNear;s.clear();s.raw(r.address,fetchRaw(1,191));CHECK(r.count(bc::Type::Share)==0&&s.relay->stats().notNear==notNear+1);
+    // The nearest leaves: the fifth nearest takes the slot, with his name handed out at once (no FETCH).
+    auto fetches=r.client->counters().fetches;
+    s.peers[1]->client->bye();s.peers[1]->silent=true;s.run(200);
+    CHECK(ids(r.client->nearby())==(std::set<uint64_t>{199,198,197,196})&&r.client->state(196,bc::StateKind::Name)&&*r.client->state(196,bc::StateKind::Name)==std::vector<uint8_t>({'e'}));
+    CHECK(r.client->counters().fetches==fetches);
+    // Without a cap he is shown all nine.
+    RelayConfig open;Sim u(open);auto& o=u.add(1,"Ray",{0,0,0});for(unsigned i=0;i<9;++i)u.add(200-i,"Sam",{5.+5*i,0,0});u.run(1500);CHECK(o.client->nearby().size()==9);
+    for(size_t bad:{size_t(1025)}){RelayConfig x;x.token="t";x.nearCap=bad;bool refused=false;try{Relay r2(x,[](const RelayAddress&,const uint8_t*,size_t){});}catch(const std::invalid_argument&){refused=true;}CHECK(refused);}
+    for(double bad:{-1.,1001.}){RelayConfig x;x.token="t";x.nearMargin=bad;bool refused=false;try{Relay r2(x,[](const RelayAddress&,const uint8_t*,size_t){});}catch(const std::invalid_argument&){refused=true;}CHECK(refused);}
+}
+
+// Two players about as far away: the one shown stays while the other swings 2 m nearer and farther; one who comes
+// clearly nearer (more than the margin) takes the place, and that is one LEAVE and one ENTER.
+static void nearHysteresis(){
+    RelayConfig config;config.nearCap=1;config.nearMargin=10;Sim s(config);
+    auto& r=s.add(1,"Ray",{0,0,0});auto& x=s.add(2,"Xan",{30,0,0});x.pose=still({30,0,0});
+    s.run(1000);CHECK(ids(r.client->nearby())==std::set<uint64_t>{2});
+    auto& y=s.add(3,"Yul",{0,0,33});y.pose=[](double t){return standing({0,0,30+3*std::sin(t*2.)});};
+    std::set<uint64_t> last=ids(r.client->nearby());unsigned changes=0;
+    for(int i=0;i<600;++i){s.step();auto now=ids(r.client->nearby());if(now!=last){++changes;last=now;}}
+    CHECK(changes==0&&last==std::set<uint64_t>{2});
+    // Yul comes to 15 m: more than 10 m nearer than Xan, he is shown instead.
+    y.pose=still({0,0,15});s.run(1500);CHECK(ids(r.client->nearby())==std::set<uint64_t>{3});
+    // And Xan, back at 25 m (10 m farther, not more), does not take it back.
+    x.pose=still({25,0,0});s.run(1500);CHECK(ids(r.client->nearby())==std::set<uint64_t>{3});
+}
+
+// Who a player sees, by his choice: the server's record of it first, else his HELLO's. Friends first within the cap,
+// only friends, nobody. The choice is his own view: the others still see him.
+static void showChoice(){
+    std::map<uint64_t,RelayViewer> viewers;
+    RelayConfig config;config.nearCap=2;config.viewer=[&](uint64_t id){auto it=viewers.find(id);return it==viewers.end()?RelayViewer{}:it->second;};
+    Sim s(config);
+    // Ray asks his game for friends only; his friends on the server are Fay (100 m) and Fil (120 m); three strangers stand
+    // near; the server gives him a cap of 3 (so a third would fit).
+    viewers[1].friends={7,8};viewers[1].cap=3;
+    auto& r=s.add(1,"Ray",{0,0,0},buildOf(1),ds::GameBuild,bc::Show::Friends);
+    auto walker=[&](uint64_t id,const std::string& name,std::array<double,3> at)->Sim::Peer&{auto& p=s.add(id,name,at);p.pose=circle(at);return p;};
+    auto& fay=walker(7,"Fay",{100,0,0});walker(8,"Fil",{120,0,0});auto& a=walker(4,"Ann",{5,0,0});walker(5,"Bob",{6,0,0});walker(6,"Cy",{7,0,0});
+    s.run(1500);CHECK(ids(r.client->nearby())==(std::set<uint64_t>{7,8}));
+    s.clear();s.run(1000);for(uint64_t id:{4,5,6})CHECK(r.seen(id).empty());CHECK(r.seen(7).size()>=4);
+    // The others still see him (his choice is what he sees, not who sees him).
+    CHECK(a.sees(1)||s.relay->shows(4,1));CHECK(fay.sees(1));
+    viewers[1].cap=-1;   // the relay's cap of 2 from here on
+    // Everyone within the cap of 2: a friend first (Fay), then the nearest stranger (Ann).
+    viewers[1].chosen=true;viewers[1].show=bc::Show::Everyone;viewers[1].friends={7};s.run(1500);CHECK(ids(r.client->nearby())==(std::set<uint64_t>{7,4}));
+    // Nobody: his roster empties and nothing more comes, entries or state.
+    viewers[1].show=bc::Show::Nobody;s.run(1000);CHECK(r.client->nearby().empty());
+    s.clear();CHECK(a.client->setState(bc::StateKind::Gear,{1}));s.run(1000);
+    CHECK(r.seen().empty()&&r.count(bc::Type::Share)==0&&r.count(bc::Type::Roster)==0);
+    // The server's record of nothing chosen: his game's choice (friends) applies again.
+    viewers[1].chosen=false;viewers[1].friends={7,8};s.run(1500);CHECK(ids(r.client->nearby())==(std::set<uint64_t>{7,8}));
+    // A game that asks for nobody, with nothing on the server: nobody; the server's everyone over it: the two nearest.
+    std::map<uint64_t,RelayViewer>().swap(viewers);
+    Sim t(config);auto& q=t.add(1,"Quin",{0,0,0},buildOf(1),ds::GameBuild,bc::Show::Nobody);t.add(4,"Ann",{5,0,0});t.add(5,"Bob",{6,0,0});t.add(6,"Cy",{7,0,0});
+    t.run(1500);CHECK(q.client->nearby().empty()&&t.relay->areNear(1,4));
+    viewers[1].chosen=true;viewers[1].show=bc::Show::Everyone;t.run(1500);CHECK(ids(q.client->nearby())==(std::set<uint64_t>{4,5}));
+}
+
+// 100 players in one place, each walking and sending presence 20 times a second: what one of them receives with a cap
+// of 16 and without one.
+static void hundred(){
+    auto measure=[](size_t cap,size_t& shown,double& datagrams,double& bytes){
+        RelayConfig config;config.nearCap=cap;config.maxPlayers=128;Sim s(config);const unsigned N=100;
+        for(unsigned i=0;i<N;++i){double a=i*2*3.14159265/N;std::array<double,3> at{(5+i%10)*std::cos(a),0,(5+i%10)*std::sin(a)};s.add(1000+i,"Sam",at).pose=circle(at);}
+        s.run(2000);s.clear();std::vector<uint64_t> unknown;for(auto& p:s.peers)unknown.push_back(p->client->counters().unknown);
+        s.run(2000);
+        shown=0;double d=0,b=0;size_t k=0;
+        size_t least=N,most=0;
+        for(auto& p:s.peers){size_t n=p->client->nearby().size();least=std::min(least,n);most=std::max(most,n);for(auto& g:p->got){d+=1;b+=double(g.size());}
+            if(p->client->counters().unknown!=unknown[k++])most=N;}   // an entry from a player who is not shown: not bounded
+        shown=least==most?least:0;datagrams=d/N/2;bytes=b/N/2;};
+    size_t shown16=0,shownAll=0;double d16=0,b16=0,dAll=0,bAll=0;
+    measure(16,shown16,d16,b16);measure(0,shownAll,dAll,bAll);
+    std::printf("broadcast relay: 100 players in one place, each receives %.0f datagrams and %.0f bytes a second with a cap of 16 (%zu shown), %.0f and %.0f without one (%zu shown)\n",
+                d16,b16,shown16,dAll,bAll,shownAll);
+    CHECK(shown16==16&&shownAll==99&&b16*4<bAll&&b16<16*20*(bc::EntryHeader+bc::PresenceBytes)*1.3);
+}
+
 int main(){
     interest();teleport();shownState();senders();orderAndStamp();modesAndBuilds();batching();crowd();
+    nearCap();nearHysteresis();showChoice();hundred();
     if(failures)return 1;
     std::puts("broadcast relay tests passed");return 0;
 }

@@ -16,7 +16,9 @@
 //   0  4  magic "DSR1"      4  2  version (2)      6  1  type      7  1  reserved
 //
 //   HELLO    1  player -> server, 140 bytes; every half second: keep-alive, position and the clock's ping
-//            8..111 as version 1's HELLO | 112 u32 game build | 116 mod build[16] | 132 u64 t0: the player's clock (ms)
+//            8..111 as version 1's HELLO, but byte 65 (reserved there) is who this player wants to be shown: 0 everyone
+//            (the bytes of before), 1 his friends, 2 nobody | 112 u32 game build | 116 mod build[16] | 132 u64 t0: the
+//            player's clock (ms)
 //   WELCOME  2  server -> player, 76 bytes; the answer to every accepted HELLO, and the clock's pong
 //            8..31 as version 1's WELCOME | 32 u64 t0 echoed | 40 u64 server time (ms) | 48 u32 x4 the versions of this
 //            player's state the server holds (0: none) | 64 u16 full metres | 66 u16 animation metres | 68 u16 interval
@@ -62,10 +64,11 @@ enum class Type : uint8_t { Hello=1, Welcome, Refused, Roster, Publish, Frame, S
 enum class Refusal : uint8_t { None=0, Full=1, IdInUse=2, Build=3 };
 enum class StateKind : uint8_t { Name=1, Gear=2, Carry=3, Places=4 };   // state kinds
 enum Part : uint8_t { HasPresence=1, HasAnimation=2 };
+enum class Show : uint8_t { Everyone=0, Friends=1, Nobody=2 };         // who a player wants to be shown (HELLO byte 65)
 using Presence=std::array<uint8_t,PresenceBytes>;
 using Versions=std::array<uint32_t,StateKinds>;
 using BuildId=std::array<uint8_t,16>;
-struct Hello { relay::Hello base; uint32_t game=0; BuildId build{}; uint64_t t0=0; };
+struct Hello { relay::Hello base; uint32_t game=0; BuildId build{}; uint64_t t0=0; Show show=Show::Everyone; };
 struct Welcome { relay::Welcome base; uint64_t t0=0,serverTime=0; Versions versions{}; uint16_t fullMetres=0,animationMetres=0,intervalMs=0,otherBuild=0,budget=0; };
 struct Refused { uint64_t id=0; uint32_t sequence=0; Refusal reason=Refusal::None; };
 // An update: what PUBLISH carries up and what one FRAME entry carries down. payload pointers point into the datagram.
@@ -105,8 +108,8 @@ inline bool animationShape(const uint8_t* p,size_t n){return n>=1&&n<=AnimationM
 }
 // Encoders throw invalid_argument for a message the wire cannot carry.
 inline Buffer encode(const Hello& h){
-    using namespace detail;need(h.t0<=(1ull<<53),"broadcast: t0");
-    auto b=asVersion(relay::encode(h.base),Version);b.reserve(HelloSize);
+    using namespace detail;need(h.t0<=(1ull<<53),"broadcast: t0");need(h.show<=Show::Nobody,"broadcast: show");
+    auto b=asVersion(relay::encode(h.base),Version);b.reserve(HelloSize);b[65]=uint8_t(h.show);
     put(b,h.game,4);b.insert(b.end(),h.build.begin(),h.build.end());put(b,h.t0,8);return b;}
 inline Buffer encode(const Welcome& w){
     using namespace detail;need(w.t0<=(1ull<<53)&&w.serverTime<=(1ull<<53),"broadcast: time");
@@ -187,8 +190,14 @@ inline Error parse(const uint8_t* b,size_t n,Message& m){
     switch(m.type){
     case Type::Hello:{
         if(!exact(HelloSize))return Error::Length;
-        relay::Message shared;auto e=parseShared(b,112,relay::Type::Hello,shared);if(e!=Error::None)return e;
+        // Byte 65 is version 1's reserved byte: the choice is read here, and version 1's parser sees it zero.
+#ifndef MUTANT_BCAST_WIRE_SHOW
+        if(b[65]>uint8_t(Show::Nobody))return Error::Range;
+#endif
+        uint8_t head[112];std::memcpy(head,b,112);head[65]=0;
+        relay::Message shared;auto e=parseShared(head,112,relay::Type::Hello,shared);if(e!=Error::None)return e;
         m.hello.base=std::move(shared.hello);m.hello.game=uint32_t(get(b+112,4));std::memcpy(m.hello.build.data(),b+116,16);m.hello.t0=get(b+132,8);
+        m.hello.show=Show(b[65]);
         if(m.hello.t0>(1ull<<53))return Error::Range;
         return Error::None;}
     case Type::Welcome:{

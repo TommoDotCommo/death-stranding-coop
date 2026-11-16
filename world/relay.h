@@ -24,6 +24,12 @@
 // a player who comes near, to everyone near when it changes, and again to a player who asks (FETCH) for a player near.
 // Players of the two modes are never near each other, nor broadcast players of different builds.
 //
+// Who a broadcast player is shown (README.md, "How many players one player sees"): of the players near him, those his
+// choice lets through (everyone, his friends, nobody: the server's record of it first, else his HELLO's), his friends
+// first, then the nearest, at most his cap; one who is shown stays until one who is not is `nearMargin` metres nearer.
+// He is told of exactly those (ENTER, LEAVE), and sent their updates and state and nothing of anyone else near: a
+// crowd beyond the cap costs him nothing. A linked server's player counts like any other.
+//
 // Linked servers' presence (README.md, "Presence across linked servers"; the envelope is presence.h): the relays of two
 // linked servers tell each other where their broadcast players are (cells of 8 m), and each sends the other the players
 // of its own that are near one of the other's, with their updates and shown state, within a byte budget a second. A
@@ -65,6 +71,12 @@ struct RelayLinkStats {
     uint64_t entries=0,budgetDropped=0,stripped=0;   // updates sent; left out for the budget; sent without animation for it
     uint64_t joined=0,left=0,unknown=0,otherBuild=0,overCap=0,clockless=0,shares=0,fetches=0;
 };
+// What the server holds for one relay id (World::relayViewer): his choice of who he is shown, if he made one there
+// (else his HELLO's applies), the relay ids of his friends, and the cap for him (-1: the relay's nearCap).
+struct RelayViewer {
+    bool chosen=false; ds::broadcast::Show show=ds::broadcast::Show::Everyone;
+    std::set<uint64_t> friends; long cap=-1;
+};
 struct RelayConfig {
     std::string token;                       // the group's secret; every HELLO must carry it
     // Set: it decides instead of `token` whether a HELLO's (or BYE's) token may speak for that player id (the server's
@@ -83,6 +95,10 @@ struct RelayConfig {
     uint32_t flushMs=25;                     // the longest an update waits for others to share its datagram (0..200; 0: at once)
     uint32_t broadcastRate=100;              // datagrams a second a broadcast player may send (10..100000)
     bool pinBuild=false;uint32_t game=0;ds::broadcast::BuildId build{};   // set: broadcast players of another build are refused
+    size_t nearCap=0;                        // the most players near one player he is shown (0: no cap; at most RelayPlayersMax)
+    double nearMargin=10;                    // one shown stays until one not shown is this many metres nearer (0..1000)
+    // Set: what the server holds for a broadcast player (asked at each of his HELLOs): his choice, his friends, his cap.
+    std::function<RelayViewer(uint64_t id)> viewer;
     // Linked servers' presence.
     std::vector<RelayLink> links;            // at most LinksMax, each with a name and a key of its own
     std::string serverId;                    // this world's id (world.h), told to the linked servers; required with links
@@ -95,6 +111,7 @@ struct RelayStats {
     uint64_t published=0,staleUpdates=0,badStamps=0;   // updates taken; refused for their order; for their stamp
     uint64_t entries=0,thinned=0,frames=0,frameBytes=0;   // entries sent; left out by interest; FRAMEs and their bytes
     uint64_t states=0,staleStates=0,shares=0,fetches=0;
+    uint64_t unshown=0;          // updates not sent to a player near who is not shown that player (cap or choice)
 };
 class Relay {
 public:
@@ -112,6 +129,8 @@ public:
     uint64_t remoteId(size_t link,uint64_t theirs) const;        // this server's id for that server's player (0: none)
     const RelayLinkStats& linkStats(size_t link) const;
     bool areNear(uint64_t a,uint64_t b) const;
+    bool shows(uint64_t viewer,uint64_t source) const;          // broadcast: is `viewer` shown `source` (told, sent)
+    size_t shown(uint64_t viewer) const;                         // how many players `viewer` is shown
     void flush(uint64_t nowMs);       // sends every FRAME that has waited flushMs (tick does it too)
     uint64_t flushDue() const;        // when the next FRAME is due (UINT64_MAX: none waiting)
     const RelayStats& stats() const {return stats_;}
@@ -126,6 +145,8 @@ private:
         // Broadcast mode (mode 2).
         uint16_t mode=1; uint32_t game=0; ds::broadcast::BuildId build{};
         bool havePublish=false,haveAt=false; uint32_t publishSequence=0; uint64_t publishStamp=0; std::array<double,3> at{};
+        // Who he is shown of the players near (a subset of `nearby`), his choice, his friends' ids and his cap.
+        std::set<uint64_t> shown; ds::broadcast::Show show=ds::broadcast::Show::Everyone; std::set<uint64_t> friends; size_t cap=0;
         struct Blob {uint32_t version=0; ds::relay::Buffer bytes;};
         std::array<Blob,ds::broadcast::StateKinds> states; uint16_t generation=0;
         // What this player has been sent of each source near him: when, and the pulses of the samples left out since.
@@ -193,10 +214,11 @@ private:
     void event(Player& to,bool enter,const Player& who);
     void flush(Player&);
     void place(Player&);
+    void select(Player&);
     void note(const std::string& s) const {if(log)log(s);}
     RelayConfig config_;Send send_;RelayStats stats_;uint32_t streams_=0;
     std::vector<std::pair<uint64_t,uint64_t>> entered_;   // (to, from) pairs that came near in this HELLO: states to hand out
     std::map<uint64_t,Player> players_;std::map<RelayAddress,uint64_t> byAddress_;ds::relay::Buffer out_;
-    std::vector<Link> links_;size_t remotes_=0;
+    std::vector<Link> links_;size_t remotes_=0;uint64_t now_=0;   // the latest time given (receive, tick)
 };
 }

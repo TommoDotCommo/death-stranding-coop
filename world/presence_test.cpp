@@ -5,7 +5,8 @@
 // sent; the byte budget holds, nearest players first; a link that goes quiet loses its players, and a player who
 // leaves his server leaves the other; nothing goes round a triangle of servers; a player here takes his id back from
 // a linked server's player, whose state never lands on a player here, and whose build keeps him apart; a datagram
-// without the link's tag, or one seen before, changes nothing.
+// without the link's tag, or one seen before, changes nothing. A linked server's players count for the cap of how many
+// players near one player he is shown, nearest first, and are friends by their ids on their own server.
 #include "relay.h"
 #include "../core/broadcast_client.h"
 #include <cmath>
@@ -341,9 +342,32 @@ static void authentication(){
     CHECK(!thief.relay->linkUp(0)&&south.relay->linkUp(0));
 }
 
+// The cap of how many players near one player he is shown: a linked server's players count like the players here.
+// Bea (north, a cap of 3) has Nia of her own server 30 m away and five players of the south 5 to 25 m away: she sees
+// the three nearest southerners and nothing of the other three; with friends only, the one southerner on her list.
+static void capped(){
+    Net net;auto& north=net.server("north",0);auto& south=net.server("south",3000);net.link(north,south,"key-of-north-and-south");
+    std::set<uint64_t> friends;bool friendsOnly=false;
+    north.config.nearCap=3;north.config.viewer=[&](uint64_t id){RelayViewer v;if(id==7){v.friends=friends;v.chosen=friendsOnly;v.show=bc::Show::Friends;}return v;};
+    net.startAll();
+    auto& bea=net.add(north,7,"Bea",{0,0,0});auto& nia=net.add(north,8,"Nia",{30,0,0});(void)nia;
+    for(unsigned i=0;i<5;++i){std::array<double,3> at{0,0,5.+5*i};auto& p=net.add(south,20+i,"S"+std::to_string(i),at);p.pose=circle(at);p.animate=true;}
+    CHECK(net.until([&]{return south.relay->exported(0)==5&&north.relay->remotePlayers()==5;},3000));
+    net.run(1500);
+    std::set<uint64_t> nearest,shown;for(unsigned i=0;i<3;++i)nearest.insert(north.relay->remoteId(0,20+i));
+    for(auto& e:bea.client->nearby())shown.insert(e.first);
+    CHECK(shown==nearest&&!bea.sees(8)&&north.relay->areNear(7,8)&&north.relay->areNear(7,north.relay->remoteId(0,24)));
+    net.clear();net.run(2000);
+    for(unsigned i=0;i<5;++i){auto id=north.relay->remoteId(0,20+i);if(i<3)CHECK(bea.entries(id)>=36);else CHECK(bea.entries(id)==0);}
+    CHECK(bea.entries(8)==0&&bea.client->counters().unknown==0);
+    // Friends only: S4 (25 m) is her friend by his id in the south, the id his key gives him there.
+    friends={24};friendsOnly=true;net.run(1500);
+    CHECK(bea.client->nearby().size()==1&&bea.sees(north.relay->remoteId(0,24))&&nameShown(*bea.client,north.relay->remoteId(0,24))=="S4 \xc2\xb7 south");
+}
+
 int main(){
     // A broken protection may break the relay's own invariants: an exception is a failure like any other.
-    for(auto test:{wire,across,interest,budget,loss,loops,identities,authentication}){
+    for(auto test:{wire,across,interest,budget,loss,loops,identities,authentication,capped}){
         try{test();}catch(const std::exception& e){std::fprintf(stderr,"linked presence oracle: exception %s\n",e.what());++failures;}}
     if(failures)return 1;
     std::puts("linked presence tests passed");return 0;

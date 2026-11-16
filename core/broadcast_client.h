@@ -30,6 +30,10 @@ struct ClientConfig {
     uint32_t helloMs=500;      // how often HELLO is sent (the clock is sampled with it)
     uint32_t silentMs=5000;    // no WELCOME for this long: the relay is gone and so is everyone near
     uint32_t delayMs=120;      // the least presentation delay (the core's Config::delayMs)
+    // Who this player wants to be shown (HELLO byte 65): everyone near (the server's cap applies), his friends on the
+    // server, or nobody. The server's own record of his choice, set through the launcher, comes first. A server from
+    // before this refuses a HELLO with anything but Everyone.
+    Show show=Show::Everyone;
 };
 struct Counters {
     uint64_t sent=0,sentBytes=0,received=0,receivedBytes=0;   // datagrams to and from the relay, and their sizes

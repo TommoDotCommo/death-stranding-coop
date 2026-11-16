@@ -37,6 +37,14 @@ static void wire(){
         CHECK(parse(v1.data(),v1.size(),m)==WireError::Version);
         auto as1=b;as1[4]=1;CHECK(parseBuffer(as1)==WireError::Version);as1[4]=3;CHECK(parseBuffer(as1)==WireError::Version);
         CHECK(versionOf(b.data(),b.size())==2&&versionOf(v1.data(),v1.size())==1&&versionOf(b.data(),3)==0);
+        // Byte 65, reserved in version 1: who the player wants to be shown. 0 (everyone) is the HELLO of before.
+        CHECK(b[65]==0&&m.hello.show==Show::Everyone);
+        for(auto show:{Show::Friends,Show::Nobody}){
+            h.show=show;auto c=encode(h);CHECK(c[65]==uint8_t(show)&&std::equal(c.begin(),c.begin()+65,b.begin())&&std::equal(c.begin()+66,c.end(),b.begin()+66));
+            CHECK(parseBuffer(c,m)==WireError::None&&m.hello.show==show&&m.hello.base.nickname=="Sam"&&m.hello.base.area==42&&m.hello.t0==123456789);}
+        for(uint8_t bad:{3,4,255}){auto c=b;c[65]=bad;CHECK(parseBuffer(c)==WireError::Range);}
+        {auto c=b;c[66]=1;CHECK(parseBuffer(c)==WireError::Reserved);}   // the other reserved bytes stay reserved
+        h.show=Show(3);CHECK(throws([&]{encode(h);}));
     }
     {   // WELCOME.
         Welcome w;w.base.id=5;w.base.sequence=11;w.base.stream=99;w.base.enterMetres=150;w.base.leaveMetres=200;w.base.timeoutSeconds=10;w.base.nearby=3;
@@ -175,6 +183,11 @@ struct Bench {
 static void clockAndRoster(){
     Bench t;t.client.setPosition({1,2,3});t.client.tick(t.now);
     auto hello=t.take(Type::Hello);CHECK(hello.size()==1&&hello[0].hello.build==buildOf(1)&&hello[0].hello.game==GameBuild&&hello[0].hello.t0==t.now);
+    CHECK(hello[0].hello.show==Show::Everyone);
+    // Who the player wants to be shown goes in every HELLO; a choice the wire has no value for is refused.
+    {auto c=Bench::config(120);c.show=Show::Friends;std::vector<Buffer> sent;Client f(c,[&](const uint8_t* d,size_t n){sent.emplace_back(d,d+n);});
+     f.tick(5);f.tick(600);Message m;CHECK(sent.size()==2&&parse(sent[1].data(),sent[1].size(),m)==WireError::None&&m.hello.show==Show::Friends);
+     c.show=Show(3);CHECK(throws([&]{Client x(c,[](const uint8_t*,size_t){});}));}
     CHECK(!t.client.clockValid()&&!t.client.online());
     // Symmetric 10 ms each way: the offset to within a millisecond.
     t.answer(10,10);CHECK(t.client.online()&&t.client.clockValid()&&std::fabs(t.client.offsetMs()-500000)<=1&&t.client.rttMs()==20);

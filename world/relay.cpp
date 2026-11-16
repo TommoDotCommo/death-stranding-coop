@@ -27,6 +27,8 @@ Relay::Relay(RelayConfig c,Send send):config_(std::move(c)),send_(std::move(send
     if(config_.budget<256||config_.budget>bc::MaxDatagram)throw std::invalid_argument("broadcast budget: 256..1200 bytes");
     if(config_.flushMs>200)throw std::invalid_argument("broadcast flush: 0..200 ms");
     if(config_.broadcastRate<10||config_.broadcastRate>100000)throw std::invalid_argument("broadcast rate: 10..100000 datagrams a second");
+    if(config_.nearCap>RelayPlayersMax)throw std::invalid_argument("broadcast near: 0..1024 players");
+    if(!(config_.nearMargin>=0&&config_.nearMargin<=1000))throw std::invalid_argument("broadcast near margin: 0..1000 metres");
     if(config_.links.size()>LinksMax)throw std::invalid_argument("relay links: at most 16");
     if(!config_.links.empty()){
         bool id=config_.serverId.size()>=4&&config_.serverId.size()<=presence::ServerIdBytes;
@@ -46,6 +48,8 @@ Relay::Relay(RelayConfig c,Send send):config_(std::move(c)),send_(std::move(send
         links_.push_back(std::move(l));}
 }
 bool Relay::areNear(uint64_t a,uint64_t b) const {auto it=players_.find(a);return it!=players_.end()&&it->second.nearby.count(b)!=0;}
+bool Relay::shows(uint64_t a,uint64_t b) const {auto it=players_.find(a);return it!=players_.end()&&it->second.shown.count(b)!=0;}
+size_t Relay::shown(uint64_t a) const {auto it=players_.find(a);return it==players_.end()?0:it->second.shown.size();}
 // The same time for any token: no early exit on the first wrong byte.
 bool Relay::rightToken(const std::string& t,uint64_t id) const {
 #ifndef MUTANT_RELAY_ADMIT
@@ -75,7 +79,7 @@ bool Relay::allow(Player& p,uint64_t now){
     return true;
 }
 void Relay::receive(const RelayAddress& from,const uint8_t* data,size_t size,uint64_t now){
-    ++stats_.received;
+    ++stats_.received;now_=std::max(now_,now);
     if(bc::versionOf(data,size)==presence::Version){receiveLink(from,data,size,now);return;}
     Player* sender=nullptr;
     if(auto a=byAddress_.find(from);a!=byAddress_.end())sender=&players_.find(a->second)->second;
@@ -174,6 +178,15 @@ void Relay::hello(const RelayAddress& from,const Hello& h,uint64_t now,const bc:
     if(!fresh&&h.stream!=0&&int32_t(h.sequence-p.lastHello)<=0)return;
 #endif
     p.lastHello=h.sequence;p.lastSeen=now;p.nickname=h.nickname;p.area=h.area;p.have=h.havePosition;p.position=h.position;
+    if(v2){
+        // Who he is shown: the server's record of his choice first, else his HELLO's; his friends and his cap.
+        RelayViewer v;if(config_.viewer)v=config_.viewer(p.id);
+#ifndef MUTANT_RELAY_SHOW_HELLO_FIRST
+        p.show=v.chosen?v.show:v2->show;
+#else
+        p.show=v2->show!=bc::Show::Everyone||!v.chosen?v2->show:v.show;
+#endif
+        p.friends=std::move(v.friends);p.cap=v.cap>=0?size_t(std::min<long>(v.cap,long(RelayPlayersMax))):config_.nearCap;}
     if(!h.havePosition)p.haveAt=false;
     if(!fresh){
         if(h.stream==0){
@@ -181,7 +194,7 @@ void Relay::hello(const RelayAddress& from,const Hello& h,uint64_t now,const bc:
             // A broadcast player that knows nobody is a game that started again: what it showed is gone too, and
             // everyone near is handed out to it again.
             if(p.mode==bc::Version){p.states={};++p.generation;p.havePublish=false;p.haveAt=false;p.feeds.clear();
-                for(auto id:p.nearby)entered_.push_back({p.id,id});}
+                for(auto id:p.shown)entered_.push_back({p.id,id});}
         }
         else if(h.stream==p.stream&&uint32_t(h.ack-p.acked)<=p.pending.size()){
             p.pending.erase(p.pending.begin(),p.pending.begin()+long(h.ack-p.acked));p.acked=h.ack;}
@@ -190,7 +203,7 @@ void Relay::hello(const RelayAddress& from,const Hello& h,uint64_t now,const bc:
     Buffer b;
     if(v2){
         bc::Welcome w;w.base.id=p.id;w.base.sequence=h.sequence;w.base.stream=p.stream;w.base.enterMetres=uint16_t(config_.enterMetres);w.base.leaveMetres=uint16_t(config_.leaveMetres);
-        w.base.timeoutSeconds=uint16_t((config_.timeoutMs+999)/1000);w.base.nearby=uint16_t(p.nearby.size());
+        w.base.timeoutSeconds=uint16_t((config_.timeoutMs+999)/1000);w.base.nearby=uint16_t(p.shown.size());
         w.t0=v2->t0;w.serverTime=std::min<uint64_t>(now,1ull<<53);for(size_t k=0;k<bc::StateKinds;++k)w.versions[k]=p.states[k].version;
         w.fullMetres=uint16_t(config_.fullMetres);w.animationMetres=uint16_t(config_.animationMetres);w.intervalMs=uint16_t(config_.intervalMs);w.budget=uint16_t(config_.budget);
         // Players who would be near but are not, for another build: the reason a group sees nobody is easy to miss.
@@ -212,14 +225,15 @@ void Relay::handOut(){
     auto pairs=std::move(entered_);entered_.clear();
     for(auto& [to,source]:pairs){
         auto t=players_.find(to),f=players_.find(source);
-        if(t==players_.end()||f==players_.end()||!t->second.nearby.count(source))continue;
+        if(t==players_.end()||f==players_.end()||!t->second.shown.count(source))continue;
         for(size_t k=0;k<bc::StateKinds;++k)if(f->second.states[k].version)share(t->second,f->second,k);}
 #endif
 }
 void Relay::restartStream(Player& p){
     do{p.stream=config_.seed+ ++streams_;}while(!p.stream);
     p.acked=0;p.pending.clear();
-    for(auto id:p.nearby)p.pending.push_back({true,id,players_.find(id)->second.nickname});
+    // A broadcast player is told of the players he is shown, a pairs player of everyone near.
+    for(auto id:p.mode==bc::Version?p.shown:p.nearby)p.pending.push_back({true,id,players_.find(id)->second.nickname});
 }
 // The caller has already changed `to.nearby`: a stream that grew too long starts again from that set.
 void Relay::event(Player& to,bool enter,const Player& who){
@@ -237,9 +251,11 @@ void Relay::flush(Player& p){
     p.pending.erase(p.pending.begin(),p.pending.begin()+long(count));p.acked+=uint32_t(count);
 #endif
 }
-// Who is near `p` now that he has said where he is.
+// Who is near `p` now that he has said where he is. Pairs players are told at once; of broadcast players, who is
+// shown to whom is chosen again (select) for `p` and for everyone whose players near changed.
 void Relay::place(Player& p){
     double enter=config_.enterMetres*config_.enterMetres,leave=config_.leaveMetres*config_.leaveMetres;
+    std::vector<Player*> changed;
     for(auto& entry:players_){
         Player& q=entry.second;if(q.id==p.id)continue;
         bool was=p.nearby.count(q.id)!=0;
@@ -259,10 +275,63 @@ void Relay::place(Player& p){
         (void)leave;bool now=can&&d<=enter;
 #endif
         if(now==was)continue;
-        if(now){p.nearby.insert(q.id);q.nearby.insert(p.id);if(p.mode==bc::Version&&q.mode==bc::Version){entered_.push_back({q.id,p.id});entered_.push_back({p.id,q.id});}}
+        if(now){p.nearby.insert(q.id);q.nearby.insert(p.id);}
         else{p.nearby.erase(q.id);q.nearby.erase(p.id);p.feeds.erase(q.id);q.feeds.erase(p.id);}
+        if(p.mode==bc::Version){changed.push_back(&q);continue;}
         event(p,now,q);event(q,now,p);flush(q);
     }
+    for(auto* q:changed){select(*q);flush(*q);}
+    select(p);   // he moved: who is nearest may have changed (his ROSTER goes with his WELCOME, or the caller's flush)
+}
+// Of the players near a broadcast player, those he is shown: what his choice lets through (everyone, his friends,
+// nobody), his friends first, then the nearest, at most his cap. One already shown counts `nearMargin` metres nearer
+// than he is, so the set does not change with every step while two players stand about as far away. Who stops being
+// shown leaves his roster (and his feed: nothing more of him is sent), who starts enters it and is handed out (his
+// state goes before anyone asks: handOut). The caller sends the ROSTER (flush).
+void Relay::select(Player& r){
+    if(r.mode!=bc::Version||r.link)return;   // a pairs player is told of everyone near; a linked player of nobody here
+    struct Candidate {bool stranger;double d;uint64_t id;bool operator<(const Candidate& o) const {return stranger!=o.stranger?!stranger:d!=o.d?d<o.d:id<o.id;}};
+    std::vector<Candidate> candidates;auto at=where(r);
+    for(auto id:r.nearby){
+        const Player& q=players_.at(id);
+        // A linked server's player is a friend by his id on his own server (made from his key there, as here).
+        bool friendly=r.friends.count(q.link?q.theirs:q.id)!=0;
+#ifndef MUTANT_RELAY_SHOW_NOBODY
+        if(r.show==bc::Show::Nobody)continue;
+#endif
+#ifndef MUTANT_RELAY_SHOW_FRIENDS
+        if(r.show==bc::Show::Friends&&!friendly)continue;
+#endif
+#ifdef MUTANT_RELAY_NEAR_FRIENDS_FIRST
+        friendly=false;
+#endif
+        double d=std::sqrt(distance2(at,where(q)));
+#ifndef MUTANT_RELAY_NEAR_HYSTERESIS
+        if(r.shown.count(id))d-=config_.nearMargin;
+#endif
+#ifdef MUTANT_RELAY_NEAR_NEAREST
+        d=double(id);
+#endif
+        candidates.push_back({!friendly,d,id});}
+#ifndef MUTANT_RELAY_NEAR_CAP
+    size_t cap=r.cap;
+#ifdef MUTANT_RELAY_NEAR_LINKED
+    // The mutant: linked servers' players are shown besides the cap.
+    size_t remote=0;for(auto& c:candidates)remote+=players_.at(c.id).link!=0;cap=cap?cap+remote:0;
+    std::sort(candidates.begin(),candidates.end());
+    std::stable_partition(candidates.begin(),candidates.end(),[&](const Candidate& c){return players_.at(c.id).link!=0;});
+    if(cap&&candidates.size()>cap)candidates.resize(cap);
+#else
+    if(cap&&candidates.size()>cap){std::nth_element(candidates.begin(),candidates.begin()+long(cap),candidates.end());candidates.resize(cap);}
+#endif
+#endif
+    std::set<uint64_t> next;for(auto& c:candidates)next.insert(c.id);
+    for(auto it=r.shown.begin();it!=r.shown.end();){
+        if(next.count(*it)){++it;continue;}
+        // What is queued for him goes before the LEAVE: no entry arrives from a player his roster no longer has.
+        sendBatch(r,now_);
+        uint64_t id=*it;it=r.shown.erase(it);r.feeds.erase(id);event(r,false,players_.at(id));}
+    for(auto id:next)if(r.shown.insert(id).second){event(r,true,players_.at(id));entered_.push_back({r.id,id});}
 }
 void Relay::remove(uint64_t id,const char* why){
     auto it=players_.find(id);if(it==players_.end())return;
@@ -271,13 +340,20 @@ void Relay::remove(uint64_t id,const char* why){
     else{byAddress_.erase(gone.address);for(auto& l:links_)if(l.exported.erase(id))l.presentDue=true;}
     for(auto other:gone.nearby){
         Player& q=players_.find(other)->second;q.nearby.erase(id);q.feeds.erase(id);
+        bool told=q.mode!=bc::Version||q.shown.erase(id)!=0;
+        if(q.mode==bc::Version&&told)sendBatch(q,now_);   // his entries already queued go before the LEAVE
 #ifndef MUTANT_RELAY_NO_LEAVE
-        event(q,false,gone);flush(q);
+        if(told)event(q,false,gone);
+#else
+        (void)told;
 #endif
+        select(q);flush(q);   // a broadcast player may now be shown another one in his place
     }
+    handOut();
     note("relay: player "+hex(id)+(gone.link?" ("+gone.nickname+")":std::string())+" "+why+", "+std::to_string(players())+" players"+(remotes_?" and "+std::to_string(remotes_)+" of linked servers":""));
 }
 void Relay::tick(uint64_t now){
+    now_=std::max(now_,now);
 #ifndef MUTANT_RELAY_NO_TIMEOUT
     std::vector<uint64_t> silent;
     for(auto& entry:players_)if(!entry.second.link&&now>entry.second.lastSeen&&now-entry.second.lastSeen>config_.timeoutMs)silent.push_back(entry.first);
@@ -335,6 +411,9 @@ bool Relay::publish(Player& s,const bc::Update& u,uint64_t now){
     for(auto id:s.nearby){
         auto it=players_.find(id);if(it==players_.end())continue;
         Player& r=it->second;if(r.mode!=bc::Version||r.link)continue;
+#ifndef MUTANT_RELAY_NEAR_HIDDEN
+        if(!r.shown.count(s.id)){++stats_.unshown;continue;}   // near, but not one he is shown: he is sent nothing of him
+#endif
         bc::Update out;
         if(!interest(r.feeds[s.id],u,distance2(where(s),where(r)),reach,teleport,now,out,merged,stats_.thinned))continue;
         out.player=s.id;out.generation=s.generation;
@@ -427,14 +506,14 @@ bool Relay::takeState(Player& s,size_t k,uint32_t version,const uint8_t* bytes,s
     auto& blob=s.states[k];
     if(!version){if(!blob.version)return false;blob={};++s.generation;return true;}
     blob.version=version;blob.bytes.assign(bytes,bytes+size);++s.generation;
-    for(auto id:s.nearby){auto it=players_.find(id);if(it!=players_.end()&&it->second.mode==bc::Version)share(it->second,s,k);}
+    for(auto id:s.nearby){auto it=players_.find(id);if(it!=players_.end()&&it->second.mode==bc::Version&&it->second.shown.count(s.id))share(it->second,s,k);}
     if(!s.link)for(auto& l:links_)if(l.exported.count(s.id))linkSendShare(l,s,k);
     return true;
 }
 void Relay::fetch(Player& r,uint64_t source,uint64_t now){
     auto it=players_.find(source);
 #ifndef MUTANT_RELAY_BCAST_FETCH_FAR
-    if(it==players_.end()||!r.nearby.count(source)){++stats_.notNear;return;}
+    if(it==players_.end()||!r.shown.count(source)){++stats_.notNear;return;}
 #else
     if(it==players_.end()||it->first==r.id){++stats_.notNear;return;}
 #endif
