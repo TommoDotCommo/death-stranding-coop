@@ -60,6 +60,32 @@ int main(){
     {bool threw=false;try{r.restore(json::parse("{\"format\":3}"));}catch(const std::exception&){threw=true;}CHECK(threw);}
     CHECK(w.call(ta2,"deleteObject","{\"id\":\""+id+"\"}",400).status==200);CHECK(w.objects()==0);
     CHECK(w.call(ta2,"createObject","not json",1).status==400);
+    // A structure the game already has an id for, sent again with it (README "An object's own id"): the id is kept when
+    // it has the game's shape and is free, the same object again is no second one, another player's id is refused.
+    {unsigned k=0;World o([&k]{return "o"+std::to_string(++k);});auto ann=tokenOf(o.signIn("steam-a","Ann","g")),bob=tokenOf(o.signIn("steam-b","Bob","g"));
+     const std::string old="bK3v9QmZ0aB1c",bobId=playerId("steam-b");
+     auto body=[&](const std::string& id){return "{\"t\":\"b\",\"q\":226,\"px\":1,\"py\":2,\"pz\":3,\"st\":\"30\",\"id\":\""+id+"\",\"tags\":[\"ps4\"],"
+         "\"mt\":[{\"c\":\"\",\"t\":0,\"mat\":[0,0,1000,0,0,0]},{\"c\":\"acct-original\",\"t\":0,\"mat\":[5]},{\"c\":\""+bobId+"\",\"t\":0,\"mat\":[7]}],"
+         "\"rmt\":[{\"c\":\"acct-other\",\"rmat\":[1]}]}";};
+     auto r=o.call(ann,"createObject",body(old),10);CHECK(r.status==200&&json::parse(r.body).get("id").string()==old&&o.objects()==1);
+     r=o.call(ann,"createObject",body(old),20);CHECK(r.status==200&&json::parse(r.body).get("id").string()==old&&json::parse(r.body).get("ut").integer()==10&&o.objects()==1);
+     CHECK(o.call(bob,"createObject",body(old),30).status==403&&o.objects()==1);
+     for(const char* bad:{"lK3v9QmZ0aB1c","BK3v9QmZ0aB1c","bK3v9QmZ0aB1","bK3v9QmZ0aB1cc","bK3v9QmZ-aB1c",""})CHECK(o.call(ann,"createObject",body(bad),40).status==400);
+     CHECK(o.objects()==1&&json::parse(o.call(ann,"createObject","{\"t\":\"b\",\"q\":226}",40).body).get("id").string()!=old&&o.objects()==2);
+     // Bob is handed it under that id, with the original service's accounts taken out of its materials (amounts and
+     // tags kept; the builder's own entry and a player of this world stay as they were).
+     auto got=json::parse(o.call(bob,"findQpidObjects","{\"q\":226,\"o\":{\"ct\":{\"b\":5}}}",50).body).get("n").get("oa");
+     const json::Value* x=nullptr;for(auto& g:got.items())if(g.get("id").string()==old)x=&g;CHECK(x!=nullptr);
+     if(x){auto& mt=x->get("mt").items();auto& rmt=x->get("rmt").items();
+         CHECK(mt.size()==3&&mt[0].get("c").string()==""&&mt[1].get("c").string()==""&&mt[1].get("mat").items()[0].integer()==5&&mt[2].get("c").string()==bobId);
+         CHECK(rmt.size()==1&&rmt[0].get("c").string()==""&&x->get("tags").items().size()==1&&x->get("tags").items()[0].string()=="ps4");}
+     // Stored so too: the world file has neither account, nor the id field in the body.
+     auto saved=o.snapshot().dump();CHECK(saved.find("acct-original")==std::string::npos&&saved.find("acct-other")==std::string::npos&&saved.find("\"st\":\"30\",\"id\"")==std::string::npos);
+     // An object stored before this (an older world file) is handed without them as well.
+     const std::string kept="{\"c\":\"\",\"rmat\":[1]}";auto at=saved.find(kept);CHECK(at!=std::string::npos);
+     if(at!=std::string::npos){saved.replace(at,kept.size(),"{\"c\":\"acct-older\",\"rmat\":[1]}");World back([]{return std::string("b");});back.restore(json::parse(saved));
+         auto again=json::parse(back.call(bob,"getQpidObjects","{\"ids\":[\""+old+"\"]}",60).body).get("objects");
+         CHECK(again.items().size()==1&&again.items()[0].get("rmt").items()[0].get("c").string()==""&&back.snapshot().dump().find("acct-older")!=std::string::npos);}}
     // Caps: players and objects per player.
     World full([&n]{return "t"+std::to_string(++n);});
     for(size_t i=0;i<MaxPlayers;++i)CHECK(full.signIn("k"+std::to_string(i),"p","g").status==200);

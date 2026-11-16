@@ -57,7 +57,7 @@ loopback, a LAN or a VPN.
 |---|---|
 | `GET …/auth/ds?provider=steam&display_name=&code=TICKET` | the player (stable id per account) and a session: token and gateway address; under identity keys only at `…/t/TICKET/auth/ds` with a launcher's ticket ("Identity") |
 | `…/gate/e/getVersion` | major 0, minor 12 (the game refuses anything else) |
-| `createObject`, `updateObject`, `deleteObject` | stored; the new id is the type letter and 12 characters (the game reads the kind from that letter); only the builder changes or removes an object; an upload the server policy does not let be shared is answered the same way and held for its builder ("Server policy"); over 4000 objects of one player, 403 |
+| `createObject`, `updateObject`, `deleteObject` | stored; the new id is the type letter and 12 characters (the game reads the kind from that letter), or the id the upload brings ("An object's own id"); only the builder changes or removes an object; an upload the server policy does not let be shared is answered the same way and held for its builder ("Server policy"); over 4000 objects of one player, 403; the account names in an upload's materials are kept for this server's players only ("An object's own id") |
 | `findQpidObjects` | the other players' objects in that area that every player is handed ("Server policy"), at most the asked number per type, never the asker's own, chosen as "Which objects a game is handed" says |
 | `getQpidObjects`, `reverseLookup` | from the stored objects and players |
 | `lookup` | a builder's name: this server's players by name only, a builder from a linked server as "Name · Home" ("Builder names") |
@@ -70,6 +70,34 @@ loopback, a LAN or a VPN.
 
 Limits: 16 players, 4000 objects built here per player, 20000 objects held from each other server, 4 MiB per body,
 32 connections.
+
+### An object's own id
+
+A structure that is already in a player's save may carry an id from the original online service. The game sends it
+again with that id when asked to (its own "re-create": the upload's body and `"id"`), and keeps its own id whatever the
+answer says. The player's mod asks it to for the save's older strand (`../mod/README.md`, "Offering your existing
+strand"). So `createObject` with `"id"`:
+
+- keeps the id when it has the game's shape: the type letter (the same as `t`, lower case) and 12 letters or digits,
+  and no object here has it; the upload then goes through the policy as any other (shared, held, kept, waiting);
+- answers the stored object, unchanged, when the same player already has an object here under that id (the same
+  structure sent twice): no second object;
+- refuses (403) an id another player's object has here, a remnant's, or an import's: the game would keep calling the
+  structure by an id that names someone else's object;
+- refuses (400) an id of any other shape (a capital first letter, which some ids of the original service have,
+  included).
+
+The id field itself is not stored in the body. What the game sends with an older structure also carries what the
+original service knew of it:
+
+- `mt` and `rmt` (materials delivered and repairs) name each contributor by account (`c`). An account that is not a
+  player of this world (the original service's accounts, another server's players) is replaced by `""`, the form the
+  game uses for the builder's own entry; the amounts stay. This is done when an upload is stored, when an object is
+  handed to a game and when it is given to a linked server, so objects stored before are handed without them too.
+- `tags` (`ps4`, `coop`: the game's own marks of the structure) are kept as they are.
+- `lp`, the like count, is kept as the object's starting likes, as for any upload.
+
+Built and tested without a game (2026-11-17). Not tried live: no game has sent a re-create to this server yet.
 
 ## The relay (`--relay-port`)
 
@@ -675,8 +703,11 @@ coop-world offer      --data world.json --player ID (--object ID | --all) [--no]
 - `offer_builds`: is what he builds while connected shared with the others. `yes`: shared (then as
   `accept_offers` says). `no`: stored for him and handed to nobody else, like a personal archive. `ask`: it waits
   for his answer; `offer` is his answer (yes, or `--no`: kept for him).
-- `offer_old`: whether the structures of his old strand may be taken over to this server, a standing yes or no
-  (default no). Recorded only: the server cannot yet tell an old structure from a new one.
+- `offer_old`: whether the structures of his old strand (what his save holds from before) may be offered to this
+  server, a standing yes or no (default no). The server tells his game's mod what applies ("What the game is told");
+  with its option `offer_strand` the mod then has the game upload them (`../mod/README.md`, "Offering your existing
+  strand"). The server itself cannot tell an old structure from a new one and does not enforce it: what is offered
+  goes through the policy as any upload.
 - `default` goes back to the server's value. A change applies to uploads from then on.
 
 What is kept or held for its builder, or waits, is handed to him only (the game asks for his own objects by id; it
@@ -805,7 +836,7 @@ learns it here, with one call of its own (`api.h`, `front.h`; built and tested w
 
 | Call | Answer |
 |---|---|
-| `GET …/coop/notices[?since=VERSION]` with the header `X-Coop-Token: TOKEN` | `format` 1, the world's display `name`, a `version`, `full`, and `objects`: his objects built here, each `id`, `kind` (ladder, cairn, …), `state` (`shared`, `held`, `kept`, `waiting`, `remnant`) and `why` (held: `build`, `member`, `limit`; kept: `choice`, `owner`, `server`; waiting: `you`, `owner`; else `""`) |
+| `GET …/coop/notices[?since=VERSION]` with the header `X-Coop-Token: TOKEN` | `format` 1, the world's display `name`, a `version`, `full`, `objects`: his objects built here, each `id`, `kind` (ladder, cairn, …), `state` (`shared`, `held`, `kept`, `waiting`, `remnant`) and `why` (held: `build`, `member`, `limit`; kept: `choice`, `owner`, `server`; waiting: `you`, `owner`; else `""`), and `offer_old`: what applies to his older strand here (`yes` or `no`: his choice, else the server's) |
 
 - **What is listed.** Every one of his objects (`full` true) on a first read, or when `since` is not a version of
   this process (the server started again, or a version it never gave); else only the objects whose state changed
@@ -846,7 +877,8 @@ good, the states of that player's objects.
   API, and the host's launcher has a Server owner window for the owner's signed calls (`../launcher/README.md`,
   "Server owner"); both built game-free and not seen on a screen. The game itself cannot ask (it does not know of
   them); the mod tells the player in the game what became of his uploads ("What the game is told").
-- `join` and `offer_old` are recorded only. There is no ban: `remove-player` does not stop anyone building again.
+- `join` is recorded only. `offer_old` is acted on by the player's mod, not by the server (above). There is no ban:
+  `remove-player` does not stop anyone building again.
 - What a game does when its upload is refused (403) after it built the structure is not known in full: live, once,
   it did not ask again and stayed up; whether it took the structure out of the player's world was not checked. The
   policy no longer refuses uploads for that reason; the hard cap still does. Unknown too: what a game does when an
@@ -999,7 +1031,13 @@ it does when one it was handed is no longer in the answer. Nothing of this has b
 `make test`: the core (`world_test.cpp`), the HTTP surface without sockets (`front_test.cpp`), the built server over a
 real socket (`test_server.py`), and a mutant for every protection (`test_mutants.py`): a call without a session, a
 change by someone who is not the builder, an object handed back to its builder, both caps, the like range, the secret
-prefix and the bearer token.
+prefix and the bearer token. An object's own id, in `world_test.cpp`: an upload with an id of the game's shape keeps it,
+the same id again from the same player answers the same object (no second one), another player's id is refused and
+the object stays its builder's, six ids of other shapes are refused, an upload without an id still gets a new one; the
+other player is handed it under that id with the original service's accounts taken out of `mt` and `rmt` (amounts,
+the builder's own entry, a player of this world and `tags` kept), the world file has neither account nor the id field,
+and an object of an older world file is handed without them. Six mutants must fail it (`WORLD_ID_SHAPE`,
+`WORLD_ID_AGAIN`, `WORLD_ID_TAKEN`, `WORLD_ID_KEEP`, `WORLD_STRIP_STORE`, `WORLD_STRIP_SERVE`).
 
 Server policy: `policy_test.cpp` (the three presets and twenty-five settings that are refused, `near_cap` among them; `build` nobody and
 members and the limit: uploads answered in the game's shape and held, handed to nobody else and never exported,
@@ -1063,7 +1101,8 @@ refused; the token call's bodies in the wrong form and a full world; a new token
 expiry, a token kept good by reads, saved, taken again after a restart within the idle time, and a world file with a
 token for an unknown account refused). Ten mutants must fail it (`NOTICES_OTHERS`, `NOTICES_IMPORTS`,
 `NOTICES_TOKEN_TICKET`, `NOTICES_EXPIRY`, `NOTICES_STAMP`, `NOTICES_SINCE`, `NOTICES_KEPT_WHY`, `NOTICES_EPOCH`,
-`NOTICES_SAVE`, `TICKET_REPLACE`). `keys_test.cpp`: under keys the token is taken by a signed call for the signer
+`NOTICES_SAVE`, `TICKET_REPLACE`), and `NOTICES_OFFER_OLD` (what applies to his older strand in every answer: the
+server's no, his yes, the server's yes with his no, and his choice set back to the server's). `keys_test.cpp`: under keys the token is taken by a signed call for the signer
 only (`API_UNSIGNED` and `API_SIGNER_PLAYER` fail it too) and read unsigned. `test_server.py` on loopback: a token,
 a first read, a held ladder listed with its reason and nothing of another player's, the token in the address refused
 and never in `--trace`; after `player-set` and `review --accept-player` on the stopped world and a start, the ladder

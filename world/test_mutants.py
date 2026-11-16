@@ -3,7 +3,7 @@ from pathlib import Path
 import os,subprocess,sys,tempfile
 from concurrent.futures import ThreadPoolExecutor
 ROOT=Path(__file__).resolve().parent
-families=[('world_test.cpp',['world.cpp'],['WORLD_NO_TOKEN','WORLD_OWNER','WORLD_OWN','WORLD_OBJECT_CAP','WORLD_PLAYER_CAP','WORLD_LIKE_RANGE','WORLD_ID_LETTER','WORLD_LIKES_MINE','WORLD_LIKES_SINCE']),
+families=[('world_test.cpp',['world.cpp'],['WORLD_NO_TOKEN','WORLD_OWNER','WORLD_OWN','WORLD_OBJECT_CAP','WORLD_PLAYER_CAP','WORLD_LIKE_RANGE','WORLD_ID_LETTER','WORLD_LIKES_MINE','WORLD_LIKES_SINCE','WORLD_ID_SHAPE','WORLD_ID_AGAIN','WORLD_ID_TAKEN','WORLD_ID_KEEP','WORLD_STRIP_STORE','WORLD_STRIP_SERVE']),
           ('policy_test.cpp',['world.cpp'],['POLICY_PLAYERS','POLICY_BUILD_NOBODY','POLICY_BUILD_MEMBERS','POLICY_LIMIT','POLICY_ASK','POLICY_REVIEW','POLICY_PENDING_SERVED','POLICY_OFFER_NO_SERVED',
                                              'POLICY_REMNANT_CHANGE','POLICY_REMNANT_LIKES','POLICY_PLAYER_ANY','POLICY_WITHDRAW_STAY_REMOVES','POLICY_WITHDRAW_GO_KEEPS','POLICY_REMOVE_PLAYER_OTHERS',
                                              'POLICY_EXPORT_PENDING','POLICY_SAVE_LOST','POLICY_HELD_SERVED','POLICY_HELD_RELEASE']),
@@ -16,7 +16,7 @@ families=[('world_test.cpp',['world.cpp'],['WORLD_NO_TOKEN','WORLD_OWNER','WORLD
           ('api_test.cpp',['front.cpp','api.cpp','link.cpp','world.cpp','identity.cpp','signatures.cpp','../vendor/monocypher/monocypher.c','../vendor/monocypher/monocypher-ed25519.c'],['API_METHOD','API_KEY','API_STRICT','API_CHOICES_MEMBER','API_CHOICES_ROOM','API_ALL_IMPLIED','API_MINE_OTHERS','API_MINE_IMPORTS','FRONT_PREFIX',
                                                                                                                                                                          'FRIENDS_SAVE_LOST','CURATE_FRIENDS_NONE']),
           ('notices_test.cpp',['front.cpp','api.cpp','link.cpp','world.cpp','identity.cpp','signatures.cpp','../vendor/monocypher/monocypher.c','../vendor/monocypher/monocypher-ed25519.c'],
-           ['NOTICES_OTHERS','NOTICES_IMPORTS','NOTICES_TOKEN_TICKET','NOTICES_EXPIRY','NOTICES_STAMP','NOTICES_SINCE','NOTICES_KEPT_WHY','NOTICES_EPOCH','NOTICES_SAVE','TICKET_REPLACE']),
+           ['NOTICES_OTHERS','NOTICES_IMPORTS','NOTICES_TOKEN_TICKET','NOTICES_EXPIRY','NOTICES_STAMP','NOTICES_SINCE','NOTICES_KEPT_WHY','NOTICES_EPOCH','NOTICES_SAVE','TICKET_REPLACE','NOTICES_OFFER_OLD']),
           ('identity_test.cpp',['identity.cpp','signatures.cpp','../vendor/monocypher/monocypher.c','../vendor/monocypher/monocypher-ed25519.c'],
            ['SIGN_NO_VERIFY','SIGN_REPLAY','SIGN_WINDOW','SIGN_BODY','SIGN_TARGET','SIGN_SERVER','SIGN_NONCE_CAP']),
           ('keys_test.cpp',['front.cpp','api.cpp','link.cpp','world.cpp','relay.cpp','identity.cpp','signatures.cpp','../vendor/monocypher/monocypher.c','../vendor/monocypher/monocypher-ed25519.c'],

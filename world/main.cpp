@@ -200,7 +200,7 @@ std::string policyText(const world::Policy& p,bool table){
         std::string differs=items[i].second==preset[i].second?"":" (preset: "+preset[i].second+")";
         if(table)out+="  "+items[i].first+std::string(15-items[i].first.size(),' ')+items[i].second+differs+"\n";
         else out+=std::string(i?",":"")+" "+items[i].first+" "+items[i].second+differs;}
-    if(table)out+="join and offer_old are recorded only; offer_builds and offer_old are what a player who chose nothing has (coop-world players)\n";
+    if(table)out+="join is recorded only; offer_old is acted on by a player's mod (offer_strand); offer_builds and offer_old are what a player who chose nothing has (coop-world players)\n";
     return out;
 }
 // The policy commands on a world file (README, "Server policy"): -1 when argv[1] is not one of them.

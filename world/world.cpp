@@ -56,6 +56,12 @@ bool wholeNumber(const std::string& s,int64_t& out){
     if(i==s.size())return false;
     for(size_t k=i;k<s.size();++k)if(s[k]<'0'||s[k]>'9')return false;
     out=std::stoll(s);return true;}
+// An object id of the game's own shape for a type letter: the letter and 12 letters or digits (what the game reads the
+// kind from, and the ids this server makes).
+bool gameIdText(const std::string& id,const std::string& type){
+    if(id.size()!=13||type.size()!=1||id[0]!=type[0])return false;
+    for(size_t i=1;i<id.size();++i)if(!id[i]||!std::strchr(Digits62,id[i]))return false;
+    return true;}
 Value triple(const Value& post,const char* a,const char* b,const char* c){Value v=Value::array();v.push(post.get(a).integer());v.push(post.get(b).integer());v.push(post.get(c).integer());return v;}
 // UTF-8: how many bytes the character that starts with `c` has (a byte that starts none counts as one), and how many
 // characters a text has.
@@ -238,6 +244,12 @@ Reply World::notices(const std::string& token,const std::string& since,int64_t n
         v.set("why",ob.share=="held"?ob.held:ob.share=="kept"?ob.kept:ob.share=="ask"?std::string("you"):ob.share=="review"?std::string("owner"):std::string());
         list.push(v);}
     Value out=Value::object();out.set("format",1);out.set("name",name_);out.set("version",epoch_+"-"+std::to_string(stamps_));out.set("full",full);out.set("objects",list);
+    // What applies to his older strand here (his choice, else the policy's): his game's mod offers it only on "yes".
+#ifndef MUTANT_NOTICES_OFFER_OLD
+    out.set("offer_old",found->second.offerOld.empty()?policy_.offerOld:found->second.offerOld);
+#else
+    out.set("offer_old",policy_.offerOld);
+#endif
     return ok(out);
 }
 bool World::relayAdmit(uint64_t id,const std::string& token,const std::string& groupKey,int64_t now){
@@ -292,12 +304,30 @@ Reply World::signInLocked(const std::string& key,const std::string& displayName,
     session.set("properties",Value::object());session.set("roles",Value::array());
     Value out=Value::object();out.set("user",user);out.set("session",session);return ok(out);
 }
+json::Value World::servedPost(const Value& post) const {
+    Value out=post;
+    for(const char* k:{"mt","rmt"}){
+        if(!post.get(k).isArray())continue;
+        Value list=Value::array();
+        for(auto e:post.get(k).items()){
+            // A contributor's account: "" is the builder's own entry (the game sends it so for its own player); a player
+            // of this world stays; any other (the original online service's accounts, another server's) is taken out.
+            if(e.isObject()&&e.has("c")&&!(e.get("c").isString()&&(e.get("c").string().empty()||playerById(e.get("c").string()))))e.set("c","");
+            list.push(e);}
+        out.set(k,list);}
+    return out;
+}
 json::Value World::objectResponse(const Object& o) const {
     const Value& p=o.post;Value r=Value::object();
     r.set("id",o.id);r.set("c",o.creator);r.set("t",p.get("t"));
     r.set("m",triple(p,"x","y","m"));r.set("l",triple(p,"px","py","pz"));r.set("r",triple(p,"rx","ry","rz"));
     r.set("exp",p.get("exp").integer());r.set("lp",o.likes);r.set("ut",o.updated);r.set("q",p.get("q").integer());
-    r.set("mt",p.has("mt")?p.get("mt"):Value::array());r.set("rmt",p.has("rmt")?p.get("rmt"):Value::array());r.set("bgs",Value::array());
+#ifndef MUTANT_WORLD_STRIP_SERVE
+    const Value q=servedPost(o.post);
+#else
+    const Value& q=o.post;
+#endif
+    r.set("mt",q.has("mt")?q.get("mt"):Value::array());r.set("rmt",q.has("rmt")?q.get("rmt"):Value::array());r.set("bgs",Value::array());
     r.set("st",p.get("st").isString()?p.get("st"):Value(""));
     Value comments=Value::array();if(p.get("c").isObject())comments.push(p.get("c"));r.set("cm",comments);
     for(const char* k:{"ri","si","bi","pi","vi","ei","ci"})if(p.get(k).isObject())r.set(k,p.get(k));
@@ -330,18 +360,46 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
         if(!in.get("t").isString())return refuse(400,"bad-object","object type missing");
         // The hard cap on what one player stores here (the server's memory and disk). What the policy does not let him
         // share is not refused: his game builds in his own world whatever a server says, so the server holds it for him.
-        size_t mine=0;for(auto& o:objects_)if(o.second.creator==me.id&&o.second.originServer.empty()&&!o.second.remnant)++mine;
-#ifndef MUTANT_WORLD_OBJECT_CAP
-        if(mine>=MaxObjectsPerPlayer){note("refused createObject: "+me.id+" has too many");return refuse(403,"too-many","too many objects");}
-#endif
         // The game reads an object's kind from the first letter of its id (its own ids are the type letter and 12
         // characters): an id of any other shape makes the builder's game delete its upload at once.
         const std::string type=in.get("t").string();
 #ifndef MUTANT_WORLD_ID_LETTER
         if(type.size()!=1||type[0]<'a'||type[0]>'z')return refuse(400,"bad-object","object type must be one letter");
 #endif
-        Object o;
-        do{
+        // A structure the game already has an id for, sent again with that id (its "re-create": the same body and
+        // "id"). The game keeps its own id whatever the answer says, so the server keeps it or refuses: a new id would
+        // leave the game and the server naming the structure differently.
+        std::string given;
+        if(in.has("id")){
+            given=in.get("id").string();
+#ifndef MUTANT_WORLD_ID_SHAPE
+            if(!gameIdText(given,type))return refuse(400,"bad-id","an object id is the type letter and 12 letters or digits");
+#endif
+            if(auto found=objects_.find(given);found!=objects_.end()){
+                const Object& was=found->second;
+                if(was.creator==me.id&&was.originServer.empty()&&!was.remnant){
+#ifndef MUTANT_WORLD_ID_AGAIN
+                    // The same structure again (a second offer, a game that did not see the first answer): no second object.
+                    note("object "+given+" sent again by "+me.name+": the same object");return ok(objectResponse(was));
+#else
+                    given.clear();
+#endif
+                }
+#ifndef MUTANT_WORLD_ID_TAKEN
+                else{note("refused createObject: "+given+" is "+(!was.originServer.empty()?"imported":was.remnant?"withdrawn":"another player's"));
+                     return refuse(403,"id-taken","that object id is not yours here");}
+#endif
+            }
+#ifdef MUTANT_WORLD_ID_KEEP
+            given.clear();
+#endif
+        }
+        size_t mine=0;for(auto& o:objects_)if(o.second.creator==me.id&&o.second.originServer.empty()&&!o.second.remnant)++mine;
+#ifndef MUTANT_WORLD_OBJECT_CAP
+        if(mine>=MaxObjectsPerPlayer){note("refused createObject: "+me.id+" has too many");return refuse(403,"too-many","too many objects");}
+#endif
+        Object o;o.id=given;
+        while(o.id.empty()||(given.empty()&&objects_.count(o.id))){
             const char* digits="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 #ifndef MUTANT_WORLD_ID_LETTER
             o.id=type;
@@ -350,8 +408,11 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
 #endif
             uint64_t h=fnv(me.id,nextObject_++*0x9e3779b97f4a7c15ull);
             for(int i=0;i<12;++i){o.id+=digits[h%62];h/=62;if(i==5)h^=fnv(o.id,nextObject_);}
-        }while(objects_.count(o.id));
-        o.creator=me.id;o.post=in;o.updated=now;o.likes=in.get("lp").integer();o.name=me.name;
+        }
+        o.creator=me.id;o.post=in;o.post.erase("id");o.updated=now;o.likes=in.get("lp").integer();o.name=me.name;
+#ifndef MUTANT_WORLD_STRIP_STORE
+        o.post=servedPost(o.post);
+#endif
         // Kept for its builder only, held (the policy does not let him share it), waiting for his answer, or offered
         // (and then as accept_offers says).
         const std::string& choice=me.offerBuilds.empty()?policy_.offerBuilds:me.offerBuilds;
@@ -696,7 +757,7 @@ std::string World::homeName(const std::string& server) const {
 }
 Shared World::sharedOf(const Object& o) const {
     Shared s;bool imported=!o.originServer.empty();
-    s.server=imported?o.originServer:serverId_;s.id=imported?o.originId:o.id;s.creator=o.creator;s.updated=o.updated;s.likes=o.likes;s.post=o.post;
+    s.server=imported?o.originServer:serverId_;s.id=imported?o.originId:o.id;s.creator=o.creator;s.updated=o.updated;s.likes=o.likes;s.post=servedPost(o.post);
     s.home=imported?o.home:name_;   // an import passes on what its first server said of itself, nothing made up here
     if(imported)s.name=o.originName;else if(o.remnant)s.name=o.name;else if(auto* p=playerById(o.creator))s.name=p->name;else s.name=o.name;
     return s;

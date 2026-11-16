@@ -137,8 +137,19 @@ static void lifetime(){
     for(auto x:tokens.items()){x.set("account","zed");list.push(x);}
     auto wrong=saved;wrong.set("notice_tokens",list);bool refused=false;try{World x;x.restore(wrong);}catch(const std::exception&){refused=true;}CHECK(refused);
 }
+static void older(){
+    // What applies to his older strand, in every answer: his own choice, else the server's (the mod offers only on yes).
+    Server s;s.signIn("ann","Ann");s.signIn("bob","Bob");auto ta=s.token("ann"),tb=s.token("bob");
+    CHECK(s.doc(ta).get("offer_old").string()=="no"&&s.doc(tb).get("offer_old").string()=="no");
+    s.w.setPlayer(playerId("ann"),"offer_old=yes");auto v=s.doc(ta).get("version").string();
+    CHECK(s.doc(ta,v).get("offer_old").string()=="yes"&&s.doc(tb).get("offer_old").string()=="no");
+    // The server's default changes for whoever chose nothing; a player's no stays no.
+    s.w.setPolicy([&]{auto p=s.w.policy();p.offerOld="yes";return p;}());s.w.setPlayer(playerId("ann"),"offer_old=no");
+    CHECK(s.doc(ta).get("offer_old").string()=="no"&&s.doc(tb).get("offer_old").string()=="yes");
+    s.w.setPlayer(playerId("ann"),"offer_old=default");CHECK(s.doc(ta).get("offer_old").string()=="yes");
+}
 int main(){
-    reads();states();scope();lifetime();
+    reads();states();scope();lifetime();older();
     if(failures){std::fprintf(stderr,"notices oracle: %u failures\n",failures);return 1;}
     std::puts("notices tests passed");return 0;
 }
