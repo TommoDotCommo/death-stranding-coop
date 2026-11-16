@@ -10,6 +10,12 @@ struct Config {
     std::string role="none", progressMismatch="warn", joinMove="log", peer, nickname, provider, fault="none", bind;   // bind: local IPv4 for a non-loopback peer (empty = the route's)
     uint32_t peerAddress=0x7f000001, bindAddress=0;                       // host byte order; 0 = choose the route's local address
     uint64_t session=0;
+    // Group play: a config without `peer` has no partner. The direct socket is never opened and nothing is sent to a
+    // partner; other players are met through the players' own server (`server`, `relay`, `others`).
+    bool group=false;
+    // The players' own server when it is not on this PC or the partner's: a numeric IPv4 address that `relay` and
+    // `online_server` may then name. The proxy's network policy must list it too (COOP_NETWORK_PEERS). 0 = none.
+    std::string server;uint32_t serverAddress=0;
     bool logging=true, required=false, impairment=false, discovery=false, selfTick=false, gameThread=false, puppetProbe=false, virtualPad=false, autoContinue=false, joinAtHost=false;
     // How the partner is shown from the start, without a test command: "off" (default), "peer" (the game's resident
     // double) or "own" (a Sam the mod makes; the double until it exists). Requires puppet_probe and an explicit role.
@@ -57,8 +63,9 @@ Config parseConfig(const std::string&);
 // A numeric IPv4 address a co-op peer may have: loopback 127.0.0.0/8, or any unicast address (LAN, a VPN such as
 // Tailscale, or public). Refuses names, 0.0.0.0/8, broadcast, multicast and reserved 240/4. Host byte order.
 std::optional<uint32_t> peerAddress(const std::string&);
-// A private online server's sign-in address: "http://A.B.C.D:PORT/path" with A.B.C.D loopback (127/8) or exactly
-// `peer` (host byte order), and a path of letters, digits and / _ - . only. Returns it unchanged, or nullopt.
+// A private online server's sign-in address: "http://A.B.C.D:PORT/path" with A.B.C.D loopback (127/8), exactly
+// `peer`, or exactly `server` when one is listed (host byte order; 0 = none), and a path of letters, digits and
+// / _ - . only. Returns it unchanged, or nullopt.
 constexpr size_t OnlineAddressMax=120;
-std::optional<std::string> onlineAddress(const std::string& url,uint32_t peer);
+std::optional<std::string> onlineAddress(const std::string& url,uint32_t peer,uint32_t server=0);
 }

@@ -122,6 +122,32 @@ int main() {
      assert(refused(r("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"a b\",\"player_id\":77")));
      assert(refused(r("\"relay_key\":\"k\"")));
      assert(refused(withKeys(probe,"\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":77")));}   // others off
+    // Group play: a config without `peer` has no partner; the players' own server is listed as `server`, and only a
+    // listed address (or loopback, or the partner's) may be the relay or the online server.
+    {std::string synthetic=R"({"server":"10.1.2.3","slot":0,"nickname":"test","provider":"synthetic","session":123})";
+     auto c=mod::parseConfig(synthetic);assert(c.group&&c.peer.empty()&&c.role=="none"&&c.server=="10.1.2.3"&&c.serverAddress==0x0a010203u&&c.slot==0&&c.peerSlot==1);
+     {auto five=synthetic;five.replace(five.find("\"slot\":0"),8,"\"slot\":5");assert(mod::parseConfig(five).slot==5&&mod::parseConfig(five).peerSlot==0);}
+     assert(!mod::parseConfig(good).group&&!mod::parseConfig(good).serverAddress);
+     assert(refused(R"({"slot":0,"nickname":"test","provider":"synthetic","session":123})"));                  // neither a partner nor a server
+     for(auto bad:{"\"localhost\"","\"224.0.0.1\"","\"0.0.0.0\"","\"10.1.2.3:80\"","true","\"\""}){auto b=synthetic;b.replace(b.find("\"10.1.2.3\""),10,bad);assert(refused(b));}
+     for(auto more:{"\"role\":\"host\"","\"role\":\"guest\"","\"peer_slot\":1","\"bind\":\"10.1.2.9\"","\"share_orders\":true","\"share_roads\":true","\"share_enemies\":true","\"share_saved_structures\":true"})assert(refused(withKeys(synthetic,more)));
+     assert(mod::parseConfig(withKeys(synthetic,"\"role\":\"none\",\"share_orders\":false,\"share_environment\":\"off\",\"partner\":\"off\"")).group);
+     std::string game=R"({"server":"10.1.2.3","slot":0,"nickname":"test","provider":"game","session":123,"game_thread":true,"puppet_probe":true,"required":true,)"+pin+"}";
+     assert(mod::parseConfig(game).group&&mod::parseConfig(game).puppetProbe);
+     for(auto more:{"\"partner\":\"own\"","\"partner\":\"peer\"","\"join_at_host\":true","\"share_environment\":\"rain\"","\"share_orders\":true,\"share_rewards\":true"})assert(refused(withKeys(game,more)));
+     auto full=mod::parseConfig(withKeys(game,"\"partner_tag\":true,\"others\":15,\"relay\":\"10.1.2.3:49100\",\"relay_key\":\"w77\",\"player_id\":999999999999999,\"online_server\":\"http://10.1.2.3:49100/w77/auth/ds\""));
+     assert(full.group&&full.others==15&&full.relayAddress==0x0a010203u&&full.relayPort==49100&&full.playerId==999999999999999ull&&full.onlineServer=="http://10.1.2.3:49100/w77/auth/ds"&&full.partnerTag);
+     assert(refused(withKeys(game,"\"others\":15,\"relay\":\"10.1.2.3:49100\",\"relay_key\":\"w77\",\"player_id\":1000000000000000")));   // an id is at most 15 digits
+     auto o=withKeys(game,"\"others\":4");
+     assert(refused(withKeys(o,"\"relay\":\"10.9.9.9:49100\",\"relay_key\":\"k\",\"player_id\":7")));           // not the listed server
+     assert(mod::parseConfig(withKeys(o,"\"relay\":\"127.0.0.1:49100\",\"relay_key\":\"k\",\"player_id\":7")).relayAddress==0x7f000001u);   // the server's own PC
+     assert(refused(withKeys(game,"\"online_server\":\"http://10.9.9.9:49100/w77/auth/ds\"")));
+     assert(mod::parseConfig(withKeys(game,"\"online_server\":\"http://127.0.0.1:49100/w77/auth/ds\"")).group);
+     assert(mod::onlineAddress("http://10.1.2.3:80/a",0x7f000001,0x0a010203)&&!mod::onlineAddress("http://10.1.2.4:80/a",0x7f000001,0x0a010203)&&!mod::onlineAddress("http://10.1.2.3:80/a",0x7f000001));
+     // A partner and a server on a third PC: both addresses are listed, nothing else.
+     auto both=withKeys(probe,"\"others\":4,\"server\":\"10.1.2.3\"");
+     assert(!mod::parseConfig(both).group&&mod::parseConfig(withKeys(both,"\"relay\":\"10.1.2.3:8090\",\"relay_key\":\"k\",\"player_id\":7")).relayAddress==0x0a010203u);
+     assert(refused(withKeys(both,"\"relay\":\"10.9.9.9:8090\",\"relay_key\":\"k\",\"player_id\":7")));}
     assert(mod::parseConfig(withKeys(threaded,"\"virtual_pad\":true,\"required\":true")).virtualPad);
     assert(mod::parseConfig(withKeys(good,"\"virtual_pad\":true,\"required\":true,\"self_tick\":true")).virtualPad);
     assert(refused(withKeys(threaded,"\"virtual_pad\":true")));

@@ -87,6 +87,12 @@ int main() {
     NetPolicy observe; observe.mode = NetMode::log_only;
     CHECK(!net_refuses(observe, NetVerdict::deny));
 
+    // The mod config's `server` must be an address the policy reaches: loopback or a listed peer, nothing else.
+    CHECK(net_reaches(p, 0x7f000001u) && net_reaches(p, 0xc0a80114u) && net_reaches(p, 0x64400007u));
+    CHECK(!net_reaches(p, 0xc0a80115u) && !net_reaches(p, 0x08080808u));
+    CHECK(!net_reaches(NetPolicy{}, 0x0a000002u));
+    CHECK(net_reaches(observe, 0x08080808u));   // log-only refuses nothing (and the proxy refuses a game-thread mod under it)
+
     if(failures) { std::printf("%d failure(s)\n", failures); return 1; }
     std::printf("network policy: all checks passed\n");
     return 0;
