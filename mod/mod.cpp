@@ -3963,7 +3963,7 @@ unsigned mod_status(char* out,unsigned cap) {
           <<",\"hosted\":"<<k.hosted<<",\"visits\":"<<k.joined<<",\"released\":"<<k.released<<",\"states\":"<<k.states<<",\"reports\":"<<k.reports
           <<",\"states_taken\":"<<k.statesTaken<<",\"reports_taken\":"<<k.reportsTaken<<",\"damage_applied\":"<<k.damageApplied<<",\"gazers_applied\":"<<k.gazersApplied
           <<",\"kills_taken\":"<<k.killsTaken<<",\"kills_refused\":"<<k.killsRefused<<",\"own_first\":"<<k.ownFirst<<",\"commands\":"<<k.commands<<",\"writes\":"<<k.writes<<"}";}
-        o<<",\"received\":{\"on\":"<<(r.receivedOn?"true":"false")<<",\"built\":"<<r.receivedBuilder.changed()<<",\"skipped\":"<<r.receivedBuilder.skipped()<<"}";
+        o<<",\"received_structures\":{\"on\":"<<(r.receivedOn?"true":"false")<<",\"built\":"<<r.receivedBuilder.changed()<<",\"skipped\":"<<r.receivedBuilder.skipped()<<"}";
         {mod::strand::Poller::Counters k;if(r.strandPoller)k=r.strandPoller->counters();
          o<<",\"strand\":{\"on\":"<<(r.strandPoller?"true":"false")<<",\"reads\":"<<k.reads<<",\"answers\":"<<k.answers<<",\"failures\":"<<k.failures<<",\"told\":"<<k.told
           <<",\"known\":"<<k.known<<",\"refused\":"<<(k.refused?"true":"false")<<",\"pending\":"<<(r.notices?r.notices->pending():0)<<"}";}

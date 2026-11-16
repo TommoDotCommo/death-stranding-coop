@@ -2000,7 +2000,7 @@ the option, without `online_server` or before the game is signed in.
 
 Log: `RECEIVED on` (and `RECEIVED off` when the sign-in goes), one `RECEIVED building <kind> <online id> (range and
 placement checks skipped): record N, type T, +0xaa 20 -> 10` per record, and `RECEIVED first scan: X ms` once.
-`mod_status` has `"received": {on, built, skipped}` (skipped: chosen, then not written because the bytes had changed
+`mod_status` has `"received_structures": {on, built, skipped}` (skipped: chosen, then not written because the bytes had changed
 or the write failed).
 
 Cost: each tick copies the construction table once (640 slots of 0x710 bytes, about 1.1 MB, the copy the structure
