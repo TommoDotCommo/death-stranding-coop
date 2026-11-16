@@ -26,11 +26,20 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
         if result.returncode != 1 or 'launcher oracle:' not in result.stderr:
             raise SystemExit(f'SURVIVED or crashed {name}: {result.returncode}\n{result.stdout}\n{result.stderr}')
         return name
-    for name in mutants.parallel(one, ['CONFIG_ROLE', 'CONFIG_PLAY', 'WORLD_GUEST_ADDRESS', 'WORLD_ONE_ACCOUNT', 'WORLD_BIND', 'WORLD_SOLO', 'WORLD_GUEST_DECIDES', 'LOBBY_WORLD_BIT', 'LOBBY_SECRET', 'BACKUP_LINKS', 'OUTPUT_LINKS',
+    for name in mutants.parallel(one, ['CONFIG_ROLE', 'CONFIG_PLAY', 'WORLD_GUEST_ADDRESS', 'WORLD_ONE_ACCOUNT', 'WORLD_BIND', 'WORLD_SOLO', 'WORLD_GUEST_DECIDES', 'LOBBY_WORLD_BIT', 'LOBBY_SECRET', 'GROUP_PEER', 'GROUP_PEERS', 'GROUP_NO_RELAY', 'GROUP_KEY', 'GROUP_ID', 'GROUP_ROUTE', 'GROUP_INVITE_KIND', 'GROUP_SAME_PC', 'DIAG_GROUP_KEY', 'BACKUP_LINKS', 'OUTPUT_LINKS',
                                       'MISSING_CONFIG_CLOSES', 'TICKET_TARGET', 'TICKET_EXPIRY', 'TICKET_NETWORK',
                                       'BACKUP_RUNNING', 'NESTED_LAB', 'NESTED_RELEASE',
                                       'DIAG_SECRET', 'DIAG_ADDRESS', 'DIAG_USER', 'DIAG_BOUND', 'FIREWALL_BLOCK_WINS', 'FIREWALL_ANY_PROGRAM', 'SETUP_OVERWRITE', 'SETUP_REMOVE_ANY']):
         print('killed', name)
+    # The socket test (test_group.py) must fail too when the games' key is not the server's, the server has no relay,
+    # or a joiner on the host's PC signs in as the host's account.
+    def group(name):
+        result = run([sys.executable, '-B', 'test_group.py', str(work/name), '../world/build/coop-world', '../mod/build/coop-swarm'])
+        if result.returncode != 1 or 'group server oracle:' not in result.stderr:
+            raise SystemExit(f'SURVIVED or crashed {name} (socket test): {result.returncode}\n{result.stdout}\n{result.stderr}')
+        return name
+    for name in map(group, ['GROUP_KEY', 'GROUP_NO_RELAY', 'GROUP_SAME_PC']):
+        print('killed', name, '(socket test)')
     def save(name):
         exe = work/name
         result = run(['g++', '-std=c++17', '-O1', '-Wall', '-Wextra', '-Werror', '-DMUTANT_'+name,

@@ -27,7 +27,28 @@ static void safeAncestors(const std::filesystem::path& path) {
 unsigned worldPort(const Session& s){return 49100+(s.port-49000);}
 std::string worldPrefix(const Session& s){return "w"+std::to_string(s.secret);}
 namespace {bool onePc(const Session& s){auto a=mod::peerAddress(s.peer);return a&&(*a>>24)==127;}}
+namespace {
+// Group play: where this game reaches the server (the host's own game on loopback), and whether that is the host's PC.
+std::string groupServer(const Session& s){return s.group==Group::Host?"127.0.0.1":s.server;}
+[[maybe_unused]] bool loopback(const std::string& address){auto a=mod::peerAddress(address);return a&&(*a>>24)==127;}
+}
+std::string networkPeers(const Session& s){
+#ifndef MUTANT_GROUP_PEERS
+    if(s.group!=Group::None)return groupServer(s);
+#endif
+    return s.peer;
+}
+std::string relayAddress(const Session& s){return groupServer(s)+":"+std::to_string(worldPort(s));}
 std::string worldAddress(const Session& s){
+    if(s.group!=Group::None){
+        // A joiner who reaches the server on loopback is on the host's PC, so on the host's Steam account: the address
+        // names him by his player id. The host and everybody on another PC are their own Steam accounts.
+        std::string who;
+#ifndef MUTANT_GROUP_SAME_PC
+        if(s.group==Group::Join&&loopback(s.server))who="/k/p"+std::to_string(s.playerId);
+#endif
+        return "http://"+groupServer(s)+":"+std::to_string(worldPort(s))+"/"+worldPrefix(s)+who+"/auth/ds";
+    }
 #ifndef MUTANT_WORLD_GUEST_ADDRESS
     std::string at=s.host?"127.0.0.1":s.peer;
 #else
@@ -40,6 +61,16 @@ std::string worldAddress(const Session& s){
     return "http://"+at+":"+std::to_string(worldPort(s))+"/"+worldPrefix(s)+who+"/auth/ds";
 }
 std::vector<std::string> worldArguments(const Session& s,const std::string& dataFile){
+    if(s.group==Group::Host){
+        // The group's server: the shared world and the relay on one port number (TCP and UDP), one key for both, on
+        // every address of this PC (the host's game uses loopback, the others a LAN or VPN address from the invite).
+        std::vector<std::string> a{"--port",std::to_string(worldPort(s)),"--bind","0.0.0.0","--prefix",worldPrefix(s),"--data",dataFile,"--idle-exit","21600"};
+#ifndef MUTANT_GROUP_NO_RELAY
+        for(auto more:{std::string("--relay-port"),std::to_string(worldPort(s)),std::string("--relay-key"),worldPrefix(s)})a.push_back(more);
+#endif
+        return a;
+    }
+    if(s.group!=Group::None)return {};
     if(!s.host||!s.sharedWorld||s.solo)return {};
 #ifndef MUTANT_WORLD_BIND
     std::string bind=onePc(s)?"127.0.0.1":"0.0.0.0";
@@ -53,6 +84,26 @@ std::string config(const Session& s) {
     if(s.name.empty()||s.name.size()>32)throw std::runtime_error("Your name must have 1..32 characters.");
     for(unsigned char c:s.name)if(c<32||c>126||c=='"'||c=='\\')throw std::runtime_error("Use a name with plain letters, numbers and spaces.");
     auto slot=s.port-49000;
+#ifndef MUTANT_GROUP_PEER
+    if(s.group!=Group::None){
+        // Group play: no peer, no role and nothing shared over a two-player session. The server is the only address;
+        // the other players are shown (presence only) with their names; the shared world is the server's own.
+        auto server=groupServer(s);
+        if(!mod::peerAddress(server))throw std::runtime_error("The group server's address must be a numeric IPv4 address.");
+        if(!playerIdValid(s.playerId))throw std::runtime_error("This launcher has no player number yet. Start it again.");
+#ifndef MUTANT_GROUP_KEY
+        const std::string key=worldPrefix(s);
+#else
+        const std::string key="w"+std::to_string(s.secret^1);
+#endif
+        std::string json="{\"server\":\""+server+"\",\"slot\":"+std::to_string(slot)+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)
+            +",\"required\":true,\"logging\":true,\"game_thread\":true,\"puppet_probe\":true,\"partner_tag\":true,\"others\":"+std::to_string(GroupOthers)
+            +",\"relay\":\""+relayAddress(s)+"\",\"relay_key\":\""+key+"\",\"player_id\":"+std::to_string(s.playerId)
+            +",\"online_server\":\""+worldAddress(s)+"\",\"discovery_sha256\":\""+mod::discovery::PinnedHash+"\"}\n";
+        mod::parseConfig(json);
+        return json;
+    }
+#endif
 #ifdef MUTANT_CONFIG_ROLE
     bool host=!s.host;
 #else
@@ -289,6 +340,23 @@ std::string redact(const std::string& in) {
             if(p-i>=11){out+="DS-<hidden>";i=p;continue;}
         }
 #endif
+#ifndef MUTANT_DIAG_GROUP_KEY
+        // A group's key in its other forms: the group invite (DSG-...), the server's secret path element (/w123...,
+        // in online_server and in the mod's log) and the relay key ("relay_key":"...").
+        if(in.compare(i,4,"DSG-")==0&&(i==0||!((in[i-1]>='A'&&in[i-1]<='Z')||digit(in[i-1])))) {
+            size_t p=i+4;while(p<in.size()&&((in[p]>='A'&&in[p]<='Z')||digit(in[p])||in[p]=='-'))++p;
+            if(p-i>=12){out+="DSG-<hidden>";i=p;continue;}
+        }
+        if(in[i]=='/'&&i+2<in.size()&&in[i+1]=='w'&&digit(in[i+2])) {
+            size_t p=i+2;while(p<in.size()&&digit(in[p]))++p;
+            if(p-i<=12&&(p==in.size()||in[p]=='/'||in[p]=='"'||in[p]==' '||in[p]=='\n'||in[p]=='\r')){out+="/w<hidden>";i=p;continue;}
+        }
+        if(startsNoCase(in,i,"relay_key")&&(i==0||!((in[i-1]>='a'&&in[i-1]<='z')||(in[i-1]>='A'&&in[i-1]<='Z')))) {
+            size_t p=i+9;while(p<in.size()&&(in[p]=='"'||in[p]==':'||in[p]=='='||in[p]==' '))++p;
+            size_t d=p;while(d<in.size()&&((in[d]>='a'&&in[d]<='z')||(in[d]>='A'&&in[d]<='Z')||digit(in[d])||in[d]=='-'||in[d]=='_'))++d;
+            if(d>p&&p>i+9){out.append(in,i,p-i);out+="<hidden>";i=d;continue;}
+        }
+#endif
 #ifndef MUTANT_DIAG_ADDRESS
         if(digit(in[i]))if(size_t n=ipv4(in,i,parts)) {
             // This PC's loopback stays; any other address keeps its first two numbers (enough to tell LAN, VPN, internet).
@@ -335,6 +403,45 @@ std::string diagnostics(const std::filesystem::path& data,const std::string& hea
     if(out.size()>DiagnosticsMax){const std::string cut="\n(report shortened)\n";out.resize(DiagnosticsMax-cut.size());out+=cut;}
 #endif
     return out;
+}
+std::string groupInvite(uint32_t secret,unsigned serverPort,const std::vector<ci_route>& routes) {
+    if(!secret||serverPort<49100||serverPort>49114||routes.empty()||routes.size()>CI_MAX_ROUTES)return {};
+    ci_invite v{};v.secret=secret;v.port=uint16_t(serverPort);v.n=int(routes.size());
+    for(size_t i=0;i<routes.size();++i)v.route[i]=routes[i];
+    char code[CI_CODE_MAX];return ci_encode(&v,GroupPrefix,code,sizeof(code))?std::string(code):std::string();
+}
+int recognise(const std::string& text,cr_result& result,bool& group) {
+    group=false;
+    int kind=coop_recognise(text.data(),text.size(),Prefix,&result);
+#ifndef MUTANT_GROUP_INVITE_KIND
+    // The kit says "an invite for another game" for the other prefix of this game: read it as what it is.
+    if(kind==CR_ERROR&&result.error==CI_WRONG_GAME){
+        cr_result other{};int k=coop_recognise(text.data(),text.size(),GroupPrefix,&other);
+        if(k!=CR_ERROR||other.error!=CI_WRONG_GAME){result=other;group=true;return k;}
+    }
+#else
+    if(kind==CR_ERROR){cr_result other{};int k=coop_recognise(text.data(),text.size(),GroupPrefix,&other);if(k==CR_INVITE||k==CR_LINK){result=other;return k;}}
+#endif
+    return kind;
+}
+int groupRoute(const ci_invite& invite,const std::vector<bool>& answered) {
+    for(int i=0;i<invite.n&&i<int(answered.size());++i) {
+#ifndef MUTANT_GROUP_ROUTE
+        if(answered[size_t(i)])return i;
+#else
+        return i;
+#endif
+    }
+    return -1;
+}
+Session groupJoin(const ci_invite& invite,int route,Session mine) {
+    if(!invite.secret||invite.port<49100||invite.port>49114||(invite.flags&CI_FLAG_STEAM))throw std::runtime_error("This is not a group invite this version can use. Ask for a new one.");
+    if(route<0||route>=invite.n)throw std::runtime_error("The group's server did not answer. Ask the host to start it, check the invite and the host's Windows Firewall, then try again.");
+    auto& ip=invite.route[route].ip;
+    mine.group=Group::Join;mine.host=false;mine.solo=false;mine.secret=invite.secret;mine.port=unsigned(invite.port)-100;
+    mine.server=std::to_string(ip[0])+"."+std::to_string(ip[1])+"."+std::to_string(ip[2])+"."+std::to_string(ip[3]);
+    config(mine);   // the production schema decides
+    return mine;
 }
 std::string packet(const Packet& p) {
     if(p.port<49000||p.port>49014||!p.nonce)throw std::runtime_error("Invalid lobby packet.");

@@ -19,12 +19,19 @@ build/discover-test: vendor/tests/coop_discover_test.c vendor/coop_discover.h | 
 	cc -std=c99 -O1 -g -Wall -Wextra -Ivendor $< -o $@
 build/saves-test: saves_test.cpp saves_vectors.h $(SRC) $(HEADERS) | build
 	g++ -std=c++17 -O2 -Wall -Wextra -Werror saves_test.cpp $(SRC) -o $@
-test: build/core-test build/saves-test build/invite-test build/discover-test
+# Group play over real sockets: the launcher's server command line with the built server and stand-in players.
+../world/build/coop-world: FORCE
+	$(MAKE) -C ../world build/coop-world
+../mod/build/coop-swarm: FORCE
+	$(MAKE) -C ../mod build/coop-swarm
+FORCE:
+test: build/core-test build/saves-test build/invite-test build/discover-test ../world/build/coop-world ../mod/build/coop-swarm
 	python3 -B test_core.py
+	python3 -B test_group.py build/core-test ../world/build/coop-world ../mod/build/coop-swarm
 	./build/invite-test 20000
 	./build/discover-test 10000
 	python3 -B test_mutants.py
-.PHONY: all test
+.PHONY: all test FORCE
 
 build/net-fixture.exe: net_fixture.cpp saves_vectors.h net_win.h $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) net_fixture.cpp $(SRC) -o $@ -lws2_32 -liphlpapi -lbcrypt

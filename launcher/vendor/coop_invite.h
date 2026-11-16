@@ -41,7 +41,7 @@ struct ci_game { const char *prefix, *product, *probe_id; };
 /* Known games: invite prefix, product name used in messages, 4-byte probe game id. */
 static inline const struct ci_game *ci_game_at(int i)
 {
-    static const struct ci_game games[] = { { "MDK2", "MDK2", "MDK2" }, { "WIT", "The Witness", "WIT " }, { "DS", "Death Stranding", "DSDC" } };
+    static const struct ci_game games[] = { { "MDK2", "MDK2", "MDK2" }, { "WIT", "The Witness", "WIT " }, { "DS", "Death Stranding", "DSDC" }, { "DSG", "Death Stranding", "DSDC" } };
     return i >= 0 && i < (int)(sizeof(games) / sizeof(games[0])) ? &games[i] : NULL;
 }
 static inline int ci_upper(int c) { return c >= 'a' && c <= 'z' ? c - 32 : c; }

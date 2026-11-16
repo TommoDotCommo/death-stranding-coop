@@ -58,7 +58,7 @@ inline release_startup::Values launchValues(const LaunchOptions& o,const Session
     if(!equalPath(release_startup::wide(v.at("COOP_MODULE_INSTANCE")),o.data))throw std::runtime_error("The data folder differs from COOP_MODULE_INSTANCE. Choose the test copy's data folder.");
     put("COOP_REDIRECT_STEAM",steamRoot());
     put("COOP_REAL_LOCAL",known(FOLDERID_LocalAppData));put("COOP_REAL_ROAMING",known(FOLDERID_RoamingAppData));put("COOP_REAL_DOCUMENTS",known(FOLDERID_Documents));put("COOP_REAL_SAVEDGAMES",known(FOLDERID_SavedGames));
-    v["COOP_MODULE_POLICY"]="allowlist";v["COOP_NETWORK_POLICY"]="enforce";v["COOP_NETWORK_PEERS"]=s.peer;
+    v["COOP_MODULE_POLICY"]="allowlist";v["COOP_NETWORK_POLICY"]="enforce";v["COOP_NETWORK_PEERS"]=networkPeers(s);   // the partner, or in group play the server
     if(o.direct)for(auto key:{"COOP_REAL_LOCAL","COOP_REAL_ROAMING","COOP_REAL_DOCUMENTS","COOP_REAL_SAVEDGAMES"}) {
         auto instance=redirect::canonical(wtext(v.at("COOP_REDIRECT_INSTANCE"))),real=redirect::canonical(wtext(v.at(key)));
         if(redirect::within(instance,real))throw std::runtime_error("Lab/direct copies need --data-dir outside the real user folders. The LocalAppData layout is reserved for release tickets.");
@@ -80,9 +80,10 @@ inline void launchGame(const LaunchOptions& o,Session s,bool solo=false) {
         for(auto& e:values)if(!SetEnvironmentVariableW(wtext(e.first).c_str(),wtext(e.second).c_str()))throw std::runtime_error("Cannot set the isolated child environment.");
     } else atomicWrite(o.data/"launcher-session.ini",bytes);
     if(o.prepareOnly)return;
-    // Shared world: the host's launcher runs the group's server (a second start cannot take the port and leaves).
+    // Shared world, and group play: the host's launcher runs the group's server (a second start cannot take the port
+    // and leaves; the one already running keeps serving).
     if(auto arguments=worldArguments(s,asciiPath(o.data/"world"/"world.json"));!arguments.empty()) {
-        if(!fs::is_regular_file(o.world))throw std::runtime_error("The shared-world server (coop-world.exe) is missing beside the launcher. Repair the package or turn the shared world off in Settings.");
+        if(!fs::is_regular_file(o.world))throw std::runtime_error(s.group!=Group::None?"The group server (coop-world.exe) is missing beside the launcher. Repair the package.":"The shared-world server (coop-world.exe) is missing beside the launcher. Repair the package or turn the shared world off in Settings.");
         fs::create_directories(o.data/"world");
         std::wstring command=L"\""+o.world.wstring()+L"\"";for(auto& a:arguments)command+=L" \""+wtext(a)+L"\"";
         STARTUPINFOW startup{};startup.cb=sizeof(startup);PROCESS_INFORMATION process{};
