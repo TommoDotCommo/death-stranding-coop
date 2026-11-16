@@ -5555,6 +5555,199 @@ the cause is unknown (the builder's shelter being unfinished is a candidate).
 Unknown: why received shelters are removed; the letters of the remaining kinds (zipline, catapult, truck,
 signboard, highway); what distinguishes the five arrays and the second list; the grid cell `x`/`y`; the key names of
 the `lookup` answer; and whether a build through the game's own menu sets the same flag (assumed, not seen).
+(2026-11-17, static: the second list, the remaining letters, the shelter's removal and the bridge's waiting are read
+from the executable in the three sections below; each still needs its live probe.)
+
+### The player's own strand: what in memory is his (2026-11-17, static)
+
+Read from the pinned executable only; nothing here was read from a running game. Confidence: **high** for the loads,
+stores and branches named (they were read instruction by instruction), **medium** where a meaning is put on them, as
+marked. All addresses are RVAs. The mod's reader is `mod/own_strand.h` (game-free, not wired into the mod).
+
+**Users are small numbers.** The user manager is the global at `0x7c1d780`. It maps a creator string to a user id, a
+u32 (`0x34b0100(manager, out id, creator string)`, find-or-add `0x34ada50`; a table at manager `+8`, 24-byte entries:
+`+0` hash, 0 = free, `+8` the user id, `+0x10` a 0x30-byte user record). A creator string equal to one of the
+manager's two own strings (`+0x20`, `+0x28`) gets the fixed id **1** (the key at `0x3edff4c` is 1); `0x34adf30` is
+"id == 1" and `0x34adf40` "id != 0", and both are called all over the online and construction code. The ids are
+saved as plain u32s (the save loaders below read them as ints and wrap them with `0x34abdb0`), so 1 is the
+signed-in player in every save. Id 0 means nobody known.
+
+**Construction records.** In the construction object (record `- 0x18`; "Structures" above) the record init
+`0x2c32760` copies from the build request:
+
+| Object | From request | Meaning |
+|---|---|---|
+| `+0x30` | `+0x48` | record id |
+| `+0x34`, `+0x35` | `+0` | type (`EDSConstructionPointType`), category (`0x2ccf0f0`) |
+| `+0xb2` | (type) | owner, `0x2ccf1d0(type)`: 0 the game's own (Stage variant, delivery bases, road rebuilder 36), 1 every Player variant, 2 every Net variant (live 2026-11-07 matched: owner 1 = built by this porter) |
+| `+0xb4` | `+0x50` | creator user id (u32, as above) |
+| `+0xb8` | `+0x68` | online id (engine string: a pointer to the characters, the length as u32 8 bytes in front) |
+| `+0x84` | `+0x4c` | level |
+| `+0x3a0` | `+0x608` | build time (record `+0x388`) |
+
+- The request constructor `0x277fde0` sets the creator to 0 and the online id to empty; `CreateConstruction` and,
+  inferred, the game's own build leave them so. A structure the porter builds is therefore owner 1, creator 0, no
+  online id. When its upload is answered (`0x2cce670`) the object gets the server's id at `+0xb8`; only a road
+  rebuilder (type 36) also gets creator 1 there, because the player paved it, while it stays owner 0 (the game's).
+- The save keeps both: the save loader `0x2c9a6a3` reads a 0x1c8-byte block per structure (type `+0`, id `+0x48`,
+  level `+0x4c`, creator `+0x50` as an int) and the online id as a string, into a request.
+- Served objects. The request builder for `findQpidObjects` answers (`0x2c5f880`, one request per accepted object)
+  compares the object's `c` with the string at online manager (`0x7c192f0`) `+0x28`; equal means the player's own
+  object and the builder picks the **Player** variant, otherwise the Net variant (post `p` 6/7, zipline `z` 22/23,
+  charger `c` 15/16, catapult `a` 12/13, safe house `s` 3/4, watchtower `w` 9/10, bridge `b` 31/32 when `st` is "30"
+  and 34/35 otherwise, rain shelter `n` 18/19, climbing rope `r` 28/29, ladder `l` 25/26, chiral bridge `g` 41/42,
+  jump stand `j` 44/45; every other letter makes no construction here). It sets the request's creator from `c`
+  (`0x34b0100`, so 1 for the player's own) and its online id from `id`. An object the game already has (by online id,
+  a map at the builder's `+0x1a0`) is not made twice. Own objects must also fit the area's bandwidth: their
+  `QpidCost` (config `+0x9c`) is added up against the area's capacity (`0x2c58640`) and the rest are dropped. Objects
+  of other players count against `LimitOfNetCreation` (config `+0x94`; `+0x8c`/`+0x90` for the game's own and the
+  player's, indexed by the owner byte) and all against 3140 records.
+- Derived (medium): "built by this player" in a construction record is **owner byte `+0xb2` == 1**, not the creator.
+  The creator is 1 only for what a server handed back as his own, and 0 for most of what he built in the save.
+- The own id string at online manager `+0x28` is made at sign-in (`0x347052a`) from two strings of the sign-in
+  answer joined by `_` (a `:` in the second becomes `_`; the code also tests the first against "identity"). Which
+  answer fields they are is not settled statically: the provider and its id are the candidates. Our server's `c` is
+  its player id (`zygo_…`), so whether the game would take an object we hand back as its own is **unknown** (probe 2).
+
+**Online objects.** The manager at `0x7c1abf0` (`+0x1e8`: table pointer, `+0x1f0` count, `+0x1f4` capacity;
+24-byte entries: `+0` hash, `+8` area id, `+0x10` the area's lists) keeps per area a value with three lists (count
+u32 and pointer at `+8`/`+0x10`, `+0x18`/`+0x20`, `+0x28`/`+0x30`). An element is 0x28 bytes (freed with that size):
+`+0` reference count, `+8` id string, `+0x10` `EDSNetSyncObjectType`, `+0x11` state, `+0x14` creator user id,
+`+0x18` flags (bit 3 set from a test on the id string), `+0x20` a pointer (not followed).
+
+- The add function `0x3498de0(manager, id, type, area, creator)` puts an element whose creator is 1 in the **second
+  list** and every other in the first (`0x34adf30` at `0x3498e29`); `0x349a040` moves states 4 and up to the third.
+  The save loader for elements (`0x3498996`) does the same with the creator id read from the save (u32), and starts
+  every loaded element in state 3 (Zombie). Answered objects are added on arrival (`0x34844f0`, creator from `c`).
+- So the second list is the player's own online objects. The live record above (an own ladder in the builder's first
+  list) fits: that element came from the upload path (`0x3485531`, creator from the uploader object), with the
+  creator the structure had, 0. Medium: the capital-letter ids seen in the second list (`B…`, `L…`) are the save's own
+  uploads in a form the publisher's server gave them.
+- When an area's answer is checked (`0x3481f00..0x3482809`), an object whose creator is 1 **skips the per-kind count**
+  (`0x34823df`): own objects are never Failed for lack of room in `ct` (they pass two other checks instead, the
+  answer handler's virtual `+0xd8` and `0x34912b0` on the global `0x7c19940`). Others need room in the count. Every
+  object must not be from a user in the list at `0x7c1c4d0` (a block or relation list, not settled), needs exactly
+  three `l` numbers, and must lie in the area it was asked for (`0x3497b40` on the position, else AlwaysFail); the
+  arrival code (`0x3484470`) already drops objects with fewer than three `l` or `r` numbers.
+- Letters of the remaining kinds (the letter map `0x3487ca0`, read backwards): `z` Zipline, `a` Catapult, `t`
+  Signboard, `h` NationalRoute, `e` PileStone, `x` Mushroom, `g` ChiralBridge, `j` JumpStand, `d` SpeedCar, `v` and
+  `k` VehicleBike or VehicleTruck by the subtype's hash; `u`, `i`, `o` and `m` map to no sync type here (roads `o`
+  have their own path).
+
+**Likes.** The answer's `lp` (`OTGCObjectResponse +0x6c`) is not copied into the build request or the element, and
+no field of the construction object was found to hold a like count. Where the game keeps the likes it shows over a
+structure is **unknown**; the like history (`OTGCGetLikeHistoryOneResponse`: `oid`, `lp`, `sc`) is the candidate
+source. A reader takes likes from the server by online id until then.
+
+**Recipe for a live reader** (all reads; `own_strand.h` does exactly this):
+
+1. Structures: `m = [base+0x7bf4960]`; records as in "Structures" (table ending at `m+0x5699c8`, 0x710 apart, class
+   pointer at `+0`, the same `+0x10` at `+0x10`); for each, object = record `- 0x18`: owner `[obj+0xb2]` (u8),
+   creator `[obj+0xb4]` (u32), online id `[obj+0xb8]` (string), type `[obj+0x34]`, state record `+0x1e`, position
+   record `+0x28` (3 f64), level record `+0x6c`. The player's own: owner 1 and state not 0.
+2. Online objects: `o = [base+0x7c1abf0]`; for each used entry of the table at `o+0x1e8` (capacity at `o+0x1f4`): the
+   area id and the value; the value's second list holds the player's own (creator `[el+0x14]` == 1); state
+   `[el+0x11]` below 4 means the game kept it.
+3. Join the two by online id: the area of an own structure is its element's area; an own element with no structure
+   (a cairn, a sign, a road) has no position here.
+
+**Live probe still needed:** (1) a save with structures of the porter: every owner-1 record, its creator (expected 0,
+or 1 for a road rebuilder he paved) and online id; the second list's ids against those online ids. (2) After sign-in:
+the strings at `[[base+0x7c192f0]]+0x28` and `[[base+0x7c1d780]]+0x20/+0x28` against the server's player id and the
+sign-in answer; then serve the player one of his own objects with `c` set to that string and check that the game
+makes a Player variant (owner 1, creator 1) and puts the element in the second list. (3) After a like for his ladder:
+which bytes of its object change.
+
+### Why a served rain shelter is taken down and a served bridge is not drawn (2026-11-17, static)
+
+Read from the executable only. Confidence as above; the conclusions marked "inferred" wait for the probes.
+
+**The path a received structure takes.** The request builder (`0x2c5f880`, previous section) sets, for every
+object it makes from an answer, request `+0x625` = 1 (object `+0xa9` bit 7: may be realised), `+0x62d` = 1
+(object `+0xaa` bit 5, 0x20: still needs the online placement check) and request `+0x629`/`+0x63d` from a byte at
+answer `+0x110` (object `+0xaf` bit 7, and `+0xaa` bit 4, 0x10: skip the range test). The answer check that would set
+that byte (`0x34828dd..0x3482921`) shuffles the accepted list and then cuts it to length 0 before the loop that sets
+it, so for downloaded objects the byte stays 0; the live flags of the received bridge (`+0xaa` 0x20 without 0x10)
+agree. The pending-list walker `0x2c87f20` then, for each pending object:
+
+1. skips it unless its world index (`+0x38`) is the current one;
+2. asks `0x2c35fb0(object, 0, …)`, which refuses while any of these holds: `+0xaa` & 0x04 or 0x08; `+0xa9` bit 7
+   clear; `+0xb0` & 1 or 8; `+0xaf` bit 7; durability `+0xd8` at or below 0 while the config's rain durability for its
+   level (config `+0xa0 + 4*(level-1)`) is above 0; `+0xab` & 0x40 (the build wait) or & 1; `+0xae` & 2 or 0x10;
+   `+0xad` & 8; the game-state object `[0x7bf6e88]` `+0xf` or `+0x17` bit 0; a Net safe house (type 4) also needs
+   `0x2c35cc0` above 1 unless a fact holds; and then, **unless `+0xaa` & 0x10**, a range test:
+   the object must lie outside the walker's exclusion boxes and its distance from the player (`+0x460`, the same value
+   the realise/unrealise code compares with the config's `DistanceToUnrealize`) must be at least a threshold:
+   20 m for category 15 (catapult shell), 50 m for any non-Net structure, and for Net structures 1000 m for
+   categories 1 (safe house), 12 and 13 (the two bridges) and 17 (jump stand), 50 m for the rest. During a load or fade (the game-state bits at `+8`, the byte
+   `0x6cdeae9`, or manager `+0x5720a8` > 0) the test is instead "not in view" (`0x283ec70`, `0x193fbe0`);
+3. if `+0xaa` & 0x20 (and not `+0x36` == 3, `+0xab` & 2, `+0xaa` & 0x40, `+0xab` & 1): first, if the byte
+   `[[0x7be6a48]+0x260+0xa0][0x39]` is set, marks it for removal at once; otherwise runs the placement check
+   `0x2c3ecb0(manager, category, position, reasons, …)`. Failing it, `0x2c8822a` sets `+0xaa |= 0x40`, `+0xab |= 1`
+   (marked for removal: exactly the flag changes watched on the received shelter, record `+0x92` 0x20 to 0x60 and
+   `+0x93` 4 to 5). Passing it clears 0x20 (and for a Net object sets `+0xad |= 1`, clears `+0xaf` & 4). At most one
+   placement check runs per walk;
+4. asks `0x2c35fb0(object, 1, 0)` again (now also refusing while 0x20 is set) and on success builds it (`0x2c6acf0`,
+   state 1).
+
+**(a) The rain shelter** (category 7, Net, threshold 50 m) passes the range test whenever the porter is 50 m or
+more away, reaches the placement check and fails it. The check `0x2c3ecb0` records why in a reason block (bytes
+`+0x08`, `+0x16`, `+0x1d`, `+0x1e`, `+0x1f`, `+0x21`); its parts, in order, are `0x2c66150` (not read; false fails
+with no reason, a set byte gives `+0x21`), `0x2caa420` (the spacing to every existing structure, through
+`0x2c65700`: reason `+0x08`), `0x2c63760` (`+0x16`) and `0x2c33a10` (codes 1, 2, 3: `+0x1e`, `+0x1f`, `+0x1d`).
+The spacing loop (`0x2c65700`, at `0x2c65b81..0x2c65c21`) holds a Net candidate to the config's
+`OnlineAvailableNearestAnothers` (DSConstructionPointConfig `+0x284`, from `BuildBox`) against every structure, and
+to `OnlineAvailableNearestSameCategory` (`+0x288`) against one of its own category (the two bridges count as one),
+taking the larger of the two configs' values; a Player candidate only to `AvailableNearestAnothers` (`+0x270`).
+Inferred (medium): the received shelter fails on that spacing, which is stricter for Net structures than for the
+builder's own build, so the builder's real place fails in the receiver's world too. Not excluded: the other parts,
+and the flag byte 0x39. Nothing in the served object can change this: no field of `OTGCObjectResponse` reaches
+these checks except the position and type. It is a game-side rule; what the server can do is serve positions that
+keep that distance, which it cannot know for the receiver's world. A mod-side way is to clear `+0xaa` & 0x20 on a
+fresh Net record that came from our server (the check is then skipped, at the risk of overlapping structures).
+
+**(b) The bridge** (category 13, Net, threshold 1000 m) is refused by the range test as long as the porter is within
+1000 m of it, so it stays pending in state 0, never reaches the placement check (its `+0xaa` keeps 0x20, as seen
+live) and is not drawn. It would be built during the next load out of view (which is what "standing after the next
+load" was), or once the porter is 1 km away, and then still has to pass the placement check. Inferred (high for the
+branch, medium that nothing else holds it). Game-side rule again; no answer field sets `+0xaa` & 0x10. Mod-side
+options: set `+0xaa |= 0x10` on such a record (skips the range test, then the placement check runs), or both that
+and clearing 0x20.
+
+**Live probes still needed:**
+
+- Shelter: read the configs: `c = [[base+0x7bf4960]+0x70]`, config of category k = `[c+0x40+8k]` (k 7 rain shelter,
+  12 45 m bridge, 13 30 m bridge, 10 ladder), floats `+0x270`, `+0x284`, `+0x288`, and `+0x94` (u32). Serve a
+  shelter (`n`) in area 226 at a place inside the area and farther than the largest of those from every record of the
+  construction table; expected: it stands (state 1 or 2). Then one at less than `+0x288` from the save's own
+  shelter: expected Removed. Read the byte `[[[base+0x7be6a48]+0x300]+0x39]` once (expected 0).
+- Bridge: with a received Net bridge pending (state 0, `+0xaa` 0x20), read `[obj+0x460]` while the porter stands by
+  it (expected under 1000); teleport him more than 1 km away: expected state 1 within a second or two, then 2 when
+  he comes back. Separately, set `[obj+0xaa] |= 0x10` near it: expected built at once if the placement check passes.
+
+### How an area's per-kind counts (`ct`) are made (2026-11-17, static)
+
+The count the game asks for, per kind and area, is `0x3497c50(manager 0x7c1abf0, area, kind, flag)` (the find
+builder and the answer check both use it; the check loops over the 23 `EDSNetSyncObjectType` values). It is:
+
+- a limit from the game's data: `0x34ab290` on the limit object of `0x34aafe0(global 0x7c1cb10, …)` for the kind, at
+  a level from `0x3498100` (an index into an int array of a resource the manager at `0x7c1cb10` holds, chosen by a
+  value from `0x2f2be50` on the global `0x7bfd960`) and with the area's delivery-point level (`0x7bfdff0`,
+  `0x2f48830`). The reflected types fit: `DSNetSyncConfig` has `LimitGroups` (`DSNetSyncLimitGroup`: `Ids` of areas,
+  `Limits` of `DSNetSyncLimit` with an `Available` fact and `SyncCounts`, whose `Levels` is an int per level),
+  `DSQpidAreaContainerResource` a `DefaultSyncLimit` (`DSNetSyncObjectCountResource.Counts`, a u16 per kind);
+- minus the objects of that kind the area already lists in its **first** list (others' objects; with the flag, those
+  still in state 0 are not counted); the player's own (second list) do not count;
+- and, for an area in a limit group, the smallest of that and the group's limit minus what the group's other areas
+  list.
+
+Vehicles (`VehicleBike`, `VehicleTruck`) and `SpeedCar` take a separate path (`0x34b55d0`, global `0x7c1ddc0`).
+
+Derived: the counts are a fixed table per kind and level in the game's data (not in the executable), gated by facts,
+less what the save already holds from other players in that area. That explains a second copy of the same save
+asking for no ladders in area 226, and the same counts in both runs of one save. Unknown: which value picks the
+level (the area's connection level or the player's), and the table itself (a live read of `0x3497c50`'s inputs, or of
+the resources, would give it).
 
 
 ## Which screen is up: state flags and the open menu page (2026-11-14, static only)
