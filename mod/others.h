@@ -1,17 +1,24 @@
 #pragma once
 // Others: more remote players than the one partner, presence only. Each other player has a 64-bit id (given by
 // whatever carries the datagrams), a presence-core session of its own (core/core.h: handshake, clock, interpolation,
-// animation samples) and a body of its own (an OwnBody driven by a Double, double.h). Nothing else of the two-player
-// layer exists for them: no cargo, structures, enemies, orders, story, vehicles, gear or carried cargo.
+// animation samples) and a body of its own (an OwnBody driven by a Double, double.h). Nothing of the two-player layer
+// that changes the world exists for them: no cargo put down or picked up, structures, enemies, orders, story, vehicles.
+// What is only shown can be: the gear a player wears and the cases a player carries (Settings::gear, Settings::carry),
+// from the same reliable events the partner path uses, kept per player and drawn on that player's body.
 //
 // Three parts, all game-free:
 //   Body, Bodies   one more Sam and a keyed set of them (also what the lab command `crowd N` uses);
 //   Others         the sessions: who is here, what each one's core says, what to send them;
+//   wearers, carriers   who wears what and whose cases are drawn, for gear::Mirrors and stack::Stacks;
 //   MemoryHub      a link in memory that joins several Others, for tests.
 // Nothing here opens a socket. The datagrams travel through a Link the caller supplies (CORE.md, "Several peers").
 #include "../core/core.h"
 #include "double.h"
 #include "nametag.h"
+#include "gear.h"
+#include "carry_visual.h"
+#include "carry_place.h"
+#include "cargo_stack.h"
 #include <array>
 #include <cstdint>
 #include <deque>
@@ -19,6 +26,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 namespace mod::others {
@@ -90,6 +98,10 @@ struct Settings {
     std::array<uint8_t,16> build{};      // the adapter's wire identity (identity.h), bytes 16..31 of every datagram
     std::string nickname;
     uint32_t delayMs=120;
+    // The reliable events others take besides the name (everything else is acknowledged and dropped):
+    bool gear=false;                     // type 7: what a player wears (gear.h). Also: this porter's set is sent
+    bool carry=false;                    // types 6 and 16: what a player carries and where each case sits
+                                         // (carry_visual.h, carry_place.h). Also: this porter's are sent
 };
 // The core session two players share: the same on both sides, different for every pair, never zero.
 uint64_t pairSession(uint64_t session,uint64_t a,uint64_t b);
@@ -100,6 +112,11 @@ inline ds::Role pairRole(uint64_t self,uint64_t other){return self<other?ds::Rol
 struct Shown {
     uint64_t id=0;bool connected=false,visible=false;ds::Render render;std::string name;
     std::optional<ds::AnimationShown> animation;   // the sample due now, when one is
+    // The latest complete sets that player sent (none: nothing has arrived, or the setting is off). What is carried is
+    // forgotten when the session drops; what is worn stays until another set arrives.
+    std::optional<gear::WornSet> worn;
+    std::optional<carry::Summary> carried;
+    std::optional<std::vector<carryplace::Placed>> places;
 };
 // How a body shows a player: where it stands, how fast, which of the game's own poses.
 struct Drive {bool shown=false;puppet::Transform goal;double speed=0;uint32_t actions=0;bool mirror=false;};
@@ -112,6 +129,36 @@ void plan(const std::vector<Shown>&,bool show,bool poses,bool animation,Plan&);
 // the name that player sent ("Porter" until one has arrived). Whether a label is shown is the body's affair: Tags asks
 // where the body is and draws nothing over a hidden one.
 std::vector<nametag::Named> labels(const std::vector<Shown>&,const class Bodies&);
+// Who wears gear (gear.h, Mirrors): one wearer for every player whose body exists, keyed by the player's id, with the
+// set that player sent. Without a set nothing is made for that body: this porter's gear says nothing about a player
+// with a save of their own. Whether the copies show is the body's affair (Mirrors asks whether the body is visible).
+std::vector<gear::Wearer> wearers(const std::vector<Shown>&,const class Bodies&);
+// A body that still wears copies when its player has left (or is no longer listed): the copies come off first. Given
+// the keys that wear copies now, returns those whose player is not in `shown`, and keeps each one's body for this tick,
+// hidden (a Want without a goal). The caller removes those keys' copies now; next tick they wear nothing and their
+// bodies go. So the game is asked to remove a body's attached copies one tick before the body itself, never after.
+std::vector<uint64_t> undress(const std::vector<Shown>&,const std::vector<uint64_t>& dressed,Plan&);
+// Whose carried cases are drawn (cargo_stack.h, Stacks). A full backpack is up to 24 meshes, so only the nearest few
+// players get theirs: CarriersAtOnce by default, at most MaxCarriers. A player who has them keeps them until another is
+// KeepMetres nearer (nametag.h), so two at about the same distance do not swap every tick.
+constexpr size_t CarriersAtOnce=4,MaxCarriers=8;
+class Nearest {
+public:
+    // Which of these (key, distance) are among the `limit` nearest, a holder counted KeepMetres nearer; remembers them.
+    std::vector<bool> choose(const std::vector<std::pair<uint64_t,double>>&,size_t limit);
+    bool holds(uint64_t key) const {return held_.count(key)!=0;}
+private:
+    std::set<uint64_t> held_;
+};
+// One player's cases: on `pack`, the copy of the backpack that player's body wears. placed: where each case sits
+// relative to it, as that player's game measured it (then `items` are those cases, hips and arms included); without
+// it `items` are the backpack's cases from the summary, packed by the stack's layout.
+struct Carrier {uint64_t key=0,body=0,pack=0;std::vector<stack::Item> items;std::optional<std::vector<puppet::Transform>> placed;};
+// The carriers among these players: connected, visible, with a body, with a copy of the backpack on it (pack(id), 0:
+// none; without one there is nothing to hang the cases on) and carrying something; of those the `limit` nearest to
+// `viewer` (this porter, in the wire's axes; without it, as listed). show=false (a local game event): nobody.
+std::vector<Carrier> carriers(const std::vector<Shown>&,const class Bodies&,const std::function<uint64_t(uint64_t id)>& pack,bool show,
+                              const std::array<double,3>* viewer,size_t limit,Nearest&);
 struct Counters {
     uint64_t sent=0,received=0,accepted=0;
     uint64_t unknown=0;        // from an id that has not entered
@@ -120,7 +167,8 @@ struct Counters {
     uint64_t kind=0;           // a kind others never carry (environment, enemies)
     uint64_t refused=0;        // refused by the session's core
     uint64_t full=0;           // entered over the cap
-    uint64_t events=0;         // reliable events that were not a name: acknowledged and dropped
+    uint64_t events=0;         // reliable events others do not take: acknowledged and dropped
+    uint64_t gear=0,carried=0; // complete sets taken: what a player wears; what a player carries or where it sits
 };
 class Others {
 public:
@@ -138,6 +186,14 @@ public:
     void local(const Local&);
     void tick(uint64_t nowMs);
     bool animation(const ds::Animation&,uint64_t nowMs);
+    // What this porter wears and carries, whenever the mod has read it again (nothing: the read failed). Each session
+    // sends it by the partner path's own rules (gear.h WornSender, carry_visual.h Sender, carry_place.h Sender: once
+    // it has held still, on every new connection, not too often), as the same events. Without Settings::gear /
+    // Settings::carry nothing is sent. `placed` is given on the passes that measured the places (nothing: not this
+    // pass). Returns the events queued.
+    size_t wears(const std::optional<gear::WornSet>&,uint64_t nowMs);
+    size_t carries(const std::optional<carry::Summary>&,const std::optional<std::vector<carryplace::Placed>>&,uint64_t nowMs);
+    std::optional<std::array<double,3>> here() const {if(!local_.available)return std::nullopt;return local_.state.position;}   // this porter (wire axes)
     std::vector<Shown> frame(uint64_t nowMs);
     void clear(uint64_t nowMs);          // everybody leaves (the link went away)
     size_t size() const {return sessions_.size();}

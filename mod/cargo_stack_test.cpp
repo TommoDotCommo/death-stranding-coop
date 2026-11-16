@@ -97,6 +97,32 @@ int main(){
       CHECK(right);
       std::vector<Transform> fewer(3);for(int i=0;i<8;++i)p.tick(true,many,&turned,&fewer);
       CHECK(p.shown()==Stack::MaxCases); }
+    // Several bodies (Stacks): the partner (key 0) and other players, one Api and one budget.
+    { Engine e3;std::vector<std::string> rows;Stacks set(e3.api(),[&](const std::string& m){rows.push_back(m);});set.layout=two;
+      auto load=[&](uint64_t key,std::vector<Item> items,double x){Load l;l.key=key;l.permitted=true;l.anchor=anchor;l.anchor.position[0]=x;l.items=std::move(items);return l;};
+      auto on=[&](double x){unsigned n=0;for(auto& [m,made]:e3.live)n+=near(made.at.position[0],x);return n;};
+      std::vector<Load> loads{load(0,I({0,0,0}),100),load(5,I({10,11}),200),load(9,I({12,12,12,12}),300)};
+      unsigned worst=0;auto run=[&](unsigned n){for(unsigned i=0;i<n;++i){auto before=e3.creates;set.tick(loads);worst=std::max(worst,e3.creates-before);}};
+      run(1);CHECK(e3.creates==Stacks::PerTick&&set.shown(0)==2&&set.shown(5)==0);   // the partner first, one budget for all
+      run(10);CHECK(worst==Stacks::PerTick&&set.shown()==9&&e3.live.size()==9&&set.shown(0)==3&&set.shown(5)==2&&set.shown(9)==4);
+      CHECK(on(100)==3&&on(200)==2&&on(300)==4);                                     // each on its own anchor
+      {bool named=false,plain=false;for(auto& r:rows){named|=r.rfind("STACK player 5 2 cases on that player's body",0)==0;plain|=r.rfind("STACK 3 cases on the partner",0)==0;}CHECK(named&&plain);}
+      // Exact places for one player; the others keep the layout.
+      loads[1].placed=std::vector<Transform>(2);(*loads[1].placed)[0].position={0,0,1};(*loads[1].placed)[1].position={0,0,2};
+      for(auto& t:*loads[1].placed)t.rotation={1,0,0,0,1,0,0,0,1};
+      run(1);{unsigned high=0;for(auto& [m,made]:e3.live)high+=near(made.at.position[0],200)&&(near(made.at.position[2],31)||near(made.at.position[2],32));CHECK(high==2);}
+      // Not permitted (hidden, a game event): that body's cases go, the others stay; permitted again: back.
+      loads[2].permitted=false;auto before=e3.releases;run(1);CHECK(e3.releases==before+4&&set.shown(9)==0&&set.shown()==5&&set.size()==3);
+      loads[2].permitted=true;run(3);CHECK(set.shown(9)==4);
+      // No longer listed (left, or no longer among the nearest): released and dropped; the others untouched.
+      before=e3.releases;loads.erase(loads.begin()+1);run(1);CHECK(e3.releases==before+2&&set.shown(5)==0&&set.size()==2&&set.shown()==7&&on(200)==0);
+      // One in, one out in the same tick: the one that goes is released before the new one's first mesh is made.
+      loads[1]=load(7,I({0,0}),400);before=e3.releases;auto made=e3.creates;run(1);
+      CHECK(e3.releases==before+4&&e3.creates==made+2&&set.shown(7)==2&&set.shown(9)==0);
+      // A new world: every stack forgets, none releases.
+      before=e3.releases;set.forget("load");CHECK(e3.releases==before&&set.shown()==0);
+      e3.live.clear();run(4);CHECK(set.shown()==5);
+      before=e3.releases;set.clear();CHECK(e3.releases==before+5&&set.size()==0); }
     if(failures)return 1;
     std::puts("stack tests passed");return 0;
 }

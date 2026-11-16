@@ -1231,10 +1231,79 @@ loading. It is removed when the player leaves. After a load every body is made a
 300 ms. A player who is down lies in the collapse pose, one caught by BTs in the drag pose, and a rider sits in the
 riding pose without a vehicle (as the partner does without `partner_vehicle`).
 
-Nothing else of the two-player layer exists for others: no cargo, structures, enemies, orders, story, time or rain,
-vehicles, gear copies, carts or carried-cargo visuals, no map pin and no notices. What this porter sends them is his
-pose and his animation controls (not what he holds, his wheels or his carts). The partner path is not touched by any
-of it: with `others` at 0, or with no relay configured, no session exists and nothing is sent.
+Nothing that changes the world exists for others: no cargo put down or picked up, structures, enemies, orders,
+story, time or rain, vehicles or carts, no map pin and no notices. What is only shown can be turned on: the gear each
+player wears and the cases each player carries (`others_gear`, `others_carry`, the next section). Otherwise what this
+porter sends them is his pose, his name and his animation controls (not what he holds, his wheels or his carts). The
+partner path is not touched by any of it: with `others` at 0, or with no relay configured, no session exists and
+nothing is sent.
+
+### Other players' gear and carried cases (`others_gear`, `others_carry`; built, not run live)
+
+`"others_gear": true` (requires `others` and the game provider; default false) copies onto every other player's body
+the gear that player wears, as the partner's gear is copied onto the partner's body (`partner_gear`, below).
+`"others_carry": N` (0..8, default 0; requires `others_gear`, since the cases hang on the copy of the backpack) also
+draws the carried cases of the N nearest other players, as `carry_visual` draws the partner's.
+
+- **What travels.** Each pair's own presence-core session carries the same reliable events the partner path uses: type
+  7 (the worn set, `gear.h` WornSender: once it has held for 5 s, on every new connection), type 6 (the carry summary,
+  `carry_visual.h`) and type 16 (where each case sits, `carry_place.h`). `Others` keeps them per player: a set from
+  one player is only ever shown on that player's body. With the setting off they are not sent and, arriving, are
+  acknowledged and dropped like every other type (`core/CORE.md`, "Several peers"). Accepted from others, exactly:
+  10 always; 7 with `others_gear`; 6 and 16 with `others_carry`. Never: cargo put down or picked up, structures,
+  enemies, orders, vehicles, story, the cart's cases (18), the outfit, likes, or any other type. What a player
+  carried is forgotten when that session drops (it is sent again on connecting); what a player wears stays until a
+  new set arrives.
+- **Gear (`gear.h`, `Mirrors`).** One `Mirror` per body in a keyed set, key 0 the partner and a player's id another
+  player, sharing one injected `Api` as the name labels share `nametag::Tags`. Per body it does exactly what the
+  partner's mirror does: copies made from this porter's matching pieces only after the body exists and its place can
+  be read, hidden whenever the body is hidden (a stale player, a private room, a game event here), removed when the
+  player leaves, forgotten (never touched) when the world is replaced. Another player has a save of his own, so
+  nothing is made for him until his set has arrived (the partner still falls back to what this porter shows). When a
+  player leaves, his copies are removed one tick before his body (`others::undress`). The game is asked for at most 2
+  new copies a game-thread tick over all bodies, the partner's first (30 players arriving at once once held the game
+  thread for 5 s before bodies were made one a tick), and this porter's gear is read about once a second for all
+  other bodies together instead of once per body.
+- **Carried cases (`cargo_stack.h`, `Stacks`).** One `Stack` per body, the same shared `Api` and the same budget: at
+  most 2 new case meshes a tick over all bodies, the partner's first. Of the other players only those who are
+  connected and visible, whose body wears a copy of the backpack and who carry something are candidates; the
+  `others_carry` nearest of them get their cases (a full backpack is up to 24 meshes), and one who has them keeps
+  them until another is 2 m nearer (`others::Nearest`, the same rule as the name labels). With measured places a
+  case goes exactly there on the backpack copy (hips and arms too), otherwise the summary's backpack cases are stacked
+  by the layout. A hidden body or an unreadable backpack copy has none; a game event here: nobody.
+- **The partner path** is the same code with key 0 listed first: with `others_gear` off and `others_carry` 0 it makes,
+  sends and draws exactly what it did with the single mirror and stack, and no new game call or address is used for
+  anybody.
+
+Log lines: `GEAR player <id> ...`, `STACK player <id> ...`, `OTHERS player <id> shows N pieces of gear` / `carries N
+entries`, and `GEAR N events of this porter's ... -> other players`. `mod_status` has `"gear_shown"` (`pieces`, `by`
+key, `sets` taken) and `"cases_shown"` (`cases`, `by` key, `sets` taken, `dropped_events`).
+
+**Not run live; what a live run must check.** The calls per body are the partner's, but they have only ever run on
+one body. A live run (two real games with `others_gear` and `others_carry`, then stand-ins) must look at:
+
+- the game thread's tick time and the `STACK slow` lines while many bodies get their copies and cases;
+- the culling guard (`GUARD the culling job met a drawable ...`) and fault records, with many attached copies on
+  bodies that hide, show and are removed (the partner's cuff copy replaced at a terminal once left a drawable in
+  the culling tree);
+- the end-of-tick flush of deferred rep calls covers only the partner's body (`REP` lines): whether attaching copies
+  to other bodies leaves calls waiting on those bodies' queues is unknown (the comment `SEAM others_gear` in
+  `mod.cpp`);
+- every backpack copy gets an empty cargo carrier of the mod's own, kept for the life of the process (about 8.5 kB
+  each): watch the memory over many arrivals and departures;
+- that a body is never removed with copies still attached (the undress order), and that a world reload with others
+  near leaves nothing behind;
+- that each body shows its own player's gear and cases and not this porter's (another save, other gear).
+
+Tests: `gear_test.cpp` (the set: budget, keys that leave, mixing, unreadable places, one shared reading, the
+no-local rule; mutants GEAR_SET_BUDGET, SET_KEEP, SET_MIX, SET_SITE, SET_READS, SET_LOCAL), `cargo_stack_test.cpp`
+(STACK_SET_BUDGET, SET_KEEP, SET_MIX, SET_FORGET), `others_test.cpp` `wearing`, `undressing`, `carrying` and `kinds`
+(OTHERS_EVENTS_OFF, OTHERS_EVENTS_MIX, OTHERS_WEAR_BODY, OTHERS_WEAR_MIX, OTHERS_CARRY_LOST, OTHERS_CARRY_LIMIT,
+OTHERS_CARRY_NEAREST, OTHERS_CARRY_FLAP, OTHERS_CARRY_HIDDEN, OTHERS_CARRY_PACK, OTHERS_CARRY_MIX, OTHERS_UNDRESS,
+OTHERS_PLACE_FRESH), the config in `unit.cpp` (CONFIG_OTHERS_SHOW), and the fake world (`test_others_partner.py`
+`dressed`: the partner and three other players, each body with its own gear, the nearest carrier's cases, a player
+without the settings taking nothing, a game event, players leaving and coming back; mutant library
+`fake-others-undressed.so`).
 
 **The seam to the transport.** `others.h` talks to a `Link`:
 
@@ -1283,9 +1352,11 @@ and each gets a session, a body and a label over that body; the partner link ref
 they are there, leave and come back; a game event hides every label; A's partner socket saw exactly the datagrams B
 sent and A's sessions exactly the ones the relay carried; one of C's datagrams given to the partner's socket is
 refused as another session, and one of B's given to the others as C's, D's or a stranger's is refused or dropped;
-and with `others` set but no `relay` there is no session, no body, no datagram and no log line. Two mutant builds
-must fail it (`test_others_partner_mutants.py`): `fake-others-to-partner.so` (a datagram of another player also
-handed to the partner's core) and `fake-others-no-relay.so` (sessions started without a relay). `mod_status` now has
+and with `others` set but no `relay` there is no session, no body, no datagram and no log line (the gear and cases
+are the `dressed` property, above). Three mutant builds must fail it (`test_others_partner_mutants.py`):
+`fake-others-to-partner.so` (a datagram of another player also handed to the partner's core),
+`fake-others-no-relay.so` (sessions started without a relay) and `fake-others-undressed.so` (a body removed while it
+still wears gear copies). `mod_status` now has
 `"others": {on, near, connected, bodies, shown, sent, received, accepted, refused, unknown, malformed}` and
 `"labels_shown"` in every build.
 

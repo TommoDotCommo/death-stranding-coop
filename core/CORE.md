@@ -435,8 +435,13 @@ What the adapter chooses per pair:
   the core never warns and never refuses between others.
 - **Build identity.** As in the two-player adapter: the adapter's wider identity travels in bytes 16..31, is checked
   on arrival, and the core is given its own pin.
-- **Reliable events (CARGO).** Only the name (type 10) is sent. Any other type that arrives is acknowledged by the
-  core, so the sender's ordered stream does not stop, and then dropped by the adapter.
+- **Reliable events (CARGO).** The name (type 10) is always sent and taken. With the mod's opt-in settings for what
+  is only shown, three more types are sent and taken, the same events the two-player layer uses: with `others_gear`
+  type 7 (the gear a player wears), with `others_carry` also types 6 (what a player carries) and 16 (where each
+  carried case sits). Every other type that arrives, and those three without their setting, is acknowledged by the
+  core, so the sender's ordered stream does not stop, and then dropped by the adapter: cargo put down or picked up,
+  structures, enemies, orders, vehicles, story and everything else that would change this world is never taken from
+  another player.
 - **Teleport flag.** The flag must reach every peer once. Each session keeps it until a PRESENCE carrying it has left
   for that peer; a flag left set would run into the receiver's five-second teleport limit.
 

@@ -1,12 +1,13 @@
 """The fake-world test of the partner with other players (test_others_partner.py) must fail on a build whose seam
-leaks: one where another player's datagram is also handed to the partner's core, and one where `others` starts
-sessions without a relay configured. Each mutant library is run against the property that guards it, side by side."""
+leaks: one where another player's datagram is also handed to the partner's core, one where `others` starts
+sessions without a relay configured, and one where a player's body is removed while it still wears gear copies.
+Each mutant library is run against the property that guards it, side by side."""
 from pathlib import Path
 import subprocess
 import sys
 import mutants
 ROOT=Path(__file__).resolve().parent
-CASES=[('fake-others-to-partner.so','together'),('fake-others-no-relay.so','no_relay')]
+CASES=[('fake-others-to-partner.so','together'),('fake-others-no-relay.so','no_relay'),('fake-others-undressed.so','dressed')]
 def one(case):
     library,prop=case
     r=subprocess.run([sys.executable,'-B',str(ROOT/'test_others_partner.py'),str(ROOT/'build'/library),prop],capture_output=True,text=True,timeout=300)

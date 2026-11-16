@@ -29,7 +29,7 @@ static Transform onAnchor(const Transform& a,const Transform& rel){
     for(int i=0;i<3;++i)for(int j=0;j<3;++j){double v=0;for(int k=0;k<3;++k)v+=double(rel.rotation[size_t(3*i+k)])*a.rotation[size_t(3*k+j)];w.rotation[size_t(3*i+j)]=float(v);}
     return w;
 }
-void Stack::tick(bool permitted,const std::vector<Item>& wanted,const Transform* anchor,const std::vector<Transform>* placed){
+void Stack::tick(bool permitted,const std::vector<Item>& wanted,const Transform* anchor,const std::vector<Transform>* placed,unsigned* budget){
     if(!permitted||!anchor){if(!meshes_.empty())clear();return;}
 #ifndef MUTANT_STACK_PLACED_LAYOUT
     bool exact=placed&&placed->size()==wanted.size();
@@ -50,6 +50,11 @@ void Stack::tick(bool permitted,const std::vector<Item>& wanted,const Transform*
 #endif
     while(meshes_.size()>keep){api_.release(meshes_.back().mesh);meshes_.pop_back();}
     for(unsigned n=0;n<PerTick&&meshes_.size()<items.size()&&failures_<MaxFailures;++n){
+#ifndef MUTANT_STACK_SET_BUDGET
+        if(budget){if(!*budget)break;--*budget;}   // the next case waits for a later tick
+#else
+        (void)budget;
+#endif
         Item item=items[meshes_.size()];
         auto known=cases_.find(item);
         if(known==cases_.end()){known=cases_.emplace(item,api_.caseFor(item.id,item.variant)).first;
@@ -84,6 +89,48 @@ void Stack::clear(){
     if(!meshes_.empty())log_("STACK "+std::to_string(meshes_.size())+" cases removed\n");
     meshes_.clear();
 }
+void Stacks::tick(const std::vector<Load>& loads){
+#ifndef MUTANT_STACK_SET_KEEP
+    for(auto it=stacks_.begin();it!=stacks_.end();){
+        bool listed=std::any_of(loads.begin(),loads.end(),[&](const Load& l){return l.key==it->first;});
+        if(listed){++it;continue;}
+        it->second->clear();it=stacks_.erase(it);
+    }
+#endif
+    unsigned budget=PerTick;
+    // The ones that lose their cases first, so the number of meshes never passes what the listed loads allow within a tick.
+    for(int pass=0;pass<2;++pass)for(size_t i=0;i<loads.size();++i){
+#ifndef MUTANT_STACK_SET_MIX
+        const Load& l=loads[i];
+#else
+        Load mixed=loads.front();mixed.key=loads[i].key;const Load& l=mixed;
+#endif
+        if(l.permitted!=(pass==1))continue;
+        auto it=stacks_.find(l.key);
+        if(it==stacks_.end()){
+            if(!l.permitted)continue;
+            auto key=l.key;auto log=log_;
+            it=stacks_.emplace(key,std::make_unique<Stack>(api_,[key,log](const std::string& row){
+                if(!log)return;
+                if(!key||row.rfind("STACK ",0)!=0){log(row);return;}
+                auto text="STACK player "+std::to_string(key)+" "+row.substr(6);
+                auto at=text.find(" on the partner");if(at!=std::string::npos)text.replace(at,15," on that player's body");
+                log(text);})).first;
+        }
+        auto& stack=*it->second;stack.layout=layout;
+        if(!l.permitted){stack.tick(false,{},nullptr);continue;}
+        stack.tick(true,l.items,&l.anchor,l.placed?&*l.placed:nullptr,&budget);
+    }
+}
+void Stacks::forget(const char* why){
+    for(auto& [key,s]:stacks_){
+        s->forget(why);
+#ifdef MUTANT_STACK_SET_FORGET
+        break;
+#endif
+    }
+}
+void Stacks::clear(){for(auto& [key,s]:stacks_)s->clear();stacks_.clear();}
 #ifdef _WIN32
 namespace {
 void require(bool ok,const char* m){if(!ok)throw std::runtime_error(m);}
