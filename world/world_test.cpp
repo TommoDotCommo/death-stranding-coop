@@ -57,7 +57,7 @@ int main(){
     // The saved document restores everything, sessions included.
     auto saved=w.snapshot();World r([]{return std::string("fresh");});r.restore(json::parse(saved.dump()));
     CHECK(r.objects()==1&&r.playerOf(ta2)==playerId("steam-a")&&r.snapshot().dump()==saved.dump());
-    {bool threw=false;try{r.restore(json::parse("{\"format\":2}"));}catch(const std::exception&){threw=true;}CHECK(threw);}
+    {bool threw=false;try{r.restore(json::parse("{\"format\":3}"));}catch(const std::exception&){threw=true;}CHECK(threw);}
     CHECK(w.call(ta2,"deleteObject","{\"id\":\""+id+"\"}",400).status==200);CHECK(w.objects()==0);
     CHECK(w.call(ta2,"createObject","not json",1).status==400);
     // Caps: players and objects per player.

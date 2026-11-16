@@ -41,6 +41,17 @@ bool passes(const Filter&,const Shared&,bool imported,int64_t nowSeconds);
 bool serverIdText(const std::string&);              // 4..32 letters and digits
 bool objectIdText(const std::string&);              // 2..64 letters and digits
 struct ImportResult { size_t added=0,updated=0,unchanged=0,removed=0,filtered=0,own=0; };
+// The server's policy (README, "Server policy"): a preset and single settings, saved with the world. Values:
+//   join invite|open (recorded only)   build everyone|members|nobody   accept_offers auto|review|never
+//   limit N (objects per player, 0 = none)   withdrawal stay|go   players N (1..MaxPlayers)
+//   offer_builds yes|no|ask, offer_old yes|no: what a player who chose nothing has chosen
+struct Policy {
+    std::string preset="friends",join="invite",build="everyone",acceptOffers="auto",withdrawal="go",offerBuilds="yes",offerOld="no";
+    int64_t limit=0,players=int64_t(MaxPlayers);
+};
+Policy presetPolicy(const std::string& name);       // friends, solo or public; throws for anything else
+void setPolicy(Policy&,const std::string& keyValue); // "KEY=VALUE"; throws with the reason and leaves it as it was
+std::vector<std::pair<std::string,std::string>> policyItems(const Policy&);   // key and value, in a fixed order
 // A gateway request body as the game sends it with plain bodies: {"data":"<json, quotes not escaped>"}, or plain JSON.
 std::string unwrap(const std::string& body);
 class World {
@@ -74,15 +85,45 @@ public:
     struct Origin { std::string server,via;size_t objects=0; };
     std::vector<Origin> origins() const;
     size_t imported() const {std::lock_guard<std::mutex> g(lock_);return byOrigin_.size();}
+    // Server policy and the players' choices (README, "Server policy"). Every call below throws std::runtime_error
+    // with the reason, and then changed nothing.
+    Policy policy() const {std::lock_guard<std::mutex> g(lock_);return policy_;}
+    void setPolicy(const Policy&);
+    // A player's own choices, "KEY=VALUE": offer_builds yes|no|ask|default, offer_old yes|no|default, member yes|no.
+    void setPlayer(const std::string& id,const std::string& keyValue);
+    // One line per player of this world, then one per builder known here only from imports (known=false).
+    struct PlayerInfo { std::string id,name,offerBuilds,offerOld;bool known=true,member=false;size_t shared=0,pending=0,kept=0,remnants=0,imported=0; };
+    std::vector<PlayerInfo> playerList() const;
+    // The objects that wait: for their builder's answer (offer_builds ask), or for the owner (accept_offers review).
+    struct Waiting { std::string id,creator,name,type;int64_t area=0,updated=0;bool forBuilder=false; };
+    std::vector<Waiting> waiting() const;
+    // The owner: an object that waits for him is shared (accept) or kept for its builder only (reject). With
+    // `player`, every object of that player that waits for the owner is accepted. Returns how many.
+    size_t review(const std::string& object,bool accept);
+    size_t reviewPlayer(const std::string& player);
+    // A player's answer for what waits for him ("" = all of it): yes goes on as accept_offers says, no keeps it his.
+    size_t offer(const std::string& player,const std::string& object,bool yes);
+    // A player takes back his objects ("" = all): with withdrawal "stay" what was shared stays as a remnant under his
+    // name that no account owns; anything else, and everything with "go", is removed.
+    struct Withdrawn { size_t remnants=0,removed=0; };
+    Withdrawn withdraw(const std::string& player,const std::string& object);
+    // The owner removes everything one builder has here (built, waiting, kept, remnants, and what came from him
+    // through linked servers). Returns how many objects went.
+    size_t removePlayer(const std::string& id);
     // For tests.
     size_t objects() const {std::lock_guard<std::mutex> g(lock_);return objects_.size();}
     std::string playerOf(const std::string& token) const;
 private:
-    struct Player { std::string id,name,key; };
+    // offerBuilds, offerOld: "" when the player chose nothing (the policy's value applies).
+    struct Player { std::string id,name,key,offerBuilds,offerOld;bool member=false; };
     // An imported object keeps where it was first built (originServer, originId), which server handed it over (via),
     // its builder's name there and the like count it arrived with; `likes` is that count plus what was given here.
+    // `name` is the builder's name when it was built (kept for a remnant); `share` is "" for an object every player
+    // is handed, else "kept" (its builder's only), "ask" (waits for its builder) or "review" (waits for the owner).
+    // A remnant was withdrawn by its builder and stayed: nobody changes it, and its likes go to no one.
     struct Object { std::string id,creator;json::Value post;int64_t updated=0;int64_t likes=0;
-                    std::string originServer,originId,via,originName;int64_t originLikes=0; };
+                    std::string originServer,originId,via,originName;int64_t originLikes=0;
+                    std::string name,share;bool remnant=false; };
     struct Like { std::string to,from,object,type;int64_t time=0,points=0,autoPoints=0; };   // to: the object's builder
     mutable std::mutex lock_;
     std::function<std::string()> random_;
@@ -93,7 +134,11 @@ private:
     uint64_t nextObject_=1;bool dirty_=false;
     std::string serverId_,epoch_;uint64_t changes_=0;
     std::map<std::pair<std::string,std::string>,std::string> byOrigin_;   // (origin server, id there) -> id here
+    Policy policy_;
     std::string versionLocked() const {return epoch_+"-"+std::to_string(changes_);}
+    bool servedTo(const Object&,const std::string& player) const;          // may this player be handed it
+    std::string shareAfterOffer() const;                                   // what an offered upload becomes
+    Object& ownObject(const std::string& player,const std::string& object);
     std::string importedId(char type,const std::pair<std::string,std::string>& origin) const;
     Shared sharedOf(const Object&) const;
     json::Value objectResponse(const Object&) const;
