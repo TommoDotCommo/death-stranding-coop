@@ -382,7 +382,7 @@ struct Runtime final:ds::Transport {
                 :client.refusal()!=ds::broadcast::Refusal::None?"RELAY refused this player\n":"RELAY offline: everybody near has left\n");}
         if(now-relayNotedAt>=10000){relayNotedAt=now;auto& k=client.counters();std::ostringstream o;
             o<<"RELAY broadcast "<<(relayOnline?"online":"offline")<<" near "<<client.nearby().size()<<" taken "<<crowd->size()<<" in "<<k.received<<" ("<<k.receivedBytes<<" bytes) out "<<k.sent<<" ("<<k.sentBytes
-             <<" bytes) frames "<<k.frames<<" accepted "<<k.accepted<<" refused "<<k.refused<<" unknown "<<k.unknown<<" malformed "<<k.malformed<<" fetches "<<k.fetches
+             <<" bytes) frames "<<k.frames<<" accepted "<<k.accepted<<" refused "<<k.refused<<" unknown "<<k.unknown<<" malformed "<<crowd->counters().malformed<<" fetches "<<k.fetches
              <<" clock offset "<<std::lround(client.offsetMs())<<" ms rtt "<<std::lround(client.rttMs())<<" ms";
             if(client.welcome().otherBuild)o<<" near with another build "<<client.welcome().otherBuild;
             o<<"\n";note(o.str().c_str());}
