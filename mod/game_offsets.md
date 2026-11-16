@@ -5811,24 +5811,24 @@ list), then `0x34858f0` sets it Activated. Nothing else in the record changes; t
 record at the next save (loader `0x2c9a6a3`).
 
 **The game already retries (high for the branches).** The base update of every construction object `0x2cb8790(obj,
-dt)` ends, on every path, with: owner `+0xb2` 1, category (`0x2ccf0f0`) not 10, 11 or 15 (ladder, rope, types
-37-39), distance to the porter `obj+0x460` below 15 m (`0x3bcbf54`), online id empty: count `obj+0x518` down by `dt`;
-at 0 call `0x2c9ed40(obj)` = `O` slot `0x28` and `obj+0x518` = 120 s. The timer starts at 0 (`0x2c22797`). The queue processor queues the same call
-at once when it makes an own record from a request with `+0x645` set (`0x2c86400`; `CreateConstruction` always sets
-it), and sets `obj+0xa8` bit 1 (request `+0x620`, "the upload flag") on every own record it makes (`0x2c86521`); what
-that bit does besides the area-capacity tests (`0x2c562f9`, `0x2c58d68`) is not read, and only ladders were tried live
-without it. Ladders and ropes (update `0x2d5ec30`) have
-the same retry behind `obj+0x5f6`, which their own code sets when the placement ends (`0x2d5edc6`, `0x2d5f18d`;
-whether a loaded ladder has it is unknown). Derived: a signed-in game uploads every own structure of its save that
-has no online id when the porter passes within 15 m of it, one every 120 s at most per structure. The live run of
-2026-11-17 did not look for this.
+dt)` ends, on every path, with: owner `+0xb2` 1, category (`0x2ccf0f0`) not 10, 11 or 15 (ladder, rope, types 37-39),
+distance to the porter `obj+0x460` below 15 m (`0x3bcbf54`), online id empty: count `obj+0x518` down by `dt`; at 0
+call `0x2c9ed40(obj)` = `O` slot `0x28` and `obj+0x518` = 120 s. The timer starts at 0 (`0x2c22797`). The queue
+processor queues the same call at once when it makes an own record from a request with `+0x645` set (`0x2c86400`;
+`CreateConstruction` always sets it), and sets `obj+0xa8` bit 1 (request `+0x620`, "the upload flag") on every own
+record it makes (`0x2c86521`); what that bit does besides the area-capacity tests (`0x2c562f9`, `0x2c58d68`) is not
+read, and only ladders were tried live without it. Ladders and ropes (update `0x2d5ec30`) have the same retry behind
+`obj+0x5f6`, which their own code sets when the placement ends (`0x2d5edc6`, `0x2d5f18d`; whether a loaded ladder has
+it is unknown). Derived: a signed-in game uploads every own structure of its save that has no online id when the
+porter passes within 15 m of it, one every 120 s at most per structure. The live run of 2026-11-17 did not look for
+this.
 
 **What the body holds (`0x2caeb50`, high).** Query (`OTGCCreateObjectQuery`): `x`, `y` the cell, `m` = `O+0x90` (the
 map id, `0x262a8c0([0x7be6318])`, a u16; 22123 is the one seen, the same number the area query sends as `aid`), `t`,
 `uc` = `obj+0xa8` bit 7; the body copies `t`, `x`, `y`, `m` (the query goes into the URL only when the online
-manager's `+0x5a` is 0; it starts as 1). Body (`OTGCCreateObjectPost`, offsets in brackets):
+manager's `+0x5a` is 0; it starts as 1). Body (`OTGCCreateObjectPost`):
 
-- `px`, `py`, `pz` (`+0x34..`): `(int)((float)pos[i] * 100000.0f)`, `pos` = `obj+0x40` (3 f64); `exp` 5.
+- `px`, `py`, `pz`: `(int)((float)pos[i] * 100000.0f)`, `pos` = `obj+0x40` (3 f64); `exp` 5.
 - `rx`, `ry`, `rz`: Euler angles of the 3x3 rows at `obj+0x58` (right, forward, up) by `0x19c1270`: `ry =
   asin(clamp(-m02))`; if `cos(ry)` > 1.9e-6, `rx = atan2(m12, m22)` and `rz = atan2(m01, m00)`, else `rx` 0 and `rz =
   atan2(-m10, m11)`; each `(int)((57.29578f * a) * 100000.0f)`. A yaw-only structure has only `rz` (the live shelter).
@@ -5888,14 +5888,14 @@ level 1 on 2026-11-12).
 5. Server: strip or keep `lp`, `tags` and the contributor strings of `mt` (the server's choice; they come from the
    original service).
 
-**Live probes still needed.** (1) Signed in on `coop-world`, walk within 15 m of an own record without an id and wait
-two minutes: expected one `createObject` with that record's type and place, then the id at `obj+0xb8`. (2) Call
-`0x2c9ed40` for a far own record: expected the same, without walking. (3) Read W, H, T (`[[[base+0x7ae90d8]` component
-of type `0x4a76b00`]) and compare the computed cell with the uploaded `x`/`y` (9, 7 at Lake Knot). (4) Compare
-`offer_strand::body` with the game's body for a ladder, a shelter and a 30 m bridge (angles may differ by a unit
-from the game's own atan2). (5) Call `O` slot `0x68` for a record with an old id: expected a `createObject` with
-`"id"`. (6) Read `[0x7bf83b0]`'s like table for an own record with likes, and whether a loaded ladder has
-`obj+0x5f6`.
+**Live probes still needed.** (1) Signed in on `coop-world`, walk within 15 m of an own record without an id: expected
+one `createObject` within seconds (the timer starts at 0) with that record's type and place, then the id at
+`obj+0xb8`. (2) Call `0x2c9ed40` for a far own record: expected the same, without walking. (3) Read W, H, T (the
+component `c` of type `0x4a76b00` on `[base+0x7ae90d8]`: `[c+0x20]+0x58`, `+0x5c`, `c+0x144`) and compare the computed
+cell with the uploaded `x`/`y` (9, 7 at Lake Knot). (4) Compare `offer_strand::body` with the game's body for a
+ladder, a shelter and a 30 m bridge (angles may differ by a unit from the game's own atan2). (5) Call `O` slot `0x68`
+for a record with an old id: expected a `createObject` with `"id"`. (6) Read `[0x7bf83b0]`'s like table for an own
+record with likes, and whether a loaded ladder has `obj+0x5f6`.
 
 
 ## Which screen is up: state flags and the open menu page (2026-11-14, static only)
