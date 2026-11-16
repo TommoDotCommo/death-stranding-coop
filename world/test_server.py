@@ -1,7 +1,7 @@
 """The built server over a real socket: sign-in, a gateway call, keep-alive, the secret prefix, the saved file; the server
 policy: an upload that waits for the owner is handed to nobody else until he accepts it, one the policy does not let be
 shared is answered and held for its builder, and the policy commands; which objects a game is handed (newest first, spread
-apart, the same ones again after newer ones came and after a restart)."""
+apart, the same ones again after newer ones came and after a restart); the launcher's API on the running server."""
 import http.client,json,math,os,socket,subprocess,sys,tempfile,time
 exe=sys.argv[1]
 def free_port():
@@ -132,6 +132,42 @@ with tempfile.TemporaryDirectory() as d:
         c.close()
     finally:
         p.kill();p.wait()
+    # The launcher's API on the running server: the policy in words, a player's choices before his game signs in, his
+    # objects with their state, his offer and withdrawal; saved like any other change.
+    port=free_port();api_world=os.path.join(d,'api.json');p=start(port,'--policy','public','--policy-set','build=everyone',path=api_world)
+    try:
+        c=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
+        def coop(method,call,body=None,player=None):
+            c.request(method,'/abc/coop/'+call+('?player='+player if player else ''),body=None if body is None else json.dumps(body))
+            r=c.getresponse();return r.status,json.loads(r.read() or b'{}')
+        c.request('GET','/coop/policy');r=c.getresponse();r.read();assert r.status==404
+        status,policy=coop('GET','policy');assert status==200 and policy['preset']=='public' and len(policy['settings'])==8,policy
+        build=[s for s in policy['settings'] if s['key']=='build'][0];assert build['value']=='everyone' and build['preset']=='members' and build['text'].startswith('What any player'),build
+        status,me=coop('GET','me',player='ann');assert status==200 and me['known'] is False,me
+        status,me=coop('POST','choices',{'player':'ann','offer_builds':'ask','offer_old':'no'});assert status==200 and me['known'] and me['applies']['offer_builds']=='ask',me
+        assert coop('POST','choices',{'player':'ann','member':'yes'})[0]==400
+        (ann,ann_id),(bob,_)=sign_in('ann'),sign_in('bob');assert ann_id==me['player']
+        status,made=gate(ann,'createObject',{'t':'l','q':226,'px':1,'py':2,'pz':3});assert status==200
+        status,mine=coop('GET','mine',player='ann');assert status==200 and [(o['id'],o['state'],o.get('waiting_for')) for o in mine['objects']]==[(made['id'],'waiting','you')],mine
+        assert coop('POST','offer',{'player':'ann'})[0]==400 and coop('POST','withdraw',{'player':'bob','object':made['id']})[0]==403
+        status,done=coop('POST','offer',{'player':'ann','object':made['id']});assert status==200 and done['offered']==1 and done['me']['waiting_owner']==1,done
+        assert gate(bob,'findQpidObjects',{'q':226})[1]['n']['oa']==[]
+        c.request('GET','/abc/coop/withdraw?player=ann',body=json.dumps({'player':'ann','all':True}));r=c.getresponse();r.read();assert r.status==404
+        c.close()
+    finally:
+        p.kill();p.wait()
+    saved=json.load(open(api_world));assert saved['players'][0]['offer_builds']=='ask' and saved['objects'][0]['share']=='review',saved
+    r=run('review','--data',api_world,'--accept',made['id']);assert r.returncode==0,r.stderr
+    port=free_port();p=start(port,path=api_world)
+    try:
+        c=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
+        assert coop('GET','mine',player='ann')[1]['objects'][0]['state']=='shared'
+        status,done=coop('POST','withdraw',{'player':'ann','all':True});assert status==200 and done['remnants']==1 and done['me']['remnants']==1,done
+        assert coop('GET','mine',player='ann')[1]['objects'][0]['state']=='remnant' and [o['id'] for o in gate(bob,'findQpidObjects',{'q':226})[1]['n']['oa']]==[made['id']]
+        c.close()
+    finally:
+        p.kill();p.wait()
+    assert json.load(open(api_world))['objects'][0]['remnant'] is True
     # --idle-exit: a server nobody asks anything leaves by itself.
     port=free_port();p=subprocess.Popen([exe,'--port',str(port),'--idle-exit','1'],stdout=subprocess.PIPE,text=True)
     try:assert p.wait(timeout=20)==0

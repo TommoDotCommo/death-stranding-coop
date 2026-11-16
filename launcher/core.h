@@ -41,6 +41,9 @@ struct Session {
     Group group=Group::None;
     std::string server="127.0.0.1";
     uint64_t playerId=0;
+    // The rules of the group's server when the host's launcher makes a new world: friends, solo or public
+    // (../world/README.md, "Server policy"). A world that exists keeps its own.
+    std::string policy="friends";
 };
 // The addresses the proxy's network policy lists for the session (COOP_NETWORK_PEERS): the partner, or in group play
 // the server and nothing else.
@@ -78,6 +81,9 @@ inline bool sessionWorld(bool host,bool ownSetting,bool hostSaid) {
 #endif
 }
 std::string config(const Session&);
+// launcher.ini with the [launcher] settings set to `values`, every other section (the choices kept per server,
+// strand.h) as it was.
+std::string settingsText(const std::string& ini,const std::vector<std::pair<std::string,std::string>>& values);
 void atomicWrite(const std::filesystem::path&,const std::string&);
 void writeConfig(const std::filesystem::path& data,const Session&);
 std::string ticket(const release_startup::Values&,const std::string& target,uint64_t now);

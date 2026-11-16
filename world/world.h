@@ -68,6 +68,7 @@ constexpr size_t MaxPickAreas=128,MaxPicksPerArea=1000;   // what is remembered 
 // to remember for the next one: what was handed, then what was remembered before and is still there.
 Curated curate(const std::string& player,int64_t area,const std::map<std::string,int64_t>* counts,const std::vector<Candidate>& candidates,
                const std::vector<std::string>& previous,const Policy& policy,const std::set<std::string>& friends={});
+std::string typeName(const std::string& letter);    // "ladder" for "l"; the letter itself for a kind without a name
 // A gateway request body as the game sends it with plain bodies: {"data":"<json, quotes not escaped>"}, or plain JSON.
 std::string unwrap(const std::string& body);
 class World {
@@ -129,6 +130,14 @@ public:
     // The owner removes everything one builder has here (built, waiting, kept, remnants, and what came from him
     // through linked servers). Returns how many objects went.
     size_t removePlayer(const std::string& id);
+    // The launcher's API (api.h): one account, by the key it signs in with. The documents are the API's answers;
+    // apiChoices throws std::runtime_error with the reason when it is refused, and then changed nothing. It makes the
+    // player when the key is new (as a sign-in would: the `players` setting applies), so his choices are in place
+    // before his game first signs in.
+    json::Value apiPolicy() const;
+    json::Value apiMe(const std::string& key) const;
+    json::Value apiMine(const std::string& key) const;
+    void apiChoices(const std::string& key,const std::string& offerBuilds,const std::string& offerOld);
     // For tests.
     size_t objects() const {std::lock_guard<std::mutex> g(lock_);return objects_.size();}
     std::string playerOf(const std::string& token) const;

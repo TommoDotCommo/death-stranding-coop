@@ -1,21 +1,46 @@
 #include "core.h"
+#include "strand.h"
 #include <chrono>
 #include <fstream>
 #include <iostream>
 #include <cstdlib>
+#include <map>
 namespace fs=std::filesystem;
 static void check(bool b,const char* what) {if(!b){std::cerr<<"launcher oracle: "<<what<<'\n';std::exit(1);}}
 template<class F> static void rejects(F f) {bool rejected=false;try{f();}catch(...){rejected=true;}check(rejected,"invalid input accepted");}
 int main(int argc,char** argv) {
-    if(argc==5&&std::string(argv[1])=="--group") {   // for test_group.py: what the launcher gives the group's server and the games
-        launcher::Session h;h.name="Host";h.port=unsigned(std::stoul(argv[2]));h.secret=uint32_t(std::stoul(argv[3]));h.group=launcher::Group::Host;h.playerId=77;
+    if((argc==5||argc==6)&&std::string(argv[1])=="--group") {   // for test_group.py: what the launcher gives the group's server and the games
+        launcher::Session h;h.name="Host";h.port=unsigned(std::stoul(argv[2]));h.secret=uint32_t(std::stoul(argv[3]));h.group=launcher::Group::Host;h.playerId=77;if(argc==6)h.policy=argv[5];
         for(auto& a:launcher::worldArguments(h,argv[4]))std::cout<<"arg "<<a<<'\n';
         auto hc=mod::parseConfig(launcher::config(h));
         std::cout<<"relay "<<hc.relay<<"\nkey "<<hc.relayKey<<"\nsession "<<hc.session<<"\nhost "<<hc.onlineServer<<'\n';
         ci_invite v{};v.secret=h.secret;v.port=uint16_t(launcher::worldPort(h));v.n=1;v.route[0]={CI_LAN,{127,0,0,1}};
         launcher::Session me;me.name="Joiner";me.playerId=78;
-        std::cout<<"join "<<mod::parseConfig(launcher::config(launcher::groupJoin(v,0,me))).onlineServer<<'\n';
+        auto joiner=launcher::groupJoin(v,0,me);
+        std::cout<<"join "<<mod::parseConfig(launcher::config(joiner)).onlineServer<<"\njoinaccount "<<launcher::strand::account(joiner,1234)<<'\n';
         return 0;
+    }
+    if(argc>=6&&std::string(argv[1]).rfind("--strand",0)==0) {   // for test_group.py: the launcher's side of the server's rules, on a real socket
+        namespace st=launcher::strand;st::Target t;t.address=argv[2];t.port=unsigned(std::stoul(argv[3]));t.prefix=argv[4];t.account=argv[5];auto send=st::transport(t,2000);
+        if(std::string(argv[1])=="--strand"&&(argc==7||argc==9)) {   // the join: ADDRESS PORT PREFIX ACCOUNT INI [BUILDS OLD]
+            std::ifstream f(argv[6],std::ios::binary);std::string ini((std::istreambuf_iterator<char>(f)),{});f.close();
+            st::Choices given;if(argc==9){given.offerBuilds=argv[7];given.offerOld=argv[8];}
+            auto j=st::join(t,send,ini,given);
+            std::ofstream(argv[6],std::ios::binary|std::ios::trunc)<<j.ini;
+            std::cout<<"fetched "<<int(j.fetched)<<"\nstart "<<j.start<<"\nmessage "<<j.message<<"\npolicy "<<j.raw<<'\n';
+            return 0;
+        }
+        if(std::string(argv[1])=="--strand-mine"&&argc==6) {   // ADDRESS PORT PREFIX ACCOUNT: the strand view's rows
+            std::vector<st::Object> list;std::string why;st::Me me;
+            if(!st::fetchMine(t,send,list,why)||!st::fetchMe(t,send,me,why)){std::cout<<"refused "<<why<<'\n';return 0;}
+            std::cout<<"me "<<me.text()<<'\n';for(auto& o:list)std::cout<<"row "<<o.id<<' '<<o.state<<' '<<o.likes<<' '<<o.text()<<'\n';
+            return 0;
+        }
+        if(std::string(argv[1])=="--strand-act"&&argc==8) {   // ADDRESS PORT PREFIX ACCOUNT offer|withdraw OBJECT|all
+            std::string result,object=argv[7];bool ok=st::act(t,send,argv[6],object=="all"?"":object,result);
+            std::cout<<(ok?"done ":"refused ")<<result<<'\n';return 0;
+        }
+        return 2;
     }
     check(argc==2,"temporary test root required");fs::path root=argv[1];fs::create_directories(root);
     launcher::Session s;s.peer="100.90.1.2";s.name="Porter";s.port=49003;s.secret=0x12345678;
@@ -56,7 +81,9 @@ int main(int argc,char** argv) {
         check(hc.onlineServer=="http://127.0.0.1:49103/w305419896/auth/ds","the host's game signs in on loopback, as its own account");
         check(hc.partner=="off"&&!hc.shareOrders&&!hc.shareEnemies&&!hc.shareRoads&&!hc.shareSavedStructures&&hc.shareEnvironment=="off"&&!hc.notices,"nothing of the two-player session in group play");
         auto a=launcher::worldArguments(h,"D");
-        check(a==std::vector<std::string>{"--port","49103","--bind","0.0.0.0","--prefix","w305419896","--data","D","--idle-exit","21600","--relay-port","49103","--relay-key","w305419896"},"group server command line: shared world and relay");
+        check(a==std::vector<std::string>{"--port","49103","--bind","0.0.0.0","--prefix","w305419896","--data","D","--idle-exit","21600","--policy","friends","--relay-port","49103","--relay-key","w305419896"},"group server command line: shared world, rules and relay");
+        {auto pub=h;pub.policy="public";auto b=launcher::worldArguments(pub,"D");check(b[10]=="--policy"&&b[11]=="public","the host's choice of rules for a new world");
+         auto other=h;other.policy="club";rejects([&]{launcher::worldArguments(other,"D");});}
         check(a.back()==hc.relayKey&&hc.onlineServer.find("/"+a[5]+"/")!=std::string::npos,"one key for the server and the games");
         check(launcher::networkPeers(h)=="127.0.0.1"&&launcher::networkPeers(s)=="100.90.1.2","the proxy lists the server in group play, the partner otherwise");
         std::vector<ci_route> routes{{CI_LAN,{192,168,1,20}},{CI_VPN,{100,70,1,2}}};
@@ -94,6 +121,84 @@ int main(int argc,char** argv) {
         check(launcher::redact("\"relay_key\":\"w305419896\",\"online_server\":\"http://127.0.0.1:49103/w305419896/k/p77/auth/ds\" "+code+" x")
               =="\"relay_key\":\"<hidden>\",\"online_server\":\"http://127.0.0.1:49103/w<hidden>/k/p77/auth/ds\" DSG-<hidden> x","the group's key is hidden in diagnostics in every form");
         check(launcher::redact("data/world/world.json /w12x /w1234567890123/ DSG-AB")=="data/world/world.json /w12x /w1234567890123/ DSG-AB","only the key's own forms change");
+    }
+    {   // A group server's rules (strand.h): read before the game connects and shown with the player's own choices for
+        // that server, which are kept per server in launcher.ini and sent; then what he has there.
+        namespace st=launcher::strand;using launcher::Group;
+        launcher::Session h;h.name="Porter";h.port=49003;h.secret=0x12345678;h.group=Group::Host;h.playerId=77;
+        check(st::account(h,1234)=="76561197960266962"&&st::account(h,0).empty(),"the host's game signs in as his Steam account");
+        auto t=st::target(h,1234);check(t.address=="127.0.0.1"&&t.port==49103&&t.prefix=="w305419896","the host's launcher asks its own server");
+        ci_invite v{};v.secret=h.secret;v.port=49103;v.n=1;v.route[0]={CI_LAN,{127,0,0,1}};launcher::Session me;me.name="Joiner";me.playerId=78;
+        auto local=launcher::groupJoin(v,0,me);check(st::account(local,1234)=="p78","a joiner on the host's PC acts as the name his game signs in with, never as the host's Steam account");
+        v.route[0]={CI_LAN,{192,168,1,20}};auto far=launcher::groupJoin(v,0,me);
+        check(st::account(far,99)=="76561197960265827"&&st::target(far,99).address=="192.168.1.20","a joiner on another PC is his own Steam account at the server's address");
+        const std::string doc=R"({"format":1,"server":"a1b2c3d4e5f6a7b8","preset":"public","players":{"count":2,"limit":16},"settings":[)"
+            R"({"key":"join","value":"open","preset":"open","text":"Open to anyone."},{"key":"build","value":"everyone","preset":"members","text":"What any player builds here may be shared."},)"
+            R"({"key":"offer_builds","value":"ask","preset":"yes","text":"Unless you choose otherwise, what you build here waits for your answer."},)"
+            R"({"key":"offer_old","value":"no","preset":"no","text":"Your older strand is not taken over."}]})";
+        auto p=st::parsePolicy(doc);
+        check(p.server=="a1b2c3d4e5f6a7b8"&&p.preset=="public"&&p.players==2&&p.limit==16&&p.settings.size()==4&&p.value("build")=="everyone","the policy read");
+        auto shown=p.text();check(shown.find("What any player builds here may be shared. (the owner changed this from the preset's members)")!=std::string::npos&&shown.find("2 of 16 players")!=std::string::npos
+                                  &&shown.find("act for any player")!=std::string::npos,"the policy in words, with what the owner changed and that there is no identity");
+        auto d=st::defaults(p);check(d.offerBuilds=="ask"&&d.offerOld=="no","a player who chose nothing has the server's choices");
+        auto edit=[&](const std::string& from,const std::string& to){auto x=doc;auto at=x.find(from);check(at!=std::string::npos,"fixture");return x.replace(at,from.size(),to);};
+        for(auto wrong:{edit("\"format\":1","\"format\":2"),edit("a1b2c3d4e5f6a7b8","a1b2]\\nx=y"),edit("a1b2c3d4e5f6a7b8","ab"),edit("\"preset\":\"public\"","\"preset\":\"club\""),
+                        edit("\"key\":\"offer_builds\"","\"key\":\"offer_new\""),edit("Open to anyone.","Open\\u0007"),edit("\"value\":\"ask\"","\"value\":\"maybe\""),
+                        edit("\"players\":{\"count\":2","\"players\":{\"count\":\"2\""),std::string("[]"),std::string("not json"),std::string()})
+            rejects([&]{st::parsePolicy(wrong);});
+        // Kept per server: two servers, two sets of choices; the launcher's own settings untouched; another server
+        // starts from its defaults.
+        std::string ini="[launcher]\nname=Porter\nplayer_id=78\n";
+        ini=st::remember(ini,"a1b2c3d4e5f6a7b8",{"no","yes"});ini=st::remember(ini,"ffff0000ffff0000",{"yes","no"});ini=st::remember(ini,"a1b2c3d4e5f6a7b8",{"no","no"});
+        auto mine=st::remembered(ini,p);check(mine.offerBuilds=="no"&&mine.offerOld=="no","this server's remembered choices");
+        auto other=p;other.server="ffff0000ffff0000";check(st::remembered(ini,other).offerBuilds=="yes","another server's own choices");
+        other.server="0000aaaa0000aaaa";check(st::remembered(ini,other).offerBuilds=="ask"&&st::remembered(ini,other).offerOld=="no","a server not seen before: its defaults");
+        check(st::iniGet(ini,"launcher","name")=="Porter"&&ini.find("offer_builds=no\noffer_old=no\n")!=std::string::npos&&ini.find("offer_builds",ini.find("offer_old"))!=std::string::npos,"one line per choice per server");
+        auto settings=launcher::settingsText(ini,{{"name","Fragile"},{"group_policy","public"}});
+        check(st::iniGet(settings,"launcher","name")=="Fragile"&&st::iniGet(settings,"launcher","group_policy")=="public"&&st::iniGet(settings,"launcher","player_id")=="78"&&st::remembered(settings,p).offerBuilds=="no","saving the settings keeps the choices kept per server");
+        rejects([&]{st::iniSet(ini,"launcher","name","a\nb");});
+        check(st::remembered("[server-a1b2c3d4e5f6a7b8]\noffer_builds=maybe\n",p).offerBuilds=="ask","a remembered value that is no choice gives way to the server's");
+        // The join, against answers given here: the rules read, the choices sent, the game started only when the server took them.
+        struct Fake {std::map<std::string,st::Http> answers;std::vector<std::string> sent;bool reach=true;};
+        auto fake=[](Fake& f){return st::Transport([&f](const std::string& method,const std::string& path,const std::string& body,st::Http& out){
+            if(!f.reach){return false;}f.sent.push_back(method+" "+path+" "+body);auto a=f.answers.find(method+" "+path);if(a==f.answers.end())return false;out=a->second;return true;});};
+        t.account="76561197960266962";
+        {Fake f;f.answers["GET /w305419896/coop/policy"]={200,doc};f.answers["POST /w305419896/coop/choices"]={200,"{}"};
+         auto j=st::join(t,fake(f),"[launcher]\nname=Porter\n",{});
+         check(j.fetched==st::Fetch::Ok&&j.start&&j.choices.offerBuilds=="ask"&&j.raw==doc&&j.message.find("waits for your answer")!=std::string::npos,"the rules read, the server's defaults chosen, the game may start");
+         check(f.sent.size()==2&&f.sent[1]=="POST /w305419896/coop/choices {\"player\":\"76561197960266962\",\"offer_builds\":\"ask\",\"offer_old\":\"no\"}","the choices sent for this account");
+         check(st::remembered(j.ini,p).offerBuilds=="ask"&&st::iniGet(j.ini,"launcher","name")=="Porter","and remembered for this server");
+         Fake g;g.answers=f.answers;auto k=st::join(t,fake(g),"[server-a1b2c3d4e5f6a7b8]\noffer_builds=no\noffer_old=yes\n",{"","no"});
+         check(k.start&&k.choices.offerBuilds=="no"&&k.choices.offerOld=="no"&&g.sent[1].find("\"offer_builds\":\"no\",\"offer_old\":\"no\"")!=std::string::npos,"the remembered choices, with what is given over them");
+         Fake r;r.answers=f.answers;r.answers["POST /w305419896/coop/choices"]={403,"{\"status\":\"403\",\"code\":403,\"message\":\"this world has all its players\"}"};
+         auto refused=st::join(t,fake(r),"",{});
+         check(refused.fetched==st::Fetch::Ok&&!refused.start&&refused.message.find("this world has all its players")!=std::string::npos,"choices the server does not take: the game is not started");
+         Fake n;n.answers=f.answers;auto none=t;none.account.clear();check(!st::join(none,fake(n),"",{}).start&&n.sent.size()==1,"no account known: nothing sent, nothing started");
+         Fake w;w.answers=f.answers;check(!st::join(t,fake(w),"",{"maybe",""}).start&&w.sent.size()==1,"no choice that is not one");}
+        {Fake f;f.answers["GET /w305419896/coop/policy"]={404,"{}"};f.answers["GET /w305419896/gate/e/getVersion"]={401,"{}"};
+         auto j=st::join(t,fake(f),"",{});check(j.fetched==st::Fetch::Old&&j.start&&f.sent.size()==2&&j.message.find("shares what every player builds")!=std::string::npos,"an older server: said so, joined with its defaults, nothing sent");}
+        {Fake f;f.answers["GET /w305419896/coop/policy"]={404,"{}"};f.answers["GET /w305419896/gate/e/getVersion"]={404,"{}"};
+         auto j=st::join(t,fake(f),"",{});check(j.fetched==st::Fetch::WrongKey&&!j.start,"a server that does not know the group's key: not joined");}
+        {Fake f;f.reach=false;auto j=st::join(t,fake(f),"",{});check(j.fetched==st::Fetch::Unreachable&&!j.start&&j.message.find("did not answer")!=std::string::npos,"no server: not joined");}
+        for(auto body:{std::string("garbage"),edit("\"format\":1","\"format\":3")}){Fake f;f.answers["GET /w305419896/coop/policy"]={200,body};
+            auto j=st::join(t,fake(f),"",{});check(j.fetched==st::Fetch::Bad&&!j.start,"an answer this launcher cannot read: not joined");}
+        {Fake f;f.answers["GET /w305419896/coop/policy"]={500,"{}"};check(st::join(t,fake(f),"",{}).fetched==st::Fetch::Bad,"a server error is not an older server");}
+        // What he has there, and his offer or withdrawal.
+        {Fake f;f.answers["GET /w305419896/coop/mine?player=76561197960266962"]={200,R"({"format":1,"objects":[{"id":"lAAAA","type":"l","kind":"ladder","area":226,"state":"held","waiting_for":"you","held":"member","held_text":"only members build on this server","likes":0},{"id":"eBBBB","kind":"cairn","area":5,"state":"shared","likes":1}]})"};
+         f.answers["GET /w305419896/coop/me?player=76561197960266962"]={200,R"({"known":true,"shared":1,"held":{"member":1,"limit":2},"likes":1})"};
+         f.answers["POST /w305419896/coop/withdraw"]={200,R"({"remnants":1,"removed":2})"};f.answers["POST /w305419896/coop/offer"]={403,R"({"message":"lAAAA stays held: only members build on this server"})"};
+         std::vector<st::Object> list;std::string why;st::Me m;
+         check(st::fetchMine(t,fake(f),list,why)&&list.size()==2&&list[0].text()=="ladder  area 226  held: only members build on this server (then your answer)  0 likes  (lAAAA)"&&list[1].text()=="cairn  area 5  shared  1 like  (eBBBB)","the rows of the strand view");
+         check(st::fetchMe(t,fake(f),m,why)&&m.held==3&&m.text().find("1 shared")!=std::string::npos,"what he has there");
+         std::string result;check(st::act(t,fake(f),"withdraw","",result)&&result=="Withdrawn: 2 removed, 1 stay as remnants."&&f.sent.back()=="POST /w305419896/coop/withdraw {\"player\":\"76561197960266962\",\"all\":true}","withdraw all of his");
+         check(!st::act(t,fake(f),"offer","lAAAA",result)&&result=="Refused: lAAAA stays held: only members build on this server."&&f.sent.back().find("\"object\":\"lAAAA\"")!=std::string::npos,"a refusal in the server's words");
+         rejects([&]{st::act(t,fake(f),"remove-player","",result);});
+         f.answers["GET /w305419896/coop/mine?player=76561197960266962"]={404,"{}"};check(!st::fetchMine(t,fake(f),list,why)&&why.find("before the launcher")!=std::string::npos,"an older server has no list");}
+        // HTTP in and out.
+        check(st::request(t,"POST","/w1/coop/offer","{}")=="POST /w1/coop/offer HTTP/1.1\r\nHost: 127.0.0.1:49103\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}","the request");
+        st::Http got;check(st::parseResponse("HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",got)&&got.status==403&&got.body=="{}","an answer");
+        for(auto wrong:{"HTTP/1.1 200 OK\r\n\r\n{}","HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n{}","HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\n{}","HTTP/1.1 2x0 OK\r\nContent-Length: 2\r\n\r\n{}",
+                        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n{}",""})check(!st::parseResponse(wrong,got),"an answer in no form this launcher reads");
     }
     for(auto peer:{"0.0.0.0","example.com","255.255.255.255","192.168.01.2","224.0.0.1"}) {s.peer=peer;rejects([&]{launcher::config(s);});}s.peer="127.0.0.1";
     for(auto port:{0u,48999u,49015u,65535u}) {s.port=port;rejects([&]{launcher::config(s);});}s.port=49000;

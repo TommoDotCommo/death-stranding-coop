@@ -1,4 +1,5 @@
 #include "core.h"
+#include "strand.h"
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
@@ -65,6 +66,11 @@ std::vector<std::string> worldArguments(const Session& s,const std::string& data
         // The group's server: the shared world and the relay on one port number (TCP and UDP), one key for both, on
         // every address of this PC (the host's game uses loopback, the others a LAN or VPN address from the invite).
         std::vector<std::string> a{"--port",std::to_string(worldPort(s)),"--bind","0.0.0.0","--prefix",worldPrefix(s),"--data",dataFile,"--idle-exit","21600"};
+        // The rules for a new world (the server keeps an existing world's own and says so).
+        if(s.policy!="friends"&&s.policy!="solo"&&s.policy!="public")throw std::runtime_error("The group server's rules are Friends, Solo archive or Public.");
+#ifndef MUTANT_GROUP_POLICY
+        for(auto more:{std::string("--policy"),s.policy})a.push_back(more);
+#endif
 #ifndef MUTANT_GROUP_NO_RELAY
         for(auto more:{std::string("--relay-port"),std::to_string(worldPort(s)),std::string("--relay-key"),worldPrefix(s)})a.push_back(more);
 #endif
@@ -127,6 +133,15 @@ std::string config(const Session& s) {
     std::string json="{\"role\":\""+std::string(host?"host":"client")+"\",\"peer\":\""+s.peer+"\",\"slot\":"+std::to_string(slot+(s.host?0:1))+",\"peer_slot\":"+std::to_string(slot+(s.host?1:0))+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)+",\"required\":true,\"logging\":true,"+play+world+",\"discovery_sha256\":\""+mod::discovery::PinnedHash+"\"}\n";
     mod::parseConfig(json); // Use the production schema before writing anything.
     return json;
+}
+std::string settingsText(const std::string& ini,const std::vector<std::pair<std::string,std::string>>& values) {
+#ifndef MUTANT_STRAND_SETTINGS_KEEP
+    std::string out=ini;
+#else
+    std::string out;(void)ini;
+#endif
+    for(auto& v:values)out=strand::iniSet(out,"launcher",v.first,v.second);
+    return out;
 }
 void atomicWrite(const std::filesystem::path& path,const std::string& bytes) {
     safeAncestors(path);
