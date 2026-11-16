@@ -53,12 +53,19 @@ void Bodies::drive(const std::vector<Want>& wants,const puppet::Anchor& porter,u
 #endif
     made_=driving_=givenUp_=0;
     if(!make_)return;
+    bool newThisCall=false;
     for(const auto& w:wants){
         auto it=bodies_.find(w.key);
 #ifdef MUTANT_BODIES_ONCE
         it=bodies_.end();
 #endif
         if(it==bodies_.end()){
+            // One new body object per call: building one looks the game's routines up again, and thirty players
+            // arriving in one tick held the game thread for over 5 s (live 2026-11-16).
+#ifndef MUTANT_BODIES_ONE_NEW
+            if(newThisCall)continue;
+#endif
+            newThisCall=true;
             auto body=make_(w.key);if(!body)continue;
             bodies_[w.key]=std::move(body);it=bodies_.find(w.key);
         }

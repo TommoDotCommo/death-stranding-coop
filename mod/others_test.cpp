@@ -112,7 +112,8 @@ void pairing(){
 // Several players enter, walk, and each body follows its own player.
 void several(){
     Sim s;auto& me=s.add(100,0);auto& b=s.add(50,20);auto& c=s.add(200,40);auto& d=s.add(300,60);
-    s.step();CHECK(me.others->size()==3&&s.bodies.size()==3);
+    s.step();CHECK(me.others->size()==3&&s.bodies.size()==1);            // one new body object a tick
+    s.step();s.step();CHECK(s.bodies.size()==3);
     CHECK(s.world.creates==1);                                           // one new entity at a time
     s.run(250);CHECK(s.world.creates==1);
     s.run(4000);
