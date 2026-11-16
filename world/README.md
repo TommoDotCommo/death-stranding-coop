@@ -25,7 +25,9 @@ coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] 
   server listens beyond loopback: the Steam ticket is not checked, so the prefix is what makes someone a player.
 - `--idle-exit SECONDS`: leave when no game has asked anything for that long (the launcher starts it with six hours).
 - `--trace`: every call with its body, for research. Bodies name other accounts (the game looks up the Steam
-  friends list); keep the file private. Neither the Steam ticket nor a launcher's sign-in ticket (`/t/`) is written.
+  friends list); keep the file private. Neither the Steam ticket nor a launcher's sign-in ticket (`/t/`) is written,
+  nor the answers that hand out tickets and tokens (`ticket`, `relay-token`, `notice-token`); a notice token travels
+  in a header, which is not written.
 - `--owner KEY`: the owner's public key (64 hex digits; the host's launcher gives its own). Saved with the world; a
   start with another key replaces it (whoever starts the server with the world file is its owner). The owner's signed
   calls are the owner's actions on the running server ("Identity").
@@ -64,6 +66,7 @@ loopback, a LAN or a VPN.
 | anything else | `{}` and an `unhandled NAME` line in the log |
 | `POST …/link/pull` with `Authorization: Link KEY` | not the game's: one page of objects for a linked server ("Linked servers") |
 | `GET`/`POST …/coop/NAME` | not the game's: the launcher's API ("The launcher's API"), and the owner's calls ("Identity") |
+| `GET …/coop/notices` with `X-Coop-Token` | not the game's: the mod's read of its player's own objects ("What the game is told") |
 
 Limits: 16 players, 4000 objects built here per player, 20000 objects held from each other server, 4 MiB per body,
 32 connections.
@@ -674,6 +677,7 @@ shows the policy before a player's game connects, sends his choices, and lists, 
 | `POST …/coop/withdraw` `{"player":KEY,"object":ID}` or `{"player":KEY,"all":true}` | as `coop-world withdraw`: `remnants`, `removed` and `me` |
 | `POST …/coop/ticket` `{"player":KEY}`, signed | identity keys: a sign-in ticket for his game, `ticket` and `expires` ("Identity") |
 | `POST …/coop/relay-token` `{"player":KEY}`, signed | identity keys: a relay token, `token`, `relay_id` (made from his key) and `expires` |
+| `POST …/coop/notice-token` `{"player":KEY}` | a notice token for his game's mod ("What the game is told"), `token` and `expires`; taken as a change is (signed under keys) |
 
 The policy also carries `time` (the server's clock, so a launcher whose clock is off signs with the server's time) and
 `owner` (whether the world has an owner key). `KEY` is the account key the player's game signs in with: the `NAME` of
@@ -705,6 +709,44 @@ Owner actions (review, remove-player, members, policy) are commands on the world
 signed calls of the owner's key while it runs ("Identity"), which the host's launcher makes from its Server owner window
 (`../launcher/README.md`, "Server owner").
 
+### What the game is told
+
+The game is answered as always whatever becomes of its upload, so the player would not know that his ladder is held
+for him alone, kept, or waits. The mod tells him in the game's info log (`../mod/README.md`, "Strand notices"); it
+learns it here, with one call of its own (`api.h`, `front.h`; built and tested without a game, 2026-11-17):
+
+| Call | Answer |
+|---|---|
+| `GET …/coop/notices[?since=VERSION]` with the header `X-Coop-Token: TOKEN` | `format` 1, the world's display `name`, a `version`, `full`, and `objects`: his objects built here, each `id`, `kind` (ladder, cairn, …), `state` (`shared`, `held`, `kept`, `waiting`, `remnant`) and `why` (held: `build`, `member`, `limit`; kept: `choice`, `owner`, `server`; waiting: `you`, `owner`; else `""`) |
+
+- **What is listed.** Every one of his objects (`full` true) on a first read, or when `since` is not a version of
+  this process (the server started again, or a version it never gave); else only the objects whose state changed
+  after that version (`full` false). A version is the process's epoch and a stamp that counts state changes: an
+  upload, a review, an offer, a held object's reason, a withdrawal that leaves a remnant. What is removed is not
+  listed again. Objects from linked servers are not his here, whatever builder id they carry, and are never listed.
+- **Why kept.** Every kept object records why: his choice (`offer_builds` no, or his no to an offer), the owner's
+  review (`review --reject`), or a server that takes no offers (`accept_offers` never). It is saved with the world
+  (`kept`); a world file from before has none (the mod then says only "kept for you").
+- **The notice token** is the call's only credential, because the mod holds no key. The launcher takes it just
+  before the game starts by `POST …/coop/notice-token` `{"player":KEY}` for the account the game signs in as, as any
+  change: unsigned under identity none (for any player, as every call there), signed by the player's key under keys.
+  It is good until its first read, at most 30 minutes; then while reads keep coming, until 15 minutes after the last;
+  a new one ends the player's older one. The time of its last read reaches the world file at most every 5 minutes, so
+  a token outlives a short restart of the server. Under every identity it reads, and does nothing else.
+
+What it holds to:
+
+| Rule | Why |
+|---|---|
+| A token reads its own player's objects built here only: never another player's, never an import | a notice is about what is his |
+| The token is no sign-in ticket, no session, no relay token and no API key; the call changes nothing | a token seen on the path gives nothing but those states |
+| Only in the header, never in the address; `GET` only | `--trace` writes addresses; a link fetched ahead reads nothing |
+| Unused 30 minutes, idle 15 minutes, a new one ends the older; kept in the world file | short-lived, and the game keeps its notices across a server restart |
+| Answers go on from a version of this process only; anything else gets everything | the mod compares with what it knows, so nothing is missed or told twice |
+
+Not protected: as for the rest of the API, plain HTTP: whoever sees the traffic reads the token and, while it is
+good, the states of that player's objects.
+
 ### Not built (server policy)
 
 - Identity under `identity none` (friends and solo): anyone who has the group's prefix can sign in under any account
@@ -714,7 +756,8 @@ signed calls of the owner's key while it runs ("Identity"), which the host's lau
   (public) closes that, within what "Identity" says it does not protect.
 - Screens: the launcher shows the policy and sets a player's choices, offers and withdrawals through the launcher's
   API, and the host's launcher has a Server owner window for the owner's signed calls (`../launcher/README.md`,
-  "Server owner"); both built game-free and not seen on a screen. The game itself cannot ask (it does not know of them).
+  "Server owner"); both built game-free and not seen on a screen. The game itself cannot ask (it does not know of
+  them); the mod tells the player in the game what became of his uploads ("What the game is told").
 - `join` and `offer_old` are recorded only. There is no ban: `remove-player` does not stop anyone building again.
 - What a game does when its upload is refused (403) after it built the structure is not known in full: live, once,
   it did not ask again and stayed up; whether it took the structure out of the player's world was not checked. The
@@ -754,6 +797,8 @@ Built and tested without a game (2026-11-17).
   takes a HELLO only with a token of that id: good until its first HELLO, at most 30 minutes, then while HELLOs keep
   coming and 5 minutes after the last; a new token ends the older one. The group's key is not taken under keys: a
   mod that sends it (an older launcher's config) is not answered, as for any wrong key.
+- **The mod's read.** The mod reads its player's objects' states with a notice token the launcher took for it by a
+  signed call; the read itself is not signed ("What the game is told").
 - **The owner.** `--owner KEY` (the host's launcher gives its own key) makes that key the owner's; it is saved with the
   world. The owner's calls, signed with that key and with no other, under every policy:
 
@@ -914,6 +959,23 @@ a `GET`). Eight mutants must fail it (`API_METHOD`, `API_KEY`, `API_STRICT`, `AP
 on the built server on loopback: the policy of a public server, a player's choices before his game signs in, his
 upload waiting for his answer, his offer, the other player handed nothing, a `GET` of a withdrawal refused; after the
 owner's `review --accept` and a restart, his withdrawal leaves a remnant, and the world file keeps every change.
+
+What the game is told: `notices_test.cpp` through the HTTP surface (a first read with every one of his objects, the
+display name and a version; then only what changed: held for a member's server, shared after he is made a member and
+the owner accepts, a remnant; nothing when nothing changed, nothing of another player's even after a change of his;
+every object again for a version of another process, a later stamp or garbage; the reasons held for the limit and for
+nobody, kept for his choice, his no, the owner's review and a server that takes no offers, waiting for him and for the
+owner; the reason saved and two world files refused; an import with his builder id never listed; no token, a wrong
+one, one in the address, a `POST`, another path: nothing; the token as a sign-in ticket, a session and a relay token:
+refused; the token call's bodies in the wrong form and a full world; a new token ending the older; unused and idle
+expiry, a token kept good by reads, saved, taken again after a restart within the idle time, and a world file with a
+token for an unknown account refused). Ten mutants must fail it (`NOTICES_OTHERS`, `NOTICES_IMPORTS`,
+`NOTICES_TOKEN_TICKET`, `NOTICES_EXPIRY`, `NOTICES_STAMP`, `NOTICES_SINCE`, `NOTICES_KEPT_WHY`, `NOTICES_EPOCH`,
+`NOTICES_SAVE`, `TICKET_REPLACE`). `keys_test.cpp`: under keys the token is taken by a signed call for the signer
+only (`API_UNSIGNED` and `API_SIGNER_PLAYER` fail it too) and read unsigned. `test_server.py` on loopback: a token,
+a first read, a held ladder listed with its reason and nothing of another player's, the token in the address refused
+and never in `--trace`; after `player-set` and `review --accept-player` on the stopped world and a start, the ladder
+listed as shared in a full answer.
 
 Identity: `identity_test.cpp` (Ed25519 against RFC 8032's tests 1, 2, 3 and SHA(abc), every one with a bit changed
 in the message, the signature or the key; the account and key forms; the relay id; a signed call taken once, changed

@@ -70,6 +70,7 @@ config names the server instead:
 | `player_id` | this player's number on the relay, 1 to 999999999999999 (the parser takes integers of at most 15 digits). It must be stable and say nothing about the player: the launcher makes it once from 49 random bits and keeps it in its settings; it is never the Steam id. On a server that takes player keys it is the number made from the player's key (`world/README.md`, "Identity"). The relay refuses a second game with an id that is in use |
 | `relay_key` | the group's key, the one the server was started with; on a server that takes player keys, this player's relay token, which the launcher takes from the server just before the game starts (the same field, at most 32 letters and digits) |
 | `online_server` (group) | `http://SERVER:PORT/KEY/auth/ds`; on a server that takes player keys `http://SERVER:PORT/KEY/t/TICKET/auth/ds`, with the sign-in ticket the launcher took (good for 30 minutes until the game signs in). The mod passes the address on as it is |
+| `strand_notices`, `strand_token` | with `online_server`: lines in the game's info log about this player's builds on the server, read with the notice token the launcher took ("Strand notices", below); the launcher writes both |
 | `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
 | `slot` | still required (0..15), but no port is bound from it |
 | refused without `peer` | `role` other than `none`, `peer_slot`, `bind`, `partner` other than `off`, `join_at_host` and every `share_*` setting that is on: they need the partner and would silently do nothing |
@@ -731,8 +732,69 @@ The mod adds a finished text to the info-log queue with the game's own add funct
 the game takes, stamped with the UI clock, looking like the game's plain messages; it uses no table item and saves
 nothing. The HUD object is found through the UI owner global and checked by its vtable on every call
 (`game_offsets.md`, "Info log"). Log lines start with `NOTICE`. `puppet.ride` "notice" shows one test line without
-the config. Tests: `notice_test.cpp` (mutants BOUND, LEFT, ALONE_ONCE, NAME_WAIT, WORLD, GAP, AWAY_SETTLE, BACK_PAIRED, LIKE_ICON, JOIN_HOLD). The launcher's play
+the config. In group play (no `peer`) nobody is expected, so "No partner yet" is never said. Tests: `notice_test.cpp` (mutants BOUND, GROUP_ALONE, LEFT, ALONE_ONCE, NAME_WAIT, WORLD, GAP, AWAY_SETTLE, BACK_PAIRED, LIKE_ICON, JOIN_HOLD). The launcher's play
 setup turns it on.
+
+## Strand notices (`strand_notices`, off by default; built game-free, not run live)
+
+The rule behind it: no surprises. A game builds in its own world whatever the server does, uploads the structure and
+is answered as always; whether the server shares it is the server's policy and the player's choices
+(`../world/README.md`, "Server policy"). With `"strand_notices": true`, `"strand_token": "..."` and `online_server`,
+the game's info log says so, naming the server by its display name ("this server" without one):
+
+| What became of an upload | The line |
+|---|---|
+| held: members only | "Your ladder is not shared on North: only members' builds are shared here." |
+| held: nobody's are shared | "Your ladder is not shared on North: no builds are shared here." |
+| held: his limit | "Your ladder is not shared on North: you have reached the limit of shared builds here." |
+| kept: his choice (`offer_builds` no) | "Your ladder is kept for you on North (your choice)." |
+| kept: the owner's review said no | "Your ladder is kept for you on North: the owner did not accept it." |
+| kept: the server takes no offers | "Your ladder is kept for you on North: builds are not shared here." |
+| waits for the owner | "Your ladder is waiting for the owner's review on North." |
+| waits for his answer (`ask`) | "Your ladder is waiting for your answer on North: offer it in the launcher." |
+| later shared (made a member, accepted, offered) | "Your ladder is now shared on North." |
+
+Once per object and state; nothing for what is shared at once, for a withdrawal (a remnant), for his own no in the
+launcher, or for what he had on the server before the game started. Several of one kind of news in one read are one
+line ("3 of your builds are not shared on North: ..."). The lines go through the notices' queue: shown only in the
+world, 2.5 s apart, at most four waiting (`notice.h`). They need no partner and turn on no partner notice.
+
+How the mod learns it: it cannot see the game's own upload, so a thread of its own (never the game's) asks the server
+every 5 s, `GET [/PREFIX]/coop/notices?since=VERSION` with the header `X-Coop-Token: TOKEN`, at the address and
+prefix of `online_server` (`../world/README.md`, "What the game is told"). The first answer lists all of the player's
+objects there and is taken as what was there before; after that the server lists only what changed since the version
+of the last answer, or everything again after it started again, and the mod compares with what it knows
+(`strand_notices.h`, `Tracker`). A read that fails is tried again after 10, 20, then every 30 s; a token the server
+refuses (403) ends the reads until the game is started again from the launcher. Log lines start with `STRAND`;
+`mod_status` has `"strand": {on, reads, answers, failures, told, known, refused, pending}`.
+
+Why a token: the game signs in with its own HTTP calls and the mod holds no key (under identity keys only the
+launcher has one). The launcher takes a notice token for the player just before the game starts (any identity: on a
+server that takes keys by a signed call) and writes it into `mod.json` (`../launcher/README.md`); the token reads
+that player's own objects built on that server and nothing else (no sign-in, no session, no API call, no relay). It
+travels in a header, never in the address (which the server's `--trace` writes), and plain HTTP like the rest: use a
+LAN or a VPN. Why opt-in in the mod and on in the launcher: a hand-written config does only what it says, as for
+every feature; the launcher's player has just seen the server's rules, and a build of his that is not shared should
+not be a surprise later.
+
+Config: `strand_notices` needs `online_server` of the form `http://ADDRESS:PORT[/PREFIX][/k/NAME|/t/TICKET]/auth/ds`
+and `strand_token` (1 to 32 letters and digits); `strand_token` alone is refused (mutant CONFIG_STRAND).
+
+Tests: `strand_notices_test.cpp` (the answer read strictly; every line above and their length; what is told from a
+run of answers: nothing first, once per object and state, nothing for shared, remnant or his own no, one line per
+kind of news, "now shared"; when to read again; the reads on their thread against a scripted server, from each
+version, stopping on a refusal; one HTTP read over loopback), mutants PARSE, FIRST, ONCE, SHARED, CHOICE, GROUP,
+SINCE, STOP, BACKOFF (`test_game_thread_mutants.py strand`). `test_strand_notices.py` runs the real mod in the fake
+world (`build/fake.so`, its info log recorded and shown in `mod_status` as `notices_shown`) in a group config
+against the built `coop-world` named North with members' builds only, the test uploading as the player's game: nothing
+for what was there before; a held ladder and a held cairn told once each in the words above; nothing for another
+player's upload; after the owner made him a member and accepted the ladder with the server stopped and started again,
+"Your ladder is now shared on North." and nothing again for the cairn; nothing for an upload shared at once; and
+without `strand_notices` no line and no read of the server. Three mutant builds must fail it: `fake-strand-once.so`
+(told again whenever listed), `fake-strand-partner.so` (lines only beside the partner's notices),
+`fake-strand-off.so` (a game reads the server without `strand_notices`). Not run with a game: the info log is the one
+the partner notices use live; whether the game's upload and the server's answer come before the next read (5 s) is
+as designed, not measured.
 
 ## Shared MULEs, BTs, orders and roads (`share_enemies`, `share_orders`, `share_order_units`, `share_roads`; off by default)
 

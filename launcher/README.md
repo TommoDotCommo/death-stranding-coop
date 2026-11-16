@@ -165,6 +165,17 @@ delete it to become a new player. The Steam id is not used there. On such a serv
 
 On a server without keys (Friends, Solo archive, or a world from before) nothing of this changes anything.
 
+**What the game is told about the player's builds** (`../mod/README.md`, "Strand notices"; `../world/README.md`, "What
+the game is told"). After the choices (and, on a server that takes keys, the passes), the host's and a joiner's
+launcher take a notice token for the player's game (`POST …/coop/notice-token`, signed where calls are signed) and
+write it into the group `mod.json` as `strand_token`, with `strand_notices` on. With it the game's info log says once
+when something the player built is not shared there and why, and when it becomes shared. The token reads that
+player's own objects' states and nothing else; a new join ends the older one. A server that gives none (one from
+before this call) only means no such lines: the game starts all the same. The two-player shared world takes no
+token (its server has no join step), and no partner notice is turned on by this. Chosen this way: on in the
+launcher, because the player has just seen the rules and should not be surprised later by what a build of his became;
+off in a `mod.json` written by hand unless it says `strand_notices`, as every feature of the mod.
+
 **Before you join: the server's rules.** The rule behind it: before a game connects, its player sees what the server
 will take from him and what it will show him; the server's owner sets the server's rules, the player sets the rules
 of his own contributions. So before the joiner's game starts, the launcher asks the server (its launcher API,
@@ -276,8 +287,8 @@ owner's window does not refresh by itself (Refresh), and there is no ban.
 About → **Save diagnostics for a bug report** (or `deathstranding-coop.exe --diagnostics`, which shows no window)
 writes `diagnostics-<time>.txt` into the co-op data folder: the launcher version, the game folder and whether its
 executable is the supported build, which parts are installed, the mod config, the files in the data folder and the
-last lines of the newest mod, proxy and crash logs. The session code, invites and a group's key (in the invite, the
-server address and the relay key) are hidden, addresses other than
+last lines of the newest mod, proxy and crash logs. The session code, invites, a group's key (in the invite, the
+server address and the relay key), a sign-in ticket and a game's notice token (`strand_token`) are hidden, addresses other than
 this PC's loopback keep only their first two numbers, and the Windows user name in paths becomes `<user>`. The
 report is at most 256 KiB and reads nothing outside the co-op data folder (never a save).
 
@@ -393,7 +404,15 @@ clock, the ticket, token and relay id taken and written into the game's config, 
 ticket (not started), a server that names another relay id, no key (nothing sent), a server without keys (unsigned,
 no passes, as before), and the host's own passes. Mutants: `KEYS_KEEP` (a new key every start), `STRAND_SIGN`
 (unsigned calls), `STRAND_NO_PASSES` (the game started without a ticket), `GROUP_TICKET`, `GROUP_RELAY_TOKEN` (the
-config keeps the name and the group's key), `DIAG_TICKET`. `test_identity.py` (part of `make -C launcher test`) runs
+config keeps the name and the group's key), `DIAG_TICKET`.
+
+Notice tokens: `core_test.cpp` checks the token taken after the choices for the same account (signed on a server that
+takes keys, and for the host's own game with and without keys), written into the group config with `strand_notices`
+and nothing without one, a join that goes on when the server gives none or one that is not a token, no new token for
+the choices alone, and the token hidden in diagnostics. Mutants: `GROUP_NOTICE_TOKEN` (the config leaves it out),
+`STRAND_NOTICE_FATAL` (no token stops the game), `DIAG_NOTICE_TOKEN`. On the built `coop-world`, `test_group.py`
+(identity none) and `test_identity.py` (keys) check that each game's token reads its own builds there, unsigned, and
+that a made-up one reads nothing. `test_identity.py` (part of `make -C launcher test`) runs
 the launcher's side as its `--dev-direct --dev-start --group-host`/`--group-join` paths do, against the built
 `coop-world` on loopback with the command line made for public rules: the host's key given as the owner's; the host's
 and a joiner's game given tickets, tokens and the relay ids of their keys, and signed in with them as two players;
