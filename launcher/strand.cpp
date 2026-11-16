@@ -15,7 +15,12 @@
 #include "strand.h"
 #include "../world/json.h"
 #include <cctype>
+#include <chrono>
+#include <ctime>
 #include <sstream>
+#ifndef _WIN32
+#include <thread>
+#endif
 namespace launcher::strand {
 namespace {
 constexpr size_t MaxAnswer=16u*1024*1024;
@@ -25,6 +30,12 @@ std::string base(const Target& t){return t.prefix.empty()?std::string():"/"+t.pr
 bool plain(const std::string& s){for(unsigned char c:s)if(c<0x20||c==0x7f)return false;return true;}
 std::string section(const std::string& server){return "server-"+server;}
 std::string trim(const std::string& s){size_t b=0,e=s.size();while(b<e&&(s[b]==' '||s[b]=='\t'||s[b]=='\r'))++b;while(e>b&&(s[e-1]==' '||s[e-1]=='\t'||s[e-1]=='\r'))--e;return s.substr(b,e-b);}
+bool passText(const std::string& s){if(s.empty()||s.size()>32)return false;for(unsigned char c:s)if(!std::isalnum(c))return false;return true;}
+// One call to the API: signed with the target's key when the server takes keys (identify()).
+bool call(const Target& t,const Transport& send,const std::string& method,const std::string& path,const std::string& body,Http& out){
+    Headers h;
+    if(t.sign&&t.keys)for(auto& x:world::identity::signRequest(*t.keys,method,path,t.server,body,int64_t(std::time(nullptr))+t.clockOffset,world::identity::newNonce()))h.push_back(x);
+    return send(method,path,h,body,out);}
 std::string message(const Http& h){try{auto v=json::parseFile(h.body,MaxAnswer);if(v.get("message").isString()&&plain(v.get("message").string()))return v.get("message").string();}catch(const std::exception&){}
     return "the server answered "+std::to_string(h.status);}
 }
@@ -44,7 +55,8 @@ std::string Policy::value(const std::string& key) const {for(auto& s:settings)if
 std::string Policy::text() const {
     std::string out="This server's rules ("+preset+" preset; "+std::to_string(players)+" of "+std::to_string(limit)+" players):\r\n";
     for(auto& s:settings)out+="- "+s.text+(s.value==s.preset?"":" (the owner changed this from the preset's "+s.preset+")")+"\r\n";
-    out+="Anyone who has this group's invite can act for any player here: there are no player accounts yet. Join friends' servers only.";
+    out+=keys()?"This server knows players by their keys: your launcher's key is you here, and nobody else can sign in, build or withdraw in your name. The traffic is not encrypted: use a LAN or VPN."
+               :"Anyone who has this group's invite can act for any player here: there are no player accounts yet. Join friends' servers only.";
     return out;
 }
 Policy parsePolicy(const std::string& body){
@@ -63,7 +75,7 @@ Policy parsePolicy(const std::string& body){
 #else
     p.server=v.get("server").string();p.preset=v.get("preset").string();
 #endif
-    p.players=v.get("players").get("count").integer();p.limit=v.get("players").get("limit").integer();
+    p.players=v.get("players").get("count").integer();p.limit=v.get("players").get("limit").integer();p.time=v.get("time").integer();
     for(auto& s:v.get("settings").items()){
         Setting one{s.get("key").string(),s.get("value").string(),s.get("preset").string(),s.get("text").string()};
 #ifndef MUTANT_STRAND_PARSE
@@ -76,9 +88,10 @@ Policy parsePolicy(const std::string& body){
 #endif
     return p;
 }
-std::string request(const Target& t,const std::string& method,const std::string& path,const std::string& body){
+std::string request(const Target& t,const std::string& method,const std::string& path,const Headers& headers,const std::string& body){
+    std::string extra;for(auto& h:headers)extra+=h.first+": "+h.second+"\r\n";
     return method+" "+path+" HTTP/1.1\r\nHost: "+t.address+":"+std::to_string(t.port)+"\r\nContent-Type: application/json\r\nContent-Length: "+std::to_string(body.size())
-           +"\r\nConnection: close\r\n\r\n"+body;
+           +"\r\n"+extra+"Connection: close\r\n\r\n"+body;
 }
 bool parseResponse(const std::string& raw,Http& out){
     auto end=raw.find("\r\n\r\n");if(end==std::string::npos||end>16*1024||raw.compare(0,9,"HTTP/1.1 ")!=0||raw.size()<12)return false;
@@ -107,7 +120,7 @@ static bool connecting(){return errno==EINPROGRESS;}
 static void timeouts(Sock s,unsigned ms){timeval t{long(ms/1000),long(ms%1000)*1000};setsockopt(s,SOL_SOCKET,SO_RCVTIMEO,&t,sizeof t);setsockopt(s,SOL_SOCKET,SO_SNDTIMEO,&t,sizeof t);}
 #endif
 Transport transport(const Target& t,unsigned ms){
-    return [t,ms](const std::string& method,const std::string& path,const std::string& body,Http& out){
+    return [t,ms](const std::string& method,const std::string& path,const Headers& headers,const std::string& body,Http& out){
         auto ip=mod::peerAddress(t.address);if(!ip||!t.port||t.port>65535)return false;
         Sock s=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);if(s==NoSock)return false;
         sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(uint16_t(t.port));a.sin_addr.s_addr=htonl(*ip);
@@ -118,7 +131,7 @@ Transport transport(const Target& t,unsigned ms){
             int error=0;socklen_t size=sizeof error;
             if(select(int(s)+1,nullptr,&writable,&failed,&wait)<=0||!FD_ISSET(s,&writable)||getsockopt(s,SOL_SOCKET,SO_ERROR,reinterpret_cast<char*>(&error),&size)!=0||error){closeSock(s);return false;}}
         blocking(s,true);timeouts(s,ms);
-        auto text=request(t,method,path,body);size_t at=0;
+        auto text=request(t,method,path,headers,body);size_t at=0;
         while(at<text.size()){auto n=send(s,text.data()+at,int(text.size()-at),0);if(n<=0){closeSock(s);return false;}at+=size_t(n);}
         std::string in;char chunk[8192];
         while(in.size()<=MaxAnswer+16*1024){auto n=recv(s,chunk,sizeof chunk,0);if(n<=0)break;in.append(chunk,size_t(n));}
@@ -134,11 +147,11 @@ const char* fetchText(Fetch f){
     }
 }
 Fetch fetchPolicy(const Target& t,const Transport& send,Policy& p,std::string* raw){
-    Http h;if(!send("GET",base(t)+"/coop/policy","",h))return Fetch::Unreachable;
+    Http h;if(!call(t,send,"GET",base(t)+"/coop/policy","",h))return Fetch::Unreachable;
     if(h.status==404){
         // No launcher API here. A gateway call without a session tells an older server (401: the key is right) from a
         // server that does not know the key (404).
-        Http g;if(!send("GET",base(t)+"/gate/e/getVersion","",g))return Fetch::Unreachable;
+        Http g;if(!send("GET",base(t)+"/gate/e/getVersion",{},"",g))return Fetch::Unreachable;
 #ifndef MUTANT_STRAND_WRONG_KEY
         return g.status==401?Fetch::Old:Fetch::WrongKey;
 #else
@@ -149,6 +162,52 @@ Fetch fetchPolicy(const Target& t,const Transport& send,Policy& p,std::string* r
     try{p=parsePolicy(h.body);}catch(const std::exception&){return Fetch::Bad;}
     if(raw)*raw=h.body;
     return Fetch::Ok;
+}
+bool identify(Target& t,const Policy& p,int64_t localNow,std::string& why){
+    if(!p.keys())return true;
+    if(!t.keys){why="This server knows players by their keys, and this launcher has none.";return false;}
+    t.account=world::identity::account(t.keys->pub);t.server=p.server;t.clockOffset=p.time?p.time-localNow:0;
+#ifndef MUTANT_STRAND_SIGN
+    t.sign=true;
+#endif
+    return true;
+}
+bool takePasses(const Target& t,const Transport& send,Passes& out,std::string& why){
+    if(!t.sign||!t.keys){why="this launcher has no key for the server.";return false;}
+    json::Value body=json::Value::object();body.set("player",t.account);
+    Http a,b;
+    if(!call(t,send,"POST",base(t)+"/coop/ticket",body.dump(),a)||!call(t,send,"POST",base(t)+"/coop/relay-token",body.dump(),b)){why="the server did not answer.";return false;}
+    if(a.status!=200){why=message(a)+".";return false;}
+    if(b.status!=200){why=message(b)+".";return false;}
+    try{
+        auto ta=json::parseFile(a.body,MaxAnswer),tb=json::parseFile(b.body,MaxAnswer);
+        Passes p{ta.get("ticket").string(),tb.get("token").string(),uint64_t(tb.get("relay_id").integer())};
+        // The relay id is made from the key: a server that names another one is not the server this key talks to.
+        if(!passText(p.ticket)||!passText(p.relayToken)||p.relayId!=world::identity::relayId(t.keys->pub))throw std::runtime_error("bad passes");
+        out=p;
+    }catch(const std::exception&){why="its answer cannot be read.";return false;}
+    return true;
+}
+void usePasses(Session& s,const Passes& p){s.signInTicket=p.ticket;s.relayToken=p.relayToken;s.playerId=p.relayId;}
+bool hostPasses(Target& t,const Transport& send,unsigned tries,Passes& out,bool& keyed,std::string& why){
+    Policy p;Fetch f=Fetch::Unreachable;
+    for(unsigned i=0;i<std::max(1u,tries);++i){
+        if(i){
+#ifdef _WIN32
+            Sleep(500);   // the launcher's MinGW has no std::thread
+#else
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+#endif
+        }
+        f=fetchPolicy(t,send,p);if(f!=Fetch::Unreachable)break;}
+    keyed=false;
+    if(f==Fetch::Old)return true;
+    if(f!=Fetch::Ok){why=fetchText(f);return false;}
+    if(!identify(t,p,int64_t(std::time(nullptr)),why))return false;
+    keyed=p.keys();
+    if(!keyed)return true;
+    if(!takePasses(t,send,out,why)){why="The group server gave your game no sign-in ticket: "+why;return false;}
+    return true;
 }
 bool validChoices(const Choices& c){return oneOf(c.offerBuilds,{"yes","no","ask"})&&oneOf(c.offerOld,{"yes","no"});}
 Choices defaults(const Policy& p){
@@ -201,18 +260,20 @@ bool sendChoices(const Target& t,const Transport& send,const Choices& c,std::str
     if(t.account.empty()){why="your Steam account is not known yet. Start Steam, then try again.";return false;}
     if(!validChoices(c)){why="these are not choices this server takes.";return false;}
     json::Value body=json::Value::object();body.set("player",t.account);body.set("offer_builds",c.offerBuilds);body.set("offer_old",c.offerOld);
-    Http h;if(!send("POST",base(t)+"/coop/choices",body.dump(),h)){why="the server did not answer.";return false;}
+    Http h;if(!call(t,send,"POST",base(t)+"/coop/choices",body.dump(),h)){why="the server did not answer.";return false;}
     if(h.status!=200){why=message(h)+".";return false;}
     return true;
 }
-Join join(const Target& t,const Transport& send,const std::string& ini,const Choices& given){
-    Join j;j.ini=ini;j.fetched=fetchPolicy(t,send,j.policy,&j.raw);
+Join join(const Target& given0,const Transport& send,const std::string& ini,const Choices& given,bool game){
+    Join j;j.ini=ini;j.target=given0;Target& t=j.target;j.fetched=fetchPolicy(t,send,j.policy,&j.raw);
     if(j.fetched==Fetch::Old){
 #ifndef MUTANT_STRAND_OLD_SERVER
         j.start=true;
 #endif
         j.message=fetchText(j.fetched);return j;}
     if(j.fetched!=Fetch::Ok){j.message=fetchText(j.fetched);return j;}
+    {std::string why;if(!identify(t,j.policy,int64_t(std::time(nullptr)),why)){j.message=why+" Your game was not started.";return j;}}
+    j.keyed=j.policy.keys();
     j.choices=remembered(ini,j.policy);
     if(!given.offerBuilds.empty())j.choices.offerBuilds=given.offerBuilds;
     if(!given.offerOld.empty())j.choices.offerOld=given.offerOld;
@@ -222,6 +283,12 @@ Join join(const Target& t,const Transport& send,const std::string& ini,const Cho
     if(!sendChoices(t,send,j.choices,why)){
         j.message="The server did not take your choices: "+why+" Your game was not started.";
 #ifdef MUTANT_STRAND_SEND_FAIL
+        j.start=true;
+#endif
+        return j;}
+    if(j.keyed&&game&&!takePasses(t,send,j.passes,why)){
+        j.message="The server gave your game no sign-in ticket: "+why+" Your game was not started.";
+#ifdef MUTANT_STRAND_NO_PASSES
         j.start=true;
 #endif
         return j;}
@@ -241,7 +308,7 @@ std::string Object::text() const {
 }
 bool fetchMe(const Target& t,const Transport& send,Me& me,std::string& why){
     if(t.account.empty()){why="Your Steam account is not known yet. Start Steam, then try again.";return false;}
-    Http h;if(!send("GET",base(t)+"/coop/me?player="+t.account,"",h)){why=fetchText(Fetch::Unreachable);return false;}
+    Http h;if(!call(t,send,"GET",base(t)+"/coop/me?player="+t.account,"",h)){why=fetchText(Fetch::Unreachable);return false;}
     if(h.status!=200){why=message(h);return false;}
     try{
         auto v=json::parseFile(h.body,MaxAnswer);if(!v.isObject())throw std::runtime_error("not an object");
@@ -255,7 +322,7 @@ bool fetchMe(const Target& t,const Transport& send,Me& me,std::string& why){
 }
 bool fetchMine(const Target& t,const Transport& send,std::vector<Object>& list,std::string& why){
     if(t.account.empty()){why="Your Steam account is not known yet. Start Steam, then try again.";return false;}
-    Http h;if(!send("GET",base(t)+"/coop/mine?player="+t.account,"",h)){why=fetchText(Fetch::Unreachable);return false;}
+    Http h;if(!call(t,send,"GET",base(t)+"/coop/mine?player="+t.account,"",h)){why=fetchText(Fetch::Unreachable);return false;}
     if(h.status==404){why="This server has no list of your objects (a coop-world from before the launcher could ask).";return false;}
     if(h.status!=200){why=message(h);return false;}
     try{
@@ -274,7 +341,7 @@ bool act(const Target& t,const Transport& send,const std::string& call,const std
     if(t.account.empty()){result="Your Steam account is not known yet. Start Steam, then try again.";return false;}
     json::Value body=json::Value::object();body.set("player",t.account);
     if(object.empty())body.set("all",true);else body.set("object",object);
-    Http h;if(!send("POST",base(t)+"/coop/"+call,body.dump(),h)){result=fetchText(Fetch::Unreachable);return false;}
+    Http h;if(!strand::call(t,send,"POST",base(t)+"/coop/"+call,body.dump(),h)){result=fetchText(Fetch::Unreachable);return false;}
     if(h.status!=200){result="Refused: "+message(h)+".";return false;}
     try{
         auto v=json::parseFile(h.body,MaxAnswer);

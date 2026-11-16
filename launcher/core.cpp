@@ -48,6 +48,10 @@ std::string worldAddress(const Session& s){
 #ifndef MUTANT_GROUP_SAME_PC
         if(s.group==Group::Join&&loopback(s.server))who="/k/p"+std::to_string(s.playerId);
 #endif
+#ifndef MUTANT_GROUP_TICKET
+        // A server that takes keys: the ticket the launcher took names the player (never an address anyone can write).
+        if(!s.signInTicket.empty())who="/t/"+s.signInTicket;
+#endif
         return "http://"+groupServer(s)+":"+std::to_string(worldPort(s))+"/"+worldPrefix(s)+who+"/auth/ds";
     }
 #ifndef MUTANT_WORLD_GUEST_ADDRESS
@@ -74,6 +78,8 @@ std::vector<std::string> worldArguments(const Session& s,const std::string& data
 #ifndef MUTANT_GROUP_NO_RELAY
         for(auto more:{std::string("--relay-port"),std::to_string(worldPort(s)),std::string("--relay-key"),worldPrefix(s)})a.push_back(more);
 #endif
+        // The host's key is the owner's: his signed calls are the owner's actions on the running server.
+        if(!s.ownerKey.empty())for(auto more:{std::string("--owner"),s.ownerKey})a.push_back(more);
         return a;
     }
     if(s.group!=Group::None)return {};
@@ -98,9 +104,12 @@ std::string config(const Session& s) {
         if(!mod::peerAddress(server))throw std::runtime_error("The group server's address must be a numeric IPv4 address.");
         if(!playerIdValid(s.playerId))throw std::runtime_error("This launcher has no player number yet. Start it again.");
 #ifndef MUTANT_GROUP_KEY
-        const std::string key=worldPrefix(s);
+        std::string key=worldPrefix(s);
 #else
-        const std::string key="w"+std::to_string(s.secret^1);
+        std::string key="w"+std::to_string(s.secret^1);
+#endif
+#ifndef MUTANT_GROUP_RELAY_TOKEN
+        if(!s.relayToken.empty())key=s.relayToken;   // a server that takes keys: this player's relay token, not the group's key
 #endif
         std::string json="{\"server\":\""+server+"\",\"slot\":"+std::to_string(slot)+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)
             +",\"required\":true,\"logging\":true,\"game_thread\":true,\"puppet_probe\":true,\"partner_tag\":true,\"others\":"+std::to_string(GroupOthers)
@@ -155,6 +164,24 @@ void atomicWrite(const std::filesystem::path& path,const std::string& bytes) {
 #else
     std::filesystem::rename(temp,path);
 #endif
+}
+world::identity::Keys playerKeys(const std::filesystem::path& file) {
+    namespace id=world::identity;
+#ifndef MUTANT_KEYS_KEEP
+    std::ifstream f(file,std::ios::binary);
+    if(f) {
+        std::string text((std::istreambuf_iterator<char>(f)),{});id::Seed seed{};
+        auto at=text.find("ed25519-seed ");
+        if(at==std::string::npos||!id::unhex(text.substr(at+13,64),seed.data(),seed.size()))
+            throw std::runtime_error("The player key file "+file.filename().string()+" cannot be read. Move it away to make a new key (on servers that take keys you are then a new player).");
+        return id::keysFromSeed(seed);
+    }
+#endif
+    auto k=id::makeKeys();
+    atomicWrite(file,"# Death Stranding co-op player key: made once by this launcher, never sent anywhere. Keep it private;\n"
+                     "# on a server that takes keys it is you. Deleting it makes you a new player there.\n"
+                     "ed25519-seed "+id::hex(k.seed)+"\n");
+    return k;
 }
 void writeConfig(const std::filesystem::path& data,const Session& s) {
     auto bytes=config(s);
@@ -362,6 +389,13 @@ std::string redact(const std::string& in) {
             size_t p=i+4;while(p<in.size()&&((in[p]>='A'&&in[p]<='Z')||digit(in[p])||in[p]=='-'))++p;
             if(p-i>=12){out+="DSG-<hidden>";i=p;continue;}
         }
+#ifndef MUTANT_DIAG_TICKET
+        // A sign-in ticket in its address (/t/TICKET/, identity keys).
+        if(in.compare(i,3,"/t/")==0) {
+            size_t p=i+3;while(p<in.size()&&((in[p]>='a'&&in[p]<='z')||(in[p]>='A'&&in[p]<='Z')||digit(in[p])))++p;
+            if(p-i>=4&&p<in.size()&&in[p]=='/'){out+="/t/<hidden>";i=p;continue;}
+        }
+#endif
         if(in[i]=='/'&&i+2<in.size()&&in[i+1]=='w'&&digit(in[i+2])) {
             size_t p=i+2;while(p<in.size()&&digit(in[p]))++p;
             if(p-i<=12&&(p==in.size()||in[p]=='/'||in[p]=='"'||in[p]==' '||in[p]=='\n'||in[p]=='\r')){out+="/w<hidden>";i=p;continue;}

@@ -102,14 +102,19 @@ a game shows the group invite and **Start group server and play** instead of a l
 1. The launcher makes the group's key once (a random nonzero 32-bit number, `group_secret` in `launcher.ini`), so
    the invite stays good between sessions. Delete that line for a new key.
 2. It starts `coop-world.exe` (beside the launcher) with `--port P --bind 0.0.0.0 --prefix wKEY --data
-   world\world.json --idle-exit 21600 --policy RULES --relay-port P --relay-key wKEY`: the shared world on TCP port P
-   and the relay on UDP port P, P = 49100 + the slot of the port in Settings (49100 by default). `--policy` gives a new
+   world\world.json --idle-exit 21600 --policy RULES --relay-port P --relay-key wKEY --owner HOSTKEY`: the shared world
+   on TCP port P and the relay on UDP port P, P = 49100 + the slot of the port in Settings (49100 by default), and the
+   host's player key as the owner's (below, "Player keys"). `--policy` gives a new
    world its rules; a world that exists keeps its own (the owner changes them with `coop-world policy` while the
    server is stopped). A server already running keeps serving; the second start leaves. It stops by itself six hours
    after the last player.
 3. It writes the host's `mod.json`: no `peer`, `server` `127.0.0.1`, `relay` `127.0.0.1:P`, `relay_key` `wKEY`,
    `session` KEY, `player_id`, `others` 15, `partner_tag`, `online_server` `http://127.0.0.1:P/wKEY/auth/ds`, and
-   the play setup's `game_thread`, `puppet_probe`, `required`. The proxy's peer list is `127.0.0.1`.
+   the play setup's `game_thread`, `puppet_probe`, `required`. The proxy's peer list is `127.0.0.1`. On a server that
+   takes keys (Public) it first waits for the server to answer (at most ten seconds) and takes the game's sign-in
+   ticket and relay token: `online_server` is then `http://127.0.0.1:P/wKEY/t/TICKET/auth/ds`, `relay_key` the token
+   and `player_id` the relay id made from the key. The server now starts before the config is written (it used to
+   start after it).
 4. It starts the game as for any session. Nobody has to be there: friends join when they like.
 
 The host's Windows Firewall has to let `coop-world.exe` receive on port P, TCP and UDP (Windows asks when the
@@ -124,7 +129,8 @@ copied one is offered from the clipboard), **Join group**:
 2. It shows the server's rules and asks for the joiner's choices there (below, "Before you join"). Cancel: nothing is
    started.
 3. It writes the joiner's `mod.json`: the same keys as the host's with that address as `server`, in `relay` and in
-   `online_server`, and the joiner's own `player_id`. The proxy's peer list is that one address.
+   `online_server`, and the joiner's own `player_id` (on a server that takes keys: his ticket, his relay token and
+   the relay id of his key, as for the host). The proxy's peer list is that one address.
 4. It starts the game. There is no Ready or Start and the host's launcher need not be open, only the server.
 
 A joiner on the host's own PC (two copies, one Steam account) reaches the server on loopback and signs in to the
@@ -138,7 +144,25 @@ finds no host). Whoever has the invite can join; it is the only secret, and it t
 
 **The player number** (`player_id`, `launcher.ini`) is made once from 49 random bits of the system's generator (1 to
 562949953421312, inside the 15 digits the mod's config takes) and kept. It is not the Steam id and says nothing about
-the player; two installs have two numbers.
+the player; two installs have two numbers. On a server that takes keys the game uses the number made from the
+player's key instead (the same range), which nobody else can claim there.
+
+**Player keys** (`../world/README.md`, "Identity"). The launcher makes an Ed25519 key pair once and keeps it in
+`player.key` in the co-op data folder, beside `launcher.ini` (Monocypher, `../vendor/monocypher`). The secret half
+never leaves the PC: it signs the launcher's calls to a group's server and is never sent; the public half is the
+player on servers whose rules say `identity keys` (the Public rules). Settings shows the key short (its first 16 hex
+digits in fours). A `player.key` that cannot be read is an error and is never replaced: a new key is a new player on
+those servers. Keep the file private and keep a copy of it if you play on public servers (Back up does not copy it);
+delete it to become a new player. The Steam id is not used there. On such a server:
+
+- every call the launcher makes but reading the rules is signed, and acts for the key's account only;
+- just before the game starts the launcher takes a sign-in ticket and a relay token for it (signed calls); the game's
+  `online_server` carries the ticket instead of a name, and its `relay_key` the token instead of the group's key. A
+  ticket is good for 30 minutes until the game signs in, so start the game from the launcher each time;
+- the host's key is the owner's: his launcher gives it to the server (`--owner`), and the owner's actions on the
+  running server (review, members, removing a player, the rules) are calls signed with it. No window makes them yet.
+
+On a server without keys (Friends, Solo archive, or a world from before) nothing of this changes anything.
 
 **Before you join: the server's rules.** The rule behind it: before a game connects, its player sees what the server
 will take from him and what it will show him; the server's owner sets the server's rules, the player sets the rules
@@ -148,7 +172,9 @@ of his own contributions. So before the joiner's game starts, the launcher asks 
 - The rules in words, one line per setting (whose builds are shared, whether the owner reviews them first, the limit
   per player, what a withdrawal does, how many players, and the rest), with what the owner changed from the preset
   and how many players the world has. Then: "Anyone who has this group's invite can act for any player here: there
-  are no player accounts yet. Join friends' servers only." Then what the joiner already has there (shared, waiting
+  are no player accounts yet. Join friends' servers only." (On a server that takes keys instead: "This server knows
+  players by their keys: your launcher's key is you here, and nobody else can sign in, build or withdraw in your name.
+  The traffic is not encrypted: use a LAN or VPN.") Then what the joiner already has there (shared, waiting
   for his answer or the owner's, held by the rules, kept, remnants, likes), or that he has not played there yet.
 - His two choices for this server: **Share what I build here**: Yes (the other players can be handed it, as the rules
   say), No (kept for him alone, a personal archive on that server) or Ask me (it waits until he offers it, below);
@@ -160,7 +186,7 @@ of his own contributions. So before the joiner's game starts, the launcher asks 
 
 The account is the one the joiner's game signs in as: on another PC his Steam account (the 64-bit id of the account
 signed in to Steam; Steam must be running), on the host's PC the name in his sign-in address (`p<id>`), never the
-host's account. When it goes wrong, nothing is started and the launcher says why: the server does not answer, it does
+host's account; on a server that takes keys, his key's account (Steam need not run). When it goes wrong, nothing is started and the launcher says why: the server does not answer, it does
 not know the group's key, its answer cannot be read, or it did not take the choices (a full world, for example). A
 server from before this change (it answers the game but has no launcher API) is said so ("it shares what every
 player builds with every player, and has no choices for you") and joined with its ways.
@@ -189,8 +215,10 @@ rules), `--group-join DSG-...` joins by invite, and `--group-join A.B.C.D[:P]` j
 `--dev-session N` as the key, without the connection test. A join reads the rules first and sends the remembered
 choices (also with `--prepare-only`); `--strand-builds yes|no|ask` and `--strand-old yes|no` choose instead, and
 `--strand-policy FILE` (or `-` for standard output) writes one line of JSON: `fetched` (`ok`, `old`, `wrong-key`,
-`unreachable`, `bad`), `start`, `message`, `account`, `choices` and the server's `policy` as it sent it. A join that
-is refused shows no dialog and exits 3.
+`unreachable`, `bad`), `start`, `message`, `account`, `keyed` (the server takes keys), `choices` and the server's
+`policy` as it sent it. A join that is refused shows no dialog and exits 3. On a server that takes keys a join (also
+with `--prepare-only`) takes the game's ticket and relay token and writes them into the config; `--group-host` with
+`--prepare-only` does so only when its server is already running (it starts none).
 
 **Not seen on a screen.** The join screen, the "My strand on this server" window and the Settings list of rules were
 built and cross-compiled, and have not been looked at or clicked. The launcher's side of the API (`strand.cpp`) is
@@ -316,7 +344,24 @@ host's account), `STRAND_PARSE`, `STRAND_WRONG_KEY` (a server without the key ta
 `STRAND_DEFAULTS` (fixed choices instead of the server's), `STRAND_PER_SERVER` (one server's choices for another),
 `STRAND_SETTINGS_KEEP` (saving the settings drops the choices); `GROUP_KEY`, `GROUP_NO_RELAY`, `GROUP_SAME_PC`,
 `GROUP_POLICY`, `STRAND_ACCOUNT`, `STRAND_WRONG_KEY`, `STRAND_OLD_SERVER` and `STRAND_SEND_FAIL` must also fail the
-socket test.
+socket test. `test_group.py` runs the public rules with `identity=none`.
+
+Player keys: `core_test.cpp` checks the key made once and kept, a damaged key file refused and left as it was; the
+config with a ticket and a relay token (host, joiner, a joiner on the host's PC: the ticket, never a name), the host's
+key as the owner's, the ticket hidden in diagnostics; and the join against a stand-in server that checks every
+signature as the server does: a server that takes keys joined as the key's account, every call signed on the server's
+clock, the ticket, token and relay id taken and written into the game's config, the secret half in no request; no
+ticket (not started), a server that names another relay id, no key (nothing sent), a server without keys (unsigned,
+no passes, as before), and the host's own passes. Mutants: `KEYS_KEEP` (a new key every start), `STRAND_SIGN`
+(unsigned calls), `STRAND_NO_PASSES` (the game started without a ticket), `GROUP_TICKET`, `GROUP_RELAY_TOKEN` (the
+config keeps the name and the group's key), `DIAG_TICKET`. `test_identity.py` (part of `make -C launcher test`) runs
+the launcher's side as its `--dev-direct --dev-start --group-host`/`--group-join` paths do, against the built
+`coop-world` on loopback with the command line made for public rules: the host's key given as the owner's; the host's
+and a joiner's game given tickets, tokens and the relay ids of their keys, and signed in with them as two players;
+`/k/NAME`, a key's name, a Steam ticket and a made-up ticket refused; unsigned calls, a call sent twice, changed after
+signing, or signed by another key refused, his own taken; the owner's calls with the host's key only, the rules
+changed on the running server; and the relay answering the joiner's token for his id only, never the group's key.
+`GROUP_TICKET`, `GROUP_RELAY_TOKEN`, `STRAND_SIGN` and `KEYS_KEEP` must also fail it.
 
 The kit's portable suites are vendored and reused (20,000 invite and 10,000
 discovery fuzz rounds). Mutants cover config role, lobby secret, backup links and

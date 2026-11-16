@@ -27,6 +27,7 @@ uint32_t requestedSecret=0,lastScan=0,groupSecret=0;   // groupSecret: the key o
 uint64_t playerNumber=0;                                // this player's number on a group's relay (core.h playerId; settings)
 std::string groupPolicy="friends";                      // the rules the host's launcher gives a new group world (settings)
 Session strandSession;bool haveStrand=false;            // the group server this launcher last hosted or joined: "My strand on this server"
+world::identity::Keys keys;                             // this install's key pair (player.key beside launcher.ini; core.h playerKeys)
 std::vector<HWND> controls[4];
 enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import,Remove,GroupHost,GroupPolicy,Strand};
 const char* PolicyNames[]={"friends","solo","public"};
@@ -111,6 +112,15 @@ uint64_t settingNumber(const wchar_t* key){wchar_t b[32];GetPrivateProfileString
 void identity(){
     playerNumber=settingNumber(L"player_id");auto key=settingNumber(L"group_secret");groupSecret=key<=UINT32_MAX?uint32_t(key):0;
     if(!playerIdValid(playerNumber)){playerNumber=playerId((uint64_t(random32())<<32)|random32());writeSettings();}
+    keys=playerKeys(options.data/"player.key");   // made once; on servers that take keys it is this player
+}
+// A group server as this launcher talks to it: the account the game signs in as, and this install's key for signing.
+strand::Target targetOf(const Session& s){auto t=strand::target(s,steamAccount());t.keys=&keys;return t;}
+// The host's own game on the server his launcher just started: on a server that takes keys, its ticket and relay token.
+void hostIdentity(Session& s){
+    auto t=targetOf(s);strand::Passes p;bool keyed=false;std::string why;
+    if(!strand::hostPasses(t,strand::transport(t),options.prepareOnly?1:20,p,keyed,why)){if(options.prepareOnly)return;throw std::runtime_error(why);}
+    if(keyed)strand::usePasses(s,p);
 }
 uint32_t groupKey(){if(!groupSecret){groupSecret=random32();writeSettings();}return groupSecret;}
 // Windows Firewall's verdict for the game's two UDP ports, read when the launcher starts and when a lobby opens.
@@ -174,12 +184,15 @@ bool choicesScreen(const strand::Policy& rules,const std::string& mine,strand::C
 }
 // Before a joiner's game connects: the server's rules and his choices for it (remembered per server, sent to it).
 // false: he cancelled, nothing is started. An older server without rules to show is said so and joined.
-bool agreeToServer(const Session& s){
-    auto t=strand::target(s,steamAccount());
-    if(t.account.empty())throw std::runtime_error("Your Steam account is not known yet. Start Steam, then try again.");
+bool agreeToServer(Session& s){
+    auto t=targetOf(s);
     auto send=strand::transport(t);strand::Policy rules;auto fetched=strand::fetchPolicy(t,send,rules);
-    if(fetched==strand::Fetch::Old){MessageBoxW(window,wtext(strand::fetchText(fetched)).c_str(),L"Group server",MB_OK|MB_ICONINFORMATION);return true;}
+    if(fetched==strand::Fetch::Old){
+        if(t.account.empty())throw std::runtime_error("Your Steam account is not known yet. Start Steam, then try again.");
+        MessageBoxW(window,wtext(strand::fetchText(fetched)).c_str(),L"Group server",MB_OK|MB_ICONINFORMATION);return true;}
     if(fetched!=strand::Fetch::Ok)throw std::runtime_error(strand::fetchText(fetched));
+    {std::string why;if(!strand::identify(t,rules,int64_t(std::time(nullptr)),why))throw std::runtime_error(why);}   // a server that takes keys: as this install's key
+    if(t.account.empty())throw std::runtime_error("Your Steam account is not known yet. Start Steam, then try again.");
     strand::Me me;std::string why;auto chosen=strand::remembered(readIni(),rules);
     std::string mine=strand::fetchMe(t,send,me,why)?me.text():why;
     if(me.known&&!me.offerBuilds.empty())chosen.offerBuilds=me.offerBuilds;   // what the server has for him, when he chose there before
@@ -187,14 +200,14 @@ bool agreeToServer(const Session& s){
     if(!choicesScreen(rules,mine,chosen,L"Join with these choices"))return false;
     auto j=strand::join(t,send,readIni(),chosen);atomicWrite(settingsFile,j.ini);
     if(!j.start)throw std::runtime_error(j.message);
+    if(j.keyed)strand::usePasses(s,j.passes);   // the game signs in with its ticket and says HELLO with its relay token
     saveNote=j.message;return true;
 }
 // "My strand on this server": what the player built on the group server he last hosted or joined, its state and
 // likes; his offer and withdrawal of the selected rows or of all; his choices there.
 void strandView(){
     if(!haveStrand)throw std::runtime_error("Host or join a group server first.");
-    auto t=strand::target(strandSession,steamAccount());
-    if(t.account.empty())throw std::runtime_error("Your Steam account is not known yet. Start Steam, then try again.");
+    auto t=targetOf(strandSession);
     auto send=strand::transport(t);
     enum {Info=501,List,Note,OfferSelected,WithdrawSelected,OfferAll,WithdrawAll,Mine,Refresh,Close};
     Popup pop;strand::Policy rules;bool shown=false;strand::Me me;std::vector<strand::Object> rows;
@@ -202,6 +215,8 @@ void strandView(){
     auto note=[&](const std::string& text){SetWindowTextW(item(Note),wtext(text).c_str());};
     auto refresh=[&]{
         std::string why;auto fetched=strand::fetchPolicy(t,send,rules);shown=fetched==strand::Fetch::Ok;std::string info=shown?rules.text():strand::fetchText(fetched);
+        if(shown&&!strand::identify(t,rules,int64_t(std::time(nullptr)),why)){shown=false;info+="\r\n\r\n"+why;}
+        if(shown&&t.account.empty()){shown=false;info+="\r\n\r\nYour Steam account is not known yet. Start Steam, then try again.";}
         me=strand::Me();
         if(shown&&strand::fetchMe(t,send,me,why))info+="\r\n\r\n"+me.text()+(me.known?"\r\nYour choices here: "+strand::choicesText({me.offerBuilds.empty()?rules.value("offer_builds"):me.offerBuilds,me.offerOld.empty()?rules.value("offer_old"):me.offerOld})+".":"");
         SetWindowTextW(item(Info),wtext(info).c_str());
@@ -235,7 +250,7 @@ void strandView(){
             if(me.known&&!me.offerBuilds.empty())chosen.offerBuilds=me.offerBuilds;
             if(me.known&&!me.offerOld.empty())chosen.offerOld=me.offerOld;
             if(!choicesScreen(rules,me.text(),chosen,L"Save my choices for this server"))return;
-            auto j=strand::join(t,send,readIni(),chosen);atomicWrite(settingsFile,j.ini);refresh();note(j.message);
+            auto j=strand::join(t,send,readIni(),chosen,false);atomicWrite(settingsFile,j.ini);refresh();note(j.message);
             if(!j.start)throw std::runtime_error(j.message);}};
     runPopup(pop,L"My strand on this server",860,700,[&](HWND h){
         popupControl(h,Info,L"EDIT",L"",ES_READONLY|ES_MULTILINE|WS_VSCROLL,20,20,804,210);
@@ -256,7 +271,8 @@ std::string groupCode(){
     return code;
 }
 void startGroup(){
-    Session s=chosenSession();s.group=Group::Host;s.secret=groupKey();options.game=gameFolder;launchGame(options,s);strandSession=s;haveStrand=true;
+    Session s=chosenSession();s.group=Group::Host;s.secret=groupKey();s.ownerKey=world::identity::hex(keys.pub);options.game=gameFolder;
+    launchGame(options,s,false,hostIdentity);strandSession=s;haveStrand=true;
     net->status=options.prepareOnly?"Configuration prepared; no game started.":"Group server started on this PC; Steam launch requested using separate co-op saves. Friends can join with the invite at any time.";
 }
 void joinGroup(const ci_invite& invite){
@@ -450,6 +466,7 @@ void buildControls(){
     label(2,223,L"Rules of a new group world:");control(2,GroupPolicy,L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL);
     for(auto name:{L"Friends: everything shared",L"Solo archive: one player",L"Public: members, review, limits"})SendMessageW(child(GroupPolicy),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
     for(int i=0;i<3;++i)if(groupPolicy==PolicyNames[i])SendMessageW(child(GroupPolicy),CB_SETCURSEL,i,0);
+    label(2,224,wtext("Your player key (made by this launcher; its secret half never leaves this PC): "+world::identity::shortText(keys.pub)+". On group servers that take keys it is you, and the host's key is the owner's.").c_str());
     control(2,Protocol,L"BUTTON",L"Open deathstranding-coop invite links in this launcher");label(2,222,L"Settings are saved on change. Each game uses two adjacent UDP ports. A group world that exists keeps its own rules.\nCo-op networking is always enforced offline. Voice, controller navigation and router mapping are not available yet.");
     label(3,230,(L"Death Stranding co-op 0.1.0-dev\nSteam Director's Cut build 13300582\n\nExperimental; not a playable release. Native Windows launcher.\nCo-op mod standard: Play, Saves, Settings, About; DS invites and LAN/Tailscale discovery.\n\nInvite/discovery reference code: coop-mod-kit (MIT).\nNot affiliated with Kojima Productions or the game's publishers.\n\nWire version: "+wtext(wireVersion())).c_str());
     control(3,Guide,L"BUTTON",L"Quick guide (F1)");control(3,Home,L"BUTTON",L"Project and issue tracker");control(3,Diagnose,L"BUTTON",L"Save diagnostics for a bug report");control(3,Remove,L"BUTTON",L"Remove co-op from the game");
@@ -522,7 +539,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         identity();
         if(devStart&&groupMode) {   // group play without the window: host the server, or join one by invite or by address
             Session s=chosenSession();
-            if(groupMode==1){s.group=Group::Host;s.secret=devSessionGiven?devSession:groupKey();}
+            if(groupMode==1){s.group=Group::Host;s.secret=devSessionGiven?devSession:groupKey();s.ownerKey=world::identity::hex(keys.pub);launchGame(options,s,false,hostIdentity);return 0;}
             else {
                 cr_result r{};bool group=false;int kind=recognise(groupTarget,r,group);
                 if(group&&(kind==CR_INVITE||kind==CR_LINK))s=groupJoin(r.invite,groupRoute(r.invite,probeServers(r.invite)),s);
@@ -532,17 +549,18 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
                 } else throw std::runtime_error("--group-join needs a group invite (DSG-...) or the server's numeric address.");
                 // The server's rules and this player's choices before the game connects, without a window: the
                 // remembered choices with the flags over them, sent (also with --prepare-only), and a report.
-                auto t=strand::target(s,steamAccount());auto before=readIni();auto j=strand::join(t,strand::transport(t),before,given);
+                auto t=targetOf(s);auto before=readIni();auto j=strand::join(t,strand::transport(t),before,given);
                 if(j.ini!=before)atomicWrite(settingsFile,j.ini);
                 if(!strandReport.empty()){
                     const char* names[]={"ok","old","wrong-key","unreachable","bad"};
-                    json::Value report=json::Value::object();report.set("fetched",names[int(j.fetched)]);report.set("start",j.start);report.set("message",j.message);report.set("account",t.account);
+                    json::Value report=json::Value::object();report.set("fetched",names[int(j.fetched)]);report.set("start",j.start);report.set("message",j.message);report.set("account",j.target.account);report.set("keyed",j.keyed);
                     json::Value chosen=json::Value::object();chosen.set("offer_builds",j.choices.offerBuilds);chosen.set("offer_old",j.choices.offerOld);report.set("choices",chosen);
                     json::Value policy;try{if(!j.raw.empty())policy=json::parse(j.raw);}catch(const std::exception&){}
                     report.set("policy",policy);auto line=report.dump()+"\n";
                     if(strandReport=="-"){DWORD n=0;HANDLE out=GetStdHandle(STD_OUTPUT_HANDLE);if(out&&out!=INVALID_HANDLE_VALUE)WriteFile(out,line.data(),DWORD(line.size()),&n,nullptr);}
                     else{std::ofstream f(strandReport,std::ios::binary|std::ios::trunc);f<<line;if(!f)throw std::runtime_error("Cannot write the --strand-policy file.");}}
                 if(!j.start)return 3;   // refused: no game, no dialog
+                if(j.keyed)strand::usePasses(s,j.passes);
             }
             launchGame(options,s);return 0;
         }

@@ -14,6 +14,7 @@ other (see "Not done" for what is missing).
 
 ```
 coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] [--log events.log] [--trace calls.log] [--idle-exit SECONDS]
+           [--owner KEY]
 ```
 
 (The relay's options are under "The relay", the ones for other servers under "Linked servers".)
@@ -24,7 +25,10 @@ coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] 
   server listens beyond loopback: the Steam ticket is not checked, so the prefix is what makes someone a player.
 - `--idle-exit SECONDS`: leave when no game has asked anything for that long (the launcher starts it with six hours).
 - `--trace`: every call with its body, for research. Bodies name other accounts (the game looks up the Steam
-  friends list); keep the file private. The sign-in ticket is never written.
+  friends list); keep the file private. Neither the Steam ticket nor a launcher's sign-in ticket (`/t/`) is written.
+- `--owner KEY`: the owner's public key (64 hex digits; the host's launcher gives its own). Saved with the world; a
+  start with another key replaces it (whoever starts the server with the world file is its owner). The owner's signed
+  calls are the owner's actions on the running server ("Identity").
 
 The launcher does all of this for a session when "Shared world" is on in its Settings (`launcher/README.md`). For a
 group of more than two it starts the server with the relay as well ("Group server" in Settings): one port number for
@@ -35,6 +39,7 @@ hand, each copy of the game gets the address in its `mod.json` (`mod/README.md`,
 ```
 "online_server": "http://127.0.0.1:8089/SECRET/auth/ds"             one Steam account per player
 "online_server": "http://127.0.0.1:8089/SECRET/k/NAME/auth/ds"      the account is NAME (two copies, one Steam account)
+"online_server": "http://127.0.0.1:8089/SECRET/t/TICKET/auth/ds"    identity keys: the account of the key the ticket was taken for
 ```
 
 ## What it speaks
@@ -45,7 +50,7 @@ loopback, a LAN or a VPN.
 
 | Call | Answer |
 |---|---|
-| `GET …/auth/ds?provider=steam&display_name=&code=TICKET` | the player (stable id per account) and a session: token and gateway address |
+| `GET …/auth/ds?provider=steam&display_name=&code=TICKET` | the player (stable id per account) and a session: token and gateway address; under identity keys only at `…/t/TICKET/auth/ds` with a launcher's ticket ("Identity") |
 | `…/gate/e/getVersion` | major 0, minor 12 (the game refuses anything else) |
 | `createObject`, `updateObject`, `deleteObject` | stored; the new id is the type letter and 12 characters (the game reads the kind from that letter); only the builder changes or removes an object; an upload the server policy does not let be shared is answered the same way and held for its builder ("Server policy"); over 4000 objects of one player, 403 |
 | `findQpidObjects` | the other players' objects in that area that every player is handed ("Server policy"), at most the asked number per type, never the asker's own, chosen as "Which objects a game is handed" says |
@@ -54,7 +59,7 @@ loopback, a LAN or a VPN.
 | `getRankingSchedules`, `getWastedBaggages`, `findMissions`, `getOrderedMissions`, … | empty lists |
 | anything else | `{}` and an `unhandled NAME` line in the log |
 | `POST …/link/pull` with `Authorization: Link KEY` | not the game's: one page of objects for a linked server ("Linked servers") |
-| `GET`/`POST …/coop/NAME` | not the game's: the launcher's API ("The launcher's API") |
+| `GET`/`POST …/coop/NAME` | not the game's: the launcher's API ("The launcher's API"), and the owner's calls ("Identity") |
 
 Limits: 16 players, 4000 objects built here per player, 20000 objects held from each other server, 4 MiB per body,
 32 connections.
@@ -75,7 +80,8 @@ coop-world --port 8089 --relay-port 8090 [--relay-key TEXT] [--relay-enter 150] 
 - `--relay-port`: the UDP port, on the same `--bind` address as the rest (loopback by default). With `--bind 0.0.0.0`
   both listen on every address of the PC, which the launcher's group server does, always with a key.
 - `--relay-key`: the group's secret (at most 32 letters, digits, `-` and `_`); every HELLO must carry it. Default: the
-  `--prefix`. Beyond loopback the server does not start a relay without one.
+  `--prefix`. Beyond loopback the server does not start a relay without one. Under identity keys the group's key is
+  not taken: a HELLO carries the player's relay token, in the same field ("Identity").
 - `--relay-enter`, `--relay-leave`: two players become near at `enter` metres or closer and stay near until they are
   farther apart than `leave` (straight-line distance; same area; both with a position).
 - `--relay-timeout`: seconds without a HELLO after which a player is gone.
@@ -88,7 +94,7 @@ the server holds to (`relay.h`):
 
 | Rule | Why |
 |---|---|
-| A player's address is learned only from a HELLO with the key | someone who merely reaches the port is not a player and is never answered |
+| A player's address is learned only from a HELLO with the key (under identity keys: with a relay token of that player id) | someone who merely reaches the port is not a player and is never answered |
 | While a player is known, a HELLO for his id from another address is refused (REFUSED, id in use) | a second sender cannot take over a player; a game that restarts on a new port waits out the timeout or says BYE first |
 | DATA from an address that has not said HELLO is dropped | the source id in what is passed on is the server's own record, never a field the sender wrote |
 | DATA goes only to a player who is near the sender | a player cannot reach, or load, someone across the map |
@@ -98,8 +104,8 @@ the server holds to (`relay.h`):
 
 Not done: the key travels in the clear (use loopback, a LAN or a VPN, as for
 the HTTP side); there is no cap on how many players may be near one player, so a crowd in one place means every pair
-exchanges datagrams; the relay and the HTTP side do not know each other's players (the player id in HELLO is whatever
-the game sends); IPv4 only.
+exchanges datagrams; under identity none the relay and the HTTP side do not know each other's players (the player id
+in HELLO is whatever the game sends; under identity keys it is bound to the player's key, "Identity"); IPv4 only.
 
 ### Broadcast mode (`--broadcast-*`)
 
@@ -438,6 +444,7 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `order` | `newest`, `liked` | newest | newest | liked |
 | `per_builder` | objects of one builder per kind in one answer, 0 for none (up to 1000) | 0 | 0 | 3 |
 | `spread` | metres, 0 for off (up to 1000) | 8 | 8 | 8 |
+| `identity` | `none`, `keys` | none | none | keys |
 
 - `join`: recorded and shown, nothing more yet (there are no invitations).
 - `build`: whose uploads are shared. `members` are the players the owner marked (`player-set ... member=yes`); anyone
@@ -454,6 +461,9 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 - `offer_builds`, `offer_old`: what a player who has chosen nothing has chosen (below).
 - `order`, `per_builder`, `spread`: which of an area's objects a game is handed when there are more than it asks for
   ("Which objects a game is handed").
+- `identity`: `none`, whoever has the group's key can sign in and act as any player (friends); `keys`, players are known
+  by the key their launcher made, and nobody signs in, builds or withdraws in another's name ("Identity"). A world
+  file from before this setting has `none`, whatever its preset.
 
 ### The players' choices
 
@@ -551,17 +561,22 @@ shows the policy before a player's game connects, sends his choices, and lists, 
 | `POST …/coop/choices` `{"player":KEY,"offer_builds":"yes\|no\|ask\|default","offer_old":"yes\|no\|default"}` | sets his choices (one or both) and answers as `me`. A key the world does not have yet becomes a player, as a sign-in would (within `players`), so the choices are in place before his game first signs in |
 | `POST …/coop/offer` `{"player":KEY,"object":ID}` or `{"player":KEY,"all":true}`, `"answer":"no"` to keep it his | as `coop-world offer` (`--no`): `offered` (or `kept`) and `me` |
 | `POST …/coop/withdraw` `{"player":KEY,"object":ID}` or `{"player":KEY,"all":true}` | as `coop-world withdraw`: `remnants`, `removed` and `me` |
+| `POST …/coop/ticket` `{"player":KEY}`, signed | identity keys: a sign-in ticket for his game, `ticket` and `expires` ("Identity") |
+| `POST …/coop/relay-token` `{"player":KEY}`, signed | identity keys: a relay token, `token`, `relay_id` (made from his key) and `expires` |
 
-`KEY` is the account key the player's game signs in with: the `NAME` of a `/k/NAME` sign-in address (two games on one
-PC), else the 64-bit Steam id from the ticket. Answers: 200; 400 for a request in the wrong form (an unknown field, a
+The policy also carries `time` (the server's clock, so a launcher whose clock is off signs with the server's time) and
+`owner` (whether the world has an owner key). `KEY` is the account key the player's game signs in with: the `NAME` of
+a `/k/NAME` sign-in address (two games on one PC), else the 64-bit Steam id from the ticket, and under identity keys
+`ed25519-` and his public key in hex. Answers: 200; 400 for a request in the wrong form (an unknown field, a
 value that is no choice, a key that is none, a body that names neither one object nor all, or both); 403 with the
 reason when the server refuses it (another player's object, an import, a remnant, an object the policy still holds,
 a full world); 404 for any other path or method.
 
-**There is no identity.** Whoever has the group's prefix can call this API for any player: read his choices and his
-objects, change his choices, offer what waits for his answer, withdraw what he built. That is exactly what he can do
-already by signing in to the gateway under another player's key (`/k/NAME`, or a Steam ticket the server does not
-check). Use it on friends servers only.
+**Under identity none there is no identity.** Whoever has the group's prefix can call this API for any player: read his
+choices and his objects, change his choices, offer what waits for his answer, withdraw what he built. That is exactly
+what he can do already by signing in to the gateway under another player's key (`/k/NAME`, or a Steam ticket the
+server does not check). Use it on friends servers only. Under identity keys every call but the policy is signed, and
+a signed call acts for its signer only ("Identity").
 
 What it holds to:
 
@@ -571,28 +586,104 @@ What it holds to:
 | A change is a `POST`; a `GET` (or any other method) of a change is 404 and changes nothing | a link that is opened or fetched ahead never offers or withdraws |
 | A body is one JSON object with only that call's fields, all checked before anything changes | a request in the wrong form changes nothing |
 | `offer` and `withdraw` name one object or `all: true`, never neither | a body that forgot the object does not take back everything |
-| `member` and the policy are not in it | they are the owner's: `player-set` and `policy` on the stopped server |
+| `member` and the policy are not in its player calls | they are the owner's: `player-set` and `policy` on the stopped server, or the owner's signed calls ("Identity") |
 | A new key by `choices` counts against `players` | a solo archive stays one player's |
 | `mine` and `me` count only his objects built here; `offer` and `withdraw` take only those (the world's own checks) | nobody acts on another's objects or on an import |
 
-Owner actions (review, remove-player, members, policy) stay commands on the world file while the server is stopped.
+Owner actions (review, remove-player, members, policy) are commands on the world file while the server is stopped, and
+signed calls of the owner's key while it runs ("Identity").
 
 ### Not built (server policy)
 
-- Identity. Anyone who has the group's prefix can sign in under any account key (`/k/NAME`, or a Steam ticket the
-  server does not check), so someone else can act as a player: build under his name, be handed what is kept for
-  him, and through the launcher's API change his choices or withdraw his objects. Until players have an identity of
-  their own these rules are for friends servers; on a public server they hold against honest mistakes, not against
-  a player who wants to break them.
+- Identity under `identity none` (friends and solo): anyone who has the group's prefix can sign in under any account
+  key (`/k/NAME`, or a Steam ticket the server does not check), so someone else can act as a player: build under his
+  name, be handed what is kept for him, and through the launcher's API change his choices or withdraw his objects.
+  There these rules hold against honest mistakes, not against a player who wants to break them. `identity keys`
+  (public) closes that, within what "Identity" says it does not protect.
 - Screens: the launcher shows the policy and sets a player's choices, offers and withdrawals through the launcher's
-  API (built game-free, not seen on a screen); the owner's actions have no screen and stay commands on the stopped
-  server. The game itself cannot ask (it does not know of them).
+  API (built game-free, not seen on a screen); the owner's actions have no screen: commands on the stopped server, or
+  the owner's signed calls (no launcher window makes them yet). The game itself cannot ask (it does not know of them).
 - `join` and `offer_old` are recorded only. There is no ban: `remove-player` does not stop anyone building again.
 - What a game does when its upload is refused (403) after it built the structure is not known in full: live, once,
   it did not ask again and stayed up; whether it took the structure out of the player's world was not checked. The
   policy no longer refuses uploads for that reason; the hard cap still does. Unknown too: what a game does when an
   object it had is no longer handed to it (withdrawn with `go`, removed by the owner).
 - A setting that changes applies to uploads from then on: nothing stored changes its state.
+
+## Identity
+
+A server whose policy says `identity keys` (the public preset) knows its players by a key of their own instead of by
+the group's key, so nobody can sign in, build or withdraw in someone else's name. There are no accounts and no
+passwords: every launcher makes an Ed25519 key pair (RFC 8032) once (`player.key` beside `launcher.ini`), its public
+key is the player, and the secret half never leaves his PC. The Steam id is not used: the game's Steam ticket is not
+read, and no player's Steam id is stored or shown (`identity.h`; the launcher's side in `../launcher/README.md`).
+Built and tested without a game (2026-11-17).
+
+- **The account** of a player with a key is `ed25519-` and his public key in 64 hex digits. Such an account is made
+  only by a call signed with that key: by name (`/k/NAME`) it is refused under every policy, and an unsigned API call
+  never acts for one. A new key becomes a player on its first signed call, within the `players` setting.
+- **Signed calls.** Under keys every call of the launcher's API but `GET …/coop/policy` is signed. The signature
+  (headers `X-Coop-Key`, `X-Coop-Time`, `X-Coop-Nonce`, `X-Coop-Signature`) covers the method, the address as sent
+  (prefix and query included), the world's server id, the time, a random nonce and the SHA-512 of the body. The server
+  takes a call within 300 s of its own clock (the launcher signs with the `time` of the policy it read, so its own
+  clock may be off), once: the nonce is remembered until the call's time leaves the window, at most 1024 per key and
+  65536 in all; when full, signed calls are refused until room comes back, never by forgetting a nonce early. A
+  signed call acts for its signer only: its `player` (or `?player=`) must be the signer's account.
+- **The game's sign-in.** The game makes its own HTTP calls, which cannot carry a signature. Just before the game
+  starts, the launcher takes a sign-in ticket by a signed `POST …/coop/ticket` and writes
+  `online_server` as `http://ADDRESS:PORT/PREFIX/t/TICKET/auth/ds` (instead of a `/k/NAME` anyone could write). The
+  ticket signs in its player only, and gives the game a session as any sign-in does. It is good until its first use,
+  at most 30 minutes, then for 2 minutes more (a sign-in the game asks again); a new ticket ends the player's older
+  one. Every other sign-in (`/k/NAME`, a Steam ticket) is refused (403), and a gateway session made before the world
+  took keys is no session (401).
+- **The relay.** The launcher takes a relay token by a signed `POST …/coop/relay-token`; the mod sends it in HELLO and
+  BYE where the group's key went (`relay_key`: the same 32-byte field, so the envelope is unchanged), with the relay id
+  made from the key (SHA-512 of the key, 49 bits, plus 1; `player_id`), so nobody can take another's id. The relay
+  takes a HELLO only with a token of that id: good until its first HELLO, at most 30 minutes, then while HELLOs keep
+  coming and 5 minutes after the last; a new token ends the older one. The group's key is not taken under keys: a
+  mod that sends it (an older launcher's config) is not answered, as for any wrong key.
+- **The owner.** `--owner KEY` (the host's launcher gives its own key) makes that key the owner's; it is saved with the
+  world. The owner's calls, signed with that key and with no other, under every policy:
+
+| Call | Answer |
+|---|---|
+| `GET …/coop/owner/players` | every player as `coop-world players` lists them: `id`, `name`, counts, `member`, his choices |
+| `GET …/coop/owner/review` | what waits or is held, as `coop-world review` lists it, with `waiting_for` (`builder` or `owner`) |
+| `POST …/coop/owner/review` `{"accept":ID}`, `{"reject":ID}` or `{"accept_player":PLAYER}` | as `coop-world review --accept`, `--reject`, `--accept-player` |
+| `POST …/coop/owner/remove-player` `{"player":PLAYER}` | as `coop-world remove-player` |
+| `POST …/coop/owner/member` `{"player":PLAYER,"member":"yes\|no"}` | as `coop-world player-set ... member=` |
+| `POST …/coop/owner/policy` `{"preset":NAME,"set":["KEY=VALUE",…]}` (one or both) | the preset and settings changed on the running server (a value that is none: 400, nothing changed); answers the policy |
+
+An unsigned owner call is 401, one signed with another key 403, and on a world without an owner key every one is 403.
+
+What it holds to:
+
+| Rule | Why |
+|---|---|
+| Under keys only a launcher's ticket signs in; `/k/NAME` and Steam tickets are refused, and older sessions too | an address or a Steam ticket the server does not check is anyone's to write |
+| An account of the key form is made and acted for only with that key's signature, under every policy | nobody takes a key's account by naming it |
+| A signed call is checked whole before the API sees it: signature over method, address, server id, time, nonce and body hash | a call changed on the way, sent to another server or to another address is refused |
+| Within 300 s of the server's clock, each nonce once, the nonces bounded and never forgotten early | a call cannot be replayed, and memory stays bounded |
+| A signed call acts for its signer only; under keys every API call but the policy is signed | nobody changes another's choices or withdraws his objects |
+| A ticket signs in its own player only, is short-lived, and a new one ends the old | a ticket is not a standing password |
+| A relay token admits only the relay id made from its player's key; under keys the group's key is no token | nobody says HELLO for another player |
+| The owner's calls need the owner's key | the owner's actions are his only |
+| The world file keeps the owner, the tickets and the tokens; a world file from before has `identity none` | a restart keeps the players in, and an older world does not lock its players out |
+
+**What it does not protect.** HTTP and the relay's UDP are not encrypted. Whoever can see the traffic between a
+player and the server (on the same network, or on the path) can read a sign-in ticket, a game's session token or a
+relay token and use it within its lifetime: sign in once with the ticket in its first 30 minutes or within 2 minutes
+of its use, use the session token as long as the session lasts (sessions do not expire), or take over the relay id
+with the token after its player stopped saying HELLO (while he plays, his id is in use). He also reads everything the
+calls carry. Signed calls cannot be replayed or changed, but their contents are not secret. So use a LAN or a VPN, as
+for the group's key; encryption is a later step. Not protected either: a player's key file on his PC (whoever copies
+it is him), a flood of signed calls from many new keys (it fills the nonce memory and the world's players; there is no
+rate limit per key), and the owner trusting a linked server ("Linked servers").
+
+Not done: tickets are taken for a game that may sign in again later in a session; whether the game ever does is
+unknown (the mod asks it to sign in at most five times until it is signed in, 30 s apart), and one that does after
+the ticket's two minutes is refused until it is started again from the launcher. No game has signed in with a ticket
+yet, and no launcher window makes the owner's calls.
 
 ## Which objects a game is handed
 
@@ -699,6 +790,24 @@ a `GET`). Eight mutants must fail it (`API_METHOD`, `API_KEY`, `API_STRICT`, `AP
 on the built server on loopback: the policy of a public server, a player's choices before his game signs in, his
 upload waiting for his answer, his offer, the other player handed nothing, a `GET` of a withdrawal refused; after the
 owner's `review --accept` and a restart, his withdrawal leaves a remnant, and the world file keeps every change.
+
+Identity: `identity_test.cpp` (Ed25519 against RFC 8032's tests 1, 2, 3 and SHA(abc), every one with a bit changed
+in the message, the signature or the key; the account and key forms; the relay id; a signed call taken once, changed
+on the way in each part, signed by another key or for another key, outside the window, and the nonces bounded per key
+and in all), seven mutants (`SIGN_NO_VERIFY`, `SIGN_REPLAY`, `SIGN_WINDOW`, `SIGN_BODY`, `SIGN_TARGET`, `SIGN_SERVER`,
+`SIGN_NONCE_CAP`). `keys_test.cpp` through the HTTP surface and the relay with real players' sides: under keys no
+sign-in by name, Steam ticket or a key's name; a ticket for its own player, again within the grace and not after, an
+unused one that expired, a new one ending the old, another player's, a full world; a session from before keys;
+unsigned calls refused and nothing changed; a player made by his first signed call; a call for another player, sent
+twice, changed, for another server, out of the window, to another address; no ticket or token under none; relay
+tokens for their id only, not the group's key, expiring unused and after the last HELLO, ending the older one, and
+real players' sides answered or not; the owner's calls with his key, another key and none (members, review, policy
+with refused values, remove-player); the saved world with owner, tickets and tokens, a world file from before keys,
+and two that are refused; identity none as before with a key's account refused by name. Thirteen mutants must fail
+it (`IDENTITY_NAME_SIGN_IN`, `IDENTITY_KEY_NAME`, `IDENTITY_OLD_SESSION`, `TICKET_EXPIRY`, `TICKET_REUSE`,
+`TICKET_REPLACE`, `RELAY_TOKEN_ID`, `RELAY_TOKEN_GROUP_KEY`, `RELAY_TOKEN_EXPIRY`, `RELAY_ADMIT`, `API_UNSIGNED`,
+`API_SIGNER_PLAYER`, `API_OWNER`). The loopback test with the built server and the launcher's side is
+`../launcher/test_identity.py`. The other tests run their public servers with `identity=none`.
 
 Linked servers: `link_test.cpp` (every filter term on the giving and on the taking side; ids of the game's shape
 that differ from the original and are the same in every world; the same export twice; an id that collides with a

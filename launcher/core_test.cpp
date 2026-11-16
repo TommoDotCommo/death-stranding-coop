@@ -1,9 +1,12 @@
 #include "core.h"
 #include "strand.h"
+#include "../world/signatures.h"   // the server's check of a signed call, standing in for the server
 #include <chrono>
 #include <fstream>
 #include <iostream>
 #include <cstdlib>
+#include <cctype>
+#include <ctime>
 #include <map>
 namespace fs=std::filesystem;
 static void check(bool b,const char* what) {if(!b){std::cerr<<"launcher oracle: "<<what<<'\n';std::exit(1);}}
@@ -40,6 +43,42 @@ int main(int argc,char** argv) {
             std::string result,object=argv[7];bool ok=st::act(t,send,argv[6],object=="all"?"":object,result);
             std::cout<<(ok?"done ":"refused ")<<result<<'\n';return 0;
         }
+        return 2;
+    }
+    // For test_identity.py: the launcher's side of a server that takes keys, as its --dev-direct --dev-start path runs
+    // it (--group-host, --group-join with --prepare-only), on a real socket. KEYFILE is a player.key.
+    if(argc>=3&&std::string(argv[1]).rfind("--keyed",0)==0) {
+        namespace st=launcher::strand;namespace wid=world::identity;
+        const std::string mode=argv[1];auto keys=launcher::playerKeys(argv[argc-1]);
+        auto print=[](const launcher::Session& s){auto c=mod::parseConfig(launcher::config(s));
+            std::cout<<"online "<<c.onlineServer<<"\nrelay "<<c.relay<<"\nkey "<<c.relayKey<<"\nplayer "<<c.playerId<<'\n';};
+        if(mode=="--keyed-keys"&&argc==3){std::cout<<"pub "<<wid::hex(keys.pub)<<"\naccount "<<wid::account(keys.pub)<<"\nrelay "<<wid::relayId(keys.pub)<<"\nshort "<<wid::shortText(keys.pub)<<'\n';return 0;}
+        if((mode=="--keyed-host"||mode=="--keyed-host-config")&&argc==6) {   // PORT SECRET WORLD-FILE KEYFILE: the server's command line, or the host's game
+            launcher::Session h;h.name="Host";h.port=unsigned(std::stoul(argv[2]));h.secret=uint32_t(std::stoul(argv[3]));h.group=launcher::Group::Host;h.playerId=77;h.policy="public";
+            h.ownerKey=wid::hex(keys.pub);
+            if(mode=="--keyed-host"){for(auto& a:launcher::worldArguments(h,argv[4]))std::cout<<"arg "<<a<<'\n';return 0;}
+            auto t=st::target(h,0);t.keys=&keys;st::Passes p;bool keyed=false;std::string why;   // launch_win.h: after the server starts, before the config
+            if(!st::hostPasses(t,st::transport(t,2000),20,p,keyed,why)){std::cout<<"refused "<<why<<'\n';return 0;}
+            if(keyed)st::usePasses(h,p);
+            std::cout<<"keyed "<<keyed<<"\naccount "<<t.account<<'\n';print(h);return 0;}
+        if(mode=="--keyed-join"&&(argc==7||argc==9)) {   // ADDRESS PORT SECRET INI [BUILDS OLD] KEYFILE: the join, then the game's config
+            ci_invite v{};v.secret=uint32_t(std::stoul(argv[4]));v.port=uint16_t(std::stoul(argv[3]));v.n=1;v.route[0].kind=CI_LAN;
+            auto ip=mod::peerAddress(argv[2]);check(ip.has_value(),"address");for(int i=0;i<4;++i)v.route[0].ip[i]=uint8_t(*ip>>(24-8*i));
+            launcher::Session me;me.name="Joiner";me.playerId=78;auto s=launcher::groupJoin(v,0,me);
+            auto t=st::target(s,0);t.keys=&keys;
+            std::ifstream f(argv[5],std::ios::binary);std::string ini((std::istreambuf_iterator<char>(f)),{});f.close();
+            st::Choices given;if(argc==9){given.offerBuilds=argv[6];given.offerOld=argv[7];}
+            auto j=st::join(t,st::transport(t,2000),ini,given);std::ofstream(argv[5],std::ios::binary|std::ios::trunc)<<j.ini;
+            std::cout<<"fetched "<<int(j.fetched)<<"\nstart "<<j.start<<"\nkeyed "<<j.keyed<<"\naccount "<<j.target.account<<"\nmessage "<<j.message<<'\n';
+            if(j.start){if(j.keyed)st::usePasses(s,j.passes);print(s);}
+            return 0;}
+        if(mode=="--keyed-signed"&&argc==8) {   // PORT PREFIX METHOD CALL BODY KEYFILE: one signed call's headers, for the test to send
+            st::Target t;t.address="127.0.0.1";t.port=unsigned(std::stoul(argv[2]));t.prefix=argv[3];t.keys=&keys;st::Policy p;
+            check(st::fetchPolicy(t,st::transport(t,2000),p)==st::Fetch::Ok,"the policy of the keyed server");
+            const std::string target="/"+t.prefix+"/coop/"+argv[5];
+            std::cout<<"target "<<target<<'\n';
+            for(auto& h:wid::signRequest(keys,argv[4],target,p.server,argv[6],p.time?p.time:int64_t(std::time(nullptr)),wid::newNonce()))std::cout<<"header "<<h.first<<' '<<h.second<<'\n';
+            return 0;}
         return 2;
     }
     check(argc==2,"temporary test root required");fs::path root=argv[1];fs::create_directories(root);
@@ -121,6 +160,28 @@ int main(int argc,char** argv) {
         check(launcher::redact("\"relay_key\":\"w305419896\",\"online_server\":\"http://127.0.0.1:49103/w305419896/k/p77/auth/ds\" "+code+" x")
               =="\"relay_key\":\"<hidden>\",\"online_server\":\"http://127.0.0.1:49103/w<hidden>/k/p77/auth/ds\" DSG-<hidden> x","the group's key is hidden in diagnostics in every form");
         check(launcher::redact("data/world/world.json /w12x /w1234567890123/ DSG-AB")=="data/world/world.json /w12x /w1234567890123/ DSG-AB","only the key's own forms change");
+        check(launcher::redact("\"online_server\":\"http://127.0.0.1:49103/w305419896/t/9f8e7d6c5b4a39281706f5e4d3c2b1a0/auth/ds\" /t/ab /t/x")
+              =="\"online_server\":\"http://127.0.0.1:49103/w<hidden>/t/<hidden>/auth/ds\" /t/ab /t/x","a sign-in ticket is hidden in diagnostics");
+        // Identity keys: the game signs in with the ticket and says HELLO with the relay token the launcher took, as the
+        // relay id made from its key; the host gives his server his key as the owner's.
+        {auto k=h;k.signInTicket="9f8e7d6c5b4a39281706f5e4d3c2b1a0";k.relayToken="0a1b2c3d4e5f60718293a4b5c6d7e8f9";k.playerId=123456;k.ownerKey=std::string(64,'c');
+         auto kc=mod::parseConfig(launcher::config(k));
+         check(kc.onlineServer=="http://127.0.0.1:49103/w305419896/t/9f8e7d6c5b4a39281706f5e4d3c2b1a0/auth/ds"&&kc.relayKey==k.relayToken&&kc.playerId==123456,"a keyed host signs in with his ticket and says HELLO with his token");
+         auto ka=launcher::worldArguments(k,"D");check(ka.size()==a.size()+2&&ka[ka.size()-2]=="--owner"&&ka.back()==k.ownerKey,"the host's key is the owner's");
+         auto kj=launcher::groupJoin(r.invite,0,me);kj.signInTicket="abc123";kj.relayToken="tok9";auto kjc=mod::parseConfig(launcher::config(kj));
+         check(kjc.onlineServer=="http://192.168.1.20:49103/w305419896/t/abc123/auth/ds"&&kjc.relayKey=="tok9","a keyed joiner too");
+         auto same=r.invite;same.route[0]={CI_LAN,{127,0,0,1}};auto kl=launcher::groupJoin(same,0,me);kl.signInTicket="abc123";
+         check(mod::parseConfig(launcher::config(kl)).onlineServer=="http://127.0.0.1:49103/w305419896/t/abc123/auth/ds","on the host's PC the ticket names him, not a name in the address");}
+    }
+    {   // This install's key: made once, kept, the same on every start; a damaged file is an error and stays as it was.
+        namespace wid=world::identity;auto file=root/"player.key";std::error_code ec;fs::remove(file,ec);
+        auto first=launcher::playerKeys(file),again=launcher::playerKeys(file);
+        std::ifstream f(file,std::ios::binary);std::string text((std::istreambuf_iterator<char>(f)),{});f.close();
+        check(first.pub==again.pub&&first.seed==again.seed&&text.find("ed25519-seed "+wid::hex(first.seed))!=std::string::npos,"the key is made once and kept");
+        check(wid::keysFromSeed(first.seed).pub==first.pub&&wid::shortText(first.pub).size()==19,"the public half comes from the kept seed");
+        std::ofstream(file,std::ios::binary|std::ios::trunc)<<"ed25519-seed zz\n";rejects([&]{launcher::playerKeys(file);});
+        std::ifstream g(file,std::ios::binary);std::string after((std::istreambuf_iterator<char>(g)),{});check(after=="ed25519-seed zz\n","a damaged key file is never replaced");
+        fs::remove(file,ec);
     }
     {   // A group server's rules (strand.h): read before the game connects and shown with the player's own choices for
         // that server, which are kept per server in launcher.ini and sent; then what he has there.
@@ -160,7 +221,7 @@ int main(int argc,char** argv) {
         check(st::remembered("[server-a1b2c3d4e5f6a7b8]\noffer_builds=maybe\n",p).offerBuilds=="ask","a remembered value that is no choice gives way to the server's");
         // The join, against answers given here: the rules read, the choices sent, the game started only when the server took them.
         struct Fake {std::map<std::string,st::Http> answers;std::vector<std::string> sent;bool reach=true;};
-        auto fake=[](Fake& f){return st::Transport([&f](const std::string& method,const std::string& path,const std::string& body,st::Http& out){
+        auto fake=[](Fake& f){return st::Transport([&f](const std::string& method,const std::string& path,const st::Headers&,const std::string& body,st::Http& out){
             if(!f.reach){return false;}f.sent.push_back(method+" "+path+" "+body);auto a=f.answers.find(method+" "+path);if(a==f.answers.end())return false;out=a->second;return true;});};
         t.account="76561197960266962";
         {Fake f;f.answers["GET /w305419896/coop/policy"]={200,doc};f.answers["POST /w305419896/coop/choices"]={200,"{}"};
@@ -195,10 +256,49 @@ int main(int argc,char** argv) {
          rejects([&]{st::act(t,fake(f),"remove-player","",result);});
          f.answers["GET /w305419896/coop/mine?player=76561197960266962"]={404,"{}"};check(!st::fetchMine(t,fake(f),list,why)&&why.find("before the launcher")!=std::string::npos,"an older server has no list");}
         // HTTP in and out.
-        check(st::request(t,"POST","/w1/coop/offer","{}")=="POST /w1/coop/offer HTTP/1.1\r\nHost: 127.0.0.1:49103\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}","the request");
+        check(st::request(t,"POST","/w1/coop/offer",{},"{}")=="POST /w1/coop/offer HTTP/1.1\r\nHost: 127.0.0.1:49103\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}","the request");
+        check(st::request(t,"GET","/w1/coop/me",{{"X-Coop-Key","ab"}},"")=="GET /w1/coop/me HTTP/1.1\r\nHost: 127.0.0.1:49103\r\nContent-Type: application/json\r\nContent-Length: 0\r\nX-Coop-Key: ab\r\nConnection: close\r\n\r\n","a signed request's headers");
         st::Http got;check(st::parseResponse("HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",got)&&got.status==403&&got.body=="{}","an answer");
         for(auto wrong:{"HTTP/1.1 200 OK\r\n\r\n{}","HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n{}","HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\n{}","HTTP/1.1 2x0 OK\r\nContent-Length: 2\r\n\r\n{}",
                         "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n{}",""})check(!st::parseResponse(wrong,got),"an answer in no form this launcher reads");
+        // A server that takes keys: every call signed with this install's key and checked as the server checks it, the
+        // choices for the key's account, the game's passes taken; the secret half never in a request.
+        namespace wid=world::identity;auto keys=wid::makeKeys();const std::string acct=wid::account(keys.pub);
+        auto keyedDoc=[&](){auto x=edit("\"preset\":\"public\",","\"preset\":\"public\",\"time\":"+std::to_string(int64_t(std::time(nullptr))+1000)+",");auto at=x.rfind("]}");
+            return x.replace(at,2,R"(,{"key":"identity","value":"keys","preset":"keys","text":"Players are known by the key their launcher made."}]})");};
+        struct Server {wid::Checker checker;std::map<std::string,st::Http> answers;std::vector<std::string> sent,signers;bool refuseTicket=false,otherRelayId=false,keysOnly=true;};
+        auto server=[&](Server& sv){return st::Transport([&sv,&keys](const std::string& method,const std::string& path,const st::Headers& headers,const std::string& body,st::Http& out){
+            std::map<std::string,std::string> h;std::string all=method+" "+path+" "+body;
+            for(auto& x:headers){std::string n=x.first;for(auto& c:n)c=char(std::tolower(static_cast<unsigned char>(c)));h[n]=x.second;all+=" "+x.first+": "+x.second;}
+            sv.sent.push_back(all);
+            std::string who,why;auto r=sv.checker.check(h,method,path,body,"a1b2c3d4e5f6a7b8",int64_t(std::time(nullptr))+1000,who,why);
+            sv.signers.push_back(r==wid::Checker::Result::Ok?who:r==wid::Checker::Result::Bad?"bad":"");
+            if(path.find("/coop/policy")!=std::string::npos){auto a=sv.answers.find("policy");out=a->second;return true;}
+            if(r==wid::Checker::Result::Bad||(sv.keysOnly&&r!=wid::Checker::Result::Ok)){out={401,"{\"message\":\"this server takes signed calls from the launcher\"}"};return true;}
+            if(path.find("/coop/choices")!=std::string::npos){out={200,"{}"};return true;}
+            if(path.find("/coop/ticket")!=std::string::npos){out=sv.refuseTicket?st::Http{403,"{\"message\":\"this world has all its players\"}"}:st::Http{200,"{\"format\":1,\"ticket\":\"9f8e7d6c5b4a39281706f5e4d3c2b1a0\"}"};return true;}
+            if(path.find("/coop/relay-token")!=std::string::npos){out={200,"{\"format\":1,\"token\":\"0a1b2c3d4e5f6071\",\"relay_id\":"+std::to_string(wid::relayId(keys.pub)+(sv.otherRelayId?1:0))+"}"};return true;}
+            return false;});};
+        auto u=t;u.account="76561197960266962";u.keys=&keys;
+        {Server sv;sv.answers["policy"]={200,keyedDoc()};auto j=st::join(u,server(sv),"",{});
+         check(j.fetched==st::Fetch::Ok&&j.keyed&&j.start&&j.target.account==acct&&j.target.sign,"a server that takes keys: joined as the key's account");
+         check(j.passes.ticket=="9f8e7d6c5b4a39281706f5e4d3c2b1a0"&&j.passes.relayToken=="0a1b2c3d4e5f6071"&&j.passes.relayId==wid::relayId(keys.pub),"the game's ticket and relay token, for the relay id of the key");
+         check(sv.sent.size()==4&&sv.signers[1]==acct&&sv.signers[2]==acct&&sv.signers[3]==acct&&sv.sent[1].find("\"player\":\""+acct+"\"")!=std::string::npos,"every call signed by the key, for its own account, on the server's clock");
+         bool leaked=false;for(auto& x:sv.sent)leaked|=x.find(wid::hex(keys.seed))!=std::string::npos;check(!leaked,"the secret half of the key is never sent");
+         check(j.policy.text().find("knows players by their keys")!=std::string::npos,"the rules say players are known by their keys");
+         launcher::Session g=launcher::groupJoin(v,0,me);st::usePasses(g,j.passes);auto gc=mod::parseConfig(launcher::config(g));
+         check(gc.onlineServer.find("/t/9f8e7d6c5b4a39281706f5e4d3c2b1a0/auth/ds")!=std::string::npos&&gc.relayKey=="0a1b2c3d4e5f6071"&&gc.playerId==wid::relayId(keys.pub),"the game's config takes the passes");}
+        {Server sv;sv.answers["policy"]={200,keyedDoc()};sv.refuseTicket=true;auto j=st::join(u,server(sv),"",{});
+         check(j.keyed&&!j.start&&j.message.find("no sign-in ticket")!=std::string::npos&&j.message.find("all its players")!=std::string::npos,"no ticket: the game is not started");}
+        {Server sv;sv.answers["policy"]={200,keyedDoc()};sv.otherRelayId=true;check(!st::join(u,server(sv),"",{}).start,"a server that names another relay id for the key: not joined");}
+        {Server sv;sv.answers["policy"]={200,keyedDoc()};auto nokey=u;nokey.keys=nullptr;auto j=st::join(nokey,server(sv),"",{});
+         check(!j.start&&sv.sent.size()==1&&j.message.find("has none")!=std::string::npos,"no key: nothing sent, not joined");}
+        {Server sv;sv.answers["policy"]={200,doc};sv.keysOnly=false;auto j=st::join(u,server(sv),"",{});
+         check(j.start&&!j.keyed&&j.target.account=="76561197960266962"&&!j.target.sign&&j.passes.ticket.empty()&&sv.signers[1].empty(),"a server without keys: as before, unsigned, no passes");}
+        {Server sv;sv.answers["policy"]={200,keyedDoc()};st::Passes p;bool k2=false;std::string why;auto host=u;
+         check(st::hostPasses(host,server(sv),1,p,k2,why)&&k2&&p.ticket.size()==32&&host.account==acct,"the host's own game takes its passes too");
+         Server old;old.answers["policy"]={200,doc};st::Passes q;auto h2=u;check(st::hostPasses(h2,server(old),1,q,k2,why)&&!k2&&q.ticket.empty(),"a host server without keys: no passes");
+         Fake nobody;nobody.reach=false;auto h3=u;check(!st::hostPasses(h3,fake(nobody),2,q,k2,why)&&why.find("did not answer")!=std::string::npos,"a host server that does not start: said so");}
     }
     for(auto peer:{"0.0.0.0","example.com","255.255.255.255","192.168.01.2","224.0.0.1"}) {s.peer=peer;rejects([&]{launcher::config(s);});}s.peer="127.0.0.1";
     for(auto port:{0u,48999u,49015u,65535u}) {s.port=port;rejects([&]{launcher::config(s);});}s.port=49000;

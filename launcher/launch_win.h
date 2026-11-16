@@ -5,6 +5,7 @@
 #include <shellapi.h>
 #include <bcrypt.h>
 #include <fstream>
+#include <functional>
 #include <vector>
 #include <ctime>
 #include <tlhelp32.h>
@@ -65,7 +66,9 @@ inline release_startup::Values launchValues(const LaunchOptions& o,const Session
     }
     return v;
 }
-inline void launchGame(const LaunchOptions& o,Session s,bool solo=false) {
+// `ready`: called after the group's server is started (when this launcher starts one) and before the game's config is
+// written; the host's launcher takes his game's sign-in ticket and relay token there on a server that takes keys.
+inline void launchGame(const LaunchOptions& o,Session s,bool solo=false,const std::function<void(Session&)>& ready={}) {
     s.solo=solo;
     auto exe=o.game/L"ds.exe";
     if(gameRunning(o.game))throw std::runtime_error("This game copy is already running. Close it before starting a new session.");
@@ -73,16 +76,11 @@ inline void launchGame(const LaunchOptions& o,Session s,bool solo=false) {
     if(!o.direct&&!equalPath(o.game,steamGame()))throw std::runtime_error("Steam is registered to another game folder, or its install path is unavailable. Select the registered Steam install in Settings. Test copies require --dev-direct.");
     if(!fs::is_regular_file(o.data/"redirect-data/mod/mod.dll"))throw std::runtime_error("The co-op mod is missing. Install or repair the package first.");
     // Solo is isolated too: a host with no partner. Ordinary Steam starts remain pass-through.
-    auto values=launchValues(o,s);auto bytes=ticket(values,asciiPath(exe),uint64_t(std::time(nullptr)));
-    writeConfig(o.data,s);
-    for(auto name:{"local","roaming","documents","savedgames","profile"})fs::create_directories(o.data/"redirect-data"/name);
-    if(o.direct) {
-        for(auto& e:values)if(!SetEnvironmentVariableW(wtext(e.first).c_str(),wtext(e.second).c_str()))throw std::runtime_error("Cannot set the isolated child environment.");
-    } else atomicWrite(o.data/"launcher-session.ini",bytes);
-    if(o.prepareOnly)return;
+    auto values=launchValues(o,s);
     // Shared world, and group play: the host's launcher runs the group's server (a second start cannot take the port
-    // and leaves; the one already running keeps serving).
-    if(auto arguments=worldArguments(s,asciiPath(o.data/"world"/"world.json"));!arguments.empty()) {
+    // and leaves; the one already running keeps serving). It starts first: on a server that takes keys the host's own
+    // game needs a ticket from it before its config is written.
+    if(auto arguments=worldArguments(s,asciiPath(o.data/"world"/"world.json"));!arguments.empty()&&!o.prepareOnly) {
         if(!fs::is_regular_file(o.world))throw std::runtime_error(s.group!=Group::None?"The group server (coop-world.exe) is missing beside the launcher. Repair the package.":"The shared-world server (coop-world.exe) is missing beside the launcher. Repair the package or turn the shared world off in Settings.");
         fs::create_directories(o.data/"world");
         std::wstring command=L"\""+o.world.wstring()+L"\"";for(auto& a:arguments)command+=L" \""+wtext(a)+L"\"";
@@ -90,6 +88,14 @@ inline void launchGame(const LaunchOptions& o,Session s,bool solo=false) {
         if(!CreateProcessW(o.world.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&startup,&process))throw std::runtime_error("Windows could not start the shared-world server.");
         CloseHandle(process.hThread);CloseHandle(process.hProcess);
     }
+    if(ready)ready(s);
+    auto bytes=ticket(values,asciiPath(exe),uint64_t(std::time(nullptr)));   // the proxy's start ticket: good for 120 s from here
+    writeConfig(o.data,s);
+    for(auto name:{"local","roaming","documents","savedgames","profile"})fs::create_directories(o.data/"redirect-data"/name);
+    if(o.direct) {
+        for(auto& e:values)if(!SetEnvironmentVariableW(wtext(e.first).c_str(),wtext(e.second).c_str()))throw std::runtime_error("Cannot set the isolated child environment.");
+    } else atomicWrite(o.data/"launcher-session.ini",bytes);
+    if(o.prepareOnly)return;
     if(o.direct) {
         std::wstring command=L"\""+exe.wstring()+L"\"";STARTUPINFOW startup{};startup.cb=sizeof(startup);PROCESS_INFORMATION process{};
         if(!CreateProcessW(exe.c_str(),command.data(),nullptr,nullptr,FALSE,0,nullptr,o.game.c_str(),&startup,&process))throw std::runtime_error("Windows could not start the test copy. Check the folder and try again.");
