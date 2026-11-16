@@ -450,8 +450,8 @@ adapter gives it to that id's core and to no other. A datagram from an id that i
 
 Costs to know: every pair has its own handshake, pings, 20 Hz presence and animation samples, so a player among N
 others sends N times what one partner gets (128 bytes at up to 20 Hz each, plus animation samples of up to about
-1 kB at up to 20 Hz each). There is no fan-out packet: sending one presence to many would need a packet without the
-per-peer nonce echo, which is a protocol change that has not been made.
+1 kB at up to 20 Hz each). The core has no fan-out packet: sending one presence to many needs a packet without the
+per-peer nonce echo. The relay's broadcast mode ("Broadcast envelope" below) is that packet, outside the core.
 
 Tests: `mod/others_test.cpp` runs several players over a link in memory (independent clocks, delay, loss), with a
 plain `Core` as one peer to show that an unchanged core on the other end pairs with it.
@@ -542,3 +542,130 @@ stream, a late WELCOME, a new stream, a refusal, five seconds of silence, a tick
 must fail it: `RELAY_WIRE_VERSION`, `RELAY_WIRE_LENGTH`, `RELAY_WIRE_RANGE`, `RELAY_WIRE_TEXT`, `RELAY_WIRE_PAYLOAD`,
 `RELAY_CLIENT_SILENT`, `RELAY_CLIENT_STREAM`, `RELAY_CLIENT_ORDER`, `RELAY_CLIENT_STRANGER`, `RELAY_CLIENT_CLOCK`. The server's side and
 both sides together are tested in `world/` (README there, "The relay").
+
+## Broadcast envelope (`broadcast.h`, envelope version 2)
+
+In version 1 every pair of players near each other runs a core session of its own and the server passes each core
+datagram on, so a player among N others sends and receives N times what one partner costs. Version 2 is the relay's
+broadcast mode: a game publishes its presence and its animation sample once a tick to the players' own server
+(`world/relay.h`), which copies them to every player near it, several players' updates to one datagram, stamped on the
+server's clock. What a player only shows of himself (his name, gear, what he carries and where each case sits) is
+versioned state that the server keeps and hands out: when a player comes near, when it changes, and when a receiver
+asks because it saw it had missed a version. `broadcast.h` is header-only and game-free; the player's side is
+`broadcast_client.h` and `.cpp` (`ds::broadcast::Client`), which uses the core's encoder, decoder and interpolation
+but no `Core`. Neither is used by the mod yet, and neither is in `build_id.py`'s manifest yet.
+
+A player's HELLO says which version it speaks. The server speaks both and puts a player near only players of the same
+version, and in broadcast only players of the same game build and mod build (the HELLO carries both once; within one
+build nothing in the entries is checked against it again).
+
+Every datagram starts with version 1's 8 bytes, with 2 in the version field. Integers are little endian, reserved
+bytes are zero, and every datagram is at most 1200 bytes (a 1280-byte path with IPv4 and UDP headers to spare).
+
+| Type | Direction | Size | After the 8 bytes |
+|---|---|---:|---|
+| HELLO 1 | player to server | 140 | bytes 8..111 as version 1's HELLO; u32 game build; mod build[16]; u64 t0, the player's clock (ms). Every half second: keep-alive, position, and the clock's ping |
+| WELCOME 2 | server to player | 76 | bytes 8..31 as version 1's WELCOME; u64 t0 echoed; u64 server time (ms); u32 x4 the versions of this player's state the server holds (0: none); u16 full metres; u16 animation metres; u16 interval ms beyond full; u16 players in reach whom another build or mode keeps apart; u16 FRAME budget; reserved[2] |
+| REFUSED 3 | server to player | 24 | as version 1; reason 1 server full, 2 id in use, 3 the server takes another build |
+| ROSTER 4 | server to player | 20 + events | as version 1 |
+| PUBLISH 5 | player to server | 32 + parts | u64 player id; u32 sequence; u8 parts (1 presence, 2 animation); reserved; u16 animation bytes; u64 stamp, the sample's time on the server's clock (ms); presence[52] with part 1; the animation payload (1..1100 bytes) with part 2 |
+| FRAME 6 | server to player | 20 + entries | u64 server time; u8 count (1..255); reserved[3]; count entries of: u64 source; u32 sequence; u64 stamp; u8 parts; reserved; u16 animation bytes; u16 state generation; reserved[2]; presence[52] with part 1; the animation payload with part 2 |
+| STATE 7 | player to server | 24 + payload | u64 player id; u8 kind (1 name, 2 gear, 3 carried, 4 places); reserved; u16 bytes (1..1100); u32 version (not 0); payload |
+| SHARE 8 | server to player | 44 + payload | u64 source; u8 kind; reserved; u16 bytes; u32 version; u16 state generation; reserved[2]; u32 x4 the source's versions of every kind now; payload. Version 0 with no payload: the source holds nothing of that kind (only in the answer to a FETCH) |
+| FETCH 9 | player to server | 24 | u64 player id; u64 source (send me that player's state again) |
+| BYE 10 | player to server | 48 | as version 1 |
+
+- **presence[52]**: the core's PRESENCE frame bytes 60..63 (flags, action, phase) and 72..119 (position, velocity,
+  yaw, health, stamina, the BYE reason and reserved byte, the vehicle block). The receiver rebuilds the 128-byte frame
+  around it and runs the core's own decoder over it, so every value is checked as in a session. The server reads the
+  teleport flag and the position, nothing else.
+- **Animation payload**: the core's (`encodeAnimationPayload`, "Optional animation samples"). The server checks only
+  its shape (at most 32 bool bytes, the held and rose bytes present); it may widen the bool bytes to merge pulses.
+- **State**: the adapter's bytes of one kind, one version per change. The *generation* is the server's count of the
+  changes it took from that player, over all kinds; FRAME entries and SHAREs carry it, so a receiver sees a change it
+  missed.
+- **Sequence** (32 bits) and generation (16 bits) are compared in serial-number order. Stamps and times are at most
+  2^53.
+
+Refused whole (`parse` returns the reason): shorter than 8 or longer than 1200 bytes, another magic, version or type,
+a nonzero reserved byte, a fixed-size type that is not exactly its size, player id 0, a part, kind, count or length out
+of range, an animation payload of the wrong shape, a SHARE whose version disagrees with its own list, entries that do
+not fill a FRAME exactly. Version 1's parts (HELLO's first 112 bytes, WELCOME's first 32, ROSTER, BYE) go through
+version 1's parser. The encoders throw for the same things, and `appendEntry` for an entry that would take a FRAME
+past 1200 bytes.
+
+### What the server does with it
+
+The rules and the options are in `world/README.md` ("Broadcast mode"). In short: the source of every entry is the
+server's record of the sender's address, never the id a PUBLISH, STATE or FETCH names; an update is taken in order
+(a later sequence and a later stamp) with a stamp at most 2 s behind and 0.5 s ahead of the server's clock; a player
+within the full distance gets every update, beyond it one in the interval (a teleport always), animation only within
+the animation distance, and the pulses of the samples left out ride on the next one sent; a receiver's entries wait at
+most the flush time for others to share a FRAME of at most the budget; the latest version of each kind of state is
+kept and handed out on ENTER, to everyone near on a change, and on FETCH (every kind, at most one answer in 250 ms per
+pair).
+
+### The player's side (`ds::broadcast::Client`)
+
+No sockets and no clock of its own, like the core: the adapter gives it a send function for the relay's address,
+hands it only datagrams from that address and calls `tick(now)` with its monotonic milliseconds from one thread.
+
+- **Clock.** HELLO carries the sending time, WELCOME echoes it with the server's time. Only the WELCOME of a HELLO this
+  side sent, with that HELLO's time, is a sample. The offset (server minus this side) is taken from the quickest of the
+  last 16 round trips and moves by at most 1 % of the time passed (`ClockSlew`); `serverNow(now)` is this side's time
+  on the server's clock, valid from the first WELCOME.
+- **Up.** `setLocal(state, available, gated, sampledAt, jumped)` and `offerAnimation(animation, now)` give the next
+  PUBLISH: one a tick at most, presence at most 20 a second on a change that shows on the wire and every 500 ms
+  unchanged, an animation sample at most every 50 ms (an unchanged one every 500 ms) whose pulses are merged into the
+  next if it is replaced before it went, the teleport flag on the next PUBLISH with presence only. Nothing while
+  offline, alone or gated. `setState(kind, bytes)` makes a new version when the bytes change and sends it at once, and
+  again after every WELCOME that shows the server holds another version.
+- **Down.** The roster as in version 1 (`takeEvents`, `nearby`). FRAME entries from a source not in the roster are
+  dropped (`unknown`). Per source, as the core does per session: order (a later sequence and a later stamp), a stamp
+  within 2 s of the server's clock, the core's decoder on every presence, impossible motion (more than 100 m/s plus
+  0.5 m) refused with a fresh baseline after a second of it, one teleport in five seconds. `render(source, now)`
+  interpolates on the server's clock at a delay of that source's own: the 95th percentile of how late its samples
+  arrived, plus `DelayMarginMs` or, when larger, its 95th-percentile send interval (at most 250 ms) and 25 ms more;
+  never under `delayMs` or over `DelayMaxMs`. `takeAnimation` gives the sample due at the same shown time with every pulse
+  since the last one taken. `live` is a presence taken within 3 s.
+- **State.** `state(source, kind, &revision)` is the source's latest bytes of a kind (the revision changes when the
+  bytes do). An entry with a later generation than this side has complete starts a FETCH after 300 ms (a SHARE may be
+  on its way), repeated every 500 ms until a SHARE's list of versions matches what is held. An entry with an earlier
+  generation (one the server had queued before the change, whose SHAREs went at once) and a SHARE older than what is
+  held change nothing.
+- No WELCOME for 5 s: offline, everyone near leaves. A WELCOME with another stream: everyone leaves and the clock is
+  taken again (the server may be another process). `bye()` tells the server once.
+
+Measured in the test's link model (a walk on a circle sampled every 50 ms, every FRAME delayed by 20..120 ms so that
+they cross, 5 % repeated; worst of 40 runs): at the full rate with 10 % lost the shown position is within 0.007 m of the
+true one at the 99th percentile. At one sample in 200 ms (the default beyond 30 m) it is 0.007 m with no loss, 0.20 m
+with 3 % lost and 0.89 m with 10 % lost: a lost sample at 5 a second cannot be bridged and the pose stops for a moment
+(the core's extrapolation cap). That is the price of the interval for players farther away.
+
+### Costs
+
+A player sends one PUBLISH a tick (presence at most 20 and animation at most 20 a second, usually together) and two
+HELLOs a second whoever is near, where in pairs mode he sends a presence and an animation datagram to each player near.
+What he receives is bounded by the server's interest: in `world/broadcast_test.cpp` 24 players walking in one place,
+each sending presence and a small animation sample 20 times a second, each received about 60 datagrams (FRAMEs of 7.7
+entries, at most 1186 bytes) and 50 kB a second; in pairs mode the same crowd delivers each player 460 presence
+datagrams of 144 bytes a second and up to as many animation datagrams. Over loopback (`world/test_broadcast.py`) a
+player in a group of 16 with 8 more beyond 30 m received about 67 datagrams and 32 kB a second with a 600-byte budget.
+
+### Tests
+
+`make -C core broadcast-test` (part of `make test`): `tests/broadcast.cpp` pins the layout byte for byte, sends every
+message through the wire and back, refuses every sample cut short at each length, one byte longer, with another
+magic, version, type or reserved byte, each bad field, and 40,000 damaged datagrams; then it drives a `Client` with
+hand-made server messages: the clock (symmetric and slow round trips, a WELCOME for a HELLO never sent), the roster, a
+new stream, silence, a refusal for the build; entries in order, repeated, older, with a stamp far from the server's
+clock, from a stranger, several sources in one FRAME, impossible motion and the fresh baseline, teleports; state
+complete in one SHARE, a gap repaired by FETCH, empty kinds, a late older SHARE and an entry of an older generation
+(no FETCH), its own state versioned and sent again; what it publishes (rate, stamps, the presence the core's encoder
+gives, gated, the teleport flag once, animation pulses merged); and interpolation over the lossy link above. Seventeen
+mutants must fail it: `BCAST_WIRE_VERSION`, `BCAST_WIRE_LENGTH`, `BCAST_WIRE_RANGE`, `BCAST_WIRE_FRAME`,
+`BCAST_CLIENT_STRANGER`, `BCAST_CLIENT_ORDER`, `BCAST_CLIENT_CLOCK`, `BCAST_CLIENT_GAP`, `BCAST_CLIENT_STALE_STATE`,
+`BCAST_CLIENT_TELEPORT`, `BCAST_CLIENT_SPEED`, `BCAST_CLIENT_REBASE`, `BCAST_CLIENT_RESEND`, `BCAST_CLIENT_DELAY` (it
+fails the 200 ms case without loss: p95 0.06 m, shown past the newest sample 81 % of the time), `BCAST_CLIENT_ROSE`,
+`BCAST_CLIENT_STREAM`, `BCAST_CLIENT_JUMP`. The server's side and both sides together are tested in `world/` (README
+there, "Broadcast mode").

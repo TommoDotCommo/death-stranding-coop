@@ -100,6 +100,63 @@ the HTTP side); there is no cap on how many players may be near one player, so a
 exchanges datagrams; the relay and the HTTP side do not know each other's players (the player id in HELLO is whatever
 the game sends); IPv4 only.
 
+### Broadcast mode (`--broadcast-*`)
+
+A game whose HELLO says envelope version 2 (`core/broadcast.h`, `core/CORE.md` "Broadcast envelope") is a broadcast
+player: instead of a core session with every player near, it publishes one update a tick (its presence and its
+animation sample), and the relay copies it to the players near, several to one datagram (FRAME), stamped on the
+server's clock. The relay also keeps what each player only shows of himself (name, gear, carried cases and their
+places), the latest version of each kind, and hands it out. The same port speaks both versions, and players of the two
+are never near each other. The mod does not speak it yet.
+
+```
+coop-world --port 8089 --relay-port 8090 [--broadcast-full 30] [--broadcast-interval 200] [--broadcast-animation 50]
+           [--broadcast-budget 1200] [--broadcast-flush 25] [--broadcast-rate 100] [--broadcast-build GAME:HEX]
+```
+
+- `--broadcast-full` (metres, 0..65535): every update of a player this near goes to the receiver.
+- `--broadcast-interval` (ms, 0..5000): farther, but still near (`--relay-enter`, `--relay-leave`), at most one update
+  in this many milliseconds; a teleport always goes. 0 sends every update to everyone near.
+- `--broadcast-animation` (metres, 0..65535): animation samples only this near. The one-frame pulses of the samples
+  the interval leaves out are merged into the next one sent, so a receiver between the two distances misses none.
+- `--broadcast-budget` (bytes, 256..1200): the most bytes in one FRAME. An entry larger than the budget (a long
+  animation sample) goes in a FRAME of its own, never past 1200 bytes.
+- `--broadcast-flush` (ms, 0..200): the longest an update waits for others to share its FRAME. 0 sends every entry at
+  once, alone.
+- `--broadcast-rate` (10..100000): datagrams a second a broadcast player may send (a second's worth can be saved up);
+  more is dropped. A player sends about 22: 20 PUBLISH and 2 HELLO.
+- `--broadcast-build GAME:HEX`: the game build (decimal) and the 32 hex digits of the mod's 16-byte wire identity.
+  Broadcast players of another build are refused (REFUSED, reason 3). Without it, players of different builds are
+  only kept apart, and each WELCOME says how many players in reach that keeps away.
+
+What the server holds to in broadcast mode, besides the rules above (`relay.h`):
+
+| Rule | Why |
+|---|---|
+| The source of every entry and SHARE is the server's record of the sender's address; a PUBLISH, STATE or FETCH that names another player is dropped (counted as spoofed), and one from an address that never said HELLO is nothing | a player cannot speak for another |
+| An update is taken in order: a later sequence and a later stamp than the last one taken | a repeat or a late datagram is not passed on |
+| Its stamp is at most 2 s behind and 0.5 s ahead of the server's clock | the receivers interpolate on that clock; a stamp from elsewhere would be shown at the wrong moment |
+| Within the full distance every update, beyond it one in the interval and a teleport always; animation only within the animation distance, the pulses of the samples left out carried by the next | the cost of a crowd falls with distance, and a teleport or a pulse is never lost to it |
+| A receiver's entries go in FRAMEs of at most the budget, each within the flush time | the datagram fits the path, and packing adds at most the flush time of delay |
+| State: the latest version of each kind, an older or repeated one refused; handed out on ENTER (each way, before anyone asks), to everyone near when it changes, and on FETCH from a player near (every kind, the empty ones too, at most one answer in 250 ms per pair) | a player who comes near shows the other's gear at once; a lost SHARE is repaired; FETCH reaches no one far away and cannot multiply traffic |
+| Pairs players and broadcast players are never near each other, nor broadcast players of different game or mod builds | a receiver trusts the server for the build of the presence it decodes |
+| A broadcast player whose HELLO says stream 0 is a game that started again: what it showed is dropped and the state of everyone near is handed to it again | a restarted game shows the others' gear without asking, and the others do not keep his old one |
+
+Costs. A broadcast player sends the same however many players are near (and no PUBLISH while nobody is). For each PUBLISH the server does the interest check for each
+player near and appends at most one entry to each; each receiver gets at most one FRAME per flush time and one more
+whenever the budget fills. A state change costs one SHARE (at most 1144 bytes) to each player near, a player coming
+near one SHARE for each kind held each way, an answered FETCH four. The server keeps at most four times 1100 bytes of
+state per player, in memory only. Measured in the tests: 24 players walking in one place, each sending presence and
+a small animation sample 20 times a second (`broadcast_test.cpp`), receive about 60 datagrams and 50 kB a second each
+(in pairs mode the server would pass each of them 460 presence datagrams a second and up to as many animation
+datagrams); over loopback (`test_broadcast.py`) a player in a group of 16 with 8 more beyond 30 m receives about 67
+datagrams and 32 kB a second with a 600-byte budget. The relay stays one thread: it wakes for a datagram, for the next
+FRAME due, and four times a second.
+
+Not done (broadcast): the mod and `coop-swarm` do not speak it yet; nothing caps how many players are near one player,
+so in a crowd within the full distance every player still receives every other's 20 updates a second (in fewer,
+larger datagrams); the shown state is not saved.
+
 ### A swarm of stand-in players (`coop-swarm`)
 
 `mod/swarm.cpp` (built by `make -C mod build/coop-swarm`, or `build/coop-swarm.exe` with the Windows binaries) is K
@@ -362,6 +419,24 @@ other through it (8 players, 56 core sessions, all connected; two groups apart; 
 stand-ins replaying a small recording written by the test: three of them and two plain ones connect all 20 sessions,
 the plain ones take over 60 animation frames of 140 bytes and send none, the first replaying one walks the 8 m the
 recording's speed gives in six seconds, and `--with-animation` is refused without a recording that has samples.
+
+Broadcast mode: `broadcast_test.cpp` runs the relay with real broadcast players (`ds::broadcast::Client`, each on a
+clock of its own) and raw datagrams: a walking, animating player seen by one within 30 m (every update, with its
+animation), one at 40 m (one in 200 ms, with animation, and every pulse shown), one at 100 m (one in 200 ms, presence
+only) and one far away (nothing); a teleport inside the interval; the shown state handed out on ENTER with no FETCH,
+six changes while walking with no FETCH, an older version refused, FETCH answered and limited, FETCH for a player who
+is not near, a game started again on either side; a PUBLISH, STATE and FETCH naming another player, and from an
+address that never said HELLO; the order and the stamp window, and the sequence wrapping; pairs players, another mod
+build and another game build in one place, and a server that pins the build; FRAMEs within a 400-byte budget and the
+flush time; 24 players in one place. Thirteen mutants must fail it (`RELAY_BCAST_MODE`, `RELAY_BCAST_BUILD`,
+`RELAY_BCAST_SPOOF`, `RELAY_BCAST_ORDER`, `RELAY_BCAST_STAMP`, `RELAY_BCAST_ANIMATION_FAR`, `RELAY_BCAST_TELEPORT`,
+`RELAY_BCAST_INTEREST`, `RELAY_BCAST_ROSE`, `RELAY_BCAST_BUDGET`, `RELAY_BCAST_ENTER_STATE`, `RELAY_BCAST_STATE_OLD`,
+`RELAY_BCAST_FETCH_FAR`). `test_broadcast.py` runs the built server on loopback UDP with 26 players written byte by
+byte in Python: options out of range refused; 16 in a group, 8 on a ring 80 m out and 2 far away, each publishing
+20 times a second; every FRAME within a 600-byte budget and from a player near, more than three entries a FRAME,
+every update with its animation within 30 m, one in 200 ms and no animation beyond, a STATE handed to the 23 players
+near and nobody else, an update naming another player sent nowhere, a pairs player in the group near nobody, and a
+server that pins the build refusing another.
 
 ## Not done
 
