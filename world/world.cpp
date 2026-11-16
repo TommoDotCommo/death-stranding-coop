@@ -1,5 +1,6 @@
 #include "world.h"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <random>
 namespace world {
@@ -169,19 +170,18 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
         for(const char* k:{"si","pi","vi","ci","ei"})if(in.get(k).isObject())found->second.post.set(k,in.get(k));
         found->second.updated=now;return ok(objectResponse(found->second));}
     if(name=="findQpidObjects"){
-        // The other players' objects in one area, at most the asked number per type. Never the asker's own: the game
-        // has those in its save.
+        // The other players' objects in one area that every player is handed, at most the asked number per type, chosen
+        // as the policy says and the same ones as last time while they are there (curate). Never the asker's own: the
+        // game has those in its save.
         int64_t area=in.get("q").integer();const Value& counts=in.get("o").get("ct");
-        std::map<std::string,int64_t> left;for(auto& m:counts.members())left[m.first]=m.second.integer();
+        std::map<std::string,int64_t> asked;for(auto& m:counts.members())asked[m.first]=m.second.integer();
+        std::vector<Candidate> here;for(auto& o:objects_)if(o.second.post.get("q").integer()==area)here.push_back(candidateOf(o.second));
+        std::vector<std::string> before;
+        if(auto p=picks_.find(me.id);p!=picks_.end())if(auto a=p->second.find(area);a!=p->second.end())before=a->second.ids;
+        Curated chosen=curate(me.id,area,counts.isObject()?&asked:nullptr,here,before,policy_,friendsOf(me.id));
+        remember(me.id,area,chosen.remember,now);
         Value list=Value::array();
-        for(auto& o:objects_){
-#ifndef MUTANT_WORLD_OWN
-            if(o.second.creator==me.id)continue;
-#endif
-            if(o.second.post.get("q").integer()!=area||!servedTo(o.second,me.id))continue;
-            auto type=o.second.post.get("t").string();
-            if(counts.isObject()){auto l=left.find(type);if(l==left.end()||l->second<=0)continue;--l->second;}
-            list.push(objectResponse(o.second));}
+        for(auto& id:chosen.handed)list.push(objectResponse(objects_.at(id)));
         Value set=Value::object();set.set("ro",Value::array());set.set("m",Value::array());set.set("oa",list);
         for(const char* k:{"ob","od","oe","op"})set.set(k,Value::array());
         Value out=Value::object();out.set("n",set);return ok(out);}
@@ -270,7 +270,13 @@ json::Value World::snapshot() const {
     out.set("objects",objects);
     Value likes=Value::array();
     for(auto& l:likes_){Value v=Value::object();v.set("to",l.to);v.set("from",l.from);v.set("object",l.object);v.set("type",l.type);v.set("time",l.time);v.set("points",l.points);v.set("auto",l.autoPoints);likes.push(v);}
-    out.set("likes",likes);return out;
+    out.set("likes",likes);
+    Value picks=Value::array();
+#ifndef MUTANT_CURATE_SAVE_LOST
+    for(auto& p:picks_)for(auto& a:p.second){Value v=Value::object();v.set("player",p.first);v.set("area",a.first);v.set("asked",a.second.asked);
+        Value ids=Value::array();for(auto& id:a.second.ids)ids.push(id);v.set("ids",ids);picks.push(v);}
+#endif
+    out.set("picks",picks);return out;
 }
 void World::restore(const json::Value& v){
     std::lock_guard<std::mutex> g(lock_);
@@ -306,6 +312,15 @@ void World::restore(const json::Value& v){
     for(auto& l:v.get("likes").items()){Like k;k.to=l.get("to").string();k.from=l.get("from").string();k.object=l.get("object").string();k.type=l.get("type").string();
         k.time=l.get("time").integer();k.points=l.get("points").integer();k.autoPoints=l.get("auto").integer();
         if(likes_.size()<MaxLikes)likes_.push_back(k);}
+    // What each player's game was handed per area; a world file from before has none.
+    picks_.clear();
+    for(auto& p:v.get("picks").items()){
+        const std::string player=p.get("player").string();auto& mine=picks_[player];
+        if(!playerById(player)||!p.get("area").isInt()||!p.get("asked").isInt()||!p.get("ids").isArray()||p.get("ids").items().empty()||p.get("ids").items().size()>MaxPicksPerArea
+           ||mine.count(p.get("area").integer())||mine.size()>=MaxPickAreas)throw std::runtime_error("world file: bad picks");
+        Picks k;k.asked=p.get("asked").integer();
+        for(auto& id:p.get("ids").items()){if(!id.isString()||!objectIdText(id.string()))throw std::runtime_error("world file: bad picks");k.ids.push_back(id.string());}
+        mine[p.get("area").integer()]=k;}
     dirty_=!hadId;
 }
 // ---- Linked servers: filters, the travelling form of an object, export, import, forget.
@@ -537,12 +552,98 @@ Reply World::linkPull(const Filter& f,const std::string& body,int64_t now) const
          Value same=Value::object();same.set("format",1);same.set("kind",DocumentKind);same.set("server",serverId_);same.set("version",versionLocked());same.set("same",true);return ok(same);}}
     return ok(exportObjects(f,server,now,after,LinkPageObjects,LinkPageBytes));
 }
+// ---- Which objects a game is handed (README, "Which objects a game is handed").
+Curated curate(const std::string& player,int64_t area,const std::map<std::string,int64_t>* counts,const std::vector<Candidate>& candidates,
+               const std::vector<std::string>& previous,const Policy& policy,const std::set<std::string>& friends){
+    // Who may be handed what: every player's shared objects of this area, never the asker's own.
+    std::vector<const Candidate*> pool;std::map<std::string,const Candidate*> byId;
+    for(auto& c:candidates){
+        if(c.area!=area)continue;
+#if !defined(MUTANT_WORLD_OWN)&&!defined(MUTANT_CURATE_OWN)
+        if(c.creator==player)continue;
+#endif
+#ifndef MUTANT_CURATE_UNSHARED
+        if(!c.shared)continue;
+#endif
+        pool.push_back(&c);byId[c.id]=&c;}
+    // The order: newest first; with `liked`, the asker's friends first, then the most liked, then the newest.
+    const bool liked=policy.order=="liked";
+    std::stable_sort(pool.begin(),pool.end(),[&](const Candidate* a,const Candidate* b){
+#ifndef MUTANT_CURATE_ORDER
+        if(liked){bool fa=friends.count(a->creator)>0,fb=friends.count(b->creator)>0;if(fa!=fb)return fa;if(a->likes!=b->likes)return a->likes>b->likes;}
+        if(a->updated!=b->updated)return a->updated>b->updated;
+#else
+        (void)liked;
+#endif
+        return a->id<b->id;});
+    Curated out;std::set<std::string> taken;std::map<std::string,int64_t> left;if(counts)left=*counts;
+    std::map<std::pair<std::string,std::string>,int64_t> byBuilder;std::map<std::string,std::vector<const Candidate*>> placed;
+    auto room=[&](const Candidate& c){
+        if(!counts)return true;
+        auto l=left.find(c.type);
+#ifndef MUTANT_CURATE_COUNTS
+        return l!=left.end()&&l->second>0;
+#else
+        return l!=left.end()&&l->second>=0;
+#endif
+    };
+    auto take=[&](const Candidate& c){out.handed.push_back(c.id);taken.insert(c.id);if(counts)--left[c.type];++byBuilder[{c.type,c.creator}];if(c.placed)placed[c.type].push_back(&c);};
+    // What this game was handed here before comes first, as long as it is still there and shared.
+#ifndef MUTANT_CURATE_UNSTABLE
+    for(auto& id:previous){auto f=byId.find(id);if(f!=byId.end()&&!taken.count(id)&&room(*f->second))take(*f->second);}
+#endif
+    for(auto* c:pool){
+        if(taken.count(c->id)||!room(*c))continue;
+#ifndef MUTANT_CURATE_BUILDER_CAP
+        // No one builder fills a kind of an area.
+        if(policy.perBuilder>0&&byBuilder[{c->type,c->creator}]>=policy.perBuilder)continue;
+#endif
+#ifndef MUTANT_CURATE_SPREAD
+        // The game fails an object placed too close to another of its kind: one farther away is handed instead.
+        if(policy.spread>0&&c->placed){
+            bool near=false;double d2=double(policy.spread)*double(policy.spread);
+            for(auto* o:placed[c->type]){double dx=c->x-o->x,dy=c->y-o->y,dz=c->z-o->z;if(dx*dx+dy*dy+dz*dz<d2){near=true;break;}}
+            if(near)continue;}
+#endif
+        take(*c);}
+    // Remembered for next time: what was handed now, then what was handed before and is still there (a kind the game
+    // did not ask for this time, or fewer of it).
+    out.remember=out.handed;
+    for(auto& id:previous)if(out.remember.size()<MaxPicksPerArea&&byId.count(id)&&!taken.count(id)){out.remember.push_back(id);taken.insert(id);}
+    if(out.remember.size()>MaxPicksPerArea)out.remember.resize(MaxPicksPerArea);
+    return out;
+}
+Candidate World::candidateOf(const Object& o) const {
+    Candidate c;const Value& p=o.post;
+    c.id=o.id;c.creator=o.creator;c.type=p.get("t").string();c.area=p.get("q").integer();c.updated=o.updated;c.likes=o.likes;c.shared=o.share.empty();
+    // The game's own reading: l / 10^exp, and an exp of zero or less counts as 2 (mod/game_offsets.md).
+    if(p.get("px").isInt()&&p.get("py").isInt()&&p.get("pz").isInt()){
+        int64_t e=p.get("exp").integer();if(e<=0)e=2;if(e>18)e=18;double scale=std::pow(10.0,double(e));
+        c.placed=true;c.x=double(p.get("px").integer())/scale;c.y=double(p.get("py").integer())/scale;c.z=double(p.get("pz").integer())/scale;}
+    return c;
+}
+void World::remember(const std::string& player,int64_t area,const std::vector<std::string>& ids,int64_t now){
+    auto mine=picks_.find(player);
+    if(ids.empty()){
+        if(mine!=picks_.end()&&mine->second.erase(area)){dirty_=true;if(mine->second.empty())picks_.erase(mine);}
+        return;}
+    auto& areas=picks_[player];auto& p=areas[area];
+    if(p.ids!=ids){p.ids=ids;dirty_=true;}
+    p.asked=now;
+#ifndef MUTANT_CURATE_UNBOUNDED
+    // Bounded: the areas this player asked for longest ago are forgotten first.
+    while(areas.size()>MaxPickAreas){
+        auto oldest=areas.end();
+        for(auto it=areas.begin();it!=areas.end();++it)if(it->first!=area&&(oldest==areas.end()||it->second.asked<oldest->second.asked))oldest=it;
+        areas.erase(oldest);dirty_=true;}
+#endif
+}
 // ---- Server policy (README, "Server policy"): presets, settings, the players' choices, withdrawal, moderation.
 Policy presetPolicy(const std::string& name){
     Policy p;p.preset=name;
     if(name=="friends")return p;
     if(name=="solo"){p.players=1;return p;}
-    if(name=="public"){p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";return p;}
+    if(name=="public"){p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;return p;}
     bad("policy: unknown preset '"+name+"' (friends, solo or public)");
 }
 void setPolicy(Policy& p,const std::string& keyValue){
@@ -561,11 +662,15 @@ void setPolicy(Policy& p,const std::string& keyValue){
     else if(key=="offer_old")pick(p.offerOld,{"yes","no"});
     else if(key=="limit")number(p.limit,0,int64_t(MaxObjectsPerPlayer));
     else if(key=="players")number(p.players,1,int64_t(MaxPlayers));
-    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old)");
+    else if(key=="order")pick(p.order,{"newest","liked"});
+    else if(key=="per_builder")number(p.perBuilder,0,1000);
+    else if(key=="spread")number(p.spread,0,1000);
+    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread)");
 }
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy& p){
     return {{"join",p.join},{"build",p.build},{"accept_offers",p.acceptOffers},{"limit",std::to_string(p.limit)},{"withdrawal",p.withdrawal},
-            {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld}};
+            {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld},
+            {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)}};
 }
 void World::setPolicy(const Policy& p){std::lock_guard<std::mutex> g(lock_);policy_=p;dirty_=true;++changes_;}
 bool World::servedTo(const Object& o,const std::string& player) const {

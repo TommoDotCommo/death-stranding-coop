@@ -5526,6 +5526,13 @@ Observed:
   in, with `{"uid":"","since":0}`. Live: after another player's `sendLike` for a ladder this game had uploaded in an
   earlier run, the next run's request was answered with that entry and the game kept running; whether it showed or
   counted the like was not observed (that ladder was not in the save the second run loaded).
+- Many of one kind (2026-11-16, live, one real game, Episode 3 save, area 226, objects served by `world/`). The game
+  asked for a count per kind as before (`t` 33, `x` 3, `b` 2, `v` 4, `n` 1, `h` 5, `e` 5); a kind it does not list,
+  like ladders (`l`) in area 226, it does not ask for at all. With 40 cairns on the server, on a 4 m grid in that
+  area, the server sent the first 5 by id: the game activated 1 and set the other 4 to Fail. Which of the game's
+  placement rules failed them is unknown; how close they stood is the candidate. After the server deleted the
+  activated cairn, the game kept it for at least 90 s: it asks for an area only when the area loads, and nothing
+  tells it of a removal. What the server makes of this: `world/README.md`, "Which objects a game is handed".
 
 Derived: a served object does persist, and the game uploads what is built with the flag; ladders and cairns work
 both ways. Rain shelters are taken down by the receiving game after it has made them, with genuine upload data too;
