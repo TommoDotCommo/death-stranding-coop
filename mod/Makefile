@@ -35,10 +35,15 @@ build/fake-no-build.so: $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DDS_TESTING -DMOD_MUTANT_BUILD -fPIC -shared $(SRC) -o $@
 build/fake-no-interpolation.so: $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DDS_TESTING -DMOD_MUTANT_INTERPOLATION -fPIC -shared $(SRC) -o $@
+# The fake world with one protection of the others' seam taken out (test_others_partner_mutants.py).
+build/fake-others-to-partner.so: $(SRC) $(HEADERS) | build
+	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_OTHERS_TO_PARTNER -fPIC -shared $(SRC) -o $@
+build/fake-others-no-relay.so: $(SRC) $(HEADERS) | build
+	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_OTHERS_NO_RELAY -fPIC -shared $(SRC) -o $@
 build/unit: unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp $(HEADERS) | build
 	$(CXX) $(FLAGS) unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o $@
 host: identity build/mod.so build/mod-no-build.so build/mod-no-interpolation.so build/mod_probe build/unit
-test: environment-test join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so
+test: environment-test join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so build/fake-others-to-partner.so build/fake-others-no-relay.so
 	./build/unit
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_PARTNER unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-partner && if ./build/unit-config-partner >/dev/null 2>&1; then echo SURVIVED CONFIG_PARTNER; exit 1; else echo KILLED MUTANT_CONFIG_PARTNER; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_MARKER unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-marker && if ./build/unit-config-marker >/dev/null 2>&1; then echo SURVIVED CONFIG_MARKER; exit 1; else echo KILLED MUTANT_CONFIG_MARKER; fi
@@ -50,6 +55,8 @@ test: environment-test join-test vehicle-test game-thread-test discovery-test po
 	python3 -B test_probe.py
 	python3 -B -m unittest -q test_game_thread_api test_probe_puppet test_actor_resources test_actor_reader_windows
 	python3 -B test_actor_resource_mutants.py
+	python3 -B test_others_partner.py
+	python3 -B test_others_partner_mutants.py
 .PHONY: all identity host test
 
 build/vehicle-test: vehicle_test.cpp vehicle.cpp vehicle.h discovery.cpp fake_memory.h discovery_signatures.h | build
@@ -248,7 +255,7 @@ game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderlo
 	./build/mule-goal-test
 	python3 -B mutants.py --sources "$(MULEGOAL_SRC)" --prefix build/mutant-mulegoal- MULEGOAL_COMPONENT MULEGOAL_CAPACITY MULEGOAL_KEY MULEGOAL_INDEX MULEGOAL_OFFSET MULEGOAL_NEAR MULEGOAL_DSCOMPONENT MULEGOAL_AGREE MULEGOAL_AI_VTABLE MULEGOAL_WALKING MULEGOAL_D_VTABLE MULEGOAL_WRITABLE MULEGOAL_SAME MULEGOAL_REACH MULEGOAL_RUNNING MULEGOAL_PENDING && echo KILLED 16 mule goal mutants
 	./build/others-test
-	python3 -B mutants.py --sources "$(OTHERS_SRC)" --prefix build/mutant-others- OTHERS_CAP OTHERS_UNKNOWN OTHERS_BUILD OTHERS_SELF OTHERS_LEFT OTHERS_ROLE OTHERS_PAIR BODIES_ONE_NEW OTHERS_STICKY OTHERS_KINDS OTHERS_STALE BODIES_HIDE BODIES_REMOVE BODIES_ONCE BODIES_RATE BODIES_MIX && echo KILLED 15 others mutants
+	python3 -B mutants.py --sources "$(OTHERS_SRC)" --prefix build/mutant-others- OTHERS_CAP OTHERS_UNKNOWN OTHERS_BUILD OTHERS_SELF OTHERS_LEFT OTHERS_ROLE OTHERS_PAIR BODIES_ONE_NEW OTHERS_STICKY OTHERS_KINDS OTHERS_STALE BODIES_HIDE BODIES_REMOVE BODIES_ONCE BODIES_RATE BODIES_MIX OTHERS_LABEL_BODY OTHERS_LABEL_NAME && echo KILLED 18 others mutants
 	./build/guard-test
 	./build/orders-test
 	./build/link-test

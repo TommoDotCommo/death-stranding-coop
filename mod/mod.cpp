@@ -268,10 +268,11 @@ struct Runtime final:ds::Transport {
     // Other players (others.h), presence only: a core session and a body each, besides the one partner. Config `others`
     // is the most there may be (0 = off).
     std::unique_ptr<mod::others::Others> others;mod::others::Plan othersPlan;uint64_t othersNotedAt=0;std::array<size_t,4> othersNoted{{~size_t(0),0,0,0}};
+    std::vector<mod::others::Shown> othersShown;   // the other players as of this tick's tickOthers (their labels use it)
     mod::controls::Gather othersGather;std::atomic<bool> othersControls{false};   // this porter's controls for them (under controlsLock)
-    // ---- SEAM: the transport for other players. Nothing in this build calls these five. ---------------------------
-    // Whatever carries the datagrams between players (a relay) calls them, always under `mutex`; the network thread's
-    // loop() is the place (poll the relay beside the partner's socket, see the mark there):
+    // ---- SEAM: the transport for other players. ---------------------------------------------------------------------
+    // Whatever carries the datagrams between players calls these five, always under `mutex`: the relay (relayStart,
+    // relayPoll below, from the network thread's loop()), and in the fake world the test (mod_test_others_*):
     //   othersStart(self, link)            this player's id on the link is known; link.send(to, data, size) sends one datagram
     //   othersEntered(id, now), othersLeft(id, now)  who is near
     //   othersReceived(from, data, size, now)        one datagram from that player, as it was sent
@@ -283,22 +284,44 @@ struct Runtime final:ds::Transport {
         note(("OTHERS ready: up to "+std::to_string(config.others)+" other players"+(otherBodies?"\n":" (no bodies in this build)\n")).c_str());
     }
     void othersStop(){if(!others)return;others->clear(mod::nowMs());others.reset();note("OTHERS stopped\n");}
-    // `now` is the network loop's time for this pass, the one its tick is given: a later reading here would put a
-    // session's last receive after the tick's time, and the core's timeout (an unsigned difference) would fire at once
-    // (live 2026-11-16: sessions dropped and reconnected all the time).
+    // `now` is the network loop's time for this pass, the one its tick is given. A later reading here put a session's
+    // last receive after the tick's time, and the core's timeout (then an unsigned difference) fired at once (live
+    // 2026-11-16: sessions dropped and reconnected all the time). The core no longer does that (CORE.md, "times out
+    // of order"); one clock per pass stays the rule, so that lateness and delay are measured on one reading.
     void othersEntered(uint64_t id,uint64_t now){if(others)others->entered(id,now);}
     void othersLeft(uint64_t id,uint64_t now){if(others)others->left(id,now);}
     ds::Error othersLastError=ds::Error::None;
-    void othersReceived(uint64_t from,const uint8_t* data,size_t size,uint64_t now){if(others){auto e=others->received(from,data,size,now);if(e!=ds::Error::None)othersLastError=e;}}
+    void othersReceived(uint64_t from,const uint8_t* data,size_t size,uint64_t now){
+        if(others){auto e=others->received(from,data,size,now);if(e!=ds::Error::None)othersLastError=e;}
+#ifdef MOD_MUTANT_OTHERS_TO_PARTNER
+        if(size==ds::WireSize&&pending.size()<256)pending.push_back({mod::nowUs(),now,std::vector<uint8_t>(data,data+size),size});   // mutant: one route for everybody
+#endif
+    }
     // The relay (core/relay.h; config relay, relay_key, player_id): a second UDP socket connected to the players' own
     // server, which says who is near and carries the datagrams of those pairs. Polled by the network thread under `mutex`.
 #ifndef MOD_FAKE_NETWORK
     SOCKET relaySocket=INVALID_SOCKET;
 #endif
     std::unique_ptr<ds::relay::Client> relayClient;bool relayOnline=false;uint64_t relayIn=0,relayOut=0,relayNotedAt=0;
+#ifdef MOD_FAKE_NETWORK
+    // The fake world has no relay socket: the test is the relay. It reads what the sessions send from here and hands
+    // the roster and the datagrams over through the seam (mod_test_others_*).
+    struct OthersOut {uint64_t to;std::vector<uint8_t> bytes;};std::deque<OthersOut> othersOutgoing;
+#endif
+    // Other players need a relay: `others` alone starts no session and sends nothing.
+    bool relayWanted() const {
+#ifndef MOD_MUTANT_OTHERS_NO_RELAY
+        return !config.relay.empty()&&config.others;
+#else
+        return config.others!=0;
+#endif
+    }
     void relayStart(){
-#ifndef MOD_FAKE_NETWORK
-        if(config.relay.empty()||!config.others)return;
+        if(!relayWanted())return;
+#ifdef MOD_FAKE_NETWORK
+        mod::others::Link link;link.send=[this](uint64_t to2,const uint8_t* d,size_t n){++relayOut;if(othersOutgoing.size()<4096)othersOutgoing.push_back({to2,std::vector<uint8_t>(d,d+n)});};
+        othersStart(config.playerId?config.playerId:1,std::move(link));
+#else
         relaySocket=::socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);if(relaySocket==INVALID_SOCKET)throw std::runtime_error("relay UDP socket failed");
         sockaddr_in to{};to.sin_family=AF_INET;to.sin_port=htons(config.relayPort);to.sin_addr.s_addr=htonl(config.relayAddress);
         // Connected: the socket takes datagrams from the relay's address and port only, and is bound to the route to it.
@@ -348,8 +371,10 @@ struct Runtime final:ds::Transport {
     // that player's animation sample; hidden while the player is stale, away or in a private room and during a local
     // game event; removed when the player has left.
     void tickOthers(const mod::puppet::Anchor& anchor,bool event,uint64_t now){
+        othersShown.clear();
         if(!otherBodies||(!others&&!otherBodies->size()))return;
-        std::vector<mod::others::Shown> shown;if(others)shown=others->frame(now);
+        if(others)othersShown=others->frame(now);
+        const auto& shown=othersShown;
         mod::others::plan(shown,!event,config.partnerPoses,config.partnerAnimation,othersPlan);
         otherBodies->drive(othersPlan.wants,anchor,now);
         std::array<size_t,4> state{{shown.size(),others?others->connected():0,otherBodies->made(),otherBodies->driving()}};
@@ -672,6 +697,8 @@ struct Runtime final:ds::Transport {
             else if(text=="continue"+stamp){continueAgain=true;}      // test: load the last save again (from the title screen)
             else if(text=="tag on"+stamp){tagTest=true;}              // test: a name over the partner body
             else if(text=="tag off"+stamp){tagTest=false;}
+            else if(text=="tag all"+stamp){tagLimit=0;note("TAG test: a label for every shown body (no limit)\n");}   // lab: not run live
+            else if(text=="tag near"+stamp){tagLimit=mod::nametag::LabelsAtOnce;note("TAG test: labels for the partner and the nearest others only\n");}
             else if(unsigned v=0;text.size()>stamp.size()&&text.compare(text.size()-stamp.size(),stamp.size(),stamp)==0&&std::sscanf(text.c_str(),"voice %u",&v)==1){voiceTest=int(v);}   // lab: one sentence container on the partner body
             else if(text=="pulse"+stamp){pulseTest=true;}             // lab: the scanner pulse variables at the partner body
             else if(text=="vitals"+stamp){vitalsTest=true;}           // lab: this porter's scan counter and status pairs, logged once
@@ -945,30 +972,59 @@ struct Runtime final:ds::Transport {
         notices->tick(now,poseAvailable&&!inEvent,connected,partnerName,connected&&((cache.remote.state.flags&ds::PrivateRoom)||!cache.remote.visible));
         notices->progress(now,connected,connected&&core->progressStatus()==ds::ProgressStatus::Mismatch);
     }
-    // --- A name over the partner (nametag.h): one of the game's hologram-name records above the partner body.
-    // On with config partner_tag; `puppet.ride` "tag on" / "tag off" test it. The name is the partner's nickname.
-    std::unique_ptr<mod::nametag::Tag> nameTag;bool tagTried=false,tagTest=false;Background<mod::nametag::Api> tagJob;uint64_t tagPorter=0;
+    // --- Names over heads (nametag.h): one of the game's hologram-name records above the partner body and above every
+    // other player's body (others.h). On with config partner_tag; `puppet.ride` "tag on" / "tag off" test it. The
+    // names are the nicknames the players sent. One Tags set holds them all: key 0 is the partner, a player id another
+    // player; all use the one native api, record by record, exactly as the partner's label always did.
+    // At most LabelsAtOnce records are registered at once (the partner, then the others nearest this porter): the game
+    // presents three names, and its record list has only been seen with one record of the mod's. `puppet.ride`
+    // "tag all" lifts the limit (a label for every shown body; not run live), "tag near" puts it back.
+    std::unique_ptr<mod::nametag::Tags> nameTags;bool tagTried=false,tagTest=false;Background<mod::nametag::Api> tagJob;uint64_t tagPorter=0;
+    size_t tagLimit=mod::nametag::LabelsAtOnce;
     mod::nametag::Sender nameTx;mod::nametag::Receiver nameRx;std::string partnerName;
+#ifdef MOD_FAKE_NETWORK
+    struct FakeLabel {std::u16string name;std::array<double,3> at{};};std::map<uint64_t,FakeLabel> fakeLabels;uint64_t fakeLabelNext=0x100;
+#endif
+    // Where a body's label goes: 2.1 m above its feet (game axes, z up), while the body is visible and readable.
+    std::optional<std::array<double,3>> labelPoint(uint64_t body) {
+        uint64_t flags=0;if(!body||!sampler->read(body+mod::gear::Flags,&flags,8)||!(flags&mod::gear::FlagVisible))return std::nullopt;
+        auto pose=mod::puppet::readEntityPose(*sampler,body);if(!(pose.available&&pose.coherent))return std::nullopt;
+        std::array<double,3> at=pose.position;at[2]+=2.1;return at;
+    }
+    void makeTags(mod::nametag::Api api) {
+        nameTags=std::make_unique<mod::nametag::Tags>(std::move(api),[this](uint64_t body){return labelPoint(body);},[this](const std::string& row){note(row.c_str());});
+    }
     void tickTag(uint64_t body,const mod::puppet::Anchor& anchor) {
         // This player's name goes to the partner on every connection (both ends send; each shows the other's).
         if(core)for(auto& e:nameTx.tick(config.nickname,core->connected()&&partnerMode()))core->queueCargo(e);
-        if(!tagTest&&!config.partnerTag){if(nameTag)nameTag->tick(false,u"",nullptr);return;}
+        if(!tagTest&&!config.partnerTag){if(nameTags)nameTags->tick(false,{});return;}
 #ifndef MOD_FAKE_NETWORK
-        if(!nameTag&&!tagTried){auto* sp=&*sampler;if(!tagJob.ready([sp]{return mod::nametag::nativeApi(*sp);}))return;
+        if(!nameTags&&!tagTried){auto* sp=&*sampler;if(!tagJob.ready([sp]{return mod::nametag::nativeApi(*sp);}))return;
             tagTried=true;
-            try{nameTag=std::make_unique<mod::nametag::Tag>(tagJob.job.get(),[this](const std::string& row){note(row.c_str());});}
+            try{makeTags(tagJob.job.get());}
             catch(const std::exception& e){note((std::string("TAG unavailable: ")+e.what()+"\n").c_str());}}
+#else
+        // The fake world's HUD: the records the mod registered, by handle.
+        if(!nameTags){mod::nametag::Api api;
+            api.create=[this](const std::u16string& name,const std::array<double,3>& at)->uint64_t{fakeLabels[fakeLabelNext+=0x40]={name,at};return fakeLabelNext;};
+            api.move=[this](uint64_t r,const std::array<double,3>& at){fakeLabels.at(r).at=at;};
+            api.remove=[this](uint64_t r){fakeLabels.erase(r);};
+            makeTags(std::move(api));}
 #endif
-        if(!nameTag)return;
-        if(anchor.entity!=tagPorter){if(tagPorter)nameTag->forget("world changed");tagPorter=anchor.entity;}
-        uint64_t flags=0;bool shown=body&&sampler->read(body+mod::gear::Flags,&flags,8)&&(flags&mod::gear::FlagVisible);
-        auto pose=body?mod::puppet::readEntityPose(*sampler,body):mod::Pose{};
-        if(!shown||inEvent||!(pose.available&&pose.coherent)){nameTag->tick(false,u"",nullptr);return;}
-        std::array<double,3> at=pose.position;at[2]+=2.1;   // game axes, z up: above the head
-        auto name=mod::nametag::fromUtf8(partnerName);if(name.empty())name=u"Partner";
-        // With partner_vitals: his blood, stamina and state after the name (signals.h), a new text at most every 2 s.
-        if(config.partnerVitals)name=tagPacer.text(mod::nowMs(),name,vitalsRx.current(core&&core->connected()));
-        nameTag->tick(true,name,&at);
+        if(!nameTags)return;
+        if(anchor.entity!=tagPorter){if(tagPorter)nameTags->forget("world changed");tagPorter=anchor.entity;}
+        std::vector<mod::nametag::Named> named;
+        // The partner (key 0), while his body is there and shown.
+        if(body&&!inEvent&&labelPoint(body)){
+            auto name=mod::nametag::fromUtf8(partnerName);if(name.empty())name=u"Partner";
+            // With partner_vitals: his blood, stamina and state after the name (signals.h), a new text at most every 2 s.
+            if(config.partnerVitals)name=tagPacer.text(mod::nowMs(),name,vitalsRx.current(core&&core->connected()));
+            named.push_back({0,body,std::move(name)});
+        }
+        // Every other player whose body exists (key: the player's id), with the name that player sent.
+        if(otherBodies)for(auto& n:mod::others::labels(othersShown,*otherBodies))named.push_back(std::move(n));
+        nameTags->limit(tagLimit);
+        nameTags->tick(!inEvent,named,anchor.pose.available&&anchor.pose.coherent?&anchor.pose.position:nullptr);
     }
     std::filesystem::path markerCommand;std::unique_ptr<mod::marker::Markers> markers;std::vector<ds::CargoEvent> pingIn;
     mod::marker::KeyEdge pingEdge;unsigned pingKey=0;bool markerConfigDone=false;Background<mod::marker::Api> markerJob;
@@ -2218,6 +2274,31 @@ struct Runtime final:ds::Transport {
                     ownTwin=std::make_unique<mod::puppet::Double>(std::move(oapi),[this](const std::string& row){note(row.c_str());});
                 }
                 gameEvent=[this]{return fakeEvent.load();};
+                // The other players' bodies in the fake world (others.h): up to eight entities of the double's class in
+                // 0xd000..0xefff, each made visible and awake as the game makes one, driven through the same calls.
+                bodyParts=[this,twinApi]{
+                    constexpr size_t First=0xd000,Each=0x400,Count=8;
+                    mod::others::BodyParts p;auto at=[this](uint64_t e){return size_t(e-fake->base);};
+                    auto flag=[this,at](uint64_t e,uint64_t bit,bool on){fake->mutate([&]{uint64_t f=0;memcpy(&f,fake->data.data()+at(e)+0x88,8);fake->put<uint64_t>(at(e)+0x88,on?f|bit:f&~bit);});};
+                    p.own.resource=[this](uint64_t porter){return mod::puppet::findDouble(*sampler,porter,fake->base+0xff00,fake->base+0xff10)?fake->base+0x9000:0;};
+                    p.own.create=[this](uint64_t,const mod::puppet::Transform& t)->uint64_t{
+                        size_t slot=0;bool found=false;
+                        fake->mutate([&]{for(size_t i=0;i<Count&&!found;++i){uint64_t v=0;memcpy(&v,fake->data.data()+First+i*Each,8);if(!v){slot=First+i*Each;found=true;}}
+                            if(found){fake->put<uint64_t>(slot,fake->base+0xff10);fake->put<uint64_t>(slot+0x88,mod::puppet::FlagVisible|0x453);}});
+                        if(!found)return 0;
+                        fake->setEntityPose(slot,t.position.data(),t.rotation.data());return fake->base+slot;};
+                    p.own.alive=[this](uint64_t b){uint64_t v=0;return sampler->read(b,&v,8)&&v==fake->base+0xff10;};
+                    p.own.park=[flag](uint64_t b){flag(b,mod::puppet::FlagVisible,false);flag(b,mod::puppet::FlagSleeping,true);};
+                    p.own.dress=[](uint64_t){return true;};
+                    p.own.remove=[this,at](uint64_t b){fake->mutate([&]{fake->put<uint64_t>(at(b),0);});};
+                    p.drive=twinApi;
+                    p.drive.sleep=[flag](uint64_t e,bool b){flag(e,mod::puppet::FlagSleeping,b);};
+                    p.drive.visible=[flag](uint64_t e,bool b){flag(e,mod::puppet::FlagVisible,b);};
+                    p.drive.place=[this,at](uint64_t e,const mod::puppet::Transform& t){fake->setEntityPose(at(e),t.position.data(),t.rotation.data());};
+                    p.drive.anchor=[this,at](uint64_t e,const mod::puppet::Transform& t){fake->mutate([&]{memcpy(fake->data.data()+at(e)+0x358,&t,60);});};
+                    return p;};
+                otherBodies=std::make_unique<mod::others::Bodies>([this](uint64_t){
+                    return std::make_unique<mod::others::Body>(bodyParts(),[this](const std::string& row){note(("OTHERS "+row).c_str());});});
 #endif
 #if defined(MOD_PUPPET_DOUBLE_RESOURCE) && !defined(MOD_FAKE_NETWORK)
                 // Experiment builds only: once the probe has created our own body, the double backend drives it
@@ -3445,6 +3526,28 @@ MOD_API void mod_test_deliver(const unsigned char* bytes) {
     uint64_t delay=fate.delayMs;
     r.pending.push_back({mod::nowUs(),mod::nowMs()+delay,std::vector<uint8_t>(b.begin(),b.end()),b.size()});
 }
+// The relay's side of the seam for other players (others.h), under the runtime lock as the network thread calls it:
+// who is near, one datagram from a player, and what the sessions sent (returns its size, 0 when there is nothing).
+MOD_API void mod_test_others_roster(uint64_t id,int enter) {
+    std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return;
+    auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
+    if(enter)r.othersEntered(id,mod::nowMs());else r.othersLeft(id,mod::nowMs());
+}
+MOD_API void mod_test_others_deliver(uint64_t from,const unsigned char* bytes,unsigned size) {
+    std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return;
+    auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
+    r.othersReceived(from,bytes,size,mod::nowMs());
+}
+MOD_API unsigned mod_test_others_drain(uint64_t* to,unsigned char* bytes,unsigned capacity) {
+    std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return 0;
+    auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
+    while(!r.othersOutgoing.empty()){
+        auto d=std::move(r.othersOutgoing.front());r.othersOutgoing.pop_front();
+        if(d.bytes.empty()||d.bytes.size()>capacity)continue;
+        *to=d.to;memcpy(bytes,d.bytes.data(),d.bytes.size());return unsigned(d.bytes.size());
+    }
+    return 0;
+}
 #endif
 int mod_pad(mod_pad_state* s) {
     if(!s||s->size!=sizeof(mod_pad_state))return -1;
@@ -3524,6 +3627,17 @@ unsigned mod_status(char* out,unsigned cap) {
         o<<",\"game_thread\":{\"enabled\":"<<(r.config.gameThread?"true":"false")<<",\"verified\":"<<(r.dispatchVerified?"true":"false")<<",\"thread_id\":"<<r.gameGate.thread()<<",\"rejected\":"<<r.gameRejected<<"},\"puppet\":{\"enabled\":"<<(r.puppet?"true":"false")<<",\"stage\":\""<<(r.puppet?r.puppet->stage():"disabled")<<"\",\"actor\":"<<(r.puppet?r.puppet->actor():0)<<"}";
         o<<",\"pad\":{\"enabled\":"<<(r.config.virtualPad?"true":"false")<<",\"running\":"<<(r.padRunning?"true":"false")<<",\"calls\":"<<padShared.calls.load()<<",\"active_calls\":"<<padShared.active.load()<<"}";
         o<<",\"event\":"<<(r.inEvent?"true":"false")<<",\"cargo\":{\"sent\":"<<r.cargoSent<<",\"created\":"<<r.cargoMade<<",\"taken\":"<<r.cargoTaken<<",\"removed\":"<<r.cargoRemoved<<",\"shared\":"<<r.cargoSync.shared()<<",\"mirrored\":"<<r.cargoSync.mirrored()<<",\"structures_sent\":"<<r.structSent<<",\"structures_created\":"<<r.structMade<<",\"pending\":"<<(r.core?r.core->cargoPending():0)<<"}";
+        {mod::others::Counters k;if(r.others)k=r.others->counters();
+         o<<",\"others\":{\"on\":"<<(r.others?"true":"false")<<",\"near\":"<<(r.others?r.others->size():0)<<",\"connected\":"<<(r.others?r.others->connected():0)
+          <<",\"bodies\":"<<(r.otherBodies?r.otherBodies->made():0)<<",\"shown\":"<<(r.otherBodies?r.otherBodies->driving():0)
+          <<",\"sent\":"<<k.sent<<",\"received\":"<<k.received<<",\"accepted\":"<<k.accepted<<",\"refused\":"<<k.refused<<",\"unknown\":"<<k.unknown<<",\"malformed\":"<<k.malformed<<"}";
+         o<<",\"labels_shown\":"<<(r.nameTags?r.nameTags->shown():0);}
+#ifdef MOD_FAKE_NETWORK
+        {auto ascii=[](const std::u16string& n){std::string t;for(auto ch:n)t+=(ch>=0x20&&ch<0x7f&&ch!='"'&&ch!='\\')?char(ch):'?';return t;};
+         o<<",\"label_names\":[";bool first=true;for(auto& [id,l]:r.fakeLabels){o<<(first?"":",")<<"\""<<ascii(l.name)<<"\"";first=false;}
+         o<<"],\"labels\":[";first=true;for(auto& [id,l]:r.fakeLabels){o<<(first?"":",")<<"{\"name\":\""<<ascii(l.name)<<"\",\"at\":["<<l.at[0]<<","<<l.at[1]<<","<<l.at[2]<<"]}";first=false;}
+         o<<"]";}
+#endif
         o<<",\"carry\":{\"enabled\":"<<(r.config.carryVisual?"true":"false")<<",\"events_sent\":"<<r.carrySent<<",\"shown_entries\":"<<r.carry.view().shown().size()<<"}";   // ds3
         o<<",\"double\":{\"stage\":\""<<(r.twin?r.twin->name():"disabled")<<"\",\"mode\":\""<<(r.twinMode==Runtime::TwinMode::Echo?"echo":r.twinMode==Runtime::TwinMode::Lead?"lead":r.twinMode==Runtime::TwinMode::Peer?"peer":r.twinMode==Runtime::TwinMode::Own?"own":"none")<<"\",\"entity\":"<<(r.twin?r.twin->entity():0)<<"}";
         o<<",\"timing\":{\"clock\":\""

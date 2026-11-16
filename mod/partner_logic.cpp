@@ -87,6 +87,39 @@ ds::State Replay::at(double ms,const std::array<double,3>& origin) const {
     if(std::hypot(s.velocity[0],s.velocity[2])>Run+.1)s.flags|=ds::Sprint;
     return s;
 }
+long AnimationCursor::due(const std::vector<std::pair<double,ds::Animation>>& samples,double ms,double span){
+    if(samples.empty()||!(span>0)||!(ms>=0))return -1;
+    double turn=std::floor(ms/span),t=ms-turn*span;
+    if(turn!=loop){loop=turn;at=-1;}
+    long i=at;while(i+1<long(samples.size())&&samples[size_t(i+1)].first<=t)++i;
+#ifndef MUTANT_PARTNER_CURSOR_ONCE
+    return i>at?i:-1;
+#else
+    return i;
+#endif
+}
+ds::Animation controlsOnly(const ds::Animation& a){
+#ifndef MUTANT_PARTNER_CONTROLS_ONLY
+    ds::Animation x;x.held=a.held;x.rose=a.rose;x.floats=a.floats;return x;
+#else
+    return a;
+#endif
+}
+ds::State CircleWalker::step(double speed,double dt){
+    if(!(radius_>0)||!(speed>0)||!std::isfinite(speed))speed=0;
+    if(!(dt>0)||!std::isfinite(dt))dt=0;
+#ifndef MUTANT_PARTNER_CIRCLE_SPEED
+    double v=speed;
+#else
+    double v=speed>0?Walk:0;
+#endif
+    if(v>0){angle_=std::remainder(angle_+v/radius_*dt,2*Pi);walked_+=v*dt;}
+    double sn=std::sin(angle_),cs=std::cos(angle_);
+    ds::State s;s.position={centre_[0]+radius_*sn,centre_[1],centre_[2]+radius_*cs};
+    if(v>0){s.velocity={v*cs,0,-v*sn};yaw_=std::atan2(cs,-sn);if(v>Run+.1)s.flags|=ds::Sprint;}
+    s.yaw=yaw_;
+    return s;
+}
 namespace {
 void rechecksum(uint8_t* b){
     uint32_t h=2166136261u;for(size_t i=0;i<ds::WireSize;++i){h^=i>=120&&i<124?0:b[i];h*=16777619u;}
@@ -101,6 +134,17 @@ void toWireLong(std::vector<uint8_t>& b){
     std::copy(mod::WireBuild.begin(),mod::WireBuild.end(),b.begin()+16);
     uint32_t h=2166136261u;for(size_t i=0;i<b.size();++i){h^=i>=120&&i<124?0:b[i];h*=16777619u;}
     for(unsigned i=0;i<4;++i)b[120+i]=uint8_t(h>>(8*i));
+}
+bool fromWireLong(std::vector<uint8_t>& b){
+    if(b.size()<=ds::WireSize||b.size()>ds::AnimationWireMax)return false;
+#ifndef MUTANT_PARTNER_WIRE_LONG_ANY
+    if(!std::equal(mod::WireBuild.begin(),mod::WireBuild.end(),b.begin()+16))return false;
+#endif
+    // Like the mod: only a checksum-valid frame is given the core's identity, so a damaged one still fails in the core.
+    auto sum=[&](uint8_t out[4]){uint32_t h=2166136261u;for(size_t i=0;i<b.size();++i){h^=i>=120&&i<124?0:b[i];h*=16777619u;}for(unsigned i=0;i<4;++i)out[i]=uint8_t(h>>(8*i));};
+    uint8_t have[4];sum(have);
+    if(std::equal(have,have+4,b.begin()+120)){std::copy(ds::ModBuild.begin(),ds::ModBuild.end(),b.begin()+16);sum(have);std::copy(have,have+4,b.begin()+120);}
+    return true;
 }
 void toWire(ds::Bytes& b){
 #ifndef MUTANT_PARTNER_WIRE

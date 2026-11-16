@@ -78,6 +78,88 @@ void Tag::forget(const char* why){
     if(record_){api_.remove(record_);log_(std::string("TAG dropped (")+why+")\n");}
     record_=0;failures_=0;
 }
+void Tags::tick(bool permitted,const std::vector<Named>& named,const std::array<double,3>* viewer){
+    // A key that is no longer listed (the player left, the partner's body is gone): its label goes with it.
+#ifndef MUTANT_NAMETAG_TAGS_KEEP
+    for(auto it=tags_.begin();it!=tags_.end();){
+        bool listed=std::any_of(named.begin(),named.end(),[&](const Named& n){return n.key==it->first;});
+        if(listed){++it;continue;}
+        it->second->tick(false,u"",nullptr);it=tags_.erase(it);
+    }
+#endif
+    // Where each body is. No label before the body exists, and none while it is hidden: the point comes from the body.
+    std::vector<std::optional<std::array<double,3>>> at(named.size());
+    for(size_t i=0;i<named.size();++i){
+#ifndef MUTANT_NAMETAG_TAGS_MIX
+        uint64_t body=named[i].body;
+#else
+        uint64_t body=named.front().body;
+#endif
+#ifndef MUTANT_NAMETAG_TAGS_BODY
+        if(body&&where_)at[i]=where_(body);
+#else
+        if(where_)at[i]=where_(body?body:named.front().body);
+#endif
+    }
+    // Which of them get a record: all, or with a limit key 0 and then the nearest, a holder counted KeepMetres nearer.
+    std::vector<bool> chosen(named.size(),true);
+    size_t candidates=0;for(auto& a:at)if(a)++candidates;
+#ifndef MUTANT_NAMETAG_TAGS_LIMIT
+    if(limit_&&candidates>limit_){
+        std::vector<std::pair<double,size_t>> order;
+        for(size_t i=0;i<named.size();++i){
+            if(!at[i])continue;
+            double d=double(order.size());   // without a viewer: as listed
+#ifndef MUTANT_NAMETAG_TAGS_NEAREST
+            if(viewer){d=std::sqrt(((*at[i])[0]-(*viewer)[0])*((*at[i])[0]-(*viewer)[0])+((*at[i])[1]-(*viewer)[1])*((*at[i])[1]-(*viewer)[1])+((*at[i])[2]-(*viewer)[2])*((*at[i])[2]-(*viewer)[2]));
+                if(!std::isfinite(d))d=1e300;
+#ifndef MUTANT_NAMETAG_TAGS_FLAP
+                auto held=tags_.find(named[i].key);if(held!=tags_.end()&&held->second->record())d-=KeepMetres;
+#endif
+            }
+#else
+            (void)viewer;
+#endif
+#ifndef MUTANT_NAMETAG_TAGS_FIRST
+            if(named[i].key==0)d=-1e300;
+#endif
+            order.push_back({d,i});
+        }
+        std::stable_sort(order.begin(),order.end(),[](const auto& a,const auto& b){return a.first<b.first;});
+        std::fill(chosen.begin(),chosen.end(),false);
+        for(size_t k=0;k<order.size()&&k<limit_;++k)chosen[order[k].second]=true;
+    }
+#else
+    (void)viewer;
+#endif
+#ifndef MUTANT_NAMETAG_TAGS_EVENT
+    bool allowed=permitted;
+#else
+    bool allowed=true;(void)permitted;
+#endif
+    // The ones that lose their record first, so the number registered never passes the limit within a tick.
+    for(int pass=0;pass<2;++pass)for(size_t i=0;i<named.size();++i){
+        bool show=allowed&&at[i].has_value()&&chosen[i];
+        if(show!=(pass==1))continue;
+        auto it=tags_.find(named[i].key);
+        if(it==tags_.end()){
+            auto key=named[i].key;auto log=log_;
+            it=tags_.emplace(key,std::make_unique<Tag>(api_,[key,log](const std::string& row){
+                if(!log)return;
+                log(key&&row.rfind("TAG ",0)==0?"TAG player "+std::to_string(key)+" "+row.substr(4):row);})).first;
+        }
+        it->second->tick(show,named[i].name,show?&*at[i]:nullptr);
+    }
+}
+void Tags::forget(const char* why){
+    for(auto& [key,tag]:tags_){
+        tag->forget(why);
+#ifdef MUTANT_NAMETAG_TAGS_FORGET
+        break;
+#endif
+    }
+}
+size_t Tags::shown() const {size_t n=0;for(auto& [key,tag]:tags_)if(tag->record())++n;return n;}
 Api nativeApi(discovery::Sampler& s){
 #ifndef _WIN32
     (void)s;throw std::runtime_error("native name tag API requires Windows");

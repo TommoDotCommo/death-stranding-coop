@@ -85,6 +85,41 @@ int main(){
         CHECK(std::equal(mod::WireBuild.begin(),mod::WireBuild.end(),broken.begin()+16)); // damaged frames are not repaired
         CHECK(!fromWire(wire.data(),wire.size()-1));
     }
+    {   // the longer ANIMATION frame: the same identity both ways; another identity, a damaged frame, a wrong size
+        ds::Packet q;q.kind=ds::Kind::Animation;q.session=7;q.animation.floats[5]=.5f;q.animation.held[1]=2;
+        auto core=ds::encodeAnimation(q);CHECK(core.size()>ds::WireSize);
+        auto wire=core;toWireLong(wire);CHECK(std::equal(mod::WireBuild.begin(),mod::WireBuild.end(),wire.begin()+16));
+        auto back=wire;CHECK(fromWireLong(back)&&back==core);
+        auto plain=core;CHECK(!fromWireLong(plain)&&plain==core);                       // the core's own identity is not the mod's
+        auto broken=wire;broken[130]^=1;CHECK(fromWireLong(broken)&&std::equal(mod::WireBuild.begin(),mod::WireBuild.end(),broken.begin()+16));
+        std::vector<uint8_t> small(wire.begin(),wire.begin()+ds::WireSize),big(ds::AnimationWireMax+1,0);
+        std::copy(mod::WireBuild.begin(),mod::WireBuild.end(),big.begin()+16);
+        CHECK(!fromWireLong(small)&&!fromWireLong(big));
+    }
+    {   // what other players are sent: the controls, without the hands, the wheels and the carts
+        ds::Animation a;a.held[3]=1;a.rose[3]=1;a.floats[9]=2.5f;a.handCount=1;a.hands[0].item=5;a.jointCount=2;a.skeleton=40;a.cartCount=1;
+        auto x=controlsOnly(a);CHECK(x.held==a.held&&x.rose==a.rose&&x.floats==a.floats&&!x.handCount&&!x.jointCount&&!x.cartCount&&!x.skeleton);
+    }
+    {   // the animation cursor: the newest sample not yet sent, each once per loop; an unsent one is offered again
+        std::vector<std::pair<double,ds::Animation>> samples(3);samples[0].first=100;samples[1].first=200;samples[2].first=900;
+        AnimationCursor c;CHECK(c.due(samples,50,1000)==-1);
+        CHECK(c.due(samples,150,1000)==0);CHECK(c.due(samples,160,1000)==0);c.sent(0);CHECK(c.due(samples,170,1000)==-1);
+        CHECK(c.due(samples,950,1000)==2);c.sent(2);CHECK(c.due(samples,990,1000)==-1);   // one passed over is not sent late
+        CHECK(c.due(samples,1050,1000)==-1);CHECK(c.due(samples,1150,1000)==0);            // the next loop: from the start again
+        AnimationCursor none;CHECK(none.due({},100,1000)==-1&&none.due(samples,100,0)==-1);
+    }
+    {   // a stand-in on its circle: where it starts, how far a speed takes it, which way it faces, and standing still
+        CircleWalker w({100,50,-200},10,0);
+        auto s=w.step(0,.1);CHECK(std::fabs(s.position[0]-100)<1e-9&&s.position[1]==50&&std::fabs(s.position[2]+190)<1e-9);
+        CHECK(s.velocity==std::array<double,3>({0,0,0})&&std::fabs(std::fabs(s.yaw)-Pi)<1e-9&&w.walked()==0);   // standing: faces the centre
+        for(int i=0;i<10;++i)s=w.step(1.6,.1);                                                // 1.6 m along a 10 m circle: 0.16 rad
+        CHECK(std::fabs(w.walked()-1.6)<1e-9&&std::fabs(s.position[0]-(100+10*std::sin(.16)))<1e-6&&std::fabs(s.position[2]-(-200+10*std::cos(.16)))<1e-6);
+        CHECK(std::fabs(std::hypot(s.velocity[0],s.velocity[2])-1.6)<1e-9&&s.velocity[0]>1.5&&!(s.flags&ds::Sprint));
+        CHECK(std::fabs(std::sin(s.yaw)*1.6-s.velocity[0])<1e-9&&std::fabs(std::cos(s.yaw)*1.6-s.velocity[2])<1e-9);   // faces the way he walks
+        auto walkingYaw=s.yaw;s=w.step(0,.1);CHECK(s.yaw==walkingYaw&&s.velocity[0]==0&&std::fabs(w.walked()-1.6)<1e-9);   // stops: keeps facing
+        s=w.step(5.8,1);CHECK((s.flags&ds::Sprint)&&std::fabs(w.walked()-7.4)<1e-9);
+        CircleWalker still({1,2,3},0,1);s=still.step(3,1);CHECK(s.position==std::array<double,3>({1,2,3})&&still.walked()==0&&s.velocity[0]==0);
+    }
     if(!failures)std::puts("partner follow and replay checks passed");
     return failures?1:0;
 }

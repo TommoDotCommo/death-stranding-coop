@@ -280,6 +280,48 @@ void showing(){
     plan({v},true,true,false,p);CHECK(p.wants.size()==1&&p.wants[0].goal&&!p.wants[0].sample);
     plan({v},true,true,true,p);CHECK(p.wants[0].goal&&p.wants[0].sample);
 }
+// Names over the others' heads: a label per body, with that player's name, over that player's body; none before the
+// body is made, none over a hidden body or during a game event, gone when the player leaves.
+void labelling(){
+    struct Hud {
+        std::map<uint64_t,std::pair<std::u16string,std::array<double,3>>> live;uint64_t next=0x100;unsigned creates=0,removes=0;
+        mod::nametag::Api api(){mod::nametag::Api a;
+            a.create=[this](const std::u16string& n,const std::array<double,3>& at)->uint64_t{++creates;live[next+=0x40]={n,at};return next;};
+            a.move=[this](uint64_t r,const std::array<double,3>& at){live.at(r).second=at;};
+            a.remove=[this](uint64_t r){++removes;live.erase(r);};
+            return a;}
+    } hud;
+    Sim s;
+    mod::nametag::Tags tags(hud.api(),[&](uint64_t body)->std::optional<std::array<double,3>>{
+        if(!s.world.shown(body))return std::nullopt;
+        auto at=s.world.of(body)->pose.position;at[2]+=2.1;return at;},{});
+    auto tick=[&]{s.step();tags.tick(!s.event,labels(s.shown,s.bodies));};
+    auto run=[&](uint64_t ms){for(uint64_t t=0;t<ms;t+=10)tick();};
+    auto over=[&](uint64_t id,const char16_t* name){
+        auto r=tags.record(id);auto e=s.world.of(s.bodies.entity(id));if(!r||!e||!hud.live.count(r))return false;
+        auto& l=hud.live.at(r);return l.first==name&&l.second[0]==e->pose.position[0]&&l.second[1]==e->pose.position[1]&&std::fabs(l.second[2]-e->pose.position[2]-2.1)<1e-9;};
+    auto& me=s.add(100,0);auto& b=s.add(50,20);auto& c=s.add(200,40);(void)me;
+    // Two players near, one body object so far and no entity shown yet: a label only where a body is.
+    tick();CHECK(s.shown.size()==2&&labels(s.shown,s.bodies).size()<=1&&hud.live.empty());
+    run(4000);
+    CHECK(labels(s.shown,s.bodies).size()==2&&hud.live.size()==2&&hud.creates==2);
+    CHECK(over(50,u"Porter 50")&&over(200,u"Porter 200"));
+    run(1000);CHECK(over(50,u"Porter 50")&&over(200,u"Porter 200")&&hud.creates==2);   // they walk: each label follows its own body
+    // A player whose name has not arrived is "Porter".
+    {auto shown=s.shown;for(auto& v:shown)v.name.clear();auto l=labels(shown,s.bodies);CHECK(l.size()==2&&l[0].name==u"Porter"&&l[1].name==u"Porter"&&l[0].key!=l[1].key);}
+    // C goes stale (its body is hidden): its label goes, B's stays; back: a label again.
+    c.gated=true;run(2500);CHECK(!tags.record(200)&&over(50,u"Porter 50")&&hud.live.size()==1);
+    c.gated=false;run(1500);CHECK(over(200,u"Porter 200")&&hud.live.size()==2);
+    // A game event here: no label; over: both again.
+    s.event=true;run(100);CHECK(hud.live.empty());
+    s.event=false;run(500);CHECK(hud.live.size()==2&&over(50,u"Porter 50"));
+    // B leaves: its label goes with its body.
+    s.hub.leave(50,s.now);tick();CHECK(hud.live.size()==1&&tags.size()==1&&over(200,u"Porter 200")&&labels(s.shown,s.bodies).size()==1);
+    // A new world: the records are handed back, and the label is made again over the new body.
+    auto removes=hud.removes;s.world.reload();tags.forget("world changed");CHECK(hud.removes==removes+1&&hud.live.empty());
+    run(3000);CHECK(hud.live.size()==1&&over(200,u"Porter 200"));
+    (void)b;
+}
 // A peer that speaks the plain core (as the lower id it is the pair's host): what others never carry is refused or dropped.
 struct Raw final:ds::StateProvider,ds::Transport {
     ds::State state;std::deque<std::vector<uint8_t>> toOthers,toRaw;std::unique_ptr<ds::Core> core;
@@ -321,7 +363,7 @@ void kinds(){
 }
 }
 int main(){
-    pairing();several();stale();leaving();limits();isolation();identity();jump();animation();reload();showing();kinds();
+    pairing();several();stale();leaving();limits();isolation();identity();jump();animation();reload();showing();labelling();kinds();
     if(failures){std::fprintf(stderr,"others: %u failures\n",failures);return 1;}
     std::puts("others: sessions per player, bodies per player, limits, isolation, staleness and leaving hold");
     return 0;

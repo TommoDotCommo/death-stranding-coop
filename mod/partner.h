@@ -65,12 +65,34 @@ std::vector<Sample> parseRecording(const std::string& text);
 // The animation samples recorded beside it (record_animation: {"t_us":..,"animation":"<payload hex>"}), on the same
 // time base (ms from the first available "local" row); malformed rows are skipped.
 std::vector<std::pair<double,ds::Animation>> parseAnimations(const std::string& text);
-void toWireLong(std::vector<uint8_t>&);      // the same for the longer ANIMATION frame
 // Wire identity. The mod in the game sends its adapter identity (identity.h, WireBuild) in bytes 16..31 of every
 // frame, accepts only frames that carry it, and gives the core the core's own ModBuild (mod.cpp send/accept). The
 // partner does the same, or the game drops every partner frame (live 2026-11-07: the partner stayed "waiting").
 void toWire(ds::Bytes&);                     // core frame -> wire frame (WireBuild, checksum redone)
 bool fromWire(uint8_t* frame,size_t size);   // wire frame -> core frame; false (unchanged) for another identity
+void toWireLong(std::vector<uint8_t>&);      // the same for the longer ANIMATION frame
+bool fromWireLong(std::vector<uint8_t>&);    // and back: false (unchanged) for another identity or a size no long frame has
+// Which recorded animation sample to send now: the newest one at or before this moment of the (looping) recording that
+// has not been sent yet, each at most once per loop (a resent one would repeat its pulses). One cursor per receiver.
+struct AnimationCursor {
+    long at=-1;double loop=-1;
+    // ms: time into the replay; span: the recording's length in ms. The index to send, or -1 for nothing new.
+    long due(const std::vector<std::pair<double,ds::Animation>>& samples,double ms,double span);
+    void sent(long index){at=index;}
+};
+// What the mod sends other players (others.h): the animation controls only, not what he holds, his wheels or his carts.
+ds::Animation controlsOnly(const ds::Animation&);
+// A stand-in on a circle (coop-swarm): angle 0 is +z from the centre, the walk goes towards +x first, and he faces
+// the way he walks; while he stands he keeps the way he faced (at first: the centre). step() moves him `speed` m/s
+// along the circle for dt seconds; with radius 0 he stands at the centre whatever the speed.
+class CircleWalker {
+public:
+    CircleWalker(const std::array<double,3>& centre,double radius,double angle):centre_(centre),radius_(radius),angle_(angle),yaw_(std::remainder(angle+Pi,2*Pi)){}
+    ds::State step(double speed,double dt);
+    double walked() const {return walked_;}   // metres along the circle so far
+private:
+    std::array<double,3> centre_;double radius_,angle_,yaw_,walked_=0;
+};
 class Replay {
 public:
     explicit Replay(std::vector<Sample> s):samples_(std::move(s)){}

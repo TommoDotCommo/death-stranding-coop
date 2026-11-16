@@ -108,6 +108,10 @@ Drive drive(const Shown&,bool poses=true);
 // point at. show=false: nobody is shown (a local game event). animation=false: no controls are mirrored.
 struct Plan {std::vector<Drive> drives;std::vector<std::optional<ds::Animation>> samples;std::vector<Want> wants;};
 void plan(const std::vector<Shown>&,bool show,bool poses,bool animation,Plan&);
+// The labels for these players (nametag.h, Tags): one for every player whose body exists, keyed by the player's id, with
+// the name that player sent ("Porter" until one has arrived). Whether a label is shown is the body's affair: Tags asks
+// where the body is and draws nothing over a hidden one.
+std::vector<nametag::Named> labels(const std::vector<Shown>&,const class Bodies&);
 struct Counters {
     uint64_t sent=0,received=0,accepted=0;
     uint64_t unknown=0;        // from an id that has not entered

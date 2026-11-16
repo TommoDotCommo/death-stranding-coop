@@ -130,6 +130,23 @@ void plan(const std::vector<Shown>& shown,bool show,bool poses,bool animation,Pl
         out.wants.push_back(w);
     }
 }
+std::vector<nametag::Named> labels(const std::vector<Shown>& shown,const Bodies& bodies){
+    std::vector<nametag::Named> out;out.reserve(shown.size());
+    for(const auto& v:shown){
+        nametag::Named n;n.key=v.id;n.body=bodies.entity(v.id);
+#ifndef MUTANT_OTHERS_LABEL_BODY
+        if(!n.body)continue;   // no body yet (one is made every MakeEveryMs), or the game refused one
+#endif
+#ifndef MUTANT_OTHERS_LABEL_NAME
+        n.name=nametag::fromUtf8(v.name);
+#else
+        n.name=nametag::fromUtf8(shown.front().name);
+#endif
+        if(n.name.empty())n.name=u"Porter";
+        out.push_back(std::move(n));
+    }
+    return out;
+}
 
 // One other player: the core's view of this porter (StateProvider) and its way out (Transport).
 struct Others::Session final:ds::StateProvider,ds::Transport {

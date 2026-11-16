@@ -1,7 +1,8 @@
 """The built server's relay over real UDP sockets on loopback: a HELLO written here byte by byte (the layout in
 core/relay.h) is answered, anything without the key is not, and a swarm of stand-in players (mod/swarm.cpp) finds each
-other through it and connects every pair with the real protocol core."""
-import re,socket,struct,subprocess,sys
+other through it and connects every pair with the real protocol core. Stand-ins that replay a recording (a small one
+written here) walk at its speed and send its animation samples, and the ones they meet read them."""
+import json,os,re,shutil,socket,struct,subprocess,sys,tempfile
 exe,swarm=sys.argv[1],sys.argv[2]
 def free_port(kind=socket.SOCK_STREAM):
     s=socket.socket(socket.AF_INET,kind);s.bind(('127.0.0.1',0));p=s.getsockname()[1];s.close();return p
@@ -50,6 +51,38 @@ try:
     b=subprocess.run([swarm,'--relay','127.0.0.1:%d'%relay,'--key','abc','--count','5','--centre','0','0','0','--radius','8','--seconds','3','--first-id','3001','--only','2001','--require-connected'],capture_output=True,text=True,timeout=60)
     assert b.returncode==0 and 'near=25 sessions=5 connected=5' in b.stdout.strip().splitlines()[-1],b.stdout[-400:]
     a.communicate(timeout=30)
+    # Stand-ins that replay a recording. The recording (the presence log of a game with record_animation): two seconds
+    # walking along x at 2 m/s, two seconds standing, and an animation sample every 100 ms (one bool held, one float
+    # control; the payload layout is CORE.md's "Optional animation samples").
+    def animation(k):return (bytes([1,1,0,1,40])+struct.pack('<f',.25+.01*k)+bytes([0,0,0])).hex()
+    rows=[]
+    for k in range(81):
+        t=k*50000;x=2.0*min(t,2000000)/1e6
+        rows.append(json.dumps({'t_us':1000000+t,'local':{'available':True,'x':x,'y':0,'z':0,'yaw_deg':90}}))
+        if k%2==0:rows.append(json.dumps({'t_us':1000000+t+1000,'animation':animation(k//2)}))
+    folder=tempfile.mkdtemp();recording=os.path.join(folder,'presence-test.jsonl');plain=os.path.join(folder,'presence-plain.jsonl')
+    open(recording,'w').write('\n'.join(rows)+'\n');open(plain,'w').write('\n'.join(r for r in rows if 'animation' not in r)+'\n')
+    common=[swarm,'--relay','127.0.0.1:%d'%relay,'--key','abc','--centre','500','0','500']
+    # --with-animation needs a recording, and one that has animation rows.
+    for wrong in (['--with-animation'],['--replay',plain,'--with-animation'],['--replay',os.path.join(folder,'none.jsonl')]):
+        r=subprocess.run(common+['--count','1','--radius','5','--seconds','1']+wrong,capture_output=True,text=True,timeout=20);assert r.returncode==2,(wrong,r.returncode,r.stderr)
+    # Three of them on a 10 m circle, and two plain stand-ins in the same place: all 20 sessions connect; the replaying
+    # ones send animation samples to everybody, and everybody's cores take them (the plain ones send none).
+    a=subprocess.Popen(common+['--count','3','--radius','10','--seconds','6','--first-id','2001','--replay',recording,'--with-animation','--require-connected'],stdout=subprocess.PIPE,text=True)
+    b=subprocess.run(common+['--count','2','--radius','5','--seconds','4','--first-id','3001','--require-connected'],capture_output=True,text=True,timeout=60)
+    m=re.match(r'SWARM done online=2/2 near=8 sessions=8 connected=8 accepted=\d+ animation_out=0 animation_in=(\d+) animation_in_bytes=(\d+)$',b.stdout.strip().splitlines()[-1])
+    assert b.returncode==0 and m and int(m.group(1))>60 and int(m.group(2))==int(m.group(1))*140,(b.returncode,b.stdout[-500:])   # 128 + a 12-byte payload
+    out=a.communicate(timeout=30)[0];lines=out.strip().splitlines()
+    assert 'a walk of 4.0 s, 41 animation samples' in lines[1],lines[:2]
+    m=re.match(r'SWARM done online=3/3 near=6 sessions=6 connected=6 accepted=\d+ animation_out=(\d+) animation_in=(\d+) animation_in_bytes=\d+ walked=([\d.]+)$',lines[-1])
+    assert a.returncode==0 and m and int(m.group(1))>200 and int(m.group(2))>60,(a.returncode,out[-500:])
+    # Six seconds of a recording that walks 2 m/s for two seconds and stands for two: 8 m (at the default pace it is 9.6).
+    assert 7.2<float(m.group(3))<8.8,lines[-1]
+    # Without --with-animation the replaying stand-ins walk the same way and send presence only.
+    quiet=subprocess.run(common+['--count','2','--radius','10','--seconds','2.5','--first-id','4001','--replay',recording,'--require-connected'],capture_output=True,text=True,timeout=60)
+    m=re.match(r'SWARM done online=2/2 near=2 sessions=2 connected=2 accepted=\d+ walked=([\d.]+)$',quiet.stdout.strip().splitlines()[-1])
+    assert quiet.returncode==0 and m and 3.5<float(m.group(1))<4.5,(quiet.returncode,quiet.stdout[-400:])
+    shutil.rmtree(folder)
     # The wrong key: nobody is answered, and the tool says so with its exit code.
     bad=subprocess.run([swarm,'--relay','127.0.0.1:%d'%relay,'--key','other','--count','2','--centre','0','0','0','--radius','5','--seconds','1.5','--require-connected'],capture_output=True,text=True,timeout=60)
     assert bad.returncode==1 and 'online=0/2' in bad.stdout,bad.stdout[-300:]

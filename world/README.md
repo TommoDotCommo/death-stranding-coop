@@ -102,7 +102,7 @@ Sams around one game copy once the mod speaks to the relay, and it loads a serve
 ```
 coop-swarm --relay 127.0.0.1:8090 --count 20 --centre X Y Z --radius 15 [--key TEXT]
            [--session N] [--speed 1.6] [--area N] [--first-id 1001] [--only ID] [--role auto|host|client]
-           [--seconds N] [--stop FILE] [--require-connected]
+           [--seconds N] [--stop FILE] [--require-connected] [--replay FILE [--with-animation]]
 ```
 
 `--centre` is in the core's axes (metres; x, y up, z). `--session` is the core session number every pair shares
@@ -112,6 +112,17 @@ K*(K-1) sessions. It prints one line a second, for example
 `SWARM t=3 online=8/8 near=56 sessions=56 connected=56 accepted=3008`, and with `--require-connected` exits 1 unless
 every player was answered and every session was connected at the end. All options: the comment at the top of
 `mod/swarm.cpp`.
+
+`--replay FILE` takes the presence log of a real game (`presence-*.jsonl`, the file `coop-partner --replay` reads).
+The players keep to their circle and walk it at the recorded player's speed of the moment: they stand when he stood
+and sprint when he sprinted (`--speed` is not used). Player i starts i/K of the way into the recording, and it loops.
+With `--with-animation` each also sends the animation samples recorded in the file (mod lab option
+`record_animation`) at their moment of the recording, to every connected session, the controls only, as the mod sends
+other players; without it the stand-ins send presence only and a game shows them gliding in the walking pose it picks
+from their speed. The stand-ins read the animation frames they are sent (a real game's, or each other's): once there
+are any, the lines end `animation_out=N animation_in=N animation_in_bytes=N` (samples sent, frames a session's core
+took, and their sizes together), and with `--replay` the last line says how far the first player walked
+(`walked=8.0`).
 
 ## Tests
 
@@ -130,7 +141,10 @@ line, all in one place and all apart, with every roster and every delivery check
 `RELAY_AREA`, `RELAY_NO_POSITION`, `RELAY_NO_TIMEOUT`, `RELAY_NO_LEAVE`, `RELAY_NO_RATE`, `RELAY_PLAYER_CAP`,
 `RELAY_HELLO_STALE`, `RELAY_ROSTER_ONCE`). `test_relay.py` runs the built server on loopback UDP: a HELLO written
 byte by byte in Python is answered and anything without the key is not, then swarms of stand-in players find each
-other through it (8 players, 56 core sessions, all connected; two groups apart; `--only`; the wrong key).
+other through it (8 players, 56 core sessions, all connected; two groups apart; `--only`; the wrong key), and
+stand-ins replaying a small recording written by the test: three of them and two plain ones connect all 20 sessions,
+the plain ones take over 60 animation frames of 140 bytes and send none, the first replaying one walks the 8 m the
+recording's speed gives in six seconds, and `--with-animation` is refused without a recording that has samples.
 
 ## Not done
 

@@ -72,7 +72,7 @@ struct Shell final:ds::StateProvider,ds::Transport {
     Follower follower;std::optional<Replay> replay;std::optional<ds::State> porter,mine;
     uint64_t started=0,last=0;double replayLoop=0;bool stickyTeleport=false;std::array<double,3> replayOrigin{};bool replayPlaced=false,whereRecorded=false;
     uint8_t rideKind=0;bool riding=false,away=false,down=false,caught=false,extra=false;uint16_t extraFlags=0;std::array<double,3> seat{};
-    std::vector<std::pair<double,ds::Animation>> anim;long animAt=-1;double animLoop=-1;   // --with-animation
+    std::vector<std::pair<double,ds::Animation>> anim;AnimationCursor animCursor;   // --with-animation
     bool readLocal(ds::State& s) override {
         if(!mine)return false;
         s=*mine;if(stickyTeleport)s.flags|=ds::Teleport;
@@ -101,10 +101,8 @@ struct Shell final:ds::StateProvider,ds::Transport {
     // The recorded animation sample of this moment of the replay, each sent once (a resent one would repeat its pulses).
     void animate(ds::Core& core,uint64_t now){
         if(anim.empty()||!replay||!replayPlaced||!core.connected())return;
-        double span=replay->span(),ms=double(now-started),loop=std::floor(ms/span),t=ms-loop*span;
-        if(loop!=animLoop){animLoop=loop;animAt=-1;}
-        long i=animAt;while(i+1<long(anim.size())&&anim[size_t(i+1)].first<=t)++i;
-        if(i>animAt&&core.sendAnimation(anim[size_t(i)].second,now))animAt=i;
+        long i=animCursor.due(anim,double(now-started),replay->span());
+        if(i>=0&&core.sendAnimation(anim[size_t(i)].second,now))animCursor.sent(i);
     }
     void step(uint64_t now){
         double dt=last?(now-last)/1000.:0;last=now;

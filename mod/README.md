@@ -617,9 +617,15 @@ and an independently allocated fixture buffer.
 
 `swarm.cpp` (`build/coop-swarm`, `build/coop-swarm.exe`) is K stand-in players in one process for the server's relay:
 each says HELLO, walks a circle around a given point and runs the real protocol core, with this mod's wire identity,
-with every player the relay says is near. The mod itself does not speak to the relay yet. Usage and what it prints:
+with every player the relay says is near. With `--replay FILE [--with-animation]` the stand-ins walk their circle
+at the speed of a recorded player and send his recorded animation samples (a presence log made with the lab option
+`record_animation`, the file `coop-partner --replay` reads), each stand-in a share of the recording further on, so a
+game shows many differently animated Sams instead of gliding ones; that has not been run against a game. The
+stand-ins also read the animation frames a game sends them and count them. Usage and what it prints:
 [`world/README.md`](../world/README.md), "A swarm of stand-in players"; every option is in the comment at the top of
-`swarm.cpp`. `world`'s `make test` runs it against the built server.
+`swarm.cpp`. `world`'s `make test` runs it against the built server. The pure parts (`CircleWalker`,
+`AnimationCursor`, `controlsOnly`, `fromWireLong` in `partner.h`) are pinned by `partner_test.cpp` with the mutants
+CIRCLE_SPEED, CURSOR_ONCE, CONTROLS_ONLY and WIRE_LONG_ANY.
 
 ## A stand-in partner for one game copy (`coop-partner`)
 
@@ -1074,6 +1080,22 @@ game's record list is still the one it joined (otherwise left alone, never freed
 `nametag_test.cpp` (mutants MARKUP, STILL and ORDER); live, two copies: each showed the other's nickname over the
 partner body, and the label went when the other copy closed. The launcher's play setup turns it on.
 
+**Other players' names (built, not run live).** With the same setting every other player's body (`others`, below)
+gets a label of its own with the name that player sent, "Porter" until one has arrived. All labels are one set
+(`nametag::Tags`): key 0 is the partner, a player id another player; each is a record of its own, made through the
+same three calls only after its body exists, moved to 2.1 m above that body every tick, removed when the body hides
+(a stale player, a private room, a game event here), when the player leaves, and handed back when the world is
+replaced. No new game call or address is used: per body it is exactly what the partner's label does, and the native
+side already kept its records in a table. The game's HUD presents three hologram names at a time, the nearest by its
+own sort (`game_offsets.md`, "hologram-name records"), and how many records its list takes has only been seen with
+the one partner label. So the mod registers at most four records at once (`LabelsAtOnce`): the partner's, then those
+of the other players nearest this porter, a body keeping its label until another is 2 m nearer; among many players
+the names appear as the porter comes near them. The lab command `tag all` in `puppet.ride` lifts the limit (a record
+for every shown body) and `tag near` puts it back; neither path has run live. Log lines read `TAG player <id> shown`.
+Tests: `nametag_test.cpp` (mutants TAGS_KEEP, TAGS_MIX, TAGS_BODY, TAGS_EVENT, TAGS_FORGET, TAGS_LIMIT, TAGS_NEAREST,
+TAGS_FLAP, TAGS_FIRST), `others_test.cpp` `labelling` (OTHERS_LABEL_BODY, OTHERS_LABEL_NAME) and the fake world
+(`test_others_partner.py`).
+
 ## Riding along on the partner's truck (`passenger_key`, with `partner_vehicle`)
 
 When the partner drives a truck, standing next to it (4.5 m) and pressing **J** holds this porter on the truck's side;
@@ -1160,8 +1182,8 @@ Besides the one partner the mod can hold up to `"others": N` more remote players
 - a 64-bit id, given by whatever carries the datagrams;
 - a presence-core session of its own (`core/CORE.md`, "Several peers"): handshake, clock mapping, the interpolated
   pose with speed and flags, the adaptive presentation delay, and the animation samples (kind 10) when they arrive;
-- the name it sends (its `nickname`, as the core's name events), kept with the session and logged; no label is
-  drawn over other players yet;
+- the name it sends (its `nickname`, as the core's name events), kept with the session and logged; with
+  `partner_tag` it is drawn over that player's body (the section on the partner's name, above);
 - a body of its own, made like the partner's own body (`OwnBody`) and driven every game-thread tick by its own
   `Double` to that player's pose with that player's animation sample.
 
@@ -1174,9 +1196,9 @@ riding pose without a vehicle (as the partner does without `partner_vehicle`).
 Nothing else of the two-player layer exists for others: no cargo, structures, enemies, orders, story, time or rain,
 vehicles, gear copies, carts or carried-cargo visuals, no map pin and no notices. What this porter sends them is his
 pose and his animation controls (not what he holds, his wheels or his carts). The partner path is not touched by any
-of it: with `others` at 0, or with no transport attached, no session exists and nothing is sent.
+of it: with `others` at 0, or with no relay configured, no session exists and nothing is sent.
 
-**The transport is not wired.** `others.h` talks to a `Link`:
+**The seam to the transport.** `others.h` talks to a `Link`:
 
 ```cpp
 struct Link {std::function<void(uint64_t to,const uint8_t* data,size_t size)> send;};
@@ -1194,9 +1216,9 @@ class Others {
 
 Times are the mod's monotonic milliseconds, the clock the core uses. Every call must come from one thread at a time.
 In `mod.cpp` the seam is marked `SEAM`: `othersStart(self, link)`, `othersEntered`, `othersLeft`, `othersReceived`
-and `othersStop`, to be called under the runtime lock from the network thread, where the partner's socket is polled.
-Nothing calls them in this build, so the setting alone starts nothing. `MemoryHub` in `others.h` is a link in memory
-for tests.
+and `othersStop`, called under the runtime lock: by the relay code from the network thread, where the partner's
+socket is polled, and in the fake world by the test. Without `relay` nothing calls them, so `others` alone starts
+nothing. `MemoryHub` in `others.h` is a link in memory for tests.
 
 Limits to know before running it live:
 
@@ -1211,8 +1233,23 @@ delay and loss: several enter, walk, go stale, drop out and come back, leave and
 player given as another's; an unknown id; another build; a jump; animation samples and one-frame pulses per receiver;
 a new world; a plain core as the peer. Mutants (`mutants.py`, 15): OTHERS_CAP, OTHERS_UNKNOWN, OTHERS_BUILD,
 OTHERS_SELF, OTHERS_LEFT, OTHERS_ROLE, OTHERS_PAIR, OTHERS_STICKY, OTHERS_KINDS, OTHERS_STALE, BODIES_HIDE,
-BODIES_REMOVE, BODIES_ONCE, BODIES_RATE, BODIES_MIX; and CONFIG_OTHERS in the unit test. The glue in `mod.cpp` is
-compiled in every build but not exercised by a test, since nothing attaches a transport yet.
+BODIES_REMOVE, BODIES_ONCE, BODIES_RATE, BODIES_MIX, and for the labels OTHERS_LABEL_BODY and OTHERS_LABEL_NAME; and
+CONFIG_OTHERS in the unit test.
+
+**The partner and others at once (fake world).** `test_others_partner.py` runs the real mod four times in one
+process (`build/fake.so`: fake game memory with a partner body and up to eight other bodies, a fake label list, and
+datagrams handed over by the test): A and B are partners over the two-player link, and the test is the relay between
+A and the other players C and D (`mod_test_others_roster`, `mod_test_others_deliver`, `mod_test_others_drain`, test
+exports of the fake build only). It shows: the partner connects and gets his body and name first; C and D come near
+and each gets a session, a body and a label over that body; the partner link refuses nothing and loses nothing while
+they are there, leave and come back; a game event hides every label; A's partner socket saw exactly the datagrams B
+sent and A's sessions exactly the ones the relay carried; one of C's datagrams given to the partner's socket is
+refused as another session, and one of B's given to the others as C's, D's or a stranger's is refused or dropped;
+and with `others` set but no `relay` there is no session, no body, no datagram and no log line. Two mutant builds
+must fail it (`test_others_partner_mutants.py`): `fake-others-to-partner.so` (a datagram of another player also
+handed to the partner's core) and `fake-others-no-relay.so` (sessions started without a relay). `mod_status` now has
+`"others": {on, near, connected, bodies, shown, sent, received, accepted, refused, unknown, malformed}` and
+`"labels_shown"` in every build.
 
 ## The partner from the start (`partner`)
 
