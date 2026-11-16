@@ -85,8 +85,8 @@ public:
     struct Origin { std::string server,via;size_t objects=0; };
     std::vector<Origin> origins() const;
     size_t imported() const {std::lock_guard<std::mutex> g(lock_);return byOrigin_.size();}
-    // Server policy and the players' choices (README, "Server policy"). Every call below throws std::runtime_error
-    // with the reason, and then changed nothing.
+    // Server policy and the players' choices (README, "Server policy"). The calls below that change something throw
+    // std::runtime_error with the reason when they are refused, and then changed nothing.
     Policy policy() const {std::lock_guard<std::mutex> g(lock_);return policy_;}
     void setPolicy(const Policy&);
     // A player's own choices, "KEY=VALUE": offer_builds yes|no|ask|default, offer_old yes|no|default, member yes|no.
