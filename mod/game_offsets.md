@@ -5805,10 +5805,11 @@ the resources, would give it).
 Read from the pinned executable only, nothing called. Question: can the structures already in a save (owner 1, see
 "The player's own strand") be put on our server, so other players get them? Confidence as before: **high** for loads,
 stores and branches read instruction by instruction, **medium** where a meaning is put on them. The game-free helper
-is `mod/offer_strand.h` (not wired into the mod).
+is `mod/offer_strand.h`; the mod's option `offer_strand` uses it (`mod/README.md`, "Offering your existing strand").
 
-**Who uploads.** The online object manager `O` (`[base+0x7c1abf0]`; the pointer at `0x4df9df0` points at the global
-`0x7c18670`, which holds the same object; vtable `0x3edecc8`) keeps per object kind a handler, in a map at `O+0x38`
+**Who uploads.** The uploader `O` (`[base+0x7c18670]`, the global the pointer at `0x4df9df0` points at; vtable
+`0x3edecc8`; a 0x3b8-byte object made by `0x34892f0`, constructor `0x3481420`, stored at `0x2e0d26e`) keeps per object
+kind a handler, in a map at `O+0x38`
 keyed by a type descriptor (`O` slot `0x18` registers, slot `0x20` looks up). The construction handler (0x420 bytes,
 made at `0x2e04630`, vtable `0x3e09460`, key `0x4c363b0`) holds three requests (`+0x8` create, `+0x90` re-create,
 `+0x118` delete) and three more for materials and tags. Its slots, all `(handler, object, ...)` (high):
@@ -5853,8 +5854,30 @@ record it makes (`0x2c86521`); what that bit does besides the area-capacity test
 read, and only ladders were tried live without it. Ladders and ropes (update `0x2d5ec30`) have the same retry behind
 `obj+0x5f6`, which their own code sets when the placement ends (`0x2d5edc6`, `0x2d5f18d`; whether a loaded ladder has
 it is unknown). Derived: a signed-in game uploads every own structure of its save that has no online id when the
-porter passes within 15 m of it, one every 120 s at most per structure. The live run of 2026-11-17 did not look for
-this.
+porter passes within 15 m of it, one every 120 s at most per structure.
+
+**Correction (2026-11-17, static, read again).** `O` is not the object at `[base+0x7c1abf0]`, as this section first
+said: that global is stored at `0x2e0d25b` from `0x349c970`, which makes a 0x248-byte object: the
+online objects' manager with the per-area lists ("The player's own strand"). The uploader is stored through
+`[0x4df9df0]` (= `0x7c18670`) at `0x2e0d26e` from `0x34892f0` (0x3b8 bytes, vtable `0x3edecc8`), and that is the object
+`0x2c9ed40` calls. Its vtable: `+0x00` `0x3481cb0`, `+0x08` `0x3488030` (update), `+0x28` `0x3485040` (queue an
+upload), `+0x48` `0x3485110`, `+0x68` `0x3484f80` (queue a re-create). Both queue functions find the handler from the
+object's own type (its vtable `+0`) and the handler's online id (handler slot `+0x08`), lock `O+0xa0`, and append the
+object unless it is in the list or in flight: create list count (i32) `O+0x58`, pointers `+0x60`, in flight `+0x68`;
+re-create `+0x78`, `+0x80`, `+0x88`. The processor `0x3488730` sets the in-flight pointer when it sends
+(`0x3488910`, `0x3488a74`); after an answer it is cleared (`0x34892b2` for the create, `0x3488216` for the re-create
+unless the handler's slot `+0x50` returns -1). Ladders' own retry (`0x2d5ede1`) calls `0x2c9ed40` too. The code of
+`0x2c9ed40` (44 bytes) and the first 40 bytes of `0x3484f80` are each unique in the image.
+
+**Live (2026-11-17, one real game, Episode 3 save, signed in to `coop-world` on loopback).** The save had 30 own
+records (owner 1, creator 1), about half with an online id of the original service and the rest none. With the porter
+teleported within 15 m of an own 30 m bridge record with no online id, the game sent `createObject` by itself within
+40 s, with `{"x":9,"y":7,"m":22123,"t":"b","px":106404184,"py":32080970,"pz":14673077,"rx":0,"ry":0,"rz":-11963270,
+"exp":5,"q":226,"st":"30","p":0,"bi":{"a":-111525},"lp":0,"tags":["ps4"],"mt":[{"c":"","t":0,"mat":[0,0,1000,0,0,0],
+"rmat":[0,0,0,0,0,0]}]}`; the server stored it and the record's `obj+0xb8` then held the server's id. So the retry
+works as read: `0x2c9ed40` queues an upload for an own record with an empty id, and the game sends the body above
+(`tags` "ps4" from `obj+0xb1`; `mt` with the builder's own entry only on this record). Probe (1) below is done; the
+mod calling it (probe 2) is not.
 
 **What the body holds (`0x2caeb50`, high).** Query (`OTGCCreateObjectQuery`): `x`, `y` the cell, `m` = `O+0x90` (the
 map id, `0x262a8c0([0x7be6318])`, a u16; 22123 is the one seen, the same number the area query sends as `aid`), `t`,
@@ -5906,7 +5929,8 @@ no durability, no build time (the server's), the like count of the original serv
 accounts as strings. Whether a receiver's level follows `mt` is unknown (a received bridge with full `mt` stayed
 level 1 on 2026-11-12).
 
-**Recipe for the mod** (game thread, signed in, the owner's option on):
+**Recipe for the mod** (game thread, signed in, the owner's option on; built as `offer_strand`, steps 1 to 3, with
+step 3 through the server keeping the id; not run live):
 
 1. Read the own records (`own_strand::readStructures`, owner 1, state 1 or 2) and skip `obj+0xab` bit 7 and the types
    without a letter (`offer_strand::plan`).
@@ -5921,9 +5945,8 @@ level 1 on 2026-11-12).
 5. Server: strip or keep `lp`, `tags` and the contributor strings of `mt` (the server's choice; they come from the
    original service).
 
-**Live probes still needed.** (1) Signed in on `coop-world`, walk within 15 m of an own record without an id: expected
-one `createObject` within seconds (the timer starts at 0) with that record's type and place, then the id at
-`obj+0xb8`. (2) Call `0x2c9ed40` for a far own record: expected the same, without walking. (3) Read W, H, T (the
+**Live probes still needed.** (1) Done (above). (2) Call `0x2c9ed40` for a far own record (the mod's `offer_strand`):
+expected the same, without walking. (3) Read W, H, T (the
 component `c` of type `0x4a76b00` on `[base+0x7ae90d8]`: `[c+0x20]+0x58`, `+0x5c`, `c+0x144`) and compare the computed
 cell with the uploaded `x`/`y` (9, 7 at Lake Knot). (4) Compare `offer_strand::body` with the game's body for a
 ladder, a shelter and a 30 m bridge (angles may differ by a unit from the game's own atan2). (5) Call `O` slot `0x68`
