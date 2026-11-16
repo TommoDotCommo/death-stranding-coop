@@ -34,6 +34,12 @@ std::optional<Answer> parse(const std::string& body){
         if(!v.isObject()||v.get("format").integer()!=1||!v.get("name").isString()||!v.get("version").isString()||v.get("version").string().size()>64
            ||v.get("full").kind()!=json::Value::Bool||!v.get("objects").isArray()||v.get("objects").items().size()>MaxItems)return std::nullopt;
         Answer a;a.name=v.get("name").string();a.version=v.get("version").string();a.full=v.get("full").boolean();
+        if(v.has("offer_old")){
+            a.offerOld=v.get("offer_old").string();
+#ifndef MUTANT_STRAND_OLD_PARSE
+            if(!oneOf(a.offerOld,{"yes","no"}))return std::nullopt;
+#endif
+        }
         for(auto& o:v.get("objects").items()){
             Item i{o.get("id").string(),o.get("kind").string(),o.get("state").string(),o.get("why").string()};
             if(!o.isObject()||!letters(i.id,2,64,true)||i.kind.size()>32||i.why.size()>16)return std::nullopt;
@@ -180,6 +186,7 @@ Poller::~Poller(){{std::lock_guard<std::mutex> g(lock_);stop_=true;}wake_.notify
 std::vector<std::u16string> Poller::lines(){std::lock_guard<std::mutex> g(lock_);std::vector<std::u16string> out(lines_.begin(),lines_.end());lines_.clear();return out;}
 std::vector<std::string> Poller::logs(){std::lock_guard<std::mutex> g(lock_);std::vector<std::string> out(logs_.begin(),logs_.end());logs_.clear();return out;}
 Poller::Counters Poller::counters() const {std::lock_guard<std::mutex> g(lock_);return counters_;}
+std::string Poller::offerOld() const {std::lock_guard<std::mutex> g(lock_);return offerOld_;}
 void Poller::run(){
     unsigned failures=0,answers=0;bool wasDown=false;
     while(true){
@@ -194,10 +201,14 @@ void Poller::run(){
         {
             std::lock_guard<std::mutex> g(lock_);
             ++counters_.reads;if(answer)++counters_.answers;else ++counters_.failures;counters_.known=tracker_.known();counters_.told+=unsigned(told.size());
+            if(answer)offerOld_=answer->offerOld;
             for(auto& line:told){if(lines_.size()>=16)lines_.pop_front();lines_.push_back(line);}
             if(!told.empty())logs_.push_back("STRAND told "+std::to_string(told.size())+" line(s)\n");
             if(!answer&&!wasDown&&wait)logs_.push_back(got.status?"STRAND the server answered "+std::to_string(got.status)+" or an answer this mod cannot read; trying again\n":std::string("STRAND the server did not answer; trying again\n"));
             wasDown=!answer;
+#ifndef MUTANT_STRAND_OLD_REFUSED
+            if(!wait)offerOld_.clear();   // no word from the server any more: nothing is offered on an old yes
+#endif
             if(!wait){counters_.refused=true;logs_.push_back("STRAND the server refused this game's notice token: no build notices until the game is started again from the launcher\n");return;}
             while(logs_.size()>64)logs_.pop_front();
         }

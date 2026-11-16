@@ -5,7 +5,9 @@ builds only. Checked from the game's status (the lines its info log took, in ord
 the game started; a held ladder told once, in the right words; a held cairn told once; nothing for another player's
 upload; after the owner made the player a member, accepted the ladder and started the server again, "now shared" for the
 ladder and nothing again for the cairn; nothing for an upload that is shared at once. Without strand_notices: no line
-and no read of the server at all.
+and no read of the server at all. With offer_strand alone (partner notices on): the server is read with the token for
+its word on the player's older strand (yes, then no after his choice changes in the launcher's API), and nothing about
+his builds is told.
 
   python3 test_strand_notices.py WORLD                       the test, then its three mutant builds side by side
   python3 test_strand_notices.py WORLD LIBRARY PROPERTY      one property against another build
@@ -144,8 +146,28 @@ def off(library,world):
             if game:game.close()
             server.stop()
 
-PROPERTIES=dict(told=told,off=off)
-MUTANTS=[('fake-strand-once.so','told'),('fake-strand-partner.so','told'),('fake-strand-off.so','off')]
+def offered(library,world):
+    """offer_strand without strand_notices (partner notices on): the server's word on his older strand is read, nothing told."""
+    with tempfile.TemporaryDirectory() as folder:
+        port=free_port();server=Server(world,folder,port);game=None
+        try:
+            ann,_=server.sign_in('ann')
+            status,me=server.call('POST','/coop/choices',{'player':'ann','offer_old':'yes'});oracle(status==200 and me['applies']['offer_old']=='yes',me)
+            game=Game(folder,library,'Ann',port,dict(notices=True,offer_strand=True,strand_token=server.notice_token('ann')))
+            oracle(game.pump(10,lambda:game.status()['strand']['offer_old']=='yes'),('the server\'s yes was not read',game.status()['strand'],game.log()[-800:]))
+            server.upload(ann,'l',30)                                                # held for her: strand_notices would tell it
+            status,me=server.call('POST','/coop/choices',{'player':'ann','offer_old':'no'});oracle(status==200,me)
+            oracle(game.pump(12,lambda:game.status()['strand']['offer_old']=='no'),('her no was not read',game.status()['strand']))
+            game.pump(6)
+            oracle(game.shown()==[],('told without strand_notices',game.shown()))
+            s=game.status();oracle(s['strand']['on'] and s['strand']['answers']>=2 and not s['offer_strand']['on'] and s['offer_strand']['asked']==0,s['strand'])
+            log=game.log();oracle('STRAND read on' in log and 'STRAND notices on' not in log and 'NOTICE shown: strand' not in log,log[-1200:])
+        finally:
+            if game:game.close()
+            server.stop()
+
+PROPERTIES=dict(told=told,off=off,offered=offered)
+MUTANTS=[('fake-strand-once.so','told'),('fake-strand-partner.so','told'),('fake-strand-off.so','off'),('fake-offer-lines.so','offered')]
 if __name__=='__main__':
     world=str(Path(sys.argv[1]).resolve())
     if len(sys.argv)==4:
@@ -158,4 +180,4 @@ if __name__=='__main__':
             assert r.returncode==1 and 'strand-notices oracle' in r.stderr,('SURVIVED '+build,r.returncode,r.stderr[-800:])
             return build
         for build in mutants.parallel(one,MUTANTS):print('KILLED '+build)
-        print('strand notices (fake world through coop-world): held told once in words, now shared after a restart, nothing for shared or others, nothing when off passed')
+        print('strand notices (fake world through coop-world): held told once in words, now shared after a restart, nothing for shared or others, nothing when off, the server word on the older strand read and nothing told for offer_strand alone passed')

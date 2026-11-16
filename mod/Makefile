@@ -4,8 +4,8 @@ CXX ?= g++
 MINGW ?= $(shell command -v x86_64-w64-mingw32-g++-posix >/dev/null 2>&1 && echo x86_64-w64-mingw32-g++-posix || echo x86_64-w64-mingw32-g++)
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = received.cpp own_strand.cpp strand_notices.cpp others.cpp crowd.cpp fights.cpp ../core/broadcast_client.cpp mule_goal.cpp enemy_poses.cpp rewards.cpp signals.cpp ui.cpp orderload.cpp carts.cpp wheels.cpp controls.cpp voidout.cpp passenger.cpp carry_place.cpp roads.cpp bts.cpp enemies.cpp orders.cpp story.cpp ../launcher/saves.cpp vitals.cpp online.cpp notice.cpp nametag.cpp likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = received.h own_strand.h strand_notices.h ../world/json.h others.h crowd.h fights.h ../core/broadcast.h ../core/broadcast_client.h ../core/relay.h mule_goal.h enemy_poses.h rewards.h signals.h ui.h orderload.h carts.h wheels.h controls.h link.h guard_win.h voidout.h passenger.h carry_place.h roads.h bts.h enemies.h orders.h story.h ../launcher/saves.h vitals.h online.h notice.h nametag.h likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = offer_strand.cpp received.cpp own_strand.cpp strand_notices.cpp others.cpp crowd.cpp fights.cpp ../core/broadcast_client.cpp mule_goal.cpp enemy_poses.cpp rewards.cpp signals.cpp ui.cpp orderload.cpp carts.cpp wheels.cpp controls.cpp voidout.cpp passenger.cpp carry_place.cpp roads.cpp bts.cpp enemies.cpp orders.cpp story.cpp ../launcher/saves.cpp vitals.cpp online.cpp notice.cpp nametag.cpp likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = offer_strand.h received.h own_strand.h strand_notices.h ../world/json.h others.h crowd.h fights.h ../core/broadcast.h ../core/broadcast_client.h ../core/relay.h mule_goal.h enemy_poses.h rewards.h signals.h ui.h orderload.h carts.h wheels.h controls.h link.h guard_win.h voidout.h passenger.h carry_place.h roads.h bts.h enemies.h orders.h story.h ../launcher/saves.h vitals.h online.h notice.h nametag.h likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -55,6 +55,9 @@ build/fake-strand-partner.so: $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_STRAND_PARTNER -fPIC -shared $(SRC) -o $@
 build/fake-strand-off.so: $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_STRAND_OFF -fPIC -shared $(SRC) -o $@
+# offer_strand without strand_notices: the token's reads tell the player nothing (the mutant tells their lines).
+build/fake-offer-lines.so: $(SRC) $(HEADERS) | build
+	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_OFFER_LINES -fPIC -shared $(SRC) -o $@
 # Fights with visitors with one protection taken out (test_fights.py): a visitor that announces the fight it shows, the
 # shown fight ended with a cleared sphere when the owner goes, and join_fights / host_fights ignored.
 build/fake-fight-visitor-hosts.so: $(SRC) $(HEADERS) | build
@@ -71,7 +74,7 @@ FORCE:
 build/unit: unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp $(HEADERS) | build
 	$(CXX) $(FLAGS) unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o $@
 host: identity build/mod.so build/mod-no-build.so build/mod-no-interpolation.so build/mod_probe build/unit
-test: environment-test join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so build/fake-others-to-partner.so build/fake-others-no-relay.so build/fake-group-sends.so build/fake-others-undressed.so build/fake-relay-mode.so build/fake-strand-once.so build/fake-strand-partner.so build/fake-strand-off.so $(FIGHT_FAKES) build/coop-swarm ../world/build/coop-world
+test: environment-test join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so build/fake-others-to-partner.so build/fake-others-no-relay.so build/fake-group-sends.so build/fake-others-undressed.so build/fake-relay-mode.so build/fake-strand-once.so build/fake-strand-partner.so build/fake-strand-off.so build/fake-offer-lines.so $(FIGHT_FAKES) build/coop-swarm ../world/build/coop-world
 	./build/unit
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_PARTNER unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-partner && if ./build/unit-config-partner >/dev/null 2>&1; then echo SURVIVED CONFIG_PARTNER; exit 1; else echo KILLED MUTANT_CONFIG_PARTNER; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_MARKER unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-marker && if ./build/unit-config-marker >/dev/null 2>&1; then echo SURVIVED CONFIG_MARKER; exit 1; else echo KILLED MUTANT_CONFIG_MARKER; fi
@@ -80,7 +83,7 @@ test: environment-test join-test vehicle-test game-thread-test discovery-test po
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_OTHERS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-others && if ./build/unit-config-others >/dev/null 2>&1; then echo SURVIVED CONFIG_OTHERS; exit 1; else echo KILLED MUTANT_CONFIG_OTHERS; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_RELAY_ADDRESS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-relay-address && if ./build/unit-config-relay-address >/dev/null 2>&1; then echo SURVIVED CONFIG_RELAY_ADDRESS; exit 1; else echo KILLED MUTANT_CONFIG_RELAY_ADDRESS; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_RELAY_NEEDS unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-relay-needs && if ./build/unit-config-relay-needs >/dev/null 2>&1; then echo SURVIVED CONFIG_RELAY_NEEDS; exit 1; else echo KILLED MUTANT_CONFIG_RELAY_NEEDS; fi
-	python3 -B mutants.py --sources "unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp" --prefix build/mutant-unit- CONFIG_GROUP CONFIG_SERVER_ANY CONFIG_OTHERS_SHOW CONFIG_RELAY_MODE CONFIG_SHOW_OTHERS CONFIG_STRAND CONFIG_FIGHTS CONFIG_RECEIVED && echo KILLED MUTANT_CONFIG_GROUP MUTANT_CONFIG_SERVER_ANY MUTANT_CONFIG_OTHERS_SHOW MUTANT_CONFIG_RELAY_MODE MUTANT_CONFIG_SHOW_OTHERS MUTANT_CONFIG_STRAND MUTANT_CONFIG_FIGHTS MUTANT_CONFIG_RECEIVED
+	python3 -B mutants.py --sources "unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp" --prefix build/mutant-unit- CONFIG_GROUP CONFIG_SERVER_ANY CONFIG_OTHERS_SHOW CONFIG_RELAY_MODE CONFIG_SHOW_OTHERS CONFIG_STRAND CONFIG_FIGHTS CONFIG_RECEIVED CONFIG_OFFER && echo KILLED MUTANT_CONFIG_GROUP MUTANT_CONFIG_SERVER_ANY MUTANT_CONFIG_OTHERS_SHOW MUTANT_CONFIG_RELAY_MODE MUTANT_CONFIG_SHOW_OTHERS MUTANT_CONFIG_STRAND MUTANT_CONFIG_FIGHTS MUTANT_CONFIG_RECEIVED MUTANT_CONFIG_OFFER
 	python3 -B test_probe.py
 	python3 -B -m unittest -q test_game_thread_api test_probe_puppet test_actor_resources test_actor_reader_windows
 	python3 -B test_actor_resource_mutants.py
@@ -181,9 +184,10 @@ build/own-strand-test: own_strand_test.cpp own_strand.cpp own_strand.h structure
 build/received-test: received_test.cpp received.cpp received.h own_strand.cpp own_strand.h structures.cpp structures.h discovery.cpp | build
 	$(CXX) $(FLAGS) received_test.cpp received.cpp own_strand.cpp structures.cpp discovery.cpp -o $@
 
-# Offering the existing strand to a server (offer_strand.h): which records and how, and the game's body; not wired in.
-build/offer-strand-test: offer_strand_test.cpp offer_strand.cpp offer_strand.h discovery.cpp | build
-	$(CXX) $(FLAGS) offer_strand_test.cpp offer_strand.cpp discovery.cpp -o $@
+# Offering the existing strand to a server (offer_strand.h, config offer_strand): which records and how, one at a time, the
+# game's code and uploader checked; and the game's body.
+build/offer-strand-test: offer_strand_test.cpp offer_strand.cpp offer_strand.h received.cpp received.h own_strand.cpp own_strand.h structures.cpp structures.h discovery.cpp | build
+	$(CXX) $(FLAGS) offer_strand_test.cpp offer_strand.cpp received.cpp own_strand.cpp structures.cpp discovery.cpp -o $@
 
 build/carts-test: carts_test.cpp carts.cpp carts.h carry_place.cpp carry_place.h discovery.cpp | build
 	$(CXX) $(FLAGS) carts_test.cpp carts.cpp carry_place.cpp discovery.cpp -o $@

@@ -75,6 +75,10 @@ struct Config {
     // With online_server: structures other players built, as the game makes them from that server's answer, are built
     // at once instead of held by the game's range test or taken down by its placement check (received.h). Not run live.
     bool buildReceived=false;
+    // With online_server and strand_token: the structures this player's save already holds are offered to that server,
+    // one at a time, through the game's own upload, while the server says his older strand may be (offer_strand.h).
+    // Off by default; not run live with the mod.
+    bool offerStrand=false;
     unsigned presenceLogMaxMiB=8;
     std::string shareEnvironment="off"; // "host": the host's time and rain; "rain": its rain only (weather.h)
     discovery::Options discoveryOptions;

@@ -72,6 +72,7 @@ config names the server instead:
 | `online_server` (group) | `http://SERVER:PORT/KEY/auth/ds`; on a server that takes player keys `http://SERVER:PORT/KEY/t/TICKET/auth/ds`, with the sign-in ticket the launcher took (good for 30 minutes until the game signs in). The mod passes the address on as it is |
 | `strand_notices`, `strand_token` | with `online_server`: lines in the game's info log about this player's builds on the server, read with the notice token the launcher took ("Strand notices", below); the launcher writes both |
 | `build_received` | with `online_server`: other players' structures that server hands the game are built at once, without the game's range and placement checks ("Received structures built", below); off by default, not run live in the mod |
+| `offer_strand` | with `online_server` and `strand_token`: the structures this player's save already holds are offered to that server through the game's own upload, one at a time, while the server says his older strand may be ("Offering your existing strand", below); off by default, not run live in the mod |
 | `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
 | `show_others` | `"everyone"` (default), `"friends"` or `"nobody"`: who of the players near this player the server shows him (broadcast only, sent in every HELLO; `world/README.md`, "How many players one player sees"). The server's own record of his choice, set from the launcher, comes first; `friends` needs a server with player keys. Requires `relay_mode` `"broadcast"`. A server from before this refuses a HELLO with anything but everyone |
 | `slot` | still required (0..15), but no port is bound from it |
@@ -768,7 +769,10 @@ objects there and is taken as what was there before; after that the server lists
 of the last answer, or everything again after it started again, and the mod compares with what it knows
 (`strand_notices.h`, `Tracker`). A read that fails is tried again after 10, 20, then every 30 s; a token the server
 refuses (403) ends the reads until the game is started again from the launcher. Log lines start with `STRAND`;
-`mod_status` has `"strand": {on, reads, answers, failures, told, known, refused, pending}`.
+`mod_status` has `"strand": {on, reads, answers, failures, told, known, refused, pending, offer_old}`. Each answer also
+says what applies to the player's older strand (`offer_old`, yes or no); `offer_strand` acts on it ("Offering your
+existing strand"). With `offer_strand` and without `strand_notices` the same reads are made for that word only, and
+none of their lines is told.
 
 Why a token: the game signs in with its own HTTP calls and the mod holds no key (under identity keys only the
 launcher has one). The launcher takes a notice token for the player just before the game starts (any identity: on a
@@ -780,21 +784,25 @@ every feature; the launcher's player has just seen the server's rules, and a bui
 not be a surprise later.
 
 Config: `strand_notices` needs `online_server` of the form `http://ADDRESS:PORT[/PREFIX][/k/NAME|/t/TICKET]/auth/ds`
-and `strand_token` (1 to 32 letters and digits); `strand_token` alone is refused (mutant CONFIG_STRAND).
+and `strand_token` (1 to 32 letters and digits); `strand_token` without `strand_notices` or `offer_strand` is refused
+(mutant CONFIG_STRAND).
 
 Tests: `strand_notices_test.cpp` (the answer read strictly; every line above and their length; what is told from a
 run of answers: nothing first, once per object and state, nothing for shared, remnant or his own no, one line per
 kind of news, "now shared"; when to read again; the reads on their thread against a scripted server, from each
-version, stopping on a refusal; one HTTP read over loopback), mutants PARSE, FIRST, ONCE, SHARED, CHOICE, GROUP,
-SINCE, STOP, BACKOFF (`test_game_thread_mutants.py strand`). `test_strand_notices.py` runs the real mod in the fake
+version, stopping on a refusal; the server's word on the older strand, read strictly, kept while the server is away and
+gone with a refused token or an answer that does not say it; one HTTP read over loopback), mutants PARSE, FIRST, ONCE,
+SHARED, CHOICE, GROUP, SINCE, STOP, BACKOFF, OLD_PARSE, OLD_REFUSED (`test_game_thread_mutants.py strand`). `test_strand_notices.py` runs the real mod in the fake
 world (`build/fake.so`, its info log recorded and shown in `mod_status` as `notices_shown`) in a group config
 against the built `coop-world` named North with members' builds only, the test uploading as the player's game: nothing
 for what was there before; a held ladder and a held cairn told once each in the words above; nothing for another
 player's upload; after the owner made him a member and accepted the ladder with the server stopped and started again,
 "Your ladder is now shared on North." and nothing again for the cairn; nothing for an upload shared at once; and
-without `strand_notices` no line and no read of the server. Three mutant builds must fail it: `fake-strand-once.so`
-(told again whenever listed), `fake-strand-partner.so` (lines only beside the partner's notices),
-`fake-strand-off.so` (a game reads the server without `strand_notices`). Not run with a game: the info log is the one
+without `strand_notices` no line and no read of the server; with `offer_strand` alone, the server's yes and then the
+player's no (changed through the launcher's API) read, and no line about a held ladder. Four mutant builds must fail
+it: `fake-strand-once.so` (told again whenever listed), `fake-strand-partner.so` (lines only beside the partner's
+notices), `fake-strand-off.so` (a game reads the server without `strand_notices`), `fake-offer-lines.so` (the lines of
+`offer_strand`'s reads told). Not run with a game: the info log is the one
 the partner notices use live; whether the game's upload and the server's answer come before the next read (5 s) is
 as designed, not measured.
 
@@ -2031,18 +2039,87 @@ structure reader also gives each object's flag bytes (`+0xa8..+0xab`) and can sk
 scans with it (above). Game-free: `own_strand_test.cpp` over a fake process memory, eleven mutants (family `own` in
 `test_game_thread_mutants.py`).
 
-### Offering the existing strand (`offer_strand.h`; not wired into the mod)
+### Offering your existing strand (`offer_strand`, off by default; built without a game, not run live in the mod)
 
-How the structures a save already holds could be put on our server (`game_offsets.md`, "Offering the player's
-existing strand"; static research only). The game uploads them itself when asked on its game thread while signed in:
-`0x2c9ed40(object)` queues its own `createObject` for an own record with no online id (the game does the same by
-itself when the porter passes within 15 m), and the online object manager's slot `0x68` queues its "re-create" (the
-same body with `"id"`) for a record with an id of the original service. `plan` says which records to offer and how
-(built by this player, built, not refused by the game, a kind the game uploads, and for a re-create an id of the
-game's shape); `read` takes the fields from a construction object; `body` makes the body the game would send (map
-cell from `cell`, angles from `angles`, the f32 arithmetic of the game) for a mod that does not call the game; not for
-climbing ropes, and without `mt`, `rmt`, `tags` and `ci`. Game-free: `offer_strand_test.cpp` over a fake process
-memory, eight mutants (family `offer` in `test_game_thread_mutants.py`).
+The structures a save already holds were built before this server: some never reached any server (no online id),
+some have an id from the original online service. The owner's decision (2026-11-17): offering them is an option.
+The player says whether his older strand may be offered to a server (`offer_old` in the launcher, kept by the server:
+`../world/README.md`, "The players' choices"); this option lets his game act on it.
+
+What is live and what is not:
+
+- **Live (2026-11-17, one game, Episode 3 save, signed in to `coop-world`):** the game's own retry. With the porter
+  teleported within 15 m of one of the save's own 30 m bridges with no online id, the game sent `createObject` by
+  itself within 40 s; the server stored it and the record then held the server's id (`game_offsets.md`, "Offering the
+  player's existing strand"). The save had 30 own records, about half with an id of the original service.
+- **Not live:** the mod calling the game for it. Everything below is built and tested without a game.
+
+With `"offer_strand": true` (needs `online_server` and `strand_token`, the notice token the launcher takes) the mod
+reads the server's word on the player's older strand with that token (`offer_old` in the answer of `/coop/notices`,
+"Strand notices" above). While the game is signed in to the server the config names and that word is `yes`, it waits
+20 s (the game's own area requests and uploads first) and then, on the game thread:
+
+1. reads the construction records the porter built (owner byte 1, built: `own_strand::readStructures`);
+2. keeps those the game uploads (`offer_strand::plan`: not refused by the game, `+0xab` bit 7; a kind with a server
+   letter); an id of the original service only when the server keeps it (the kind's letter in lower case and 12
+   letters or digits: some of that service's ids start with a capital letter, and are left out);
+3. asks the game for one of them: no online id, `0x2c9ed40(object)`, the very call the game's own retry makes (it
+   queues the game's `createObject` and sets the record's retry timer to 120 s); an id of the original service, the
+   uploader's slot `0x68` (`0x3484f80`), the game's re-create (its body and `"id"`), which the server keeps under that
+   id (`../world/README.md`, "An object's own id");
+4. waits for that one: done when the record has its online id (uploaded), when the game no longer has it in its queue
+   or in flight (the uploader's lists at `+0x58`/`+0x68`, `+0x78`/`+0x88`: refused, or for a re-create sent), when the
+   record is gone, or after a minute; then 1 s, and the next.
+
+Each record is asked for once per run, whatever came of it. Nothing without the option, without `online_server`,
+before the game is signed in, or without the server's yes (a server that does not say, or a token it refused, is
+no); when any of that goes, nothing more is asked (the one asked last stays in the game's queue). What is uploaded
+goes through the server's policy as any upload: shared, held, kept or waiting, and with `strand_notices` the player is
+told as for a new build.
+
+Calls into the game, checked: before the first one, the code of `0x2c9ed40` (all 44 bytes: it reads the uploader
+through the pointer at `0x4df9df0`, calls slot `0x28`, sets `+0x518`) and the first 40 bytes of `0x3484f80` must each
+be found exactly once in the image, at those addresses, or the option logs `OFFER unavailable` and does nothing.
+Before every call the uploader is found as the game's call finds it (`[[image+0x4df9df0]]`, that pointer being
+`image+0x7c18670`) and must have its class (`0x3edecc8`) with `0x3485040` in slot `0x28` and `0x3484f80` in slot
+`0x68`; otherwise nothing is called (`OFFER stopped`). The object passed is a record of this tick's scan.
+
+Log: `OFFER on` / `OFFER off`, `OFFER N own structures to upload, M to send again with their ids, K left out`, one
+`OFFER asked the game to upload <kind> record N (on no server)` (or `to send again <kind> <id> ...`) per record, then
+one of `uploaded, the server's id is in the record`, `sent again with its id`, `answered without an id`, `the game did
+not queue it`, `gone before an answer`, `no answer within a minute`; `OFFER nothing more to offer: ...` at the end.
+`mod_status` has `"offer_strand": {on, asked, uploaded, sent_again, refused, no_answer, not_queued, gone, left_out,
+stopped}` and `"strand": {..., offer_old}`.
+
+The body is the game's own, so it carries what the record has from the original service: the like count (`lp`),
+`tags` (`ps4`) and in `mt` the accounts of the players who delivered materials. The server takes the accounts out
+(`../world/README.md`, "An object's own id"). The game-free `body` below makes the same body from memory for a mod
+that would not call the game; it is not used.
+
+A live run must check first: the log's `OFFER the game's upload call and re-create queue are this build's`; after the
+20 s, one `asked` line and, within seconds, its `uploaded` line with the server storing the object under that player
+(`coop-world`'s log: `object ... type ... by ...`); that the game keeps running and the porter's world is unchanged;
+then the records one by one (about 15 without an id on the Episode 3 save) and the re-creates (the server's log shows
+the original id kept); and `mod_status` `offer_strand` against the log.
+
+Not known yet: whether the game's queue processor runs the upload of a record far from the porter (its retry only
+fires within 15 m; the queue itself has no distance test, read statically); whether a re-create is answered as the
+server answers it (the game ignores the answer's id); whether the uploader's in-flight pointer is cleared after every
+answer (read statically at `0x34892b2` and `0x3488216`; if not, each one waits the minute).
+
+Also here, game-free and not used by the mod: `read` takes the fields from a construction object; `body` makes the body
+the game would send (map cell from `cell`, angles from `angles`, the f32 arithmetic of the game), not for climbing
+ropes, and without `mt`, `rmt`, `tags` and `ci`.
+
+Tests: `offer_strand_test.cpp` over a fake process memory and a scripted game: which records and how; the settle
+wait; one at a time; uploaded when the id comes, sent again when the re-create leaves the queue; nothing more, then a
+new record found at the next look and none asked twice; refused, not queued, a minute without an answer, gone; off
+and on again; a call that is not made stops it; the code (found once at its address, twice, elsewhere, a changed
+slot, a changed callee); the uploader (its pointer, class and both slots); the queues (listed, in flight, neither, a
+count that is none); and the body. Mutants (family `offer` in `test_game_thread_mutants.py`): OWNER, PENDING, HELD,
+SHAPE, CLAMP, POLE, FLOAT, BRIDGE, OPTION, SIGNED, YES, KEPT, SETTLE, TIMEOUT, PACE, ONCE, SIGNATURE, IDENTITY. The
+config in `unit.cpp` (mutant CONFIG_OFFER); the server's word read through the real server in `test_strand_notices.py`
+(above).
 
 ## The partner is down or caught (`vitals.h`, with `notices`)
 
