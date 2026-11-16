@@ -69,6 +69,7 @@ config names the server instead:
 | `session` | the group's number: every player of a group has the same one (each pair's core session is derived from it and the two ids) |
 | `player_id` | this player's number on the relay, 1 to 999999999999999 (the parser takes integers of at most 15 digits). It must be stable and say nothing about the player: the launcher makes it once from 49 random bits and keeps it in its settings; it is never the Steam id. The relay refuses a second game with an id that is in use |
 | `relay_key` | the group's key, the one the server was started with |
+| `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
 | `slot` | still required (0..15), but no port is bound from it |
 | refused without `peer` | `role` other than `none`, `peer_slot`, `bind`, `partner` other than `off`, `join_at_host` and every `share_*` setting that is on: they need the partner and would silently do nothing |
 
@@ -654,7 +655,10 @@ and an independently allocated fixture buffer.
 
 `swarm.cpp` (`build/coop-swarm`, `build/coop-swarm.exe`) is K stand-in players in one process for the server's relay:
 each says HELLO, walks a circle around a given point and runs the real protocol core, with this mod's wire identity,
-with every player the relay says is near. With `--replay FILE [--with-animation]` the stand-ins walk their circle
+with every player the relay says is near (`--mode pairs`, the default), or runs the real broadcast client and posts
+its name as the mod does (`--mode broadcast`, the mod's `relay_mode`). Each second it prints, in both modes alike, the
+datagrams and bytes each stand-in received and sent on average and how many stand-in and player pairs it heard from,
+so the two modes can be compared under the same crowd. With `--replay FILE [--with-animation]` the stand-ins walk their circle
 at the speed of a recorded player and send his recorded animation samples (a presence log made with the lab option
 `record_animation`, the file `coop-partner --replay` reads), each stand-in a share of the recording further on, so a
 game shows many differently animated Sams instead of gliding ones; that has not been run against a game. The
@@ -1212,6 +1216,7 @@ letters, digits, `-` and `_`) and `"player_id"` (this player's number on the rel
 The mod opens a second UDP socket connected to that address, reports this porter's position (none while loading or
 in a cutscene), and feeds who is near and their datagrams to the sessions below. The log says `RELAY online`,
 `RELAY offline: everybody near has left`, and every 10 s `RELAY online near N in .. out .. accepted .. refused ..`.
+That is the relay's pairs mode (`"relay_mode": "pairs"`, the default); the broadcast mode is the next section but one.
 
 
 Besides the one partner the mod can hold up to `"others": N` more remote players (0..32, default 0; requires
@@ -1237,6 +1242,58 @@ player wears and the cases each player carries (`others_gear`, `others_carry`, t
 porter sends them is his pose, his name and his animation controls (not what he holds, his wheels or his carts). The
 partner path is not touched by any of it: with `others` at 0, or with no relay configured, no session exists and
 nothing is sent.
+
+### The broadcast mode (`relay_mode`; built and tested game-free, not run live)
+
+With `"relay_mode": "broadcast"` the same players reach each other through the server's broadcast mode (envelope
+version 2: `core/broadcast.h` and `core/broadcast_client.h`; the server's side is `world/relay.h`). The mod then runs no session
+per player: `Crowd` (`crowd.h`) holds one `ds::broadcast::Client`, which publishes this porter's pose and animation
+controls once a tick to the server, and the server copies every update to each player near (every update within its
+full distance, fewer beyond it, animation only within its animation distance), several players' updates to one
+datagram, on the server's clock. What a player only shows of himself is state the server keeps, one blob per kind:
+the name, the worn set, the carry summary and the carried cases' places, each blob one complete output of the same
+senders the pairs mode uses (`nametag.h`, `gear.h` WornSender, `carry_visual.h` Sender, `carry_place.h` Sender), its
+events written as the core's CARGO fields (`crowd.h` has the layout). The server hands it to a player who comes
+near, to everybody near when it changes, and again to one who sees he missed a version.
+
+`Crowd` and `Others` are both `others::Players`, so bodies, poses, name labels, gear and cases are the same code in
+both modes. What is the same: the most players (`others`), who is taken when that many are near and who waits, the
+accepted kinds (the name always, gear with `others_gear`, carried cases and places with `others_carry`; blobs of a kind
+that is off are dropped and counted in `dropped_events`), what this porter sends (nothing of gear or cases without the
+setting; the controls only), a blob shown only on its own player's body, a hidden body for a player who is stale, in a
+private room or cutscene, or while this game is in a game event or loading. What differs:
+
+- a player is connected while his presence arrives (a sample taken within the last 3 s; standing still he is sent
+  twice a second) instead of while a core session is up; there is no handshake and no pair session number;
+- what a player carried is forgotten when he goes quiet and taken again from the server's copy when he is heard again
+  (nothing is resent: the server holds it); worn gear and the name stay;
+- a blob is taken only whole: every event of its kind's type, and the kind's receiver completing its set exactly
+  at the last event; anything else is refused and counted as malformed;
+- the game's datagrams to the server do not grow with the players near it (pairs: a session's worth for each);
+- every other check of a session's presence (the core's decoder for every value, order, freshness, impossible motion,
+  one teleport in five seconds) is made per source by the client, and the source of every update is the server's own
+  record of who sent it.
+
+The log says `OTHERS ready (broadcast)`, `RELAY online (broadcast)`, `RELAY refused this player: the server wants
+another build`, and every 10 s `RELAY broadcast online near N taken N in .. (.. bytes) out .. (.. bytes) frames ..
+accepted .. refused .. unknown .. malformed .. fetches .. clock offset .. ms rtt .. ms` (and `near with another
+build N` when the server sees players of another build where this porter is). `mod_status` `"others"` has `"mode"`.
+In the fake world the test is the relay socket: `mod_test_relay_drain` gives the client's next datagram for the
+server, `mod_test_relay_deliver` hands it one from the server.
+
+Tests: `crowd_test.cpp` (three Crowds and a bare client through the real server, `world/relay.cpp`, in memory, each on
+a clock of its own: blobs, names, gear and cases with and without the settings, the cap, a player who goes quiet and
+comes back, pulses, whole sets) with 13 mutants (CROWD_BLOB_LENGTH, _TYPE, _RANGE, _WHOLE, _EVENTS_OFF, _SEND_OFF,
+_MIX, _CAP, _LEFT, _CARRY_LOST, _CARRY_BACK, _ROSE, _GATED); `test_others_broadcast.py` (three copies of the fake
+world in group configs, each with a UDP socket to the real `coop-world`, and three `coop-swarm --mode broadcast`
+stand-ins: bodies made and shown, the names over them, the stand-ins' too, gear and cases with the settings and none
+without, a player leaving and coming back, the stand-ins leaving, this game's traffic) and its mutant
+`fake-relay-mode.so` (the setting ignored); `unit.cpp` for the config key with the mutant CONFIG_RELAY_MODE.
+
+**Not run live.** Nothing of the broadcast mode has met a game. A live run must look at what the pairs mode was
+checked for (bodies, names, gear and cases, players leaving and returning), and at the poses of players beyond the
+server's full distance (one update in 200 ms by default: with loss the pose stops for a moment; the client measures
+that interval and waits for it: `adaptDelay` in `core/broadcast_client.cpp`).
 
 ### Other players' gear and carried cases (`others_gear`, `others_carry`; built, not run live)
 

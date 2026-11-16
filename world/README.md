@@ -165,10 +165,21 @@ whoever the relay says is near, with the mod's wire identity like `coop-partner`
 Sams around one game copy once the mod speaks to the relay, and it loads a server without any game today.
 
 ```
-coop-swarm --relay 127.0.0.1:8090 --count 20 --centre X Y Z --radius 15 [--key TEXT]
+coop-swarm --relay 127.0.0.1:8090 --count 20 --centre X Y Z --radius 15 [--mode pairs|broadcast] [--key TEXT]
            [--session N] [--speed 1.6] [--area N] [--first-id 1001] [--only ID] [--role auto|host|client]
            [--seconds N] [--stop FILE] [--require-connected] [--replay FILE [--with-animation]]
 ```
+
+`--mode broadcast` makes every stand-in a player of the relay's broadcast mode (the mod's `relay_mode`): one broadcast
+client each (`core/broadcast_client.h`) instead of a core session per player near, with its name posted as the mod
+posts it; `--session`, `--only` and `--role` are then refused. Its lines say `live` where pairs say `connected` (the
+players near whose presence is being taken) and have no sessions; the last is
+`SWARM done mode=broadcast online=8/8 near=56 live=56 accepted=4368`. In both modes every line also gives the last
+second's traffic per stand-in on average, `in=24.6 in_bytes=11718 out=22.2 out_bytes=1986 heard=56` (datagrams and
+bytes from and to the relay; heard: the stand-in and player pairs a presence sample arrived for), and a
+`SWARM traffic` line before the last gives the same over the whole run, so the two modes can be compared under the
+same crowd (those numbers: 8 stand-ins on a 10 m circle in broadcast; in pairs they received and sent about 160
+datagrams, 23 kB, a second each).
 
 `--centre` is in the core's axes (metres; x, y up, z). `--session` is the core session number every pair shares
 (default 1); of two players the lower id is the host unless `--role` says otherwise. `--only ID` makes the stand-ins

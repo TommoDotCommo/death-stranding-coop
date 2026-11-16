@@ -195,7 +195,7 @@ def no_relay(library):
             a.roster(3,True);a.others_in(3,bytes(128))
             oracle(w.run(8,lambda:a.status()['connected'] and b.status()['connected'] and labels(a.status())==['Bob']),'the partner pair never came up')
             w.run(1);s=a.status();partner_fine(s,'no relay')
-            oracle(s['others']==dict(on=False,near=0,connected=0,bodies=0,shown=0,sent=0,received=0,accepted=0,refused=0,unknown=0,malformed=0),('others without a relay',s['others']))
+            oracle(s['others']==dict(on=False,mode='pairs',near=0,connected=0,bodies=0,shown=0,sent=0,received=0,accepted=0,refused=0,unknown=0,malformed=0),('others without a relay',s['others']))
             oracle(a.others_out()==[] and 'OTHERS' not in a.log() and 'RELAY' not in a.log(),'others said or sent something without a relay')
             oracle(s['received']==w.partner_carried,'the partner socket saw datagrams nobody sent it')
         finally:
