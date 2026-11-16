@@ -71,6 +71,7 @@ config names the server instead:
 | `relay_key` | the group's key, the one the server was started with; on a server that takes player keys, this player's relay token, which the launcher takes from the server just before the game starts (the same field, at most 32 letters and digits) |
 | `online_server` (group) | `http://SERVER:PORT/KEY/auth/ds`; on a server that takes player keys `http://SERVER:PORT/KEY/t/TICKET/auth/ds`, with the sign-in ticket the launcher took (good for 30 minutes until the game signs in). The mod passes the address on as it is |
 | `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
+| `show_others` | `"everyone"` (default), `"friends"` or `"nobody"`: who of the players near this player the server shows him (broadcast only, sent in every HELLO; `world/README.md`, "How many players one player sees"). The server's own record of his choice, set from the launcher, comes first; `friends` needs a server with player keys. Requires `relay_mode` `"broadcast"`. A server from before this refuses a HELLO with anything but everyone |
 | `slot` | still required (0..15), but no port is bound from it |
 | refused without `peer` | `role` other than `none`, `peer_slot`, `bind`, `partner` other than `off`, `join_at_host` and every `share_*` setting that is on: they need the partner and would silently do nothing |
 
@@ -1276,6 +1277,12 @@ private room or cutscene, or while this game is in a game event or loading. What
   one teleport in five seconds) is made per source by the client, and the source of every update is the server's own
   record of who sent it.
 
+The server shows a player at most a number of the players near him (its `near_cap`, 32 on a friends server and 16 on
+a public one; `world/README.md`, "How many players one player sees"): his friends first, then the nearest, kept while
+they stay about as near. Those are the players his roster has, and nothing of the others near reaches the game, so the
+mod's own `others` (at most 32) chooses among what the server sends. `"show_others": "friends"` or `"nobody"` asks the
+server for fewer (the launcher's choice on the server comes first). Built and tested without a game (2026-11-17).
+
 Players of a linked server (`world/README.md`, "Presence across linked servers") arrive as ordinary broadcast
 players and need nothing here: the server gives each an id of its own, keeps his build, and puts his home server
 into his name state (`Bea · north`, at most 24 characters), so his label shows it. Built and tested without a game
@@ -1295,7 +1302,8 @@ _MIX, _CAP, _LEFT, _CARRY_LOST, _CARRY_BACK, _ROSE, _GATED); `test_others_broadc
 world in group configs, each with a UDP socket to the real `coop-world`, and three `coop-swarm --mode broadcast`
 stand-ins: bodies made and shown, the names over them, the stand-ins' too, gear and cases with the settings and none
 without, a player leaving and coming back, the stand-ins leaving, this game's traffic) and its mutant
-`fake-relay-mode.so` (the setting ignored); `unit.cpp` for the config key with the mutant CONFIG_RELAY_MODE.
+`fake-relay-mode.so` (the setting ignored); `unit.cpp` for the config keys with the mutants CONFIG_RELAY_MODE and
+CONFIG_SHOW_OTHERS (`show_others`: its three values, four that are none, refused in pairs and without a relay).
 
 **Not run live.** Nothing of the broadcast mode has met a game. A live run must look at what the pairs mode was
 checked for (bodies, names, gear and cases, players leaving and returning), and at the poses of players beyond the

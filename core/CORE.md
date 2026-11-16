@@ -568,7 +568,7 @@ bytes are zero, and every datagram is at most 1200 bytes (a 1280-byte path with 
 
 | Type | Direction | Size | After the 8 bytes |
 |---|---|---:|---|
-| HELLO 1 | player to server | 140 | bytes 8..111 as version 1's HELLO; u32 game build; mod build[16]; u64 t0, the player's clock (ms). Every half second: keep-alive, position, and the clock's ping |
+| HELLO 1 | player to server | 140 | bytes 8..111 as version 1's HELLO, except byte 65 (reserved there): who the player wants to be shown, 0 everyone, 1 his friends, 2 nobody; u32 game build; mod build[16]; u64 t0, the player's clock (ms). Every half second: keep-alive, position, and the clock's ping |
 | WELCOME 2 | server to player | 76 | bytes 8..31 as version 1's WELCOME; u64 t0 echoed; u64 server time (ms); u32 x4 the versions of this player's state the server holds (0: none); u16 full metres; u16 animation metres; u16 interval ms beyond full; u16 players in reach whom another build or mode keeps apart; u16 FRAME budget; reserved[2] |
 | REFUSED 3 | server to player | 24 | as version 1; reason 1 server full, 2 id in use, 3 the server takes another build |
 | ROSTER 4 | server to player | 20 + events | as version 1 |
@@ -590,10 +590,15 @@ bytes are zero, and every datagram is at most 1200 bytes (a 1280-byte path with 
   missed.
 - **Sequence** (32 bits) and generation (16 bits) are compared in serial-number order. Stamps and times are at most
   2^53.
+- **Who is shown** (HELLO byte 65): the player's own choice of whom of the players near the server shows him
+  (`ClientConfig::show`, the mod's `show_others`); the server's record of his choice comes first, and it shows him at
+  most a cap of them, his friends first, then the nearest (`world/README.md`, "How many players one player sees").
+  0 is the HELLO of before, so an older game is everyone; a server from before this refuses a HELLO with 1 or 2 (a
+  reserved byte), so a game that asks for friends or nobody needs this server.
 
 Refused whole (`parse` returns the reason): shorter than 8 or longer than 1200 bytes, another magic, version or type,
-a nonzero reserved byte, a fixed-size type that is not exactly its size, player id 0, a part, kind, count or length out
-of range, an animation payload of the wrong shape, a SHARE whose version disagrees with its own list, entries that do
+a nonzero reserved byte, a fixed-size type that is not exactly its size, player id 0, a part, kind, count, choice of who
+is shown or length out of range, an animation payload of the wrong shape, a SHARE whose version disagrees with its own list, entries that do
 not fill a FRAME exactly. Version 1's parts (HELLO's first 112 bytes, WELCOME's first 32, ROSTER, BYE) go through
 version 1's parser. The encoders throw for the same things, and `appendEntry` for an entry that would take a FRAME
 past 1200 bytes.
@@ -607,7 +612,8 @@ within the full distance gets every update, beyond it one in the interval (a tel
 the animation distance, and the pulses of the samples left out ride on the next one sent; a receiver's entries wait at
 most the flush time for others to share a FRAME of at most the budget; the latest version of each kind of state is
 kept and handed out on ENTER, to everyone near on a change, and on FETCH (every kind, at most one answer in 250 ms per
-pair).
+pair). All of that only to the players near who are shown him: at most a cap of them (`near_cap`, `--broadcast-near`),
+by his choice, his friends first, then the nearest, kept while about as near.
 
 ### The player's side (`ds::broadcast::Client`)
 
@@ -655,21 +661,25 @@ each sending presence and a small animation sample 20 times a second, each recei
 entries, at most 1186 bytes) and 50 kB a second; in pairs mode the same crowd delivers each player 460 presence
 datagrams of 144 bytes a second and up to as many animation datagrams. Over loopback (`world/test_broadcast.py`) a
 player in a group of 16 with 8 more beyond 30 m received about 67 datagrams and 32 kB a second with a 600-byte budget.
+With the server's cap what he receives stops growing with the crowd: of 100 `coop-swarm` stand-ins walking in one
+place, each received 40 datagrams and 25 kB a second shown 16 of them, and 140 datagrams and 157 kB a second shown all
+99.
 
 ### Tests
 
 `make -C core broadcast-test` (part of `make test`): `tests/broadcast.cpp` pins the layout byte for byte, sends every
 message through the wire and back, refuses every sample cut short at each length, one byte longer, with another
-magic, version, type or reserved byte, each bad field, and 40,000 damaged datagrams; then it drives a `Client` with
+magic, version, type or reserved byte, each bad field (a choice of who is shown above 2 among them), and 40,000 damaged
+datagrams; then it drives a `Client` with
 hand-made server messages: the clock (symmetric and slow round trips, a WELCOME for a HELLO never sent), the roster, a
 new stream, silence, a refusal for the build; entries in order, repeated, older, with a stamp far from the server's
 clock, from a stranger, several sources in one FRAME, impossible motion and the fresh baseline, teleports; state
 complete in one SHARE, a gap repaired by FETCH, empty kinds, a late older SHARE and an entry of an older generation
 (no FETCH), its own state versioned and sent again; what it publishes (rate, stamps, the presence the core's encoder
-gives, gated, the teleport flag once, animation pulses merged); and interpolation over the lossy link above. Seventeen
-mutants must fail it: `BCAST_WIRE_VERSION`, `BCAST_WIRE_LENGTH`, `BCAST_WIRE_RANGE`, `BCAST_WIRE_FRAME`,
+gives, gated, the teleport flag once, animation pulses merged; the choice of who is shown in every HELLO); and
+interpolation over the lossy link above. Eighteen mutants must fail it: `BCAST_WIRE_VERSION`, `BCAST_WIRE_LENGTH`, `BCAST_WIRE_RANGE`, `BCAST_WIRE_FRAME`,
 `BCAST_CLIENT_STRANGER`, `BCAST_CLIENT_ORDER`, `BCAST_CLIENT_CLOCK`, `BCAST_CLIENT_GAP`, `BCAST_CLIENT_STALE_STATE`,
 `BCAST_CLIENT_TELEPORT`, `BCAST_CLIENT_SPEED`, `BCAST_CLIENT_REBASE`, `BCAST_CLIENT_RESEND`, `BCAST_CLIENT_DELAY` (it
 fails the 200 ms case without loss: p95 0.06 m, shown past the newest sample 81 % of the time), `BCAST_CLIENT_ROSE`,
-`BCAST_CLIENT_STREAM`, `BCAST_CLIENT_JUMP`. The server's side and both sides together are tested in `world/` (README
+`BCAST_CLIENT_STREAM`, `BCAST_CLIENT_JUMP`, `BCAST_WIRE_SHOW`. The server's side and both sides together are tested in `world/` (README
 there, "Broadcast mode").

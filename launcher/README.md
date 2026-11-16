@@ -205,6 +205,12 @@ and Ctrl for several), then:
 - **Withdraw selected** / **Withdraw all**: asks first, with what this server does with it (stays for the others as a
   remnant nobody owns, or removed for everyone); the server does not touch his save.
 - **My choices for this server**: the same screen as before joining; saved, remembered and sent.
+- **Who I see**: who of the players near him in the game the server's relay shows him (`../world/README.md`, "How
+  many players one player sees"): everyone near (at most the server's number, his friends first, then the nearest),
+  only his friends, nobody (the others still see him), or his game's own setting (`show_others`); and his friend list
+  on this server, a friend added by the short form of his key (`a1b2 c3d4 e5f6 a7b8`, shown in the same window for
+  him to give his friends) and removed by selecting him. Each change is one call (`GET`/`POST …/coop/friends`), signed
+  on a server with player keys; on one without them friends are not recognised on the relay, and the window says so.
 - **Refresh**.
 
 Objects that came to the server from linked servers are not listed (their builder is what the other server says).
@@ -256,7 +262,7 @@ choices (also with `--prepare-only`); `--strand-builds yes|no|ask` and `--strand
 with `--prepare-only`) takes the game's ticket and relay token and writes them into the config; `--group-host` with
 `--prepare-only` does so only when its server is already running (it starts none).
 
-**Not seen on a screen.** The join screen, the "My strand on this server" window, the Server owner window and the
+**Not seen on a screen.** The join screen, the "My strand on this server" window, its Who I see window, the Server owner window and the
 Settings list of rules were built and cross-compiled, and have not been looked at or clicked. The launcher's side of the API (`strand.cpp`) is
 tested on Linux sockets (below); on Windows it ran once without a window, against `coop-world.exe` on loopback: a
 server that did not answer (report `unreachable`, exit 3) and a full solo world (the rules read, the choices refused,
@@ -372,7 +378,9 @@ The server's rules (`strand.h`): `core_test.cpp` checks the account a game signs
 documents refused), the rules in words with what the owner changed, choices kept per server beside the launcher's
 own settings, and the join against answers given in the test: the rules read and the choices sent, remembered choices
 with given ones over them, a full server, no account, an older server (joined), a wrong key, no answer, an unreadable
-answer and a server error (not joined); the strand view's rows, offer, withdraw and a refusal in the server's words.
+answer and a server error (not joined); the strand view's rows, offer, withdraw and a refusal in the server's words;
+the friend list and the choice of whom he sees read and changed (the bodies sent, a refusal in the server's words, a
+choice that is none not read, an older server) and short keys as typed.
 `test_group.py` does it on real sockets: the group server started with the host's rules (public), the joiner's
 choices read, remembered and sent for the account his game signs in as and found on the server, his object listed as
 held by the rules, his offer refused in the server's words, the host's account refused his object, his withdrawal;
@@ -380,7 +388,7 @@ then a wrong key, nobody listening and a full solo world (not joined), and a sma
 coop-world from before the API (joined, said so). Mutants: `STRAND_ACCOUNT` (a joiner on the host's PC acts as the
 host's account), `STRAND_PARSE`, `STRAND_WRONG_KEY` (a server without the key taken for an older one),
 `STRAND_OLD_SERVER` (an older server refused), `STRAND_SEND_FAIL` (the game started though the choices were refused),
-`STRAND_DEFAULTS` (fixed choices instead of the server's), `STRAND_PER_SERVER` (one server's choices for another),
+`STRAND_FRIENDS_READ` (a choice of whom he sees that is none taken from the server's answer), `STRAND_DEFAULTS` (fixed choices instead of the server's), `STRAND_PER_SERVER` (one server's choices for another),
 `STRAND_SETTINGS_KEEP` (saving the settings drops the choices); `GROUP_KEY`, `GROUP_NO_RELAY`, `GROUP_SAME_PC`,
 `GROUP_POLICY`, `STRAND_ACCOUNT`, `STRAND_WRONG_KEY`, `STRAND_OLD_SERVER` and `STRAND_SEND_FAIL` must also fail the
 socket test. `test_group.py` runs the public rules with `identity=none`.
@@ -399,7 +407,9 @@ the launcher's side as its `--dev-direct --dev-start --group-host`/`--group-join
 and a joiner's game given tickets, tokens and the relay ids of their keys, and signed in with them as two players;
 `/k/NAME`, a key's name, a Steam ticket and a made-up ticket refused; unsigned calls, a call sent twice, changed after
 signing, or signed by another key refused, his own taken; the owner's calls with the host's key only, the rules
-changed on the running server; and the relay answering the joiner's token for his id only, never the group's key.
+changed on the running server; the joiner's friend list as the Who I see window changes it (the host added by the
+short form of his key, with `friends`), read back, another key's own list empty and his refused to another key; and the
+relay answering the joiner's token for his id only, never the group's key.
 `GROUP_TICKET`, `GROUP_RELAY_TOKEN`, `STRAND_SIGN` and `KEYS_KEEP` must also fail it.
 
 Server owner (`owner.h`): `core_test.cpp` checks who sees the window (the host with the key he gave the server; not

@@ -107,8 +107,8 @@ the server holds to (`relay.h`):
 | Caps: players, datagram size (1268 bytes), rate per player | one datagram in makes at most one DATA datagram out, and nothing to a sender without the key |
 
 Not done: the key travels in the clear (use loopback, a LAN or a VPN, as for
-the HTTP side); there is no cap on how many players may be near one player, so a crowd in one place means every pair
-exchanges datagrams; under identity none the relay and the HTTP side do not know each other's players (the player id
+the HTTP side); in this mode (pairs) there is no cap on how many players may be near one player, so a crowd in one place
+means every pair exchanges datagrams (the broadcast mode has one: "How many players one player sees"); under identity none the relay and the HTTP side do not know each other's players (the player id
 in HELLO is whatever the game sends; under identity keys it is bound to the player's key, "Identity"); IPv4 only.
 
 ### Broadcast mode (`--broadcast-*`)
@@ -123,6 +123,7 @@ are never near each other. The mod does not speak it yet.
 ```
 coop-world --port 8089 --relay-port 8090 [--broadcast-full 30] [--broadcast-interval 200] [--broadcast-animation 50]
            [--broadcast-budget 1200] [--broadcast-flush 25] [--broadcast-rate 100] [--broadcast-build GAME:HEX]
+           [--broadcast-near N] [--broadcast-near-margin 10]
 ```
 
 - `--broadcast-full` (metres, 0..65535): every update of a player this near goes to the receiver.
@@ -139,6 +140,10 @@ coop-world --port 8089 --relay-port 8090 [--broadcast-full 30] [--broadcast-inte
 - `--broadcast-build GAME:HEX`: the game build (decimal) and the 32 hex digits of the mod's 16-byte wire identity.
   Broadcast players of another build are refused (REFUSED, reason 3). Without it, players of different builds are
   only kept apart, and each WELCOME says how many players in reach that keeps away.
+- `--broadcast-near` (0..1024): the most players near one player he is shown; 0 shows everyone near. Without it the
+  world's policy setting `near_cap` is the cap (friends 32, public 16; "Server policy"), read again at each of his
+  HELLOs, so the owner's change applies on the running server. Next section.
+- `--broadcast-near-margin` (metres, 0..1000): a player shown stays until one who is not is this much nearer.
 
 What the server holds to in broadcast mode, besides the rules above (`relay.h`):
 
@@ -152,24 +157,68 @@ What the server holds to in broadcast mode, besides the rules above (`relay.h`):
 | State: the latest version of each kind, an older or repeated one refused; handed out on ENTER (each way, before anyone asks), to everyone near when it changes, and on FETCH from a player near (every kind, the empty ones too, at most one answer in 250 ms per pair) | a player who comes near shows the other's gear at once; a lost SHARE is repaired; FETCH reaches no one far away and cannot multiply traffic |
 | Pairs players and broadcast players are never near each other, nor broadcast players of different game or mod builds | a receiver trusts the server for the build of the presence it decodes |
 | A broadcast player whose HELLO says stream 0 is a game that started again: what it showed is dropped and the state of everyone near is handed to it again | a restarted game shows the others' gear without asking, and the others do not keep his old one |
+| A broadcast player is told of, sent the updates and state of, and may FETCH only the players near he is shown (next section), at most his cap | a crowd beyond the cap costs him nothing |
 
 Costs. A broadcast player sends the same however many players are near (and no PUBLISH while nobody is). For each PUBLISH the server does the interest check for each
-player near and appends at most one entry to each; each receiver gets at most one FRAME per flush time and one more
+player near who is shown him and appends at most one entry to each; each receiver gets at most one FRAME per flush time and one more
 whenever the budget fills. A state change costs one SHARE (at most 1144 bytes) to each player near, a player coming
 near one SHARE for each kind held each way, an answered FETCH four. The server keeps at most four times 1100 bytes of
 state per player, in memory only. Measured in the tests: 24 players walking in one place, each sending presence and
 a small animation sample 20 times a second (`broadcast_test.cpp`), receive about 60 datagrams and 50 kB a second each
 (in pairs mode the server would pass each of them 460 presence datagrams a second and up to as many animation
 datagrams); over loopback (`test_broadcast.py`) a player in a group of 16 with 8 more beyond 30 m receives about 67
-datagrams and 32 kB a second with a 600-byte budget. The relay stays one thread: it wakes for a datagram, for the next
-FRAME due, and four times a second.
+datagrams and 32 kB a second with a 600-byte budget. With a cap ("How many players one player sees") what a player
+receives no longer grows with the crowd: 100 players walking in one place, each sending presence 20 times a second,
+in memory (`broadcast_test.cpp`) 42 datagrams and 27 kB a second each shown 16 of them, 162 datagrams and 162 kB a
+second each shown all 99; over loopback with 100 `coop-swarm` stand-ins (`test_broadcast.py`) 40 datagrams and 25 kB
+a second shown 16, 140 datagrams and 157 kB a second shown 99. The relay stays one thread: it wakes for a datagram,
+for the next FRAME due, and four times a second.
 
 The mod speaks it with `"relay_mode": "broadcast"` (`../mod/README.md`, "The broadcast mode") and `coop-swarm` with
 `--mode broadcast`; live once on 2026-11-16 with two real games and 12 stand-ins (`../STATUS.md`, "Many players").
 
-Not done (broadcast): nothing caps how many players are near one player,
-so in a crowd within the full distance every player still receives every other's 20 updates a second (in fewer,
-larger datagrams); the shown state is not saved.
+Not done (broadcast): the shown state is not saved; the server's cap and the players' choices are not run with a
+game yet (stand-ins and players written by the tests only).
+
+### How many players one player sees
+
+Of the players near a broadcast player (the enter and leave distances above), the relay shows him at most a cap of
+them: it tells him of exactly those (ENTER, LEAVE), sends him their updates and their state, and nothing of the others
+near, not even the FRAME entries or SHAREs he would drop. A crowd beyond the cap therefore costs him nothing but the
+server's own check. Who they are, chosen again at each of his HELLOs (twice a second) and whenever the players near him
+change:
+
+1. **His choice.** `everyone` (the default), `friends` (only the players on his friend list) or `nobody`. The server's
+   record of his choice comes first: the launcher sets it (`POST …/coop/friends`, "The launcher's API"), under identity
+   keys only. Without one, the choice his game sends in its HELLO (mod config `show_others`; `core/broadcast.h`, HELLO
+   byte 65) applies. The choice is who he sees; it does not change who sees him.
+2. **His friends first**, then the nearest (straight-line distance), at most the cap: `--broadcast-near`, else the
+   policy's `near_cap`.
+3. **No flapping.** A player shown counts `--broadcast-near-margin` metres (10) nearer than he is, so one who is not
+   shown takes his place only when he is that much nearer. Two players about as far away do not swap with every step.
+4. A player who starts being shown is handed his state with his ENTER, as when he comes near; the updates already
+   queued for a player go out before a LEAVE, so no entry arrives from someone his roster no longer has. When a shown
+   player leaves or goes away, the next one takes the slot at once.
+5. A linked server's player ("Presence across linked servers") counts like any other, and is a friend by his id on his
+   own server (under identity keys there, the id made from his key, as here).
+
+Friends are known on the relay by relay id, and a relay id is someone's only under identity keys (made from his key,
+"Identity"). Under identity none the relay id is whatever the game sends, so the server holds no choice and no friends
+for anyone there: `friends` shows nobody, `everyone` and `nobody` work, and the cap applies.
+
+What it holds to (`relay.cpp`, `select`):
+
+| Rule | Why |
+|---|---|
+| At most the cap of the players near are shown to one player | what a player receives is bounded, whatever the crowd |
+| Friends first, then the nearest | in a crowd he sees his friends and the players beside him |
+| One shown stays until one not shown is the margin nearer | the roster does not change with every step |
+| Nothing of a player near who is not shown: no ROSTER event, entry, SHARE or FETCH answer | a crowd beyond the cap costs him nothing |
+| `friends` shows only his friends, `nobody` nobody; the server's record of his choice before his HELLO's | a player decides whom he sees, and the launcher's choice is not undone by an older config |
+| A linked server's player counts for the cap | the cap holds across servers |
+
+Not done: who sees a player (the choice is only whom he sees); a cap for a pairs player (one core session per player
+near: use broadcast); friends under identity none.
 
 ### A swarm of stand-in players (`coop-swarm`)
 
@@ -478,7 +527,8 @@ walking, animating players near one player of the other server would take about 
 link sent 36.5 kB a second over 4 s, the ten nearest got 78 or more of their 80 updates each and every one of the
 twenty farther ones 7 to 20. Over loopback (`test_presence.py`) thirty stand-ins on a 20000-byte link: 8, 23 and 21 kB
 a second in the server's 5 s reports (a full second's worth saved up lets one window reach 1.2 times the budget), and
-the other server's four stand-ins kept every one of the thirty live. The relay stays one thread.
+each of the other server's four stand-ins was shown 32 of the 33 players near him (the friends preset's `near_cap`),
+the thirty linked ones counted like his own, all live. The relay stays one thread.
 
 Changed from the design that was here before: there, one server judged each pair across the link with a second event
 stream, and every core datagram of a pair crossed with both ids kept (version 1 needs them for each pair's session).
@@ -555,6 +605,7 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `per_builder` | objects of one builder per kind in one answer, 0 for none (up to 1000) | 0 | 0 | 3 |
 | `spread` | metres, 0 for off (up to 1000) | 20 | 20 | 20 |
 | `identity` | `none`, `keys` | none | none | keys |
+| `near_cap` | players near one player he is shown on the relay, 0 for no cap (up to 1024) | 32 | 32 | 16 |
 
 - `join`: recorded and shown, nothing more yet (there are no invitations).
 - `build`: whose uploads are shared. `members` are the players the owner marked (`player-set ... member=yes`); anyone
@@ -574,6 +625,9 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 - `identity`: `none`, whoever has the group's key can sign in and act as any player (friends); `keys`, players are known
   by the key their launcher made, and nobody signs in, builds or withdraws in another's name ("Identity"). A world
   file from before this setting has `none`, whatever its preset.
+- `near_cap`: how many of the players near one broadcast player the relay shows him ("How many players one player
+  sees"), unless the server was started with `--broadcast-near`. A world file from before it has its preset's value; a
+  `coop-world` from before it refuses a world file that has it (unknown setting).
 
 ### The players' choices
 
@@ -661,8 +715,8 @@ What it holds to:
 ### The launcher's API
 
 Beside the game's gateway, under the same secret prefix, for the launcher and never the game (`api.h`). The launcher
-shows the policy before a player's game connects, sends his choices, and lists, offers and withdraws his objects
-(`launcher/README.md`, "A group on one server"). Built and tested without a game and without a screen (2026-11-16).
+shows the policy before a player's game connects, sends his choices, lists, offers and withdraws his objects, and
+sets whom he sees and his friend list (`launcher/README.md`, "A group on one server"). Built and tested without a game and without a screen (2026-11-16).
 
 | Call | Answer |
 |---|---|
@@ -672,6 +726,8 @@ shows the policy before a player's game connects, sends his choices, and lists, 
 | `POST …/coop/choices` `{"player":KEY,"offer_builds":"yes\|no\|ask\|default","offer_old":"yes\|no\|default"}` | sets his choices (one or both) and answers as `me`. A key the world does not have yet becomes a player, as a sign-in would (within `players`), so the choices are in place before his game first signs in |
 | `POST …/coop/offer` `{"player":KEY,"object":ID}` or `{"player":KEY,"all":true}`, `"answer":"no"` to keep it his | as `coop-world offer` (`--no`): `offered` (or `kept`) and `me` |
 | `POST …/coop/withdraw` `{"player":KEY,"object":ID}` or `{"player":KEY,"all":true}` | as `coop-world withdraw`: `remnants`, `removed` and `me` |
+| `GET …/coop/friends?player=KEY` | who he sees: `show_others` (his choice here, `""` for none: his game's own applies) and `friends`, each with `key` (his account key), `id`, `short` (a key's short form, `""` for an account that is no key), `known` and `name` |
+| `POST …/coop/friends` `{"player":KEY,"add":[…],"remove":[…],"show_others":"everyone\|friends\|nobody\|default"}` (one or more of the last three) | changes them and answers as the `GET`. A friend is an account key, or the short form of a key (`a1b2 c3d4 e5f6 a7b8`), which names the one player of this world whose key begins so (403 when none does); at most 256 friends, never himself. A key the world does not have yet becomes a player, as by `choices` |
 | `POST …/coop/ticket` `{"player":KEY}`, signed | identity keys: a sign-in ticket for his game, `ticket` and `expires` ("Identity") |
 | `POST …/coop/relay-token` `{"player":KEY}`, signed | identity keys: a relay token, `token`, `relay_id` (made from his key) and `expires` |
 
@@ -693,12 +749,13 @@ What it holds to:
 
 | Rule | Why |
 |---|---|
-| Only under the prefix, never under `/k/NAME`, and only the six calls | the game's paths and the API do not mix, and nothing answers without the group's key |
+| Only under the prefix, never under `/k/NAME`, and only the seven calls | the game's paths and the API do not mix, and nothing answers without the group's key |
 | A change is a `POST`; a `GET` (or any other method) of a change is 404 and changes nothing | a link that is opened or fetched ahead never offers or withdraws |
 | A body is one JSON object with only that call's fields, all checked before anything changes | a request in the wrong form changes nothing |
 | `offer` and `withdraw` name one object or `all: true`, never neither | a body that forgot the object does not take back everything |
 | `member` and the policy are not in its player calls | they are the owner's: `player-set` and `policy` on the stopped server, or the owner's signed calls ("Identity") |
-| A new key by `choices` counts against `players` | a solo archive stays one player's |
+| A new key by `choices` or `friends` counts against `players` | a solo archive stays one player's |
+| A friend list and the choice of whom he sees are his own: under keys only his key's signed call reads or sets them; they are kept with the world (`friends`, `show_others` per player) | nobody sets whom another sees or reads his friends; a restart keeps them |
 | `mine` and `me` count only his objects built here; `offer` and `withdraw` take only those (the world's own checks) | nobody acts on another's objects or on an import |
 
 Owner actions (review, remove-player, members, policy) are commands on the world file while the server is stopped, and
@@ -815,8 +872,8 @@ held or waiting ("Server policy"). In this order:
    was handed. A structure that was there last time is there again, so structures do not change between sessions.
    Newer or more liked ones do not push it out. It counts for the cap per builder below and is not checked for spread.
 2. **The rest, best first.** `order=newest` (friends and solo): the last changed first. `order=liked` (public): a
-   friend's objects first, then the most liked, then the newest. There is no friend list yet, so nobody is a friend
-   (the server has the place for one). The same time, likes and friendship: by id.
+   friend's objects first, then the most liked, then the newest. A friend is a builder on the asker's friend list
+   (`…/coop/friends`, "The launcher's API"). The same time, likes and friendship: by id.
 3. Skipped on the way: an object of a builder who already has `per_builder` of that kind in this answer (0: no cap;
    public 3), so one player does not fill an area while others have built there; and an object closer than `spread`
    metres (straight line, at the position `l / 10^exp` the game reads) to one of its kind already in this answer, so
@@ -857,7 +914,7 @@ what was handed before and the policy):
 | Nothing closer than `spread` to one of its kind in the same answer | the game fails objects that stand close together |
 | The memory is bounded per player and area, and saved with the world | a long-running server does not grow without end, and a restart changes no answer |
 
-Not built: a friend list; choosing by distance from the player (the game does not say where he is when it asks).
+Not built: choosing by distance from the player (the game does not say where he is when it asks).
 Unknown: whether a game counts the objects it already has from the server against the number it asks for, and what
 it does when one it was handed is no longer in the answer. Nothing of this has been run with a game yet.
 
@@ -868,7 +925,7 @@ real socket (`test_server.py`), and a mutant for every protection (`test_mutants
 change by someone who is not the builder, an object handed back to its builder, both caps, the like range, the secret
 prefix and the bearer token.
 
-Server policy: `policy_test.cpp` (the three presets and twenty-one settings that are refused; `build` nobody and
+Server policy: `policy_test.cpp` (the three presets and twenty-five settings that are refused, `near_cap` among them; `build` nobody and
 members and the limit: uploads answered in the game's shape and held, handed to nobody else and never exported,
 refused to `offer` and `review` while the reason holds and shared when it goes (a member, a higher limit, a
 withdrawal), a held one whose builder is to be asked first, waiting objects that count for the limit and kept ones
@@ -909,8 +966,12 @@ setting; a key that has not signed in, made a player by its choices before its s
 fourteen bodies and six keys that are refused and leave the world as it was; a full world; a player's objects in every
 state with `waiting_for` and the reason a held one is held, his offer (yes and no), the owner's review, likes, a
 withdrawal with stay and with go, another player's object, an import with his builder id, and every change refused as
-a `GET`). Eight mutants must fail it (`API_METHOD`, `API_KEY`, `API_STRICT`, `API_CHOICES_MEMBER`, `API_CHOICES_ROOM`,
-`API_ALL_IMPLIED`, `API_MINE_OTHERS`, `API_MINE_IMPORTS`), and `FRONT_PREFIX` must fail it too. `test_server.py` calls it
+a `GET`; a friend list and the choice of whom he sees set before his game signs in, read back, eleven bodies that are
+refused and leave the world as it was, a short key nobody here has, too many friends, the list and the choice in a
+restored world and five world files that are refused, and a friend's two older cairns handed before a stranger's two
+newer ones under `order=liked`). Ten mutants must fail it (`API_METHOD`, `API_KEY`, `API_STRICT`, `API_CHOICES_MEMBER`,
+`API_CHOICES_ROOM`, `API_ALL_IMPLIED`, `API_MINE_OTHERS`, `API_MINE_IMPORTS`, `FRIENDS_SAVE_LOST`,
+`CURATE_FRIENDS_NONE`), and `FRONT_PREFIX` must fail it too. `test_server.py` calls it
 on the built server on loopback: the policy of a public server, a player's choices before his game signs in, his
 upload waiting for his answer, his offer, the other player handed nothing, a `GET` of a withdrawal refused; after the
 owner's `review --accept` and a restart, his withdrawal leaves a remnant, and the world file keeps every change.
@@ -927,10 +988,13 @@ twice, changed, for another server, out of the window, to another address; no ti
 tokens for their id only, not the group's key, expiring unused and after the last HELLO, ending the older one, and
 real players' sides answered or not; the owner's calls with his key, another key and none (members, review, policy
 with refused values, remove-player); the saved world with owner, tickets and tokens, a world file from before keys,
-and two that are refused; identity none as before with a key's account refused by name. Thirteen mutants must fail
-it (`IDENTITY_NAME_SIGN_IN`, `IDENTITY_KEY_NAME`, `IDENTITY_OLD_SESSION`, `TICKET_EXPIRY`, `TICKET_REUSE`,
-`TICKET_REPLACE`, `RELAY_TOKEN_ID`, `RELAY_TOKEN_GROUP_KEY`, `RELAY_TOKEN_EXPIRY`, `RELAY_ADMIT`, `API_UNSIGNED`,
-`API_SIGNER_PLAYER`, `API_OWNER`). The loopback test with the built server and the launcher's side is
+and two that are refused; identity none as before with a key's account refused by name; a friend list set and read
+only by its player's key (unsigned, another key), a friend added by the short form of his key, the relay ids the
+world gives the relay for a key's choice and friends (and nothing under identity none), four broadcast players on a
+relay as the server runs it (only the friend shown, then everyone within a `near_cap` of 1), the list in a restored
+world. Fourteen mutants must fail it (`IDENTITY_NAME_SIGN_IN`, `IDENTITY_KEY_NAME`, `IDENTITY_OLD_SESSION`,
+`TICKET_EXPIRY`, `TICKET_REUSE`, `TICKET_REPLACE`, `RELAY_TOKEN_ID`, `RELAY_TOKEN_GROUP_KEY`, `RELAY_TOKEN_EXPIRY`,
+`RELAY_ADMIT`, `API_UNSIGNED`, `API_SIGNER_PLAYER`, `API_OWNER`, `API_FRIENDS_ANY`), and `FRIENDS_SAVE_LOST` too. The loopback test with the built server and the launcher's side is
 `../launcher/test_identity.py`. The other tests run their public servers with `identity=none`.
 
 Builder names: `names_test.cpp` (display names that are and are not one; cutting in whole characters; the label for
@@ -988,15 +1052,27 @@ six changes while walking with no FETCH, an older version refused, FETCH answere
 is not near, a game started again on either side; a PUBLISH, STATE and FETCH naming another player, and from an
 address that never said HELLO; the order and the stamp window, and the sequence wrapping; pairs players, another mod
 build and another game build in one place, and a server that pins the build; FRAMEs within a 400-byte budget and the
-flush time; 24 players in one place. Thirteen mutants must fail it (`RELAY_BCAST_MODE`, `RELAY_BCAST_BUILD`,
-`RELAY_BCAST_SPOOF`, `RELAY_BCAST_ORDER`, `RELAY_BCAST_STAMP`, `RELAY_BCAST_ANIMATION_FAR`, `RELAY_BCAST_TELEPORT`,
-`RELAY_BCAST_INTEREST`, `RELAY_BCAST_ROSE`, `RELAY_BCAST_BUDGET`, `RELAY_BCAST_ENTER_STATE`, `RELAY_BCAST_STATE_OLD`,
-`RELAY_BCAST_FETCH_FAR`). `test_broadcast.py` runs the built server on loopback UDP with 26 players written byte by
+flush time; 24 players in one place. How many one player sees: ten walking, animating players 5 to 50 m from one with
+a cap of 4 (the four nearest shown, though they have the highest ids; every update and pulse of those four and no
+entry, SHARE or FETCH answer of the six others; a state change of one not shown not sent; the nearest leaving and the
+fifth taking his slot with his name and no FETCH; nine shown without a cap; a cap and a margin out of range refused); a
+cap of 1 with one player swinging 3 m about as far as the one shown (no change in 6 s), then coming 15 m nearer (he
+is shown), the other coming back to 5 m farther (no change); friends only (two friends of five near, within a cap of
+3), everyone from the server's record over the HELLO's friends (a friend 100 m away first, then the nearest), nobody
+(no ROSTER, entry or SHARE), the HELLO's choice again when the record is dropped, a HELLO asking for nobody; 100
+walking players with a cap of 16 and without (each shown 16 or 99, no entry from a player not shown). Twenty-one
+mutants must fail it (`RELAY_BCAST_MODE`, `RELAY_BCAST_BUILD`, `RELAY_BCAST_SPOOF`, `RELAY_BCAST_ORDER`,
+`RELAY_BCAST_STAMP`, `RELAY_BCAST_ANIMATION_FAR`, `RELAY_BCAST_TELEPORT`, `RELAY_BCAST_INTEREST`, `RELAY_BCAST_ROSE`,
+`RELAY_BCAST_BUDGET`, `RELAY_BCAST_ENTER_STATE`, `RELAY_BCAST_STATE_OLD`, `RELAY_BCAST_FETCH_FAR`, `RELAY_NEAR_CAP`,
+`RELAY_NEAR_NEAREST`, `RELAY_NEAR_HYSTERESIS`, `RELAY_NEAR_HIDDEN`, `RELAY_NEAR_FRIENDS_FIRST`, `RELAY_SHOW_FRIENDS`,
+`RELAY_SHOW_NOBODY`, `RELAY_SHOW_HELLO_FIRST`). `test_broadcast.py` runs the built server on loopback UDP with 26 players written byte by
 byte in Python: options out of range refused; 16 in a group, 8 on a ring 80 m out and 2 far away, each publishing
 20 times a second; every FRAME within a 600-byte budget and from a player near, more than three entries a FRAME,
 every update with its animation within 30 m, one in 200 ms and no animation beyond, a STATE handed to the 23 players
 near and nobody else, an update naming another player sent nowhere, a pairs player in the group near nobody, and a
-server that pins the build refusing another.
+server that pins the build refusing another; then 100 `coop-swarm` stand-ins in one place on a server with
+`--broadcast-near 16` and on one with 0: 1600 and 9900 pairs shown and heard, and with the cap at most 26 kB a second
+to each and less than a quarter of what each receives without it.
 
 Presence across linked servers: `presence_test.cpp` runs two and three relays in memory, each on a clock of its own
 (up to 7 s apart), linked to each other, with real players' sides (`ds::broadcast::Client`) on each: the tag's
@@ -1012,13 +1088,17 @@ gear changes, half the link's datagrams lost, a game that starts again, Gus taki
 list played again, a forged one, one with the key from another address, a server with the wrong key. Thirteen mutants
 must fail it (`LINK_PRESENCE_MAC`, `LINK_PRESENCE_REPLAY`, `LINK_PRESENCE_REMAP`, `LINK_PRESENCE_LOCAL_FIRST`,
 `LINK_PRESENCE_STATE_ANY`, `LINK_PRESENCE_BUILD`, `LINK_PRESENCE_NAME`, `LINK_PRESENCE_INTEREST`, `LINK_PRESENCE_BUDGET`,
-`LINK_PRESENCE_TIMEOUT`, `LINK_PRESENCE_GONE`, `LINK_PRESENCE_REEXPORT`, `LINK_PRESENCE_CLOCK`). `test_presence.py` runs
+`LINK_PRESENCE_TIMEOUT`, `LINK_PRESENCE_GONE`, `LINK_PRESENCE_REEXPORT`, `LINK_PRESENCE_CLOCK`), and `RELAY_NEAR_LINKED`
+(linked servers' players shown besides the cap): Bea in the north with a cap of 3, Nia of her own server 30 m away and
+five southerners 5 to 25 m away, sees the three nearest southerners and nothing of the other three, and with friends
+only the one southerner on her list, by his id in the south. `test_presence.py` runs
 two built servers on loopback, one knowing the other's relay: eight option lines that are refused; Bea, Fay and Carl
 written byte by byte (each sees the other once, under another id, as `Bea · north` and `Carl · south`, about 20
 updates a second; Fay never reaches the south); the north stopped and Carl losing Bea 3 s later; a new north and
 `coop-swarm --mode broadcast --names` stand-ins with the same ids on both servers, each seeing its own four and the
 other's four, whose names read as the mod reads them end with ` · north` (or ` · south`); thirty stand-ins in the north
-on a 20000-byte link, within it and all live on the other side.
+on a 20000-byte link, within it, and each of the four in the south shown 32 of his 33 (the `near_cap` of a friends
+server), all live.
 
 ## Not done
 
