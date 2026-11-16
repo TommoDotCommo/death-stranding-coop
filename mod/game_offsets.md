@@ -5767,6 +5767,136 @@ asking for no ladders in area 226, and the same counts in both runs of one save.
 level (the area's connection level or the player's), and the table itself (a live read of `0x3497c50`'s inputs, or of
 the resources, would give it).
 
+### Offering the player's existing strand (2026-11-17, static)
+
+Read from the pinned executable only, nothing called. Question: can the structures already in a save (owner 1, see
+"The player's own strand") be put on our server, so other players get them? Confidence as before: **high** for loads,
+stores and branches read instruction by instruction, **medium** where a meaning is put on them. The game-free helper
+is `mod/offer_strand.h` (not wired into the mod).
+
+**Who uploads.** The online object manager `O` (`[base+0x7c1abf0]`; the pointer at `0x4df9df0` points at the global
+`0x7c18670`, which holds the same object; vtable `0x3edecc8`) keeps per object kind a handler, in a map at `O+0x38`
+keyed by a type descriptor (`O` slot `0x18` registers, slot `0x20` looks up). The construction handler (0x420 bytes,
+made at `0x2e04630`, vtable `0x3e09460`, key `0x4c363b0`) holds three requests (`+0x8` create, `+0x90` re-create,
+`+0x118` delete) and three more for materials and tags. Its slots, all `(handler, object, ...)` (high):
+
+| Slot | Function | What |
+|---|---|---|
+| `+0x00`, `+0x08`, `+0x18` | `0x2c5d240`, `0x2c5c590`, `0x2c5c970` | position `obj+0x40`, online id `obj+0xb8`, creator `obj+0xb4` |
+| `+0x20` | `0x2c634c0` | `obj+0xaa` bit 1: registered as online (request `+0x628`) |
+| `+0x38` | `0x2cac820` | send `createObject` |
+| `+0x40` | `0x2cada10` | send `createObject` with `id` (the game's "re_create_object", body `OTGCReCreateObjectPost` = the create body plus `id`) |
+| `+0x48` | `0x2cce670` | create answer: `obj+0xb8` = the answer's `id` (and creator 1 for a road rebuilder) |
+| `+0x50` | `0x2cce700` | re-create answer: done or not; the id is **not** taken from the answer |
+| `+0xc0` | `0x2cacbf0` | send `deleteObject` with `obj+0xb8` |
+| `+0xd0` | `0x2caeb50` | fill the query and the body (below) |
+
+Request getters (`otgc://gateway/e/NAME`): `createObject` `0x32aa4e0`, `createObject` with id `0x32b0210`,
+`deleteObject` `0x32aac60`, `updateObject` `0x32b4b80`, `setConstructionMaterials` `0x32ab120`, `setRecycleMaterials`
+`0x32b4920`, `updateObjectsTag` `0x32b4cb0`.
+
+**The queue.** `O` slot `0x28` = `0x3485040(O, obj)` queues an upload: it does nothing when the handler's online id
+is not empty or the object is already queued (list `O+0x58/+0x60`, lock `O+0xa0`). `O` slot `0x68` = `0x3484f80(O,
+obj)` queues a re-create, only when the id is **not** empty (list `O+0x78/+0x80`). `O`'s update `0x3488030` runs the
+queues only while the login task's step is 7, signed in (`0x346f680` on `[0x4df8d78]`); `0x3488730` then, unless
+`[[0x7be6318]+0x20] > 0` or `O+0x331..+0x333` is set, takes the first object of the create queue and calls the
+handler's slot `0x38` with `(handler, obj, &cell, m = O+0x90, &position, q = 0x3497b40(O, position, obj+0x38), p, aq)`
+(`p` and `aq` from `0x3497aa0`, a region list of `0x7c1cb10`: `p` 1 inside a region, `aq` its alternative area);
+the same for the re-create queue with slot `0x40`. One request at a time (`O+0x318` state 1 or 2 until the answer;
+`O+0x68`/`+0x88` hold the bare object pointer meanwhile). `0x2cac820` and `0x2cada10` refuse an object with
+`obj+0xab` bit 7 (request `+0x62e`; set by the request builder `0x2c38200` from a flag of its caller, meaning not
+read): it is dropped from the queue. On the create answer (`0x3489120`): `obj+0xb8` = the new id, an element is added
+for it (`0x3498de0`, type from the id's first letter, creator `obj+0xb4`: 1 for a save's own record, so the second
+list), then `0x34858f0` sets it Activated. Nothing else in the record changes; the save writes `obj+0xb8` with the
+record at the next save (loader `0x2c9a6a3`).
+
+**The game already retries (high for the branches).** The base update of every construction object `0x2cb8790(obj,
+dt)` ends, on every path, with: owner `+0xb2` 1, category (`0x2ccf0f0`) not 10, 11 or 15 (ladder, rope, types
+37-39), distance to the porter `obj+0x460` below 15 m (`0x3bcbf54`), online id empty: count `obj+0x518` down by `dt`;
+at 0 call `0x2c9ed40(obj)` = `O` slot `0x28` and `obj+0x518` = 120 s. The timer starts at 0 (`0x2c22797`). The queue processor queues the same call
+at once when it makes an own record from a request with `+0x645` set (`0x2c86400`; `CreateConstruction` always sets
+it), and sets `obj+0xa8` bit 1 (request `+0x620`, "the upload flag") on every own record it makes (`0x2c86521`); what
+that bit does besides the area-capacity tests (`0x2c562f9`, `0x2c58d68`) is not read, and only ladders were tried live
+without it. Ladders and ropes (update `0x2d5ec30`) have
+the same retry behind `obj+0x5f6`, which their own code sets when the placement ends (`0x2d5edc6`, `0x2d5f18d`;
+whether a loaded ladder has it is unknown). Derived: a signed-in game uploads every own structure of its save that
+has no online id when the porter passes within 15 m of it, one every 120 s at most per structure. The live run of
+2026-11-17 did not look for this.
+
+**What the body holds (`0x2caeb50`, high).** Query (`OTGCCreateObjectQuery`): `x`, `y` the cell, `m` = `O+0x90` (the
+map id, `0x262a8c0([0x7be6318])`, a u16; 22123 is the one seen, the same number the area query sends as `aid`), `t`,
+`uc` = `obj+0xa8` bit 7; the body copies `t`, `x`, `y`, `m` (the query goes into the URL only when the online
+manager's `+0x5a` is 0; it starts as 1). Body (`OTGCCreateObjectPost`, offsets in brackets):
+
+- `px`, `py`, `pz` (`+0x34..`): `(int)((float)pos[i] * 100000.0f)`, `pos` = `obj+0x40` (3 f64); `exp` 5.
+- `rx`, `ry`, `rz`: Euler angles of the 3x3 rows at `obj+0x58` (right, forward, up) by `0x19c1270`: `ry =
+  asin(clamp(-m02))`; if `cos(ry)` > 1.9e-6, `rx = atan2(m12, m22)` and `rz = atan2(m01, m00)`, else `rx` 0 and `rz =
+  atan2(-m10, m11)`; each `(int)((57.29578f * a) * 100000.0f)`. A yaw-only structure has only `rz` (the live shelter).
+- `q` = the area (`0x3497b40`: `0x2f493d0` on `[0x7bfdff0]` with the world index `obj+0x38`, then the first sub-area
+  that holds the point), `p` 0 or 1, `ei` `{"aq":…}` only with an alternative area, `lp` (below).
+- Per type (the switch on `obj+0x34`, table `0x2cafe64`): 3 `s`; 6, 7 `p`; 9 `w`; 12 `a`; 15 `c`; 18 `n`; 22 `z`;
+  36 `h`; 25 `l` with `st` = the level `obj+0x84` in decimal ("0"); 28 `r` with `st` the same and `ri` `{p, h, l}`
+  (pitch and heading of a vector, degrees x 10^5, and length x 10^5, from a request the object fills through its
+  virtual `+0x48`; not readable without a call); 31 `b` with `st` "30" and 34 `b` with `st` empty, both `bi` `{"a":
+  (int)(100000 * (57.29578f * obj+0x528))}`; 41 `g` with `bi.a` from `obj+0x590`; 44 `j` from `obj+0x580`. Every
+  other type sends `t` "unknown".
+- `ci` `{"cp": obj+0x1fc}` for a customised structure (`0x2c633d0`, `obj+0xae` bit 6), `col` for some classes.
+- `tags`: "coop" when `obj+0xac` bit 0 (and not a Net structure at its top level), "ps4" when `obj+0xb1` bit 0
+  (request `+0x643`).
+- `mt`: when any of the porter's own six material counts (`obj+0x210`, record `+0x1f8`) or six repair counts
+  (`obj+0x260`) is not 0, one entry `{c, t 0, mat, rmat}` with `c` empty when the creator is 1 and otherwise the own
+  id string (user manager `+0x20`); then one entry per contributor of `obj+0x228` (0x38 bytes: user id, materials at
+  `+0x10`, time at `+0x28`; `c` the contributor's id string from the user manager `0x34ad380`). `rmt` the same from
+  `0x2c5d7b0` and `obj+0x298`.
+- `lp` (`+0xa8`): when `obj+0x3c` is not 0, entry `+0x10` of the 0x70-byte record keyed by `obj+0x3c` in the table of
+  `[0x7bf83b0]` (`0x2e0beb0`), else 0. Medium: this is where the game keeps a structure's likes (the open question
+  of "The player's own strand").
+
+**The grid cell (high for the arithmetic).** `0x3482e50(&out, &position)`: the component of type `0x4a76b00` on
+`[0x7ae90d8]` (cached at its `+0x30`), `g = [component+0x20]`, `W = g+0x58`, `H = g+0x5c`, tile size `T =
+component+0x144` (ints); `tx = floor(x / T)`, `ty = floor(y / T)`; `cx = clamp(tx + W/2, 0, W-1) / 2`, `cy = clamp(ty +
+H/2, 0, H-1) / 2` (integer division). `O+0x94`/`+0x98` hold the cell counts `(W+1)/2`, `(H+1)/2`. W, H and T are game
+data: unknown statically.
+
+**An own record that already has an online id (high for the branches).** The game never re-uploads it by itself: the
+retry needs an empty id; at load the record is registered by id (`O` slot `0x48` = `0x3485110`, for objects with
+`obj+0xaa` bit 1) with no request. There is a re-upload: `O` slot `0x68` queues it, and the handler sends the same
+body plus `"id"` (the old id) to `createObject`; the answer's id is ignored, so the game keeps the old one. The game
+itself queues it only from the handler's update (`0x2cbb170`): when `setConstructionMaterials` for an object of
+creator 1 (sent by `0x2cb5bc0` after a material delivery, `0x2cf9c27`, `0x2d32dcb`) is answered with status 404
+(`handler+0x294` == 0x194), `0x2cbb46a` calls `O` slot `0x68`. `updateObject` (queue `O+0x378`) carries only `id`,
+`si`, `pi`, `vi`, `ci`, `ei` (cairn rest count, parking, vehicle, customize, extra): no position, no re-upload.
+
+**What a receiver gets that differs from a fresh build.** No level (only ladders and ropes send `st`, always "0"),
+no durability, no build time (the server's), the like count of the original service in `lp` (medium), the "ps4" and
+"coop" tags, and in `mt` the materials delivered over the save's life, with contributor ids of the original service's
+accounts as strings. Whether a receiver's level follows `mt` is unknown (a received bridge with full `mt` stayed
+level 1 on 2026-11-12).
+
+**Recipe for the mod** (game thread, signed in, the owner's option on):
+
+1. Read the own records (`own_strand::readStructures`, owner 1, state 1 or 2) and skip `obj+0xab` bit 7 and the types
+   without a letter (`offer_strand::plan`).
+2. Empty online id: call `0x2c9ed40(obj)` (or `O` slot `0x28`). The game sends its own body; one at a time; each
+   answered upload sets `obj+0xb8`. Ladders and ropes too (the call bypasses their `+0x5f6`).
+3. An id of the original service: call `O` slot `0x68(O, obj)`; the game sends its body with `"id"`. `world/` has to
+   keep that id (today it makes a new one, so the game and the server would disagree, and a later
+   `setConstructionMaterials` 404 would re-create it again). Or, without a server change: write an empty string to
+   `obj+0xb8` first and use step 2 (the old element stays in `O`'s second list until the next load).
+4. Fallback when calling is not wanted: `offer_strand::body` builds the same body from memory (not ropes), with the
+   cell, `m`, `q`, `p` and `aq` from the game's own functions above.
+5. Server: strip or keep `lp`, `tags` and the contributor strings of `mt` (the server's choice; they come from the
+   original service).
+
+**Live probes still needed.** (1) Signed in on `coop-world`, walk within 15 m of an own record without an id and wait
+two minutes: expected one `createObject` with that record's type and place, then the id at `obj+0xb8`. (2) Call
+`0x2c9ed40` for a far own record: expected the same, without walking. (3) Read W, H, T (`[[[base+0x7ae90d8]` component
+of type `0x4a76b00`]) and compare the computed cell with the uploaded `x`/`y` (9, 7 at Lake Knot). (4) Compare
+`offer_strand::body` with the game's body for a ladder, a shelter and a 30 m bridge (angles may differ by a unit
+from the game's own atan2). (5) Call `O` slot `0x68` for a record with an old id: expected a `createObject` with
+`"id"`. (6) Read `[0x7bf83b0]`'s like table for an own record with likes, and whether a loaded ladder has
+`obj+0x5f6`.
+
 
 ## Which screen is up: state flags and the open menu page (2026-11-14, static only)
 
