@@ -8,7 +8,10 @@ families=[('world_test.cpp',['world.cpp'],['WORLD_NO_TOKEN','WORLD_OWNER','WORLD
                                                       'LINK_FILTER_AREA','LINK_FILTER_AGE','LINK_NO_PRUNE','LINK_FORGET_ANY','LINK_CAP','LINK_SIZE','LINK_STRICT','LINK_LIKES','LINK_VERSION']),
           ('front_test.cpp',['front.cpp','link.cpp','world.cpp'],['FRONT_PREFIX','FRONT_BEARER','FRONT_LINK_KEY']),
           ('relay_test.cpp',['relay.cpp'],['RELAY_NO_TOKEN','RELAY_REBIND','RELAY_ANY_SOURCE','RELAY_FORWARD_FAR','RELAY_SOURCE_ID','RELAY_NO_HYSTERESIS','RELAY_AREA','RELAY_NO_POSITION',
-                                           'RELAY_NO_TIMEOUT','RELAY_NO_LEAVE','RELAY_NO_RATE','RELAY_PLAYER_CAP','RELAY_HELLO_STALE','RELAY_ROSTER_ONCE'])]
+                                           'RELAY_NO_TIMEOUT','RELAY_NO_LEAVE','RELAY_NO_RATE','RELAY_PLAYER_CAP','RELAY_HELLO_STALE','RELAY_ROSTER_ONCE']),
+          ('broadcast_test.cpp',['relay.cpp','../core/broadcast_client.cpp','../core/core.cpp'],['RELAY_BCAST_MODE','RELAY_BCAST_BUILD','RELAY_BCAST_SPOOF','RELAY_BCAST_ORDER','RELAY_BCAST_STAMP',
+                                           'RELAY_BCAST_ANIMATION_FAR','RELAY_BCAST_TELEPORT','RELAY_BCAST_INTEREST','RELAY_BCAST_ROSE','RELAY_BCAST_BUDGET','RELAY_BCAST_ENTER_STATE',
+                                           'RELAY_BCAST_STATE_OLD','RELAY_BCAST_FETCH_FAR'])]
 with tempfile.TemporaryDirectory() as d:
     def one(job):
         test,sources,name=job;exe=Path(d)/name
