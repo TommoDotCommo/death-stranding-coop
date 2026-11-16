@@ -45,14 +45,29 @@ struct ImportResult { size_t added=0,updated=0,unchanged=0,removed=0,filtered=0,
 //   join invite|open (recorded only)   build everyone|members|nobody   accept_offers auto|review|never
 //   limit N (objects per player, 0 = none)   withdrawal stay|go   players N (1..MaxPlayers)
 //   offer_builds yes|no|ask, offer_old yes|no: what a player who chose nothing has chosen
+//   order newest|liked, per_builder N (0 = none), spread METRES (0 = off): which objects a game is handed (curate)
 struct Policy {
-    std::string preset="friends",join="invite",build="everyone",acceptOffers="auto",withdrawal="go",offerBuilds="yes",offerOld="no";
-    int64_t limit=0,players=int64_t(MaxPlayers);
+    std::string preset="friends",join="invite",build="everyone",acceptOffers="auto",withdrawal="go",offerBuilds="yes",offerOld="no",order="newest";
+    int64_t limit=0,players=int64_t(MaxPlayers),perBuilder=0,spread=8;
 };
 Policy presetPolicy(const std::string& name);       // friends, solo or public; throws for anything else
 void setPolicy(Policy&,const std::string& keyValue); // "KEY=VALUE"; throws with the reason and leaves it as it was
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy&);   // key and value, in a fixed order
 std::string heldText(const std::string& why);       // why an object is held (build, member, limit), in words
+// Which objects of one area a player's game is handed (README, "Which objects a game is handed"). Pure: the World
+// gives it the area's objects, what was handed to that player there before, and the policy.
+struct Candidate {
+    std::string id,creator,type;int64_t area=0,updated=0,likes=0;
+    bool shared=true;                                // handed to every player (not kept, held or waiting)
+    bool placed=false;double x=0,y=0,z=0;           // its position in metres, when it has one
+};
+struct Curated { std::vector<std::string> handed,remember; };
+constexpr size_t MaxPickAreas=128,MaxPicksPerArea=1000;   // what is remembered per player, and per player and area
+// `counts`: the number the game asks per kind (nullptr: no number, every kind); `previous`: what was remembered for this
+// player and area, most recently handed first; `friends`: the asker's friends. Returns the answer (`handed`) and what
+// to remember for the next one: what was handed, then what was remembered before and is still there.
+Curated curate(const std::string& player,int64_t area,const std::map<std::string,int64_t>* counts,const std::vector<Candidate>& candidates,
+               const std::vector<std::string>& previous,const Policy& policy,const std::set<std::string>& friends={});
 // A gateway request body as the game sends it with plain bodies: {"data":"<json, quotes not escaped>"}, or plain JSON.
 std::string unwrap(const std::string& body);
 class World {
@@ -141,6 +156,12 @@ private:
     std::string serverId_,epoch_;uint64_t changes_=0;
     std::map<std::pair<std::string,std::string>,std::string> byOrigin_;   // (origin server, id there) -> id here
     Policy policy_;
+    // What each player's game was handed per area (curate): kept so the same structures come back, saved with the world.
+    struct Picks { int64_t asked=0;std::vector<std::string> ids; };
+    std::map<std::string,std::map<int64_t,Picks>> picks_;   // player id -> area -> picks
+    Candidate candidateOf(const Object&) const;
+    void remember(const std::string& player,int64_t area,const std::vector<std::string>& ids,int64_t now);
+    std::set<std::string> friendsOf(const std::string&) const {return {};}   // no friend list exists yet
     std::string versionLocked() const {return epoch_+"-"+std::to_string(changes_);}
     bool servedTo(const Object&,const std::string& player) const;          // may this player be handed it
     std::string shareAfterOffer() const;                                   // what an offered upload becomes

@@ -13,8 +13,9 @@ struct Server {
     explicit Server(const char* preset="friends",std::vector<const char*> settings={}):w([]{return "tok"+std::to_string(++counter);}){
         Policy p=presetPolicy(preset);for(auto s:settings)setPolicy(p,s);w.setPolicy(p);}
     std::string signIn(const std::string& key,const std::string& name){return json::parse(w.signIn(key,name,"g").body).get("session").get("token").string();}
+    unsigned placed=0;   // every object 100 m from the others, so the spread setting leaves them all
     Reply build(const std::string& token,const char* type="l",int area=226,int64_t now=100){
-        return w.call(token,"createObject",std::string("{\"t\":\"")+type+"\",\"q\":"+std::to_string(area)+",\"px\":1,\"py\":2,\"pz\":3}",now);}
+        return w.call(token,"createObject",std::string("{\"t\":\"")+type+"\",\"q\":"+std::to_string(area)+",\"px\":"+std::to_string(++placed*10000)+",\"py\":2,\"pz\":3}",now);}
     std::string make(const std::string& token,const char* type="l",int area=226,int64_t now=100){
         auto r=build(token,type,area,now);CHECK(r.status==200);return json::parse(r.body).get("id").string();}
     size_t found(const std::string& token,int area=226,const char* counts=""){
@@ -34,6 +35,10 @@ static void presets(){
     CHECK(f.build=="everyone"&&f.acceptOffers=="auto"&&f.limit==0&&f.withdrawal=="go"&&f.players==int64_t(MaxPlayers)&&f.offerBuilds=="yes"&&f.offerOld=="no");
     CHECK(s.build=="everyone"&&s.acceptOffers=="auto"&&s.limit==0&&s.withdrawal=="go"&&s.players==1);
     CHECK(p.build=="members"&&p.acceptOffers=="review"&&p.limit==200&&p.withdrawal=="stay"&&p.join=="open"&&p.offerOld=="no");
+    CHECK(f.order=="newest"&&f.perBuilder==0&&f.spread==8&&s.order=="newest"&&s.perBuilder==0&&s.spread==8&&p.order=="liked"&&p.perBuilder==3&&p.spread==8);
+    {Policy c=f;for(const char* good:{"order=liked","per_builder=1000","spread=0","spread=1000"})CHECK(!throws([&]{setPolicy(c,good);}));
+     CHECK(c.order=="liked"&&c.perBuilder==1000&&c.spread==1000);
+     for(const char* wrong:{"order=best","order=","per_builder=-1","per_builder=1001","spread=-1","spread=1001","spread=8m"}){Policy before=c;CHECK(throws([&]{setPolicy(c,wrong);}));CHECK(policyItems(c)==policyItems(before));}}
     CHECK(throws([]{presetPolicy("open");})&&throws([]{presetPolicy("");}));
     Policy q=f;
     for(const char* good:{"join=open","build=nobody","accept_offers=never","limit=0","limit=4000","withdrawal=stay","players=1","players=16","offer_builds=ask","offer_old=yes"," build = members "})
@@ -41,7 +46,7 @@ static void presets(){
     CHECK(q.build=="members"&&q.join=="open"&&q.acceptOffers=="never"&&q.limit==4000&&q.players==16&&q.offerBuilds=="ask"&&q.offerOld=="yes");
     for(const char* wrong:{"","build","build=","build=all","limit=-1","limit=4001","limit=x","players=0","players=17","offer_builds=maybe","offer_old=ask","withdraw=go","colour=red","accept_offers=Auto"}){
         Policy before=q;CHECK(throws([&]{setPolicy(q,wrong);}));CHECK(policyItems(q)==policyItems(before));}
-    auto items=policyItems(p);CHECK(items.size()==8&&items[0].first=="join"&&items[3]==std::make_pair(std::string("limit"),std::string("200")));
+    auto items=policyItems(p);CHECK(items.size()==11&&items[0].first=="join"&&items[3]==std::make_pair(std::string("limit"),std::string("200")));
     CHECK(Server().w.policy().preset=="friends");
 }
 static void building(){

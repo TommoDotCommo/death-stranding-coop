@@ -2,7 +2,7 @@
 file that is refused), then two servers on loopback that take from each other with filters: new, changed and removed
 objects follow, nothing comes back to where it was built, the wrong key gets nothing, requests in the wrong form are
 refused, and either side catches up after it was away."""
-import http.client,json,os,socket,subprocess,sys,tempfile,time
+import http.client,itertools,json,os,socket,subprocess,sys,tempfile,time
 exe=sys.argv[1]
 def free_port():
     s=socket.socket();s.bind(('127.0.0.1',0));p=s.getsockname()[1];s.close();return p
@@ -33,11 +33,12 @@ class Server:
         status,auth=self.call('GET','/k/%s/auth/ds?provider=steam&display_name=%s&code=00'%(name,name));assert status==200,status;return auth['session']['token']
     def gate(self,token,name,body):
         status,answer=self.call('POST','/gate/e/'+name,json.dumps(body),{'Authorization':'Bearer '+token});assert status==200,(name,status,answer);return answer
-    def make(self,token,kind,area):return self.gate(token,'createObject',{'t':kind,'q':area,'px':1,'py':2,'pz':3})['id']
+    def make(self,token,kind,area):return self.gate(token,'createObject',{'t':kind,'q':area,'px':next(PLACES),'py':2,'pz':3})['id']
     def found(self,token,area):return sorted(o['t'] for o in self.gate(token,'findQpidObjects',{'q':area})['n']['oa'])
     def saved(self):return json.load(open(self.data))
     def logged(self,text):return os.path.exists(self.log) and text in open(self.log).read()
 KEY='key-of-a-and-b'
+PLACES=itertools.count(10000,10000)   # every object 100 m from the others, so the policy's spread leaves them all
 # A server with a link that has no key, or half a link, does not start; nor do the offline commands with half their options.
 for wrong in (['--link','n'],['--link','n','--link-key','short'],['--link','n','--link-key','has space in it'],['--link-key',KEY],['--link','n','--link-key',KEY,'--link-url','http://example.org:80'],
               ['--link','n','--link-key',KEY,'--link-url','10.0.0.1:80'],['--link','n','--link-key',KEY,'--link-import','all'],['--link','n','--link-key',KEY,'--link-export','types=ladders'],
