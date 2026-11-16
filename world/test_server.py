@@ -43,7 +43,7 @@ with tempfile.TemporaryDirectory() as d:
     for wrong in (['--policy','club'],['--policy-set','limit=x'],['--policy-set','colour=red']):
         r=run('--port','1',*wrong);assert r.returncode==2,(wrong,r.stdout,r.stderr)
     held=os.path.join(d,'policy.json')
-    port=free_port();p=start(port,'--policy','public','--policy-set','build=everyone',path=held)
+    port=free_port();p=start(port,'--policy','public','--policy-set','build=everyone','--policy-set','identity=none',path=held)   # identity keys: test_identity.py
     try:
         assert 'policy public:' in p.stdout.readline()
         c=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
@@ -134,14 +134,14 @@ with tempfile.TemporaryDirectory() as d:
         p.kill();p.wait()
     # The launcher's API on the running server: the policy in words, a player's choices before his game signs in, his
     # objects with their state, his offer and withdrawal; saved like any other change.
-    port=free_port();api_world=os.path.join(d,'api.json');p=start(port,'--policy','public','--policy-set','build=everyone',path=api_world)
+    port=free_port();api_world=os.path.join(d,'api.json');p=start(port,'--policy','public','--policy-set','build=everyone','--policy-set','identity=none',path=api_world)
     try:
         c=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
         def coop(method,call,body=None,player=None):
             c.request(method,'/abc/coop/'+call+('?player='+player if player else ''),body=None if body is None else json.dumps(body))
             r=c.getresponse();return r.status,json.loads(r.read() or b'{}')
         c.request('GET','/coop/policy');r=c.getresponse();r.read();assert r.status==404
-        status,policy=coop('GET','policy');assert status==200 and policy['preset']=='public' and len(policy['settings'])==11,policy
+        status,policy=coop('GET','policy');assert status==200 and policy['preset']=='public' and len(policy['settings'])==12,policy
         build=[s for s in policy['settings'] if s['key']=='build'][0];assert build['value']=='everyone' and build['preset']=='members' and build['text'].startswith('What any player'),build
         status,me=coop('GET','me',player='ann');assert status==200 and me['known'] is False,me
         status,me=coop('POST','choices',{'player':'ann','offer_builds':'ask','offer_old':'no'});assert status==200 and me['known'] and me['applies']['offer_builds']=='ask',me

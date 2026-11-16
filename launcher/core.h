@@ -5,6 +5,7 @@
 #include "vendor/coop_discover.h"
 #include "../mod/config.h"
 #include "../redirect/startup_policy.h"
+#include "../world/identity.h"
 
 namespace launcher {
 inline constexpr const char* GameId="DSDC";
@@ -44,7 +45,15 @@ struct Session {
     // The rules of the group's server when the host's launcher makes a new world: friends, solo or public
     // (../world/README.md, "Server policy"). A world that exists keeps its own.
     std::string policy="friends";
+    // Identity keys (../world/README.md, "Identity"): on a server that takes keys the game signs in with a ticket and
+    // says HELLO with a relay token, both taken by the launcher's signed call just before the game starts (strand.h),
+    // and its relay id (`playerId`) is the one made from the key. The host gives his server his key as the owner's.
+    std::string signInTicket,relayToken,ownerKey;   // ownerKey: 64 hex digits
 };
+// This install's key pair: made once and kept in `file` (player.key, beside launcher.ini). Its secret half is never
+// sent anywhere; the public half is the player on servers that take keys. A file that is there but cannot be read is
+// an error, never replaced (a new key would be a new player).
+world::identity::Keys playerKeys(const std::filesystem::path& file);
 // The addresses the proxy's network policy lists for the session (COOP_NETWORK_PEERS): the partner, or in group play
 // the server and nothing else.
 std::string networkPeers(const Session&);

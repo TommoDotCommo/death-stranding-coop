@@ -33,7 +33,9 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-group-') as d:
     args=[l[4:] for l in lines if l.startswith('arg ')];said=dict(l.split(' ',1) for l in lines if not l.startswith('arg '))
     port=49100+slot
     check('--relay-port' in args and '--relay-key' in args,'the group server is started with its relay')
-    p=subprocess.Popen([world,*args],stdout=subprocess.PIPE,text=True)
+    # The public rules take player keys (identity keys): that is test_identity.py. Here the same rules without keys,
+    # the way a friends server signs in, by the names and Steam ids the launcher writes for it.
+    p=subprocess.Popen([world,*args,'--policy-set','identity=none'],stdout=subprocess.PIPE,text=True)
     try:
         first,second=p.stdout.readline(),p.stdout.readline()
         check('listening on 0.0.0.0:%d'%port in first and 'relay on 0.0.0.0:%d'%port in second,'server and relay listen on the port the launcher names: '+first+second)

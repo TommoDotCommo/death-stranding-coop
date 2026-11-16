@@ -39,6 +39,9 @@ constexpr size_t RelayPlayersMax=1024,RelayPendingMax=4096;
 constexpr uint32_t BroadcastStampAheadMs=500,BroadcastStampBehindMs=2000,BroadcastFetchEveryMs=250;
 struct RelayConfig {
     std::string token;                       // the group's secret; every HELLO must carry it
+    // Set: it decides instead of `token` whether a HELLO's (or BYE's) token may speak for that player id (the server's
+    // identity: World::relayAdmit, a relay token of the player under identity keys).
+    std::function<bool(uint64_t id,const std::string& token)> admit;
     double enterMetres=150,leaveMetres=200;  // 1..65535, leave >= enter
     uint32_t timeoutMs=10000;
     size_t maxPlayers=64;                    // 1..RelayPlayersMax
@@ -93,7 +96,7 @@ private:
         ds::relay::Buffer batch; uint64_t batchSince=0;
     };
     bool allow(Player&,uint64_t now);
-    bool rightToken(const std::string&) const;
+    bool rightToken(const std::string&,uint64_t id) const;
     void hello(const RelayAddress&,const ds::relay::Hello&,uint64_t now,const ds::broadcast::Hello* v2=nullptr);
     void refuse(const RelayAddress&,uint64_t id,uint32_t sequence,uint8_t reason,uint16_t mode);
     bool compatible(const Player&,const Player&) const;

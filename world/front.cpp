@@ -1,5 +1,6 @@
 #include "front.h"
 #include "api.h"
+#include <cctype>
 namespace world {
 namespace {
 Reply notFound(){return Reply{404,"{\"status\":\"404\",\"code\":404,\"message\":\"not found\"}"};}
@@ -53,20 +54,36 @@ Reply Front::handle(const Request& r,int64_t now){
         if(!link){if(world_.log)world_.log("link request refused: no link has that key");return notFound();}
         return world_.linkPull(link->exportFilter,r.body,now);}
     // The launcher's API (api.h): under the prefix, never under /k/NAME, never the game's.
-    if(path.compare(0,6,"/coop/")==0)return launcherApi(world_,r.method,path.substr(6),query(q,"player"),r.body);
-    std::string key;
+    if(path.compare(0,6,"/coop/")==0){
+        // A signed call is checked whole (identity.h) before the API sees it: the signer is the player it may act for.
+        std::string signer,why;
+        if(signatures_.check(r.headers,r.method,r.target,r.body,world_.serverId(),now,signer,why)==identity::Checker::Result::Bad){
+            if(world_.log)world_.log("signed call refused: "+why);
+            Reply e;e.status=401;json::Value v=json::Value::object();v.set("status","401");v.set("code",401);v.set("message",why);e.body=v.dump();return e;}
+        return launcherApi(world_,r.method,path.substr(6),query(q,"player"),r.body,signer,now);}
+    std::string key,ticket;
     if(path.compare(0,3,"/k/")==0){
         size_t end=path.find('/',3);if(end==std::string::npos)return notFound();
         key=path.substr(3,end-3);path.erase(0,end);
         if(!accountKeyText(key))return notFound();}
+    else if(path.compare(0,3,"/t/")==0){
+        // A sign-in ticket the player's launcher took for him (identity keys): it names the player, for sign-in only.
+        size_t end=path.find('/',3);if(end==std::string::npos)return notFound();
+        ticket=path.substr(3,end-3);path.erase(0,end);
+        bool text=!ticket.empty()&&ticket.size()<=PassBytes;for(char c:ticket)text=text&&std::isalnum(static_cast<unsigned char>(c));
+        if(!text)return notFound();}
     if(path=="/auth/ds"){
         if(r.method!="GET")return notFound();
+        if(!ticket.empty()){
+            auto host=r.headers.find("host");
+            if(host==r.headers.end()||host->second.empty())return Reply{400,"{\"status\":\"400\",\"code\":400,\"message\":\"no host\"}"};
+            return world_.signInTicket(ticket,query(q,"display_name"),"http://"+host->second+base+"/gate",now);}
         if(key.empty())key=steamIdOf(query(q,"code"));
         if(key.empty())return Reply{400,"{\"status\":\"400\",\"code\":400,\"message\":\"no account in the sign-in\"}"};
         auto host=r.headers.find("host");
         if(host==r.headers.end()||host->second.empty())return Reply{400,"{\"status\":\"400\",\"code\":400,\"message\":\"no host\"}"};
         return world_.signIn(key,query(q,"display_name"),"http://"+host->second+base+"/gate");}
-    if(path.compare(0,6,"/gate/")==0&&key.empty()){
+    if(path.compare(0,6,"/gate/")==0&&key.empty()&&ticket.empty()){
         std::string name=path.substr(6);
         if(name.compare(0,2,"e/")==0)name.erase(0,2);
         if(name.empty()||name.size()>64||name.find('/')!=std::string::npos)return notFound();

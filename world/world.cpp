@@ -10,9 +10,25 @@ Reply ok(const Value& v){return Reply{200,v.dump()};}
 Reply refuse(int status,const char* code,const std::string& message){
     Value e=Value::object();e.set("status",std::to_string(status));e.set("code",status);e.set("message",message+" ("+code+")");return Reply{status,e.dump()};}
 uint64_t fnv(const std::string& s,uint64_t seed){uint64_t h=1469598103934665603ull^seed;for(unsigned char c:s){h^=c;h*=1099511628211ull;}return h;}
+// Session tokens, sign-in tickets and relay tokens are secrets: each is drawn from the system's generator, never from a
+// generator whose state its earlier outputs give away.
 std::string defaultToken(){
-    static std::mutex m;static std::mt19937_64 rng{std::random_device{}()};std::lock_guard<std::mutex> g(m);
-    const char* hex="0123456789abcdef";std::string t;for(int i=0;i<4;++i){uint64_t v=rng();for(int k=0;k<16;++k){t+=hex[v&15];v>>=4;}}return t;}
+    static std::mutex m;std::lock_guard<std::mutex> g(m);
+#ifdef _WIN32
+    static std::random_device rd;
+#else
+    static std::random_device rd("/dev/urandom");
+#endif
+    const char* hex="0123456789abcdef";std::string t;for(int i=0;i<8;++i){uint32_t v=rd();for(int k=0;k<8;++k){t+=hex[v&15];v>>=4;}}return t;}
+// The same time for any two texts of at most `most` bytes: no early exit on the first byte that differs.
+bool sameText(const std::string& a,const std::string& b,size_t most){
+    unsigned char diff=a.size()>most||b.size()>most?1:0;
+    for(size_t i=0;i<most;++i)diff|=static_cast<unsigned char>((i<a.size()?a[i]:0)^(i<b.size()?b[i]:0));
+    return diff==0;}
+bool passText(const std::string& t){
+    if(t.empty()||t.size()>PassBytes)return false;
+    for(char c:t)if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')))return false;
+    return true;}
 std::string randomHex(size_t n){
     static std::mutex m;static std::mt19937_64 rng{std::random_device{}()};std::lock_guard<std::mutex> g(m);
     const char* hex="0123456789abcdef";std::string t;while(t.size()<n){uint64_t v=rng();for(int k=0;k<16&&t.size()<n;++k){t+=hex[v&15];v>>=4;}}return t;}
@@ -57,6 +73,94 @@ const World::Player* World::playerById(const std::string& id) const {for(auto& p
 std::string World::playerOf(const std::string& token) const {std::lock_guard<std::mutex> g(lock_);auto t=tokens_.find(token);return t==tokens_.end()?std::string():t->second;}
 Reply World::signIn(const std::string& key,const std::string& displayName,const std::string& gateway){
     std::lock_guard<std::mutex> g(lock_);
+#ifndef MUTANT_IDENTITY_NAME_SIGN_IN
+    // Under keys the account comes from a launcher's ticket only: not from an address anyone can write, nor from a
+    // Steam ticket the server does not check.
+    if(policy_.identity=="keys"){note("sign-in refused: this server takes a ticket from the launcher (identity keys)");return refuse(403,"keys","sign in through the launcher: this server knows players by their keys");}
+#endif
+#ifndef MUTANT_IDENTITY_KEY_NAME
+    if(identity::accountIsKey(key)){note("sign-in refused: an account of a key signs in with a ticket");return refuse(403,"key-account","an account of a key signs in with a ticket from its launcher");}
+#endif
+    return signInLocked(key,displayName,gateway);
+}
+Reply World::signInTicket(const std::string& ticket,const std::string& displayName,const std::string& gateway,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+    auto t=passText(ticket)?tickets_.find(ticket):tickets_.end();
+    bool good=t!=tickets_.end();
+#ifndef MUTANT_TICKET_EXPIRY
+    if(good&&!t->second.used&&now>t->second.issued+TicketUnusedSeconds)good=false;
+#endif
+#ifndef MUTANT_TICKET_REUSE
+    if(good&&t->second.used&&now>t->second.used+TicketGraceSeconds)good=false;
+#endif
+    if(!good){note("sign-in refused: unknown or expired ticket");return refuse(403,"ticket","the sign-in ticket is unknown or expired: start the game from the launcher again");}
+    if(!t->second.used){t->second.used=now;dirty_=true;}
+    return signInLocked(t->second.account,displayName,gateway);
+}
+World::Player& World::playerFor(const std::string& account,const char* why){
+    auto found=players_.find(account);
+    if(found!=players_.end())return found->second;
+    size_t room=std::min(MaxPlayers,size_t(policy_.players));
+    if(players_.size()>=room){note(std::string(why)+" refused: world is full ("+std::to_string(room)+" players)");bad("this world has all its players");}
+    Player p;p.key=account;p.id=playerId(account);p.name="Porter";note("new player "+p.id+" ("+why+")");
+    dirty_=true;++changes_;return players_.emplace(account,p).first->second;
+}
+// One good pass of a kind per player: a new one ends his older one, and passes that can no longer be used are dropped.
+std::string World::pass(std::map<std::string,Pass>& passes,const std::string& account,uint64_t relayId,int64_t now){
+    const bool ticket=&passes==&tickets_;
+    for(auto it=passes.begin();it!=passes.end();){
+        const Pass& p=it->second;
+        bool over=ticket?(p.used?now>p.used+TicketGraceSeconds:now>p.issued+TicketUnusedSeconds):(p.used?now>p.used+RelayTokenIdleSeconds:now>p.issued+RelayTokenUnusedSeconds);
+#ifndef MUTANT_TICKET_REPLACE
+        over=over||p.account==account;
+#endif
+        if(over)it=passes.erase(it);else ++it;}
+    std::string text;
+    for(int tries=0;tries<8&&(!passText(text)||passes.count(text));++tries)text=random_().substr(0,PassBytes);
+    if(!passText(text)||passes.count(text))bad("no fresh ticket could be made");
+    passes[text]=Pass{account,relayId,now,0};dirty_=true;return text;
+}
+json::Value World::apiTicket(const std::string& account,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+    if(policy_.identity!="keys")bad("this server has no player keys (identity none): its game sign-in needs no ticket");
+    if(!identity::accountIsKey(account))bad("a ticket is for a player's key");
+    playerFor(account,"ticket");
+    Value out=Value::object();out.set("format",1);out.set("ticket",pass(tickets_,account,0,now));out.set("expires",now+TicketUnusedSeconds);
+    note("sign-in ticket for "+playerId(account));return out;
+}
+json::Value World::apiRelayToken(const std::string& account,uint64_t relayId,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+    if(policy_.identity!="keys")bad("this server has no player keys (identity none): its relay takes the group's key");
+    if(!identity::accountIsKey(account)||!relayId)bad("a relay token is for a player's key and his relay id");
+    playerFor(account,"relay token");
+    Value out=Value::object();out.set("format",1);out.set("token",pass(relayTokens_,account,relayId,now));out.set("relay_id",int64_t(relayId));out.set("expires",now+RelayTokenUnusedSeconds);
+    note("relay token for "+playerId(account));return out;
+}
+bool World::relayAdmit(uint64_t id,const std::string& token,const std::string& groupKey,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+    if(policy_.identity!="keys")return sameText(token,groupKey,PassBytes);
+#ifdef MUTANT_RELAY_TOKEN_GROUP_KEY
+    if(sameText(token,groupKey,PassBytes))return true;
+#endif
+    auto t=relayTokens_.find(token);
+    if(t==relayTokens_.end())return false;
+    Pass& p=t->second;
+#ifndef MUTANT_RELAY_TOKEN_EXPIRY
+    if(p.used?now>p.used+RelayTokenIdleSeconds:now>p.issued+RelayTokenUnusedSeconds)return false;
+#endif
+#ifndef MUTANT_RELAY_TOKEN_ID
+    if(p.relayId!=id)return false;
+#else
+    (void)id;
+#endif
+    p.used=std::max(p.used,now);return true;
+}
+void World::setOwner(const std::string& account){
+    if(!account.empty()&&!identity::accountIsKey(account))bad("the owner is a key (ed25519- and 64 hex digits)");
+    std::lock_guard<std::mutex> g(lock_);
+    if(owner_!=account){owner_=account;dirty_=true;++changes_;note(account.empty()?"no owner key":"owner key "+account.substr(8,16));}
+}
+Reply World::signInLocked(const std::string& key,const std::string& displayName,const std::string& gateway){
     if(key.empty()||key.size()>MaxKeyBytes||displayName.size()>MaxNameBytes)return refuse(400,"bad-account","account key or name refused");
     auto found=players_.find(key);
     if(found==players_.end()){
@@ -100,6 +204,10 @@ Reply World::call(const std::string& token,const std::string& name,const std::st
     std::lock_guard<std::mutex> g(lock_);
     const Player* player=nullptr;
     auto t=tokens_.find(token);if(t!=tokens_.end())player=playerById(t->second);
+#ifndef MUTANT_IDENTITY_OLD_SESSION
+    // A session from before the world took keys belongs to an account anyone could sign in as.
+    if(player&&policy_.identity=="keys"&&!identity::accountIsKey(player->key)){note("refused "+name+": a session from before identity keys");return refuse(401,"no-session","sign in again through the launcher: this server knows players by their keys");}
+#endif
 #ifndef MUTANT_WORLD_NO_TOKEN
     if(!player){note("refused "+name+": no session");return refuse(401,"no-session","sign in first");}
 #else
@@ -256,6 +364,13 @@ json::Value World::snapshot() const {
         players.push(v);}
     out.set("players",players);
     Value tokens=Value::object();for(auto& t:tokens_)tokens.set(t.first,t.second);out.set("sessions",tokens);
+    if(!owner_.empty())out.set("owner",owner_);
+    for(auto* passes:{&tickets_,&relayTokens_}){
+        Value list=Value::array();
+        for(auto& t:*passes){Value v=Value::object();v.set("text",t.first);v.set("account",t.second.account);v.set("issued",t.second.issued);v.set("used",t.second.used);
+            if(passes==&relayTokens_)v.set("relay_id",int64_t(t.second.relayId));
+            list.push(v);}
+        out.set(passes==&tickets_?"tickets":"relay_tokens",list);}
     Value objects=Value::array();
     for(auto& o:objects_){Value v=Value::object();v.set("id",o.second.id);v.set("creator",o.second.creator);v.set("updated",o.second.updated);v.set("likes",o.second.likes);v.set("post",o.second.post);
         if(!o.second.name.empty())v.set("name",o.second.name);
@@ -289,8 +404,12 @@ void World::restore(const json::Value& v){
         try{
             policy=presetPolicy(v.get("policy").get("preset").string());
             for(auto& m:v.get("policy").members())if(m.first!="preset")world::setPolicy(policy,m.first+"="+(m.second.isInt()?std::to_string(m.second.integer()):m.second.isString()?m.second.string():std::string("?")));
+            // A world file from before identity keys: no keys, whatever its preset says now.
+            if(!v.get("policy").has("identity"))policy.identity="none";
         }catch(const std::exception& e){throw std::runtime_error(std::string("world file: ")+e.what());}}
-    players_.clear();tokens_.clear();objects_.clear();byOrigin_.clear();++changes_;policy_=policy;
+    const std::string owner=v.get("owner").string();
+    if(!owner.empty()&&!identity::accountIsKey(owner))throw std::runtime_error("world file: bad owner");
+    players_.clear();tokens_.clear();objects_.clear();byOrigin_.clear();tickets_.clear();relayTokens_.clear();++changes_;policy_=policy;owner_=owner;
     // A world file from before linked servers has no id: it keeps the one made for this process, and is saved with it.
     bool hadId=v.has("server_id");
     if(hadId){if(!serverIdText(v.get("server_id").string()))throw std::runtime_error("world file: bad server id");serverId_=v.get("server_id").string();}
@@ -300,6 +419,11 @@ void World::restore(const json::Value& v){
         if(pl.key.empty()||pl.id!=playerId(pl.key)||!oneOf(pl.offerBuilds,{"","yes","no","ask"})||!oneOf(pl.offerOld,{"","yes","no"}))throw std::runtime_error("world file: bad player");
         players_[pl.key]=pl;}
     for(auto& t:v.get("sessions").members())if(playerById(t.second.string()))tokens_[t.first]=t.second.string();
+    for(auto* passes:{&tickets_,&relayTokens_})
+        for(auto& t:v.get(passes==&tickets_?"tickets":"relay_tokens").items()){
+            Pass p{t.get("account").string(),uint64_t(t.get("relay_id").integer()),t.get("issued").integer(),t.get("used").integer()};const std::string text=t.get("text").string();
+            if(!passText(text)||!identity::accountIsKey(p.account)||!players_.count(p.account)||(passes==&relayTokens_)!=(p.relayId!=0)||!passes->emplace(text,p).second)
+                throw std::runtime_error("world file: bad ticket or relay token");}
     for(auto& o:v.get("objects").items()){Object ob;ob.id=o.get("id").string();ob.creator=o.get("creator").string();ob.updated=o.get("updated").integer();ob.likes=o.get("likes").integer();ob.post=o.get("post");
         ob.name=o.get("name").string();ob.share=o.get("share").string();ob.remnant=o.get("remnant").boolean();ob.held=o.get("held").string();ob.heldAsk=o.get("held_ask").boolean();
         if(ob.id.empty()||!ob.post.isObject()||!oneOf(ob.share,{"","kept","ask","review","held"})||(o.has("origin")&&(ob.remnant||!ob.share.empty()))
@@ -644,7 +768,7 @@ Policy presetPolicy(const std::string& name){
     Policy p;p.preset=name;
     if(name=="friends")return p;
     if(name=="solo"){p.players=1;return p;}
-    if(name=="public"){p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;return p;}
+    if(name=="public"){p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";return p;}
     bad("policy: unknown preset '"+name+"' (friends, solo or public)");
 }
 void setPolicy(Policy& p,const std::string& keyValue){
@@ -666,12 +790,13 @@ void setPolicy(Policy& p,const std::string& keyValue){
     else if(key=="order")pick(p.order,{"newest","liked"});
     else if(key=="per_builder")number(p.perBuilder,0,1000);
     else if(key=="spread")number(p.spread,0,1000);
-    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread)");
+    else if(key=="identity")pick(p.identity,{"none","keys"});
+    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity)");
 }
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy& p){
     return {{"join",p.join},{"build",p.build},{"accept_offers",p.acceptOffers},{"limit",std::to_string(p.limit)},{"withdrawal",p.withdrawal},
             {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld},
-            {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)}};
+            {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity}};
 }
 void World::setPolicy(const Policy& p){std::lock_guard<std::mutex> g(lock_);policy_=p;dirty_=true;++changes_;}
 bool World::servedTo(const Object& o,const std::string& player) const {

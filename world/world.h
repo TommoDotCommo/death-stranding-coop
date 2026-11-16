@@ -3,6 +3,7 @@
 // Game-free core: sign-in and one gateway call at a time on JSON values; `http.cpp` puts it on a socket. The
 // message shapes are the game's own (mod/game_offsets.md, "Online protocol"); nothing here talks to the publisher's
 // service or knows its keys. One World is one co-op group's shared world and is saved as one JSON document.
+#include "identity.h"
 #include "json.h"
 #include <cstdint>
 #include <functional>
@@ -18,6 +19,12 @@ constexpr size_t MaxObjectsPerPlayer=4000,MaxPlayers=16,MaxNameBytes=64,MaxKeyBy
 // for one object's data on the way, and this much for one page and one request of a live link.
 constexpr size_t MaxImportedPerServer=20000,MaxSharedPostBytes=64*1024,LinkPageObjects=500,LinkPageBytes=1024*1024,MaxLinkRequestBytes=4096;
 constexpr size_t MaxWorldFileBytes=512u*1024*1024;
+// Identity keys (README, "Identity"): how long a sign-in ticket and a relay token are good. A ticket: until its first
+// sign-in, at most TicketUnusedSeconds after it was made; then TicketGraceSeconds more (a sign-in that is asked again).
+// A relay token: until its first HELLO, at most RelayTokenUnusedSeconds; then while HELLOs keep coming, until
+// RelayTokenIdleSeconds after the last one. A new one of either kind ends the player's older one.
+constexpr int64_t TicketUnusedSeconds=1800,TicketGraceSeconds=120,RelayTokenUnusedSeconds=1800,RelayTokenIdleSeconds=300;
+constexpr size_t PassBytes=32;                      // a ticket or relay token: at most this many letters and digits
 struct Reply { int status=200;std::string body="{}"; };
 // What may travel between two servers. Text form: "all", "none", or terms separated by ';':
 //   types=l,rope,e   owners=NAME,zygo_...   areas=226,227   max-age=30d (s, m, h, d)   likes=no   imported=yes
@@ -46,8 +53,9 @@ struct ImportResult { size_t added=0,updated=0,unchanged=0,removed=0,filtered=0,
 //   limit N (objects per player, 0 = none)   withdrawal stay|go   players N (1..MaxPlayers)
 //   offer_builds yes|no|ask, offer_old yes|no: what a player who chose nothing has chosen
 //   order newest|liked, per_builder N (0 = none), spread METRES (0 = off): which objects a game is handed (curate)
+//   identity none|keys: keys refuses every sign-in but a launcher's ticket, and every API call that is not signed
 struct Policy {
-    std::string preset="friends",join="invite",build="everyone",acceptOffers="auto",withdrawal="go",offerBuilds="yes",offerOld="no",order="newest";
+    std::string preset="friends",join="invite",build="everyone",acceptOffers="auto",withdrawal="go",offerBuilds="yes",offerOld="no",order="newest",identity="none";
     int64_t limit=0,players=int64_t(MaxPlayers),perBuilder=0,spread=8;
 };
 Policy presetPolicy(const std::string& name);       // friends, solo or public; throws for anything else
@@ -76,7 +84,23 @@ public:
     explicit World(std::function<std::string()> randomToken={});
     // Sign-in. `key` names the account (a Steam id read from the ticket, or a key in the address); the same key is
     // always the same player. Returns the game's auth response, with a fresh session token and `gateway` as given.
+    // Refused (403) under identity keys, and for an account of the key form (identity.h) whatever the policy.
     Reply signIn(const std::string& key,const std::string& displayName,const std::string& gateway);
+    // Identity (README, "Identity"). A sign-in with a ticket the launcher took for its player (apiTicket): that
+    // player's session, while the ticket is good.
+    Reply signInTicket(const std::string& ticket,const std::string& displayName,const std::string& gateway,int64_t now);
+    // For a signed call of the player whose account (identity::account) this is, under identity keys: a sign-in ticket,
+    // or a relay token for his relay id. Makes the player when the account is new (the `players` setting applies).
+    // Throws std::runtime_error with the reason when refused, and then changed nothing.
+    json::Value apiTicket(const std::string& account,int64_t now);
+    json::Value apiRelayToken(const std::string& account,uint64_t relayId,int64_t now);
+    // May this HELLO's (or BYE's) token speak for relay id `id`? identity none: the token is the group's key
+    // (`groupKey`); keys: a good relay token of that id (a HELLO it admits keeps it good).
+    bool relayAdmit(uint64_t id,const std::string& token,const std::string& groupKey,int64_t now);
+    // The owner's account key (identity::account of the host's launcher key; "" none): his signed calls are the
+    // owner's actions in the API. Saved with the world.
+    void setOwner(const std::string& account);
+    std::string owner() const {std::lock_guard<std::mutex> g(lock_);return owner_;}
     // One gateway call: `name` is the last path element ("createObject"), `body` the request body as received.
     Reply call(const std::string& token,const std::string& name,const std::string& body,int64_t nowSeconds);
     json::Value snapshot() const;
@@ -134,7 +158,9 @@ public:
     // apiChoices throws std::runtime_error with the reason when it is refused, and then changed nothing. It makes the
     // player when the key is new (as a sign-in would: the `players` setting applies), so his choices are in place
     // before his game first signs in.
-    json::Value apiPolicy() const;
+    json::Value apiPolicy(int64_t now=0) const;          // with the server's clock (`time`), for the launcher's signatures
+    json::Value apiPlayers() const;                       // the owner's: playerList and waiting as documents
+    json::Value apiWaiting() const;
     json::Value apiMe(const std::string& key) const;
     json::Value apiMine(const std::string& key) const;
     void apiChoices(const std::string& key,const std::string& offerBuilds,const std::string& offerOld);
@@ -165,6 +191,12 @@ private:
     std::string serverId_,epoch_;uint64_t changes_=0;
     std::map<std::pair<std::string,std::string>,std::string> byOrigin_;   // (origin server, id there) -> id here
     Policy policy_;
+    // Identity: the owner's account, and the tickets and relay tokens the launchers took (by text).
+    struct Pass { std::string account;uint64_t relayId=0;int64_t issued=0,used=0; };   // used: first sign-in; a token's last HELLO
+    std::string owner_;std::map<std::string,Pass> tickets_,relayTokens_;
+    std::string pass(std::map<std::string,Pass>& passes,const std::string& account,uint64_t relayId,int64_t now);
+    Player& playerFor(const std::string& account,const char* why);   // made when new, within `players`
+    Reply signInLocked(const std::string& key,const std::string& displayName,const std::string& gateway);
     // What each player's game was handed per area (curate): kept so the same structures come back, saved with the world.
     struct Picks { int64_t asked=0;std::vector<std::string> ids; };
     std::map<std::string,std::map<int64_t,Picks>> picks_;   // player id -> area -> picks

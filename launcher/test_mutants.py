@@ -6,6 +6,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parent
+KEYS = ['../world/identity.cpp', '../vendor/monocypher/monocypher.c', '../vendor/monocypher/monocypher-ed25519.c']
 
 sys.path.insert(0, str(ROOT.parent/'mod'))
 import mutants  # the shared side-by-side runner
@@ -18,7 +19,7 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
     def one(name):
         exe = work/name
         result = run(['g++', '-std=c++17', '-O1', '-Wall', '-Wextra', '-Werror', '-DMUTANT_'+name,
-                      'core_test.cpp', 'core.cpp', 'strand.cpp', '../mod/config.cpp', '../redirect/path_map.cpp', '-o', str(exe)])
+                      'core_test.cpp', 'core.cpp', 'strand.cpp', '../mod/config.cpp', '../redirect/path_map.cpp', *KEYS, '../world/signatures.cpp', '-o', str(exe)])
         if result.returncode:
             raise SystemExit(result.stderr)
         with tempfile.TemporaryDirectory(dir=work) as fixture:
@@ -29,6 +30,7 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
     for name in mutants.parallel(one, ['CONFIG_ROLE', 'CONFIG_PLAY', 'WORLD_GUEST_ADDRESS', 'WORLD_ONE_ACCOUNT', 'WORLD_BIND', 'WORLD_SOLO', 'WORLD_GUEST_DECIDES', 'LOBBY_WORLD_BIT', 'LOBBY_SECRET', 'GROUP_PEER', 'GROUP_PEERS', 'GROUP_NO_RELAY', 'GROUP_KEY', 'GROUP_ID', 'GROUP_ROUTE', 'GROUP_INVITE_KIND', 'GROUP_SAME_PC', 'DIAG_GROUP_KEY',
                                       'GROUP_POLICY', 'STRAND_ACCOUNT', 'STRAND_PARSE', 'STRAND_WRONG_KEY', 'STRAND_OLD_SERVER', 'STRAND_SEND_FAIL', 'STRAND_DEFAULTS', 'STRAND_PER_SERVER', 'STRAND_SETTINGS_KEEP', 'BACKUP_LINKS', 'OUTPUT_LINKS',
                                       'MISSING_CONFIG_CLOSES', 'TICKET_TARGET', 'TICKET_EXPIRY', 'TICKET_NETWORK',
+                                      'KEYS_KEEP', 'STRAND_SIGN', 'STRAND_NO_PASSES', 'GROUP_TICKET', 'GROUP_RELAY_TOKEN', 'DIAG_TICKET',
                                       'BACKUP_RUNNING', 'NESTED_LAB', 'NESTED_RELEASE',
                                       'DIAG_SECRET', 'DIAG_ADDRESS', 'DIAG_USER', 'DIAG_BOUND', 'FIREWALL_BLOCK_WINS', 'FIREWALL_ANY_PROGRAM', 'SETUP_OVERWRITE', 'SETUP_REMOVE_ANY']):
         print('killed', name)
@@ -42,10 +44,18 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
         return name
     for name in map(group, ['GROUP_KEY', 'GROUP_NO_RELAY', 'GROUP_SAME_PC', 'GROUP_POLICY', 'STRAND_ACCOUNT', 'STRAND_WRONG_KEY', 'STRAND_OLD_SERVER', 'STRAND_SEND_FAIL']):
         print('killed', name, '(socket test)')
+    # Identity keys on the real server (test_identity.py): the game's ticket and relay token, the signed calls, the kept key.
+    def keyed(name):
+        result = run([sys.executable, '-B', 'test_identity.py', str(work/name), '../world/build/coop-world'])
+        if result.returncode != 1 or 'identity oracle:' not in result.stderr:
+            raise SystemExit(f'SURVIVED or crashed {name} (identity socket test): {result.returncode}\n{result.stdout}\n{result.stderr}')
+        return name
+    for name in map(keyed, ['GROUP_TICKET', 'GROUP_RELAY_TOKEN', 'STRAND_SIGN', 'KEYS_KEEP']):
+        print('killed', name, '(identity socket test)')
     def save(name):
         exe = work/name
         result = run(['g++', '-std=c++17', '-O1', '-Wall', '-Wextra', '-Werror', '-DMUTANT_'+name,
-                      'saves_test.cpp', 'saves.cpp', 'core.cpp', 'strand.cpp', '../mod/config.cpp', '../redirect/path_map.cpp', '-o', str(exe)])
+                      'saves_test.cpp', 'saves.cpp', 'core.cpp', 'strand.cpp', '../mod/config.cpp', '../redirect/path_map.cpp', *KEYS, '-o', str(exe)])
         if result.returncode:
             raise SystemExit(result.stderr)
         with tempfile.TemporaryDirectory(dir=work) as fixture:

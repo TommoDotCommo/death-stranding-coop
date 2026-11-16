@@ -3,16 +3,17 @@ CXX = x86_64-w64-mingw32-g++
 WINDRES ?= $(shell command -v x86_64-w64-mingw32-windres >/dev/null 2>&1 && echo x86_64-w64-mingw32-windres || echo windres)
 FLAGS = -std=c++17 -O2 -Wall -Wextra -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
 # -static: MSYS2's toolchain otherwise links libwinpthread-1.dll dynamically and the binaries fail to start (0xC000007B).
-SRC = core.cpp strand.cpp saves.cpp ../mod/config.cpp ../redirect/path_map.cpp
-HEADERS = core.h strand.h ../world/json.h saves.h net_win.h launch_win.h firewall_win.h ../mod/config.h ../mod/identity.h ../redirect/startup_policy.h vendor/coop_invite.h vendor/coop_discover.h vendor/coop_discover_win.h
+# Players' keys: ../world/identity.* on the vendored Monocypher (../vendor/monocypher).
+SRC = core.cpp strand.cpp saves.cpp ../mod/config.cpp ../redirect/path_map.cpp ../world/identity.cpp ../vendor/monocypher/monocypher.c ../vendor/monocypher/monocypher-ed25519.c
+HEADERS = core.h strand.h ../world/json.h ../world/identity.h ../vendor/monocypher/monocypher.h ../vendor/monocypher/monocypher-ed25519.h saves.h net_win.h launch_win.h firewall_win.h ../mod/config.h ../mod/identity.h ../redirect/startup_policy.h vendor/coop_invite.h vendor/coop_discover.h vendor/coop_discover_win.h
 all: build/deathstranding-coop.exe build/net-fixture.exe build/discover-win-test.exe
 build:
 	mkdir -p build
 build/deathstranding-coop.exe: main.cpp $(SRC) $(HEADERS) launcher.rc | build
 	$(WINDRES) launcher.rc -o build/launcher-res.o
 	$(CXX) $(FLAGS) -municode -mwindows main.cpp $(SRC) build/launcher-res.o -o $@ -lcomctl32 -lshell32 -lole32 -loleaut32 -luuid -lws2_32 -liphlpapi -lbcrypt
-build/core-test: core_test.cpp $(SRC) $(HEADERS) | build
-	g++ -std=c++17 -O2 -Wall -Wextra -Werror core_test.cpp $(SRC) -o $@
+build/core-test: core_test.cpp $(SRC) $(HEADERS) ../world/signatures.cpp ../world/signatures.h | build
+	g++ -std=c++17 -O2 -Wall -Wextra -Werror core_test.cpp $(SRC) ../world/signatures.cpp -o $@
 build/invite-test: vendor/tests/coop_invite_test.c vendor/coop_invite.h | build
 	cc -std=c99 -O1 -g -Wall -Wextra -Ivendor $< -o $@
 build/discover-test: vendor/tests/coop_discover_test.c vendor/coop_discover.h | build
@@ -28,6 +29,7 @@ FORCE:
 test: build/core-test build/saves-test build/invite-test build/discover-test ../world/build/coop-world ../mod/build/coop-swarm
 	python3 -B test_core.py
 	python3 -B test_group.py build/core-test ../world/build/coop-world ../mod/build/coop-swarm
+	python3 -B test_identity.py build/core-test ../world/build/coop-world
 	./build/invite-test 20000
 	./build/discover-test 10000
 	python3 -B test_mutants.py
