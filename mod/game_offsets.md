@@ -5982,3 +5982,13 @@ Live checklist (one copy, the Episode 3 save, `share_rewards` on; read-only exce
    step that crosses it, the game's level-up notice, and no `STALL` line or fault record. This is the level-up
    path of the add routine, not run live yet (the 2026-11-15 run never crossed a threshold below the cap).
 4. Compare one row's `level cap` with the stars the map shows as reachable for that facility, if it shows them.
+
+## Many bodies of the player's kind in one game (live, 2026-11-16)
+
+The entity creator used for the partner's own body (`EntityResource_ExportedCreateEntity` on the resident double's
+resource) was called 80 more times in one session, 300 ms apart. Every call returned a `DSPlayerAKukanEntity`; every
+body took the in-place art-parts dressing, an instance of the porter's animation network (the "upgrade" of
+double.cpp), `SetVisible`/`SetSleeping`, the fixed-position mover and the join to the porter's update group
+(0x23f4040, kind 0, several bodies on one porter). No pool limit was met at 81 bodies besides the resident double.
+Removal through the game's queued removal worked for all of them while the game ran on. Cost on the mod's side:
+about 170 microseconds per body per game-thread tick (what takes the time inside a tick was not measured).

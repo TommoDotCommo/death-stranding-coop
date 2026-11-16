@@ -255,6 +255,12 @@ struct Runtime final:ds::Transport {
     bool partnerMode() const {return twinMode==TwinMode::Peer||twinMode==TwinMode::Own;}
     std::filesystem::path cargoCommand;std::function<void(uint32_t,const mod::puppet::Transform&)> cargoCreate;
     std::filesystem::path bodyCommand;std::unique_ptr<mod::body::Probe> body;   // own-body experiment (body.h)
+    // Crowd experiment (lab command "crowd N" in puppet.double): N more bodies, each made and driven exactly like the
+    // partner's own body, standing in rings around him (or around this porter while no partner is shown). It answers
+    // how many Sams one game holds; nothing here is on the wire.
+    struct CrowdMember{std::unique_ptr<mod::puppet::OwnBody> own;std::unique_ptr<mod::puppet::Double> drive;uint64_t entity=0,linkedTo=0,quietBody=0,quietComponent=0;};
+    std::vector<std::unique_ptr<CrowdMember>> crowd;size_t crowdWanted=0;std::function<std::unique_ptr<CrowdMember>()> crowdMake;
+    uint64_t crowdMadeAt=0,crowdNotedAt=0,crowdWorstUs=0,crowdSumUs=0,crowdTicks=0,crowdTickAt=0,crowdGapWorstMs=0;
     // The porter's visible gear on the partner's own body (gear.h); config partner_gear or puppet.gear "on <stamp>".
     std::filesystem::path gearCommand;std::unique_ptr<mod::gear::Mirror> gear;bool gearOn=false;
     uint32_t gearChurnMode=0,gearChurnLeft=0;uint64_t gearChurnAt=0;
@@ -1136,7 +1142,8 @@ struct Runtime final:ds::Transport {
     // corrupted those queues (game_offsets.md, "Deferred rep calls"). The body has no inventory to show: the bit is
     // kept clear on the body.
     uint64_t kukanBody=0,kukanComponent=0,kukanCleared=0,kukanNoted=0,kukanNotedAt=0;
-    void quietBodyInventory(uint64_t body,uint64_t now){
+    void quietBodyInventory(uint64_t body,uint64_t now){quietInventoryOf(body,now,kukanBody,kukanComponent);}
+    void quietInventoryOf(uint64_t body,uint64_t now,uint64_t& kukanBody,uint64_t& kukanComponent){
         if(!sampler||!body){kukanBody=0;kukanComponent=0;return;}
         uint64_t vtable=0;
         if(body!=kukanBody||!kukanComponent||!sampler->read(kukanComponent,&vtable,8)||vtable!=sampler->base+0x3d7eec8){
@@ -1166,12 +1173,48 @@ struct Runtime final:ds::Transport {
     void linkBodyUpdate(uint64_t body,uint64_t player){
         if(!config.bodyUpdateLink||!sampler||!body||!player||(body==linkedBody&&player==linkedPlayer))return;
         linkedBody=body;linkedPlayer=player;
+        if(joinUpdateGroup(body,player))note("BODY joined to this porter's update group\n");
+    }
+    bool joinUpdateGroup(uint64_t body,uint64_t player){
 #ifdef _WIN32
         static const uint8_t want[16]={0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57};uint8_t got[16]{};
-        if(!sampler->read(sampler->base+0x23f4040,got,16)||std::memcmp(got,want,16)){note("BODY update link unavailable: the link function differs\n");return;}
+        if(!sampler->read(sampler->base+0x23f4040,got,16)||std::memcmp(got,want,16)){note("BODY update link unavailable: the link function differs\n");return false;}
         reinterpret_cast<void(*)(uint64_t,uint64_t,uint64_t,uint32_t)>(sampler->base+0x23f4040)(player+0x208,body,player,0);
-        note("BODY joined to this porter's update group\n");
+        return true;
+#else
+        (void)body;(void)player;return false;
 #endif
+    }
+    // One tick of the crowd experiment (game thread, after the partner's body was driven).
+    void tickCrowd(const mod::puppet::Anchor& anchor,const mod::puppet::Transform* goal,const ds::Animation* sample,bool fresh,double speed,uint32_t actions,uint64_t now){
+        if(!crowdMake||(!crowdWanted&&crowd.empty()))return;
+        uint64_t began=mod::nowUs();
+        if(crowdTickAt&&now-crowdTickAt>crowdGapWorstMs)crowdGapWorstMs=now-crowdTickAt;
+        crowdTickAt=now;
+        while(crowd.size()>crowdWanted){auto& m=crowd.back();m->drive->mirror(nullptr,false);m->drive->tick(true,nullptr);m->own->remove();crowd.pop_back();}
+        // One new body every 300 ms: making one takes the game a while, and a refusal should be seen one at a time.
+        if(crowd.size()<crowdWanted&&now-crowdMadeAt>=300&&anchor.entity&&anchor.pose.available){crowdMadeAt=now;crowd.push_back(crowdMake());}
+        mod::puppet::Transform centre=goal?*goal:mod::puppet::transform(anchor.pose);
+        size_t made=0,given_up=0,driving=0;
+        for(size_t i=0;i<crowd.size();++i){auto& m=*crowd[i];
+            m.entity=m.own->exhausted()?0:m.own->tick(anchor);
+            if(m.own->exhausted())++given_up;
+            if(!m.entity){m.drive->mirror(nullptr,false);m.drive->tick(true,nullptr);continue;}
+            ++made;
+            // Rings of 6, 12, 18 ... bodies, 2 m apart, at the centre's height (flat ground is assumed).
+            size_t ring=1,first=0;while(i>=first+6*ring){first+=6*ring;++ring;}
+            double angle=6.283185307179586*double(i-first)/double(6*ring),radius=2.0*double(ring);
+            auto t=centre;t.position[0]+=radius*std::cos(angle);t.position[1]+=radius*std::sin(angle);
+            m.drive->mirror(sample,fresh);m.drive->tick(true,&t,speed,actions,false);m.drive->mirror(nullptr,false);
+            if(m.drive->stage()==mod::puppet::Double::Stage::Driving)++driving;
+            quietInventoryOf(m.entity,now,m.quietBody,m.quietComponent);
+            if(config.bodyUpdateLink&&m.linkedTo!=anchor.entity&&anchor.entity){m.linkedTo=anchor.entity;joinUpdateGroup(m.entity,anchor.entity);}
+        }
+        uint64_t took=mod::nowUs()-began;crowdSumUs+=took;++crowdTicks;if(took>crowdWorstUs)crowdWorstUs=took;
+        if(now-crowdNotedAt>=5000){crowdNotedAt=now;std::ostringstream o;
+            o<<"CROWD wanted "<<crowdWanted<<" made "<<made<<" driving "<<driving<<" given up "<<given_up<<" tick avg "<<(crowdTicks?crowdSumUs/crowdTicks:0)<<" us worst "<<crowdWorstUs
+             <<" us, longest gap between ticks "<<crowdGapWorstMs<<" ms over "<<crowdTicks<<" ticks\n";note(o.str().c_str());
+            crowdSumUs=crowdTicks=crowdWorstUs=crowdGapWorstMs=0;}
     }
     // The game thread's last tick, for the watchdog on the mod's own thread (guard_win.h, breakEndlessWalk).
     std::atomic<uint64_t> gameTickUs{0};uint64_t ringTriedUs=0;unsigned ringNoted=0;
@@ -2121,6 +2164,20 @@ struct Runtime final:ds::Transport {
                     driver.find=[this](uint64_t){return ownEntity;};
                     ownTwin=std::make_unique<mod::puppet::Double>(std::move(driver),[this](const std::string& row){note(row.c_str());});
                     ownTwin->walk(true);
+                    crowdMake=[this,sp,camera,akukan]{
+                        auto m=std::make_unique<CrowdMember>();auto* raw=m.get();
+                        auto made=mod::puppet::nativeApi(*sp);auto driver=mod::puppet::nativeDoubleApi(*sp);
+                        mod::puppet::OwnBodyApi oa;auto resourceOf=made.resource;
+                        oa.resource=[resourceOf,sp,camera,akukan](uint64_t porter){auto d=mod::puppet::findDouble(*sp,porter,camera,akukan);return d?resourceOf(d):0;};
+                        oa.create=made.create;oa.remove=made.remove;
+                        oa.alive=[sp,akukan](uint64_t b){uint64_t v=0;return sp->read(b,&v,8)&&v==akukan;};
+                        auto hide=driver.visible;auto rest=driver.sleep;oa.park=[hide,rest](uint64_t b){hide(b,false);rest(b,true);};
+                        oa.dress=mod::puppet::nativeDress(*sp,[this]{return dressMask;},[this](const std::string& row){note(row.c_str());});
+                        oa.ready=[sp](uint64_t porter){return mod::puppet::wornParts(*sp,porter,sp->base+0x3cf2b18)>1;};
+                        m->own=std::make_unique<mod::puppet::OwnBody>(std::move(oa),[this](const std::string& row){note(("CROWD "+row).c_str());});
+                        driver.find=[raw](uint64_t){return raw->entity;};
+                        m->drive=std::make_unique<mod::puppet::Double>(std::move(driver),[](const std::string&){});
+                        m->drive->walk(true);m->drive->enable();return m;};
                     gearOn=config.partnerGear;
                     gear=std::make_unique<mod::gear::Mirror>(mod::gear::nativeApi(*sampler),[this](const std::string& row){note(row.c_str());});
                 }
@@ -2334,6 +2391,10 @@ struct Runtime final:ds::Transport {
                 // then the apply if needed, 40 a read-only report (double.h). game_offsets.md, "Own-body mode".
                 dressMask=*ownMask;twinMode=TwinMode::Own;if(ownTwin)ownTwin->enable();
                 note(("DOUBLE own dress mask 0x"+[](unsigned m){std::ostringstream o;o<<std::hex<<m;return o.str();}(dressMask)+"\n").c_str());}
+            else if(command.rfind("crowd ",0)==0&&command.size()>stamp.size()&&command.compare(command.size()-stamp.size(),stamp.size(),stamp)==0){
+                auto n=command.substr(6,command.size()-stamp.size()-6);
+                if(n.empty()||n.size()>3||n.find_first_not_of("0123456789")!=std::string::npos){note("CROWD refused: crowd <0..200>\n");return;}
+                crowdWanted=std::min<size_t>(200,size_t(std::stoul(n)));note(("CROWD wanted "+std::to_string(crowdWanted)+(crowdMake?"\n":" (unavailable in this build)\n")).c_str());return;}
             else if(command=="lead"+stamp)twinMode=TwinMode::Lead;
             else if(command=="still"+stamp){twin->walk(false);if(ownTwin)ownTwin->walk(false);note("DOUBLE own (private-room) network for the next acquire\n");return;}
             else if(command=="off"+stamp)twinMode=TwinMode::None;else {note("DOUBLE ignored command for another process\n");return;}
@@ -2446,6 +2507,8 @@ struct Runtime final:ds::Transport {
         }
         else{twin->mirror(mirrorSample,mirrorFresh);if(ownTwin)ownTwin->mirror(nullptr,false);
             twin->tick(true,goal,speed,actions,hold);if(ownTwin)ownTwin->tick(true,nullptr);}
+        stages.enter("crowd",mod::nowUs());
+        tickCrowd(anchor,goal,mirrorSample,mirrorFresh,goal?speed:0,goal?actions:0,now);
         twin->mirror(nullptr,false);if(ownTwin)ownTwin->mirror(nullptr,false);   // the sample lives only for this tick
         stages.enter("gear",mod::nowUs());
         repWatch=useOwn?ownEntity:0;

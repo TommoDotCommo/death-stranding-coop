@@ -1123,6 +1123,14 @@ partner can play the other side: `--shout-every S`, `--scan-every S`, `--vitals 
 `signals_test.cpp` (mutants KIND, SHOUT_HELD, SCAN_LEARN, SCAN_GAP, RECEIVE_GAP, SCAN_OWNER, VITALS_RANGE, INFO_OWNER,
 INFO_RANGE, STATE_HOLD, STEP, VITALS_CHANGED, VITALS_GAP, LABEL_GAP) and the scan notice in `notice_test.cpp` (SCAN_GAP).
 
+## Many bodies (lab command `crowd N`)
+
+`crowd <0..200>` in `puppet.double` makes that many more bodies beside the partner's own body (rings of 6, 12, 18 ...,
+2 m apart, at his height, or around this porter while no partner is shown), each with its own `OwnBody` and `Double`
+and the partner's animation sample; `crowd 0` removes them. One body is made every 300 ms. Every 5 s the log says
+`CROWD wanted N made M driving D given up G tick avg .. us worst .. us`. It is an experiment for the question "how
+many Sams does one game hold" (STATUS.md, "Many Sams in one game"); nothing of it is on the wire.
+
 ## The partner from the start (`partner`)
 
 `"partner": "own"` (or `"peer"`) in `mod.json` shows the partner from the start, as the `puppet.double` command `own` /
