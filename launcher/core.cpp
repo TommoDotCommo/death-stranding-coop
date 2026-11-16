@@ -114,6 +114,9 @@ std::string config(const Session& s) {
         std::string json="{\"server\":\""+server+"\",\"slot\":"+std::to_string(slot)+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)
             +",\"required\":true,\"logging\":true,\"game_thread\":true,\"puppet_probe\":true,\"partner_tag\":true,\"others\":"+std::to_string(GroupOthers)
             +",\"relay\":\""+relayAddress(s)+"\",\"relay_key\":\""+key+"\",\"player_id\":"+std::to_string(s.playerId)
+#ifndef MUTANT_GROUP_PAIRS
+            +",\"relay_mode\":\"broadcast\""   // publish once, the server copies to everyone near (../mod/README.md, "The broadcast mode")
+#endif
             +",\"online_server\":\""+worldAddress(s)+"\""
 #ifndef MUTANT_GROUP_NOTICE_TOKEN
             +(s.noticeToken.empty()?std::string():",\"strand_notices\":true,\"strand_token\":\""+s.noticeToken+"\"")

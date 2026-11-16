@@ -140,6 +140,7 @@ int main(int argc,char** argv) {
         auto hc=mod::parseConfig(launcher::config(h));
         check(hc.group&&hc.peer.empty()&&hc.role=="none"&&hc.server=="127.0.0.1"&&hc.slot==3,"a group player has no partner");
         check(hc.others==launcher::GroupOthers&&hc.relay=="127.0.0.1:49103"&&hc.relayKey=="w305419896"&&hc.playerId==h.playerId&&hc.partnerTag&&hc.session==h.secret&&hc.gameThread&&hc.puppetProbe&&hc.required,"group host config");
+        check(hc.relayMode=="broadcast","group play uses the relay's broadcast mode");
         check(hc.onlineServer=="http://127.0.0.1:49103/w305419896/auth/ds","the host's game signs in on loopback, as its own account");
         check(hc.partner=="off"&&!hc.shareOrders&&!hc.shareEnemies&&!hc.shareRoads&&!hc.shareSavedStructures&&hc.shareEnvironment=="off"&&!hc.notices,"nothing of the two-player session in group play");
         auto a=launcher::worldArguments(h,"D");

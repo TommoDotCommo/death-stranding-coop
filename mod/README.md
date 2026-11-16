@@ -1367,8 +1367,10 @@ without, a player leaving and coming back, the stand-ins leaving, this game's tr
 `fake-relay-mode.so` (the setting ignored); `unit.cpp` for the config keys with the mutants CONFIG_RELAY_MODE and
 CONFIG_SHOW_OTHERS (`show_others`: its three values, four that are none, refused in pairs and without a relay).
 
-**Not run live.** Nothing of the broadcast mode has met a game. A live run must look at what the pairs mode was
-checked for (bodies, names, gear and cases, players leaving and returning), and at the poses of players beyond the
+**Live** (2026-11-16/17): two real games and 12 stand-ins replaying a recorded walk, all near each other, each game
+showing the other 13 with names (the lab's group regression in broadcast mode), and two real games on two linked
+servers ("Presence across linked servers" in `../world/README.md`). The launcher's group configs use it since
+2026-11-17. Not yet looked at live: gear and cases in broadcast mode, and the poses of players beyond the
 server's full distance (one update in 200 ms by default: with loss the pose stops for a moment; the client measures
 that interval and waits for it: `adaptDelay` in `core/broadcast_client.cpp`).
 

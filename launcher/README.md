@@ -109,7 +109,8 @@ a game shows the group invite and **Start group server and play** instead of a l
    server is stopped). A server already running keeps serving; the second start leaves. It stops by itself six hours
    after the last player.
 3. It writes the host's `mod.json`: no `peer`, `server` `127.0.0.1`, `relay` `127.0.0.1:P`, `relay_key` `wKEY`,
-   `session` KEY, `player_id`, `others` 15, `partner_tag`, `online_server` `http://127.0.0.1:P/wKEY/auth/ds`, and
+   `session` KEY, `player_id`, `relay_mode` `broadcast` (since 2026-11-17: each game publishes once and the server
+   copies to everyone near; `../mod/README.md`, "The broadcast mode"), `others` 15, `partner_tag`, `online_server` `http://127.0.0.1:P/wKEY/auth/ds`, and
    the play setup's `game_thread`, `puppet_probe`, `required`. The proxy's peer list is `127.0.0.1`. On a server that
    takes keys (Public) it first waits for the server to answer (at most ten seconds) and takes the game's sign-in
    ticket and relay token: `online_server` is then `http://127.0.0.1:P/wKEY/t/TICKET/auth/ds`, `relay_key` the token
