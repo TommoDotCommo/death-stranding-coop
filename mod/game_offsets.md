@@ -5651,6 +5651,24 @@ source. A reader takes likes from the server by online id until then.
 3. Join the two by online id: the area of an own structure is its element's area; an own element with no structure
    (a cairn, a sign, a road) has no position here.
 
+**Live (2026-11-17, one real game, Episode 3 save, signed in to `coop-world` on loopback; read from outside the process).**
+
+- After sign-in, the string at online manager `+0x28` and the user manager's `+0x20` are the server's player id for
+  this game (`zygo_` and 28 characters, as `world/` makes it); the user manager's `+0x28` is the provider and the
+  provider's account id joined by `_`. So an object the server hands with `c` equal to the player's id is his own to
+  the game.
+- The save's structures: 225 construction records, 30 with owner 1 and 45 with owner 2 (Net). Every owner-1 record
+  had **creator 1**, not 0 as read statically above (the save keeps the creator, and the porter's builds of earlier
+  sessions carry 1); about half had an online id from the original online service, the rest none. So "built by this
+  player" is owner 1, and creator 1 agrees.
+- Configs read (`DSConstructionPointConfig`, metres: `+0x270` / `+0x284` / `+0x288`, `+0x94`): rain shelter 10 / 20 /
+  200, both bridges 10 / 20 / 100 (unrealize 1030), ladder 0 / 5 / 5, post 10 / 20 / 100, watchtower 11 / 20 / 250;
+  `LimitOfNetCreation` 9999 for each. The byte `[[[base+0x7be6a48]+0x300]+0x39]` was 0.
+- Own objects served back (a server built to hand a player his own objects; a cairn, a 30 m bridge and a rain
+  shelter uploaded as the same player before the game started): the game added the three elements with creator 1,
+  and set all three to Fail (state 4, third list) with no construction record. The game does not rebuild an own
+  object its save lacks; `world/` never hands a player his own objects, which stays right.
+
 **Live probe still needed:** (1) a save with structures of the porter: every owner-1 record, its creator (expected 0,
 or 1 for a road rebuilder he paved) and online id; the second list's ids against those online ids. (2) After sign-in:
 the strings at `[[base+0x7c192f0]]+0x28` and `[[base+0x7c1d780]]+0x20/+0x28` against the server's player id and the
