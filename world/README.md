@@ -54,6 +54,7 @@ loopback, a LAN or a VPN.
 | `getRankingSchedules`, `getWastedBaggages`, `findMissions`, `getOrderedMissions`, … | empty lists |
 | anything else | `{}` and an `unhandled NAME` line in the log |
 | `POST …/link/pull` with `Authorization: Link KEY` | not the game's: one page of objects for a linked server ("Linked servers") |
+| `GET`/`POST …/coop/NAME` | not the game's: the launcher's API ("The launcher's API") |
 
 Limits: 16 players, 4000 objects built here per player, 20000 objects held from each other server, 4 MiB per body,
 32 connections.
@@ -511,7 +512,8 @@ through linked servers (only his: the other builders of the same server stay), a
 objects. The account stays: he can sign in and build again. An imported builder's objects come back with the next
 import from a server that still gives them, unless its filter leaves them out.
 
-Like `export` and `import`, the policy commands work on a world file while no server has it open.
+Like `export` and `import`, the policy commands work on a world file while no server has it open. While the server
+runs, a player's own choices, offer and withdrawal go through the launcher's API (below).
 
 What it holds to:
 
@@ -526,14 +528,56 @@ What it holds to:
 | `remove-player` removes that builder's objects only | the other builders of the same linked server are not touched |
 | The world file keeps the policy, the choices and every object's state; it is format 2, which a `coop-world` from before refuses | an older server would hand out what is kept and let remnants be changed |
 
+### The launcher's API
+
+Beside the game's gateway, under the same secret prefix, for the launcher and never the game (`api.h`). The launcher
+shows the policy before a player's game connects, sends his choices, and lists, offers and withdraws his objects
+(`launcher/README.md`, "A group on one server"). Built and tested without a game and without a screen (2026-11-16).
+
+| Call | Answer |
+|---|---|
+| `GET …/coop/policy` | `format` 1, the world's `server` id, `preset`, `players` (`count`, `limit`) and `settings`: every setting as `key`, `value`, the preset's value (`preset`) and one line in words (`text`) |
+| `GET …/coop/me?player=KEY` | that player's id, `known` (has he signed in or chosen here), `name`, `member`, `choices` (his own, `""` for none), what `applies`, and counts of his objects built here: `shared`, `waiting_you`, `waiting_owner`, `held` by reason (`build`, `member`, `limit`), `kept`, `remnants`, and `likes` (on what is still his: a remnant's are nobody's) |
+| `GET …/coop/mine?player=KEY` | his objects built here: `id`, `type` and `kind` (ladder, cairn, …), `area`, `state` (`shared`, `waiting`, `held`, `kept`, `remnant`), `waiting_for` (`you` or `owner`), `held` and `held_text` (why), `likes`, `updated`. Objects that came from linked servers are not his here, whatever builder id the other server names, and are not listed |
+| `POST …/coop/choices` `{"player":KEY,"offer_builds":"yes\|no\|ask\|default","offer_old":"yes\|no\|default"}` | sets his choices (one or both) and answers as `me`. A key the world does not have yet becomes a player, as a sign-in would (within `players`), so the choices are in place before his game first signs in |
+| `POST …/coop/offer` `{"player":KEY,"object":ID}` or `{"player":KEY,"all":true}`, `"answer":"no"` to keep it his | as `coop-world offer` (`--no`): `offered` (or `kept`) and `me` |
+| `POST …/coop/withdraw` `{"player":KEY,"object":ID}` or `{"player":KEY,"all":true}` | as `coop-world withdraw`: `remnants`, `removed` and `me` |
+
+`KEY` is the account key the player's game signs in with: the `NAME` of a `/k/NAME` sign-in address (two games on one
+PC), else the 64-bit Steam id from the ticket. Answers: 200; 400 for a request in the wrong form (an unknown field, a
+value that is no choice, a key that is none, a body that names neither one object nor all, or both); 403 with the
+reason when the server refuses it (another player's object, an import, a remnant, an object the policy still holds,
+a full world); 404 for any other path or method.
+
+**There is no identity.** Whoever has the group's prefix can call this API for any player: read his choices and his
+objects, change his choices, offer what waits for his answer, withdraw what he built. That is exactly what he can do
+already by signing in to the gateway under another player's key (`/k/NAME`, or a Steam ticket the server does not
+check). Use it on friends servers only.
+
+What it holds to:
+
+| Rule | Why |
+|---|---|
+| Only under the prefix, never under `/k/NAME`, and only the six calls | the game's paths and the API do not mix, and nothing answers without the group's key |
+| A change is a `POST`; a `GET` (or any other method) of a change is 404 and changes nothing | a link that is opened or fetched ahead never offers or withdraws |
+| A body is one JSON object with only that call's fields, all checked before anything changes | a request in the wrong form changes nothing |
+| `offer` and `withdraw` name one object or `all: true`, never neither | a body that forgot the object does not take back everything |
+| `member` and the policy are not in it | they are the owner's: `player-set` and `policy` on the stopped server |
+| A new key by `choices` counts against `players` | a solo archive stays one player's |
+| `mine` and `me` count only his objects built here; `offer` and `withdraw` take only those (the world's own checks) | nobody acts on another's objects or on an import |
+
+Owner actions (review, remove-player, members, policy) stay commands on the world file while the server is stopped.
+
 ### Not built (server policy)
 
 - Identity. Anyone who has the group's prefix can sign in under any account key (`/k/NAME`, or a Steam ticket the
   server does not check), so someone else can act as a player: build under his name, be handed what is kept for
-  him. Until players have an identity of their own these rules are for friends servers; on a public server they
-  hold against honest mistakes, not against a player who wants to break them.
-- Screens: the launcher does not show or set the policy or a player's choices yet, and the game cannot ask (it does
-  not know of them). Today they are set with the commands above, on the server's PC, while the server is stopped.
+  him, and through the launcher's API change his choices or withdraw his objects. Until players have an identity of
+  their own these rules are for friends servers; on a public server they hold against honest mistakes, not against
+  a player who wants to break them.
+- Screens: the launcher shows the policy and sets a player's choices, offers and withdrawals through the launcher's
+  API (built game-free, not seen on a screen); the owner's actions have no screen and stay commands on the stopped
+  server. The game itself cannot ask (it does not know of them).
 - `join` and `offer_old` are recorded only. There is no ban: `remove-player` does not stop anyone building again.
 - What a game does when its upload is refused (403) after it built the structure is not known in full: live, once,
   it did not ask again and stayed up; whether it took the structure out of the player's world was not checked. The
@@ -568,6 +612,17 @@ it; three start options are refused, and eight command lines that are refused le
 server with `build=nobody`: the upload is answered 200 with an id of the game's shape, the other player is handed
 nothing, `offer` is refused while nobody builds, and after `policy --set build=everyone` and `offer --all` the other
 player finds it.
+
+The launcher's API: `api_test.cpp` through the HTTP surface (the policy in words for the three presets and a changed
+setting; a key that has not signed in, made a player by its choices before its sign-in and the same player after it;
+fourteen bodies and six keys that are refused and leave the world as it was; a full world; a player's objects in every
+state with `waiting_for` and the reason a held one is held, his offer (yes and no), the owner's review, likes, a
+withdrawal with stay and with go, another player's object, an import with his builder id, and every change refused as
+a `GET`). Eight mutants must fail it (`API_METHOD`, `API_KEY`, `API_STRICT`, `API_CHOICES_MEMBER`, `API_CHOICES_ROOM`,
+`API_ALL_IMPLIED`, `API_MINE_OTHERS`, `API_MINE_IMPORTS`), and `FRONT_PREFIX` must fail it too. `test_server.py` calls it
+on the built server on loopback: the policy of a public server, a player's choices before his game signs in, his
+upload waiting for his answer, his offer, the other player handed nothing, a `GET` of a withdrawal refused; after the
+owner's `review --accept` and a restart, his withdrawal leaves a remnant, and the world file keeps every change.
 
 Linked servers: `link_test.cpp` (every filter term on the giving and on the taking side; ids of the game's shape
 that differ from the original and are the same in every world; the same export twice; an id that collides with a
