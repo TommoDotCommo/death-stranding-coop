@@ -5562,7 +5562,8 @@ from the executable in the three sections below; each still needs its live probe
 
 Read from the pinned executable only; nothing here was read from a running game. Confidence: **high** for the loads,
 stores and branches named (they were read instruction by instruction), **medium** where a meaning is put on them, as
-marked. All addresses are RVAs. The mod's reader is `mod/own_strand.h` (game-free, not wired into the mod).
+marked. All addresses are RVAs. The mod's reader is `mod/own_strand.h` (game-free; only its structure reader is used
+in the mod, by `build_received`).
 
 **Users are small numbers.** The user manager is the global at `0x7c1d780`. It maps a creator string to a user id, a
 u32 (`0x34b0100(manager, out id, creator string)`, find-or-add `0x34ada50`; a table at manager `+8`, 24-byte entries:
@@ -5724,6 +5725,38 @@ and clearing 0x20.
 - Bridge: with a received Net bridge pending (state 0, `+0xaa` 0x20), read `[obj+0x460]` while the porter stands by
   it (expected under 1000); teleport him more than 1 km away: expected state 1 within a second or two, then 2 when
   he comes back. Separately, set `[obj+0xaa] |= 0x10` near it: expected built at once if the placement check passes.
+
+### Received structures built (2026-11-17, live)
+
+One test copy, an Episode 3 save, signed in to `coop-world` on loopback, which served a 30 m bridge and rain shelters
+of another player near the porter. A reader outside the game read the construction records (object = record
+`- 0x18`, as above) and, in the last probe, wrote one byte. Flag bytes are quoted from object `+0xa8`.
+
+Observed:
+
+- A record the game made from the server's answer is a Net variant (owner `+0xb2` = 2) with the online id at `+0xb8`.
+  It starts in record state 0 with `+0xaa` 0x20 set (still needs the online placement check) and 0x10 clear (the range
+  test is not skipped), as the static reading above has it.
+- Probe 1: the served 30 m bridge stayed in state 0 with the porter 9 m from it, with him 1378 m from it for 40 s,
+  and after he came back. (The static reading expected it to be built once he was 1 km away; what else held it is
+  not known.)
+- Probe 2: setting only `+0xaa |= 0x10` on that record made the walker run the placement check at once. It failed
+  (`+0xaa` 0x20 to 0x70, `+0xab` 04 to 05) and the record was removed.
+- Probe 3: the outside reader set `+0xaa = (+0xaa | 0x10) & ~0x20` as soon as a served bridge record appeared (state
+  0). The record went to state 2 (built) at once, and its flag bytes then matched those of the save's own received
+  bridges from the publisher's service: `21 c0 10 04 2c 00 00 04 20 00` from `+0xa8`.
+- Probe 4: served rain shelters were made and removed within about 1 to 3 s (`+0xaa` 0x20 to 0x60), too fast for the
+  outside reader to change them first.
+- Records the save loads for other players' structures carry `+0xaa` 0x10 already (`20 c0 10 ...` in state 1,
+  `21 c0 10 ...` in state 2).
+
+Derived: owner 2, record state 0, `+0xaa` 0x20 set with 0x10 and 0x40 clear, `+0xab` bit 0 clear and a non-empty
+online id pick out the records freshly made from a server's answer; the save's records of other players and the
+records the game has already refused fall outside, and so do the Net copies the mod makes of a partner's structures
+(`CreateConstruction`, no online id). The mod's option `build_received` (`mod/received.h`) writes that one byte for
+such records on the game thread. Not yet run with the mod: whether its tick (up to 20 times a second, at the message
+pump between frames) sees a served rain shelter before the walker refuses it; whether a structure built this way
+stays after a load; what the game does with one that overlaps another structure.
 
 ### How an area's per-kind counts (`ct`) are made (2026-11-17, static)
 

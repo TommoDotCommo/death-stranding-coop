@@ -71,6 +71,7 @@ config names the server instead:
 | `relay_key` | the group's key, the one the server was started with; on a server that takes player keys, this player's relay token, which the launcher takes from the server just before the game starts (the same field, at most 32 letters and digits) |
 | `online_server` (group) | `http://SERVER:PORT/KEY/auth/ds`; on a server that takes player keys `http://SERVER:PORT/KEY/t/TICKET/auth/ds`, with the sign-in ticket the launcher took (good for 30 minutes until the game signs in). The mod passes the address on as it is |
 | `strand_notices`, `strand_token` | with `online_server`: lines in the game's info log about this player's builds on the server, read with the notice token the launcher took ("Strand notices", below); the launcher writes both |
+| `build_received` | with `online_server`: other players' structures that server hands the game are built at once, without the game's range and placement checks ("Received structures built", below); off by default, not run live in the mod |
 | `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
 | `show_others` | `"everyone"` (default), `"friends"` or `"nobody"`: who of the players near this player the server shows him (broadcast only, sent in every HELLO; `world/README.md`, "How many players one player sees"). The server's own record of his choice, set from the launcher, comes first; `friends` needs a server with player keys. Requires `relay_mode` `"broadcast"`. A server from before this refuses a HELLO with anything but everyone |
 | `slot` | still required (0..15), but no port is bound from it |
@@ -1970,6 +1971,51 @@ The mod then does three things in the game (`online.h`; addresses in `game_offse
 The log says `ONLINE server …`, `ONLINE sign-in asked` and each change of the login task, with `(signed in)` at the
 end. Game-free tests: the address rules and the asking logic, five mutants (`online_test.cpp`).
 
+### Received structures built (`build_received`, off by default; built without a game, not run live in the mod)
+
+The game makes another player's structure from the server's answer as a pending Net record and then holds it back:
+a bridge, safe house or jump stand is built only while the porter is at least 1 km from it, and every received
+structure must pass the game's placement check, which (read statically) holds other players' structures to a wider
+spacing than the porter's own. Live (2026-11-17, `game_offsets.md`, "Received structures built"): a served 30 m bridge stayed unbuilt
+with the porter 9 m and 1378 m from it, and served rain shelters were taken down within 1 to 3 s.
+
+With `"build_received": true` (needs `online_server`), while the game is signed in to the server the config names,
+the mod looks at the construction records on the game thread at every tick (at most 20 times a second) and, for each
+record the game has just made from that server's answer, writes one byte: object `+0xaa` gets 0x10 (skip the range
+test) and loses 0x20 (skip the placement check). The game then builds it itself. Live, the same byte written by a
+reader outside the game made a served bridge stand at once, with the flags of the received bridges the save already
+had.
+
+**The trade-off.** The game's own placement check is skipped for received structures, so one may overlap a structure
+in your world: one of yours, one of the game's, or one another player built that your save already has. The server
+already spreads what it hands a game: two objects of one kind in one answer are at least `spread` metres apart (20
+by default; `../world/README.md`, "Which objects a game is handed"). It cannot know what stands in your world.
+
+What is changed: only records owned by another player (Net), in state 0, with `+0xaa` 0x20 set and 0x10 clear, not
+marked for removal (`+0xaa` 0x40, `+0xab` bit 0) and with an online id. Left alone: the porter's own (Player) and the
+game's (Stage) records, the records of the save (they carry 0x10 already), what the game has refused or built, and
+the Net copies the mod makes of a partner's structures (no online id). Each record once, by record id and online id.
+The two flag bytes are read again just before the write, and nothing is written if they changed. Nothing without
+the option, without `online_server` or before the game is signed in.
+
+Log: `RECEIVED on` (and `RECEIVED off` when the sign-in goes), one `RECEIVED building <kind> <online id> (range and
+placement checks skipped): record N, type T, +0xaa 20 -> 10` per record, and `RECEIVED first scan: X ms` once.
+`mod_status` has `"received": {on, built, skipped}` (skipped: chosen, then not written because the bytes had changed
+or the write failed).
+
+Cost: each tick copies the construction table once (640 slots of 0x710 bytes, about 1.1 MB, the copy the structure
+sync makes every 500 ms), reads 0x18 bytes of each record in state 0 and the online id of each candidate. Not
+measured in a game; the tick profiler logs the stage `received` when it takes over 1 ms.
+
+Not known yet: whether the tick sees a served rain shelter before the walker refuses it (the tick runs at the message
+pump between the game's frames, so it never runs between the answer that makes a record and a walk in that same
+frame); whether a structure built this way stays after a load; what the game does with one that overlaps.
+
+Tests: `received_test.cpp` over a fake process memory (the scan, what is changed and left alone, the one byte, once
+per record, a slot reused for another object, the bytes changed between the scan and the write, a failed write),
+mutants OPTION, SERVER, BUILT, PLAYER, SAVED, REMOVAL, ONLINE, ONCE, RECHECK (`test_game_thread_mutants.py
+received`); the config in `unit.cpp` (mutant CONFIG_RECEIVED).
+
 ### The player's own strand (`own_strand.h`; a reader, not wired into the mod)
 
 A read-only reader for what in a game's memory is the player's own (the launcher's "My strand" and a live probe;
@@ -1977,8 +2023,9 @@ A read-only reader for what in a game's memory is the player's own (the launcher
 this save, or handed back by a server as his), and online objects whose creator is the signed-in player (the
 game's user id 1, filed in an area's second list), joined by online id into one list with the server's letter, the
 area, the position and the level. Likes are not read from the game (where it keeps them is unknown); a server's
-counts are merged in by online id. Static research only: nothing of it has been read from a running game yet.
-Game-free: `own_strand_test.cpp` over a fake process memory, eleven mutants (family `own` in
+counts are merged in by online id. Static research only: nothing of it has been read from a running game yet. Its
+structure reader also gives each object's flag bytes (`+0xa8..+0xab`) and can skip records early; `build_received`
+scans with it (above). Game-free: `own_strand_test.cpp` over a fake process memory, eleven mutants (family `own` in
 `test_game_thread_mutants.py`).
 
 ## The partner is down or caught (`vitals.h`, with `notices`)
