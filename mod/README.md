@@ -736,7 +736,7 @@ nothing. The HUD object is found through the UI owner global and checked by its 
 the config. In group play (no `peer`) nobody is expected, so "No partner yet" is never said. Tests: `notice_test.cpp` (mutants BOUND, GROUP_ALONE, LEFT, ALONE_ONCE, NAME_WAIT, WORLD, GAP, AWAY_SETTLE, BACK_PAIRED, LIKE_ICON, JOIN_HOLD). The launcher's play
 setup turns it on.
 
-## Strand notices (`strand_notices`, off by default; built game-free, not run live)
+## Strand notices (`strand_notices`, off by default; live once, 2026-11-17)
 
 The rule behind it: no surprises. A game builds in its own world whatever the server does, uploads the structure and
 is answered as always; whether the server shares it is the server's policy and the player's choices

@@ -5435,6 +5435,13 @@ Observed (live): with an Episode 3 save at Lake Knot the game asked `findQpidObj
 with the counts `t` 33, `x` 3, `b` 2, `v` 4, `n` 1, `h` 5, `e` 5: an area asks only for some kinds. A ladder made by
 calling `CreateConstruction` (the mod's test command) was not uploaded within four minutes.
 
+### What the game shows of a structure's builder (2026-11-17, live, one test copy, Episode 3 save)
+
+A ladder the porter built while signed in to `coop-world` (on a server holding it for him alone) carried the game's
+own hologram above it: the ladder's icon, a like count (0) and the builder's name, which was the display name the
+server's `lookup` answer gave for his account ("Porter"). So the name the game shows over a structure is whatever the
+server answers for that account id; the server decides it (world/README "Builder names").
+
 ### What the game does with a served object (2026-11-11, live, one test copy, Episode 3 save)
 
 Method: a logging server on loopback answered `findQpidObjects` for area 226 with hand-made `OTGCObjectResponse`
