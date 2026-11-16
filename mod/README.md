@@ -1498,7 +1498,7 @@ still wears gear copies). `mod_status` now has
 `"others": {on, near, connected, bodies, shown, sent, received, accepted, refused, unknown, malformed}` and
 `"labels_shown"` in every build.
 
-## Fights with visitors (`host_fights`, `join_fights`; built game-free, not run live)
+## Fights with visitors (`host_fights`, `join_fights`; live once, 2026-11-17)
 
 The owner's decision: each player plays his own save and story, and in a boss fight **one game owns the fight** while
 other players join it as **visitors**. This is the first step, for the catcher fight of a BT area, over the relay's
