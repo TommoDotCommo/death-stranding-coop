@@ -38,6 +38,7 @@ Value triple(const Value& post,const char* a,const char* b,const char* c){Value 
 }
 std::string heldText(const std::string& why){
     return why=="build"?"nobody builds on this server":why=="member"?"only members build on this server":why=="limit"?"this server's limit of objects per player":why;}
+std::string typeName(const std::string& letter){for(auto& n:TypeNames)if(letter.size()==1&&letter[0]==n.second)return n.first;return letter;}
 std::string unwrap(const std::string& body){
     const std::string head="{\"data\":\"",tail="\"}";
     if(body.size()>=head.size()+tail.size()&&body.compare(0,head.size(),head)==0&&body.compare(body.size()-tail.size(),tail.size(),tail)==0)

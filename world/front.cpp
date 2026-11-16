@@ -1,4 +1,5 @@
 #include "front.h"
+#include "api.h"
 namespace world {
 namespace {
 Reply notFound(){return Reply{404,"{\"status\":\"404\",\"code\":404,\"message\":\"not found\"}"};}
@@ -17,10 +18,6 @@ std::string query(const std::string& q,const std::string& name){
         at=end+1;}
     return {};
 }
-bool keyText(const std::string& k){
-    if(k.empty()||k.size()>MaxKeyBytes)return false;
-    for(char c:k)if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='-'||c=='.'))return false;
-    return true;}
 }
 std::string steamIdOf(const std::string& hex){
     // Ticket layout: a 4-byte length (20), an 8-byte token, then the 8-byte Steam id, little-endian.
@@ -55,11 +52,13 @@ Reply Front::handle(const Request& r,int64_t now){
 #endif
         if(!link){if(world_.log)world_.log("link request refused: no link has that key");return notFound();}
         return world_.linkPull(link->exportFilter,r.body,now);}
+    // The launcher's API (api.h): under the prefix, never under /k/NAME, never the game's.
+    if(path.compare(0,6,"/coop/")==0)return launcherApi(world_,r.method,path.substr(6),query(q,"player"),r.body);
     std::string key;
     if(path.compare(0,3,"/k/")==0){
         size_t end=path.find('/',3);if(end==std::string::npos)return notFound();
         key=path.substr(3,end-3);path.erase(0,end);
-        if(!keyText(key))return notFound();}
+        if(!accountKeyText(key))return notFound();}
     if(path=="/auth/ds"){
         if(r.method!="GET")return notFound();
         if(key.empty())key=steamIdOf(query(q,"code"));
