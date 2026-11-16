@@ -7,7 +7,7 @@
 //
 //   coop-swarm --relay HOST:PORT --count K --centre X Y Z --radius R [--mode pairs|broadcast]
 //              [--key TEXT] [--session N] [--speed M/S] [--area N] [--first-id N] [--only ID] [--role auto|host|client]
-//              [--seconds N] [--stop FILE] [--require-connected] [--replay FILE [--with-animation]]
+//              [--seconds N] [--stop FILE] [--require-connected] [--replay FILE [--with-animation]] [--names]
 //
 //   --mode     how the players talk through the relay: pairs (core sessions, the relay passing each pair's datagrams;
 //              the default) or broadcast (one client each, the server copying every update to everybody near; mod
@@ -30,6 +30,9 @@
 //              keeps to the circle and walks it at the recording's speed of the moment (standing when the recorded
 //              player stood, sprinting when he sprinted); --speed is not used. Player i starts i/K of the way into the
 //              recording, so no two move alike, and the recording loops.
+//   --names    broadcast: at the end, one line for every player near a stand-in, with the name he shows as the mod
+//              reads it from his state (crowd.h, nametag.h): SWARM name id=ID "NAME" (a linked server's player shows
+//              his name, " · " and his server's name; world/README.md, "Presence across linked servers")
 //   --with-animation     with --replay: also sends the animation samples recorded in FILE (mod lab option
 //              record_animation) at their moment of the recording, to every connected session, the controls only (as
 //              the mod sends other players). Without it the stand-ins send presence only and a game shows them gliding.
@@ -103,7 +106,7 @@ size_t frameSources(const uint8_t* d,size_t n,Player& p){
 [[noreturn]] void usage(const char* why){std::fprintf(stderr,"coop-swarm: %s\n(see the comment at the top of swarm.cpp)\n",why);std::exit(2);}
 }
 int main(int argc,char** argv){
-    std::string relayText,key,stopFile,replayFile,role="auto",mode="pairs";bool withAnimation=false,haveSession=false;unsigned count=0;std::array<double,3> centre{};bool haveCentre=false,requireConnected=false;
+    std::string relayText,key,stopFile,replayFile,role="auto",mode="pairs";bool withAnimation=false,haveSession=false,names=false;unsigned count=0;std::array<double,3> centre{};bool haveCentre=false,requireConnected=false;
     double radius=-1,speed=Walk,seconds=3600;uint64_t session=1,firstId=1001,only=0;uint32_t area=0;
     for(int i=1;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc)usage(("missing value after "+a).c_str());return std::string(argv[++i]);};
@@ -116,7 +119,7 @@ int main(int argc,char** argv){
             else if(a=="--first-id")firstId=std::stoull(next());else if(a=="--only")only=std::stoull(next());
             else if(a=="--role")role=next();else if(a=="--seconds")seconds=std::stod(next());else if(a=="--stop")stopFile=next();
             else if(a=="--require-connected")requireConnected=true;
-            else if(a=="--replay")replayFile=next();else if(a=="--with-animation")withAnimation=true;
+            else if(a=="--replay")replayFile=next();else if(a=="--with-animation")withAnimation=true;else if(a=="--names")names=true;
             else usage(("unknown option "+a).c_str());
         }catch(const std::exception&){usage(("not a number after "+a).c_str());}
     }
@@ -135,6 +138,7 @@ int main(int argc,char** argv){
     if(role!="auto"&&role!="host"&&role!="client")usage("--role is auto, host or client");
     if(mode!="pairs"&&mode!="broadcast")usage("--mode is pairs or broadcast");
     bool broadcast=mode=="broadcast";
+    if(names&&!broadcast)usage("--names is for --mode broadcast");
     if(broadcast&&(only||role!="auto"||haveSession))usage("--session, --only and --role are for --mode pairs (broadcast has no sessions)");
     if(!ds::relay::positionValid({centre[0]+radius,centre[1],centre[2]+radius})||!ds::relay::positionValid({centre[0]-radius,centre[1],centre[2]-radius}))usage("the circle leaves the map (100 km)");
     std::optional<Replay> replay;std::vector<std::pair<double,ds::Animation>> recorded;
@@ -292,6 +296,19 @@ int main(int argc,char** argv){
     }
     census();
     if(broadcast){uint64_t taken=0;for(auto& p:players)taken+=p->client->counters().animationsTaken;animationIn=taken;}
+    if(names){
+        // The name every player near shows, read as the mod reads it: the whole set of name events of his state.
+        std::map<uint64_t,std::string> shown;
+        for(auto& p:players)for(auto& near:p->client->nearby()){
+            if(shown.count(near.first))continue;
+            std::string name="(none)";
+            if(auto* b=p->client->state(near.first,ds::broadcast::StateKind::Name)){
+                name="(not a name)";
+                if(auto events=mod::crowd::unpack(*b,mod::nametag::WireType)){
+                    mod::nametag::Receiver r;
+                    for(size_t i=0;i<events->size();++i)if(auto n=r.feed((*events)[i])){if(i+1==events->size())name=*n;break;}}}
+            shown[near.first]=name;}
+        for(auto& [id,name]:shown)std::printf("SWARM name id=%llu \"%s\"\n",(unsigned long long)id,name.c_str());}
     {auto total=traffic();double span=std::max(1e-3,double(nowMs()-start)/1000)*count;
      std::printf("SWARM traffic mode=%s seconds=%.1f per player and second: in=%.1f in_bytes=%.0f out=%.1f out_bytes=%.0f heard=%.1f\n",mode.c_str(),double(nowMs()-start)/1000,
                  double(total.in)/span,double(total.inBytes)/span,double(total.out)/span,double(total.outBytes)/span,statusSeconds?double(heardTotal)/double(statusSeconds):0.);}

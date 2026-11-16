@@ -6,7 +6,8 @@
 //               [--broadcast-animation METRES] [--broadcast-budget BYTES] [--broadcast-flush MS] [--broadcast-rate N]
 //               [--broadcast-build GAME:HEX]]
 //              [--link NAME --link-key KEY [--link-url http://ADDRESS:PORT[/PREFIX]] [--link-export FILTER] [--link-import FILTER]
-//               [--link-every SECONDS]]...
+//               [--link-every SECONDS] [--link-presence yes|no [--link-relay ADDRESS:PORT] [--link-presence-budget BYTES]
+//               [--link-presence-players N]]]...
 //   coop-world export  --data world.json --out FILE [--filter FILTER]
 //   coop-world import  --data world.json --in FILE [--filter FILTER] [--prune]
 //   coop-world forget  --data world.json --server ID
@@ -313,6 +314,14 @@ void serveRelay(sock_t s,world::RelayConfig config){
         if(now>=relay.flushDue())relay.flush(now);
         if(now>=nextTick){relay.tick(now);nextTick=now+250;if(relay.players())lastRequest=nowSeconds();}}
 }
+// --link-relay A.B.C.D:PORT, a linked server's relay.
+bool parseRelayAddress(const std::string& text,world::RelayAddress& out){
+    auto colon=text.find(':');if(colon==std::string::npos)return false;
+    in_addr a{};if(inet_pton(AF_INET,text.substr(0,colon).c_str(),&a)!=1)return false;
+    std::string port=text.substr(colon+1);if(port.empty()||port.size()>5)return false;
+    long p=0;for(char c:port){if(c<'0'||c>'9')return false;p=p*10+(c-'0');}
+    if(p<1||p>65535)return false;
+    out.ip=ntohl(a.s_addr);out.port=uint16_t(p);return out.ip!=0;}
 // --broadcast-build GAME:HEX32, the one build broadcast players may have.
 bool parseBuild(const std::string& text,world::RelayConfig& c){
     auto colon=text.find(':');if(colon==std::string::npos||text.size()-colon-1!=32)return false;
@@ -326,6 +335,7 @@ int main(int argc,char** argv){
     if(argc>1&&argv[1][0]!='-')return offline(argc,argv);
     std::string bind="127.0.0.1",prefix,relayKey;int port=0,relayPort=0;long idleExit=0;bool haveRelayKey=false;world::RelayConfig relayConfig;
     std::vector<world::LinkConfig> links;
+    struct Presence {std::string on,relay;long budget=250000,players=64;};std::vector<Presence> presence;   // per link: --link-presence and its options
     std::string policyPreset;std::vector<std::string> policySets;
     auto link=[&](const std::string& option)->world::LinkConfig&{if(links.empty()){std::cerr<<option<<" comes after --link NAME\n";std::exit(2);}return links.back();};
     auto filter=[](const std::string& option,const std::string& text){
@@ -345,17 +355,21 @@ int main(int argc,char** argv){
         else if(a=="--broadcast-flush")relayConfig.flushMs=uint32_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));
         else if(a=="--broadcast-rate")relayConfig.broadcastRate=uint32_t(std::min(std::max(std::atol(next().c_str()),0L),1000000L));
         else if(a=="--broadcast-build"){if(!parseBuild(next(),relayConfig)){std::cerr<<"--broadcast-build GAME:HEX (the game build and the 32 hex digits of the mod's wire identity)\n";return 2;}}
-        else if(a=="--link"){links.emplace_back();links.back().name=next();}
+        else if(a=="--link"){links.emplace_back();links.back().name=next();presence.emplace_back();}
         else if(a=="--link-key")link(a).key=next();else if(a=="--link-url")link(a).url=next();
         else if(a=="--link-export")link(a).exportFilter=filter(a,next());else if(a=="--link-import")link(a).importFilter=filter(a,next());
         else if(a=="--link-every")link(a).everySeconds=std::atoi(next().c_str());
+        else if(a=="--link-presence"){link(a);presence.back().on=next();}else if(a=="--link-relay"){link(a);presence.back().relay=next();}
+        else if(a=="--link-presence-budget"){link(a);presence.back().budget=std::min(std::max(std::atol(next().c_str()),0L),1000000000L);}
+        else if(a=="--link-presence-players"){link(a);presence.back().players=std::min(std::max(std::atol(next().c_str()),0L),100000L);}
         else if(a=="--policy")policyPreset=next();else if(a=="--policy-set")policySets.push_back(next());
         else{std::cerr<<"usage: coop-world --port N [--bind ADDRESS] [--data FILE] [--prefix SECRET] [--log FILE] [--trace FILE] [--idle-exit SECONDS]\n"
                         "                  [--policy friends|solo|public] [--policy-set KEY=VALUE]...\n"
                         "                  [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS] [--relay-players N] [--relay-rate N]]\n"
                         "                   [--broadcast-full METRES] [--broadcast-interval MS] [--broadcast-animation METRES] [--broadcast-budget BYTES]\n"
                         "                   [--broadcast-flush MS] [--broadcast-rate N] [--broadcast-build GAME:HEX]]\n"
-                        "                  [--link NAME --link-key KEY [--link-url http://ADDRESS:PORT[/PREFIX]] [--link-export FILTER] [--link-import FILTER] [--link-every SECONDS]]...\n"
+                        "                  [--link NAME --link-key KEY [--link-url http://ADDRESS:PORT[/PREFIX]] [--link-export FILTER] [--link-import FILTER] [--link-every SECONDS]\n"
+                        "                   [--link-presence yes|no [--link-relay ADDRESS:PORT] [--link-presence-budget BYTES] [--link-presence-players N]]]...\n"
                       <<OfflineUsage;return 2;}}
     if(port<1||port>65535){std::cerr<<"--port 1..65535 required\n";return 2;}
     try{world::Policy p=world::presetPolicy(policyPreset.empty()?"friends":policyPreset);for(auto& s:policySets)world::setPolicy(p,s);}
@@ -372,7 +386,16 @@ int main(int argc,char** argv){
         for(size_t k=0;k<i;++k)if(links[k].key==l.key||links[k].name==l.name){std::cerr<<"link "<<l.name<<": every link needs a name and a key of its own\n";return 2;}
         if(!l.url.empty()&&!world::parseLinkUrl(l.url,linkEndpoints[i])){std::cerr<<"link "<<l.name<<": --link-url is http://ADDRESS:PORT or http://ADDRESS:PORT/PREFIX with a numeric IPv4 address\n";return 2;}
         if(l.url.empty()&&!l.importFilter.none){std::cerr<<"link "<<l.name<<": --link-import needs --link-url (the server to take from)\n";return 2;}
-        if(l.everySeconds<1||l.everySeconds>3600){std::cerr<<"link "<<l.name<<": --link-every 1..3600 seconds\n";return 2;}}
+        if(l.everySeconds<1||l.everySeconds>3600){std::cerr<<"link "<<l.name<<": --link-every 1..3600 seconds\n";return 2;}
+        // Presence across the link (README, "Presence across linked servers"): off unless asked for, and only with a relay here.
+        auto& p=presence[i];
+        if(!p.on.empty()&&p.on!="yes"&&p.on!="no"){std::cerr<<"link "<<l.name<<": --link-presence yes or no\n";return 2;}
+        if(p.on!="yes"&&(!p.relay.empty()||p.budget!=250000||p.players!=64)){std::cerr<<"link "<<l.name<<": --link-relay and --link-presence-* need --link-presence yes\n";return 2;}
+        if(p.on!="yes")continue;
+        if(!relayPort){std::cerr<<"link "<<l.name<<": --link-presence needs --relay-port (this server's relay)\n";return 2;}
+        world::RelayLink r;r.name=l.name;r.key=l.key;r.budget=uint32_t(p.budget);r.players=size_t(p.players);
+        if(!p.relay.empty()&&!parseRelayAddress(p.relay,r.peer)){std::cerr<<"link "<<l.name<<": --link-relay is ADDRESS:PORT with a numeric IPv4 address (the other server's --relay-port)\n";return 2;}
+        relayConfig.links.push_back(r);}
 #ifdef _WIN32
     WSADATA wsa;if(WSAStartup(MAKEWORD(2,2),&wsa)!=0){std::cerr<<"winsock unavailable\n";return 1;}
 #endif
@@ -393,7 +416,7 @@ int main(int argc,char** argv){
         if(relayPort<1||relayPort>65535){std::cerr<<"--relay-port 1..65535\n";return 2;}
         relayConfig.token=haveRelayKey?relayKey:prefix;
         if(relayConfig.token.empty()&&(ntohl(address.sin_addr.s_addr)>>24)!=127){std::cerr<<"the relay needs --relay-key (or --prefix) when it listens beyond loopback\n";return 2;}
-        relayConfig.seed=std::random_device{}();
+        relayConfig.seed=std::random_device{}();relayConfig.serverId=w.serverId();
         try{world::Relay check(relayConfig,[](const world::RelayAddress&,const uint8_t*,size_t){});}
         catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 2;}
         sockaddr_in relayAddress=address;relayAddress.sin_port=htons(uint16_t(relayPort));
@@ -420,6 +443,9 @@ int main(int argc,char** argv){
         line("link "+links[i].name+": "+(links[i].exportFilter.none?"gives nothing":"gives objects")+", "+(links[i].importFilter.none?"takes nothing":"takes objects from "+links[i].url)+" (this server is "+w.serverId()+")");
         if(!links[i].url.empty()&&!links[i].importFilter.none)std::thread([&w,l=links[i],e=linkEndpoints[i]]{serveLink(w,l,e);}).detach();}
     if(relayPort)line("coop-world relay on "+bind+":"+std::to_string(relayPort)+" (UDP; near from "+std::to_string(int(relayConfig.enterMetres))+" m to "+std::to_string(int(relayConfig.leaveMetres))+" m, "+std::to_string(relayConfig.maxPlayers)+" players)");
+    for(auto& l:relayConfig.links)
+        line("link "+l.name+": presence of broadcast players with the relay at "+(l.peer.ip?std::to_string(l.peer.ip>>24)+"."+std::to_string((l.peer.ip>>16)&255)+"."+std::to_string((l.peer.ip>>8)&255)+"."+std::to_string(l.peer.ip&255)+":"+std::to_string(l.peer.port):std::string("the address of its first HELLO"))
+             +" (at most "+std::to_string(l.budget)+" bytes a second and "+std::to_string(l.players)+" players each way)");
     if(relayPort)line("coop-world relay speaks pairs and broadcast (every update within "+std::to_string(int(relayConfig.fullMetres))+" m, beyond it one in "+std::to_string(relayConfig.intervalMs)+" ms, animation within "
                       +std::to_string(int(relayConfig.animationMetres))+" m, frames of "+std::to_string(relayConfig.budget)+" bytes within "+std::to_string(relayConfig.flushMs)+" ms"+(relayConfig.pinBuild?", one build":"")+")");
     line(policyText(w.policy(),false)+policyNote);

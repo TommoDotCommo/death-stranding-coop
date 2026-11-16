@@ -20,13 +20,16 @@ build/front-test: front_test.cpp front.cpp front.h $(API) $(LINK) world.cpp worl
 	$(CXX) $(FLAGS) front_test.cpp front.cpp api.cpp link.cpp world.cpp -o $@
 build/api-test: api_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h | build
 	$(CXX) $(FLAGS) api_test.cpp front.cpp api.cpp link.cpp world.cpp -o $@
-RELAY := relay.cpp relay.h ../core/relay.h ../core/broadcast.h
+RELAY := relay.cpp relay.h presence.h ../core/relay.h ../core/broadcast.h
 build/relay-test: relay_test.cpp $(RELAY) | build
 	$(CXX) $(FLAGS) relay_test.cpp relay.cpp -o $@
 # The broadcast mode against the real player's side (core/broadcast_client.*), which needs the presence core.
 PLAYER := ../core/broadcast_client.cpp ../core/broadcast_client.h ../core/core.cpp ../core/core.h ../core/build_id.h
 build/broadcast-test: broadcast_test.cpp $(RELAY) $(PLAYER) | build
 	$(CXX) $(FLAGS) broadcast_test.cpp relay.cpp ../core/broadcast_client.cpp ../core/core.cpp -o $@
+# Linked servers' presence: two and three relays in memory with real players' sides.
+build/presence-test: presence_test.cpp $(RELAY) $(PLAYER) | build
+	$(CXX) $(FLAGS) presence_test.cpp relay.cpp ../core/broadcast_client.cpp ../core/core.cpp -o $@
 build/coop-world: main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
 	$(CXX) $(FLAGS) main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp -o $@
 build/coop-world.exe: main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
@@ -35,7 +38,7 @@ build/coop-world.exe: main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.
 ../mod/build/coop-swarm: FORCE
 	$(MAKE) -C ../mod build/coop-swarm
 FORCE:
-test: build/world-test build/policy-test build/curate-test build/link-test build/front-test build/api-test build/relay-test build/broadcast-test build/coop-world ../mod/build/coop-swarm
+test: build/world-test build/policy-test build/curate-test build/link-test build/front-test build/api-test build/relay-test build/broadcast-test build/presence-test build/coop-world ../mod/build/coop-swarm
 	./build/world-test
 	./build/policy-test
 	./build/curate-test
@@ -44,10 +47,12 @@ test: build/world-test build/policy-test build/curate-test build/link-test build
 	./build/api-test
 	./build/relay-test
 	./build/broadcast-test
+	./build/presence-test
 	python3 -B test_server.py build/coop-world
 	python3 -B test_link.py build/coop-world
 	python3 -B test_relay.py build/coop-world ../mod/build/coop-swarm
 	python3 -B test_broadcast.py build/coop-world
+	python3 -B test_presence.py build/coop-world ../mod/build/coop-swarm
 	python3 -B test_mutants.py
 all: build/coop-world.exe
 clean:
