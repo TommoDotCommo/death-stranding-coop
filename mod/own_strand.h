@@ -2,9 +2,10 @@
 // The player's own strand, read-only (own_strand.cpp; game_offsets.md, "The player's own strand"). Two places in a
 // game's memory say what is this player's own:
 // - the construction records (structures.h): the owner byte at object +0xb2 is 1 for a Player variant, which is what
-//   the porter built in this save and what a server hands back with his own id as creator; 2 is another player's
-//   (Net), 0 the game's own. Object +0xb4 is the creator's user id (1 = the signed-in player, 0 = nobody known, as for
-//   most of what was built here) and +0xb8 the online id once the object is on a server (empty before).
+//   the porter built in this save; 2 is another player's (Net), 0 the game's own. Object +0xb4 is the creator's user
+//   id (1 = the signed-in player, live on every owner-1 record of a save; 0 = nobody known) and +0xb8 the online id
+//   once the object is on a server (empty before). A server cannot hand a player his own objects back: the game sets
+//   them to Fail when its save lacks them (live 2026-11-17).
 // - the online object manager (image+0x7c1abf0): per area three lists of 0x28-byte elements (+8 id string, +0x10
 //   EDSNetSyncObjectType, +0x11 state, +0x14 creator user id). The game files an element whose creator is user 1 in
 //   the second list, everything else in the first, and moves failed ones (state 4 and up) to the third.
