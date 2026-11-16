@@ -28,6 +28,12 @@ std::string settingText(const std::string& key,const std::string& value,size_t p
                                   value=="ask"?"Unless you choose otherwise, what you build here waits for your answer.":"Unless you choose otherwise, what you build here is shared.";
     if(key=="offer_old")return value=="yes"?"Unless you choose otherwise, your older strand may be taken over (recorded only).":
                                "Unless you choose otherwise, your older strand is not taken over (recorded only).";
+    if(key=="order")return value=="liked"?"Where there are more objects than a game takes, the most liked come first, then the newest.":
+                           "Where there are more objects than a game takes, the newest come first.";
+    if(key=="per_builder")return value=="0"?"No cap on how many of one builder's objects of a kind a game is handed at once.":
+                                 "At most "+value+" of one builder's objects of a kind are handed to a game at once.";
+    if(key=="spread")return value=="0"?"Objects of a kind may be handed however close together they stand.":
+                            "Objects of a kind closer than "+value+" m to one already handed are left out of that answer.";
     return key+" "+value;
 }
 json::Value World::apiPolicy() const {
