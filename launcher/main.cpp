@@ -778,7 +778,11 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
          if(v&&n>=2&&std::wstring(v[1])==L"--setup"){auto c=setupVerb(n,v);LocalFree(v);return c;}
          if(v)LocalFree(v);}
         SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);WSADATA ws;if(WSAStartup(MAKEWORD(2,2),&ws))return 1;net=std::make_unique<Network>();
-        options.data=known(FOLDERID_LocalAppData)/"DeathStrandingCoop";settingsFile=options.data/"launcher.ini";
+        options.data=known(FOLDERID_LocalAppData)/"DeathStrandingCoop";
+        // --data-dir (with --dev-direct, checked below) names the folder whose settings this launcher uses: read them from
+        // there, not from the player's own co-op folder (a test copy took the player's last choice, Join, as its own).
+        {int c=0;auto v=CommandLineToArgvW(GetCommandLineW(),&c);if(v){for(int i=1;i+1<c;++i)if(std::wstring(v[i])==L"--data-dir"){options.data=fs::path(v[i+1]);break;}LocalFree(v);}}
+        settingsFile=options.data/"launcher.ini";
         auto maxMb=GetPrivateProfileIntW(L"launcher",L"max_log_mb",diag::DefaultMaxLogMb,settingsFile.c_str());
         if(!diag::ValidMaxLogMb(maxMb))maxMb=diag::DefaultMaxLogMb;
         if(diagnostic.Open(diag::DefaultLogsDir(),"launcher",maxMb))diag::crash::Install(diagnostic);

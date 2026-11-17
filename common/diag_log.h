@@ -149,6 +149,15 @@ inline size_t Prune(const fs::path& dir,uint64_t cap,const std::string& current)
 }
 inline fs::path DefaultLogsDir() {
 #ifdef _WIN32
+    // Inside a game the proxy names its co-op folder (COOP_MODULE_INSTANCE): for a player that is
+    // %LOCALAPPDATA%\DeathStrandingCoop itself, for a developer's test copy the copy's own folder, so test runs never
+    // write into the player's logs (and into his diagnostics).
+    wchar_t inst[32768];auto m=GetEnvironmentVariableW(L"COOP_MODULE_INSTANCE",inst,32768);
+#ifndef MUTANT_DIAG_LOGS_SHARED
+    if(m&&m<32768)return fs::path(inst)/L"logs";
+#else
+    (void)m;
+#endif
     wchar_t local[32768];auto n=GetEnvironmentVariableW(L"LOCALAPPDATA",local,32768);
     return n&&n<32768?fs::path(local)/L"DeathStrandingCoop"/L"logs":fs::path();
 #else

@@ -70,6 +70,12 @@ int wmain(int argc,wchar_t** argv)try {
     if(argc==2&&std::wstring(argv[1])==L"--interop-check")return 0;
     if(argc==4&&std::wstring(argv[1])==L"--child")return Child(argv[2],argv[3]);
     wchar_t image[32768];Require(GetModuleFileNameW(nullptr,image,32768)>0,"exe path");
+    {   // Logs follow the game's co-op folder (COOP_MODULE_INSTANCE): a test copy's runs stay out of the player's logs.
+        Require(SetEnvironmentVariableW(L"COOP_MODULE_INSTANCE",L"C:\\ds-fixture-instance")!=0,"set instance");
+        Require(diag::DefaultLogsDir()==diag::fs::path(L"C:\\ds-fixture-instance\\logs"),"logs in the co-op folder the proxy names");
+        SetEnvironmentVariableW(L"COOP_MODULE_INSTANCE",nullptr);
+        Require(diag::DefaultLogsDir().filename()==L"logs"&&diag::DefaultLogsDir().parent_path().filename()==L"DeathStrandingCoop","logs default to the player's co-op folder");
+    }
     auto root=diag::fs::temp_directory_path()/(L"ds-crash-fixture-"+std::to_wstring(GetCurrentProcessId()));
     diag::fs::remove_all(root);
     for(auto mode:{L"shared-handled",L"shared-crash",L"proxy-handled",L"proxy-crash"})Run(image,root/mode,mode);

@@ -21,7 +21,7 @@ def build(macro):
 
 def main():
     base = build(None)
-    macros = ['MUTANT_DIAG_CRASH_OFF', 'MUTANT_DIAG_CRASH_CHAIN', 'MUTANT_DIAG_CRASH_FULL', 'MUTANT_DIAG_PLAYER_MARKER']
+    macros = ['MUTANT_DIAG_CRASH_OFF', 'MUTANT_DIAG_CRASH_CHAIN', 'MUTANT_DIAG_CRASH_FULL', 'MUTANT_DIAG_PLAYER_MARKER', 'MUTANT_DIAG_LOGS_SHARED']
     built = dict(zip(macros, parallel(build, macros)))
     try:
         result = subprocess.run([str(base), '--interop-check'], capture_output=True, text=True)
