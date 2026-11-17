@@ -107,7 +107,7 @@ namespace {
 // The builder's prologue, and its flag stores from AnswerFlags (build 13300582):
 //   +0x00 c6 85 b3 05 00 00 00   mov byte [rbp+0x5b3],0     request +0x623
 //   +0x07 c6 85 b5 05 00 00 01   mov byte [rbp+0x5b5],1     request +0x625 (object +0xa9 bit 7)
-//   +0x0e c6 85 bd 05 00 00 01   mov byte [rbp+0x5bd],1     request +0x62d (object +0xaa 0x20)
+//   +0x0e c6 85 bd 05 00 00 01   mov byte [rbp+0x5bd],1     request +0x62d (object +0xaa 0x20); [rbp+0x5ce] is +0x63e
 //   +0x15 0f b6 81 10 01 00 00   movzx eax,byte [rcx+0x110] the answer's byte
 //   +0x1c 88 85 b9 05 00 00      mov [rbp+0x5b9],al         request +0x629 (object +0xaf bit 7)
 //   +0x22 88 85 cd 05 00 00      mov [rbp+0x5cd],al         request +0x63d (object +0xaa 0x10)
@@ -117,8 +117,13 @@ const uint8_t Original[AnswerFlagsSize]={0xc6,0x85,0xb3,0x05,0x00,0x00,0x00,0xc6
     0xbd,0x05,0x00,0x00,0x01,0x0f,0xb6,0x81,0x10,0x01,0x00,0x00,0x88,0x85,0xb9,0x05,0x00,0x00,0x88,0x85,0xcd,0x05,0x00,0x00};
 struct Byte{size_t at;uint8_t from,to;};
 const std::vector<Byte> Changes={
-#ifndef MUTANT_RECEIVED_PLACEMENT
-    {0x14,0x01,0x00},                                // request +0x62d = 0: no online placement check
+#if !defined(MUTANT_RECEIVED_PLACEMENT)&&!defined(MUTANT_RECEIVED_AREA)
+    {0x10,0xbd,0xce},                                // the store of 1 goes to +0x63e, not +0x62d: +0x62d keeps the
+                                                     // constructor's 0 (no online placement check), +0x63e = 1 (object
+                                                     // +0xaf 0x20: the area check for others' structures counts as done)
+#endif
+#ifdef MUTANT_RECEIVED_AREA
+    {0x14,0x01,0x00},                                // the earlier change: +0x62d stored as 0, +0x63e left at 0
 #endif
 #ifndef MUTANT_RECEIVED_RANGE
     {0x24,0xcd,0xb9},                                // the answer's byte to +0x629 again, +0x63d keeps 1: no range test
@@ -161,7 +166,7 @@ const char* label(Early e){
 }
 std::string line(Early e){
     switch(e){
-        case Early::Patched:return "RECEIVED answer requests changed: served structures are made without the range and placement checks\n";
+        case Early::Patched:return "RECEIVED answer requests changed: served structures are made without the range, placement and area checks\n";
         case Early::Already:return "RECEIVED answer requests already changed\n";
         case Early::Differs:return "RECEIVED answer requests not changed: the game's code differs (the scan alone)\n";
         case Early::Failed:return "RECEIVED answer requests not changed: a write failed (the scan alone)\n";

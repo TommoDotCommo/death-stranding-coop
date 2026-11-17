@@ -42,7 +42,7 @@ const uint8_t Stores[AnswerFlagsSize]={0xc6,0x85,0xb3,0x05,0x00,0x00,0x00,0xc6,0
 // What those instructions do to a request, run the way the processor runs them (the four forms the block has; any
 // other byte sequence is refused). The request starts with the constructor's defaults (0x277fde0).
 static bool run(const uint8_t* code,size_t n,uint8_t answer,std::map<unsigned,uint8_t>& request){
-    request={{0x623,0},{0x625,1},{0x629,0},{0x62d,0},{0x63d,1}};
+    request={{0x623,0},{0x625,1},{0x629,0},{0x62d,0},{0x63b,1},{0x63d,1},{0x63e,0}};
     auto disp=[&](size_t k){uint32_t d;std::memcpy(&d,code+k,4);return unsigned(d+0x70);};
     unsigned eax=0x100;size_t i=0;
     while(i<n){
@@ -61,14 +61,18 @@ static bool builtAtOnce(std::map<unsigned,uint8_t>& r){
     uint8_t a9=r[0x625]?0x80:0,aa=uint8_t((r[0x63d]?0x10:0)|(r[0x62d]?0x20:0)),af=r[0x629]?0x80:0;
     return (a9&0x80)&&!(af&0x80)&&!(aa&0x20)&&(aa&0x10);
 }
+// Whether the record is kept when its floor is rechecked (game_offsets.md, "Why received rain shelters are removed"):
+// the area check for another player's structure (0x2c43590) runs only while object +0xaf 0x20 (request +0x63e) is clear.
+static bool areaDone(std::map<unsigned,uint8_t>& r){return r[0x63e]!=0;}
 static void answers(){
     CHECK(early(true,true)&&!early(false,true)&&!early(true,false)&&!early(false,false));
     CHECK(std::string(label(Early::Patched))=="patched"&&std::string(label(Early::Off))=="off"&&line(Early::Off).empty());
-    CHECK(line(Early::Patched)=="RECEIVED answer requests changed: served structures are made without the range and placement checks\n");
+    CHECK(line(Early::Patched)=="RECEIVED answer requests changed: served structures are made without the range, placement and area checks\n");
     CHECK(line(Early::Differs).find("the scan alone")!=std::string::npos&&line(Early::Failed).find("the scan alone")!=std::string::npos);
-    // The game's own code: +0x62d 1, +0x63d the answer's byte (0 for a download): the record waits for both checks.
+    // The game's own code: +0x62d 1, +0x63d the answer's byte (0 for a download): the record waits for both checks,
+    // and +0x63e stays 0, so the area check runs on it when its floor is rechecked.
     std::map<unsigned,uint8_t> r;
-    CHECK(run(Stores,sizeof Stores,0,r)&&r[0x62d]==1&&r[0x63d]==0&&r[0x629]==0&&r[0x625]==1&&!builtAtOnce(r));
+    CHECK(run(Stores,sizeof Stores,0,r)&&r[0x62d]==1&&r[0x63d]==0&&r[0x629]==0&&r[0x625]==1&&!builtAtOnce(r)&&!areaDone(r));
 
     auto image=[](Memory& m){m.block(Base+AnswerBuilder,sizeof BuilderStart);std::memcpy(m.at(Base+AnswerBuilder,9),BuilderStart,9);
         m.block(Base+AnswerFlags,AnswerFlagsSize);std::memcpy(m.at(Base+AnswerFlags,AnswerFlagsSize),Stores,AnswerFlagsSize);};
@@ -79,13 +83,15 @@ static void answers(){
     CHECK(patchAnswers(s,Base,code)==Early::Patched);
     // Two bytes, nothing else.
     CHECK(writes.size()==2);
-    if(writes.size()==2)CHECK(writes[0]==std::make_pair(Base+AnswerFlags+0x14,uint8_t(0))&&writes[1]==std::make_pair(Base+AnswerFlags+0x24,uint8_t(0xb9)));
+    if(writes.size()==2)CHECK(writes[0]==std::make_pair(Base+AnswerFlags+0x10,uint8_t(0xce))&&writes[1]==std::make_pair(Base+AnswerFlags+0x24,uint8_t(0xb9)));
     {unsigned differ=0;for(size_t i=0;i<AnswerFlagsSize;++i)differ+=*m.at(Base+AnswerFlags+i,1)!=Stores[i];CHECK(differ==2);
      CHECK(!std::memcmp(m.at(Base+AnswerBuilder,9),BuilderStart,9));}
-    // What the changed code makes: +0x62d 0, +0x63d 1, +0x629 still the answer's byte: built as it is made.
+    // What the changed code makes: +0x62d 0, +0x63d 1, +0x629 still the answer's byte: built as it is made; +0x63e 1:
+    // the area check counts as done, as for the save's received structures (object +0xaf 0x24 with +0x63b's 4).
     const uint8_t* now=m.at(Base+AnswerFlags,AnswerFlagsSize);
     CHECK(run(now,AnswerFlagsSize,0,r)&&r[0x62d]==0&&r[0x63d]==1&&r[0x629]==0&&r[0x625]==1&&r[0x623]==0&&builtAtOnce(r));
-    CHECK(run(now,AnswerFlagsSize,1,r)&&r[0x629]==1&&r[0x63d]==1&&r[0x62d]==0);   // the game's own byte, if it ever set it
+    CHECK(areaDone(r)&&r[0x63b]==1&&r.size()==7);                                   // nothing else of the request written
+    CHECK(run(now,AnswerFlagsSize,1,r)&&r[0x629]==1&&r[0x63d]==1&&r[0x62d]==0&&r[0x63e]==1);   // the game's own byte, if it ever set it
     // Again: found changed, nothing written.
     writes.clear();
     CHECK(patchAnswers(s,Base,code)==Early::Already&&writes.empty());

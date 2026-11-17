@@ -58,11 +58,14 @@ Builder::Write nativeWrite();
 // the mod. So the mod also changes the request the record is made from, in the game's code: the builder of requests
 // for a findQpidObjects answer (AnswerBuilder, one request per accepted object, nothing else uses it) sets request
 // +0x62d = 1 (object +0xaa 0x20) and copies the answer's byte +0x110, which is 0 for every downloaded object, into
-// request +0x63d (object +0xaa 0x10). Two bytes of that code: its constant 1 for +0x62d becomes 0, and its store into
-// +0x63d goes to +0x629 instead, where the same byte was just stored, so +0x63d keeps the request constructor's 1. The
-// record is then made with 0x10 set and 0x20 clear, the flags the scan writes, and built as it is made, as the game
-// builds the save's records of other players. +0x629 (object +0xaf bit 7, which holds the build until another online
-// callback clears it) keeps the answer's byte. Nothing else of the game's code changes: the porter's builds,
+// request +0x63d (object +0xaa 0x10). Two bytes of that code: its store of 1 into +0x62d goes to +0x63e instead, and
+// its store into +0x63d goes to +0x629 instead, where the same byte was just stored. +0x62d and +0x63d keep the request
+// constructor's 0 and 1. The record is then made with 0x10 set and 0x20 clear, the flags the scan writes, and built as
+// it is made, as the game builds the save's records of other players. +0x63e = 1 is object +0xaf 0x20: the check the
+// game runs on another player's structure when its floor is rechecked (0x2c43590: not inside an unconstructable or a
+// construction-offline area) counts as done, as it does for the save's received structures (game_offsets.md, "Why
+// received rain shelters are removed"). +0x629 (object +0xaf bit 7, which holds the build until another online callback
+// clears it) keeps the answer's byte. Nothing else of the game's code changes: the porter's builds,
 // CreateConstruction, the save's records and every other request come from other code.
 constexpr uint64_t AnswerBuilder=0x2c5f850,AnswerFlags=0x2c601c0;
 constexpr size_t AnswerFlagsSize=0x28;
