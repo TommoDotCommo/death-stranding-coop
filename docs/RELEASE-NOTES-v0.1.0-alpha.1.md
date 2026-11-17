@@ -66,8 +66,10 @@ the player path (Setup or the launcher's install, the game started by Steam), no
 
 ## Not verified
 
-- **Setup**: the firewall step with its administrator prompt, the invite-link option, SmartScreen's wording on a PC
-  that downloaded the file from GitHub, and Uninstall from the window.
+- **Setup**: the administrator prompt of the firewall option for a user who is not already elevated (the option itself
+  ran: ticking it added inbound rules for the game, the launcher and the server on Private and Public networks, and
+  unticking took them away), the invite-link option, and SmartScreen's wording on a PC that downloaded the file from
+  GitHub. Uninstall from the window ran (the game folder back as it was).
 - **The internet**: every two-PC run so far went over Tailscale; a rented server on a public address and players behind
   ordinary home routers have not been tried (`deploy/vps` is checked on loopback only).
 - **F2** (bug marker) in a real game, and an actual game crash producing a dump.
