@@ -19,17 +19,17 @@ function Out-Result($result) {
 try {
     switch ($verb) {
         'status' {
-            $result = Invoke-DsSetup @($words | Select-Object -Skip 1)
+            $result = Invoke-DsSetup $words      # the same words, verb first
             Out-Result $result
             exit $result.ExitCode
         }
         'install' {
-            $result = Invoke-DsSetup @($words | Select-Object -Skip 1)
+            $result = Invoke-DsSetup $words      # the same words, verb first
             Out-Result $result
             exit $result.ExitCode
         }
         'uninstall' {
-            $result = Invoke-DsSetup @($words | Select-Object -Skip 1)
+            $result = Invoke-DsSetup $words      # the same words, verb first
             Out-Result $result
             if ($result.ExitCode -eq $script:DsExitUsage -or $result.ExitCode -eq $script:DsExitRunning) { exit $result.ExitCode }
             $code = $result.ExitCode

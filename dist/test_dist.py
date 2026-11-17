@@ -102,6 +102,8 @@ def main():
     assert '$optFirewall.Checked = $false' in gui, 'the firewall rule is opt-in'
     for verb in ("'status'", "'install'", "'uninstall'"):
         assert verb in verbs, 'verb ' + verb
+    # The verbs reach the launcher unchanged, verb first (a Windows run once lost the verb this way).
+    assert verbs.count('Invoke-DsSetup $words ') == 3, 'status, install and uninstall reach the launcher with the same words, verb first'
     print('PASS: SHA-256 vectors, Setup payload parsing and checksum, run-from-zip test, Setup script facts')
 
 
