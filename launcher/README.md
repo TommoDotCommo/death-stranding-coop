@@ -6,7 +6,7 @@ installation is needed. The game is still experimental; this launcher does not m
 shared story progression or the partner body release-ready.
 
 The [co-op standard](https://github.com/TommoDotCommo/coop-mod-kit/blob/main/STANDARD.md)
-and its prototype define the structure: Play / Saves / Settings / About (A1),
+and its prototype define the structure: Play / Saves / Challenges / Settings / About (A1: Challenges is the one tab of its own a game may add),
 Host / Join / Solo and one primary action (A2), Lobby as a state of Play (A3),
 network discovery and invites (B1/B2/B5–B9, C3–C5), ready/start (D3), settings saved
 on change (E1), separate co-op saves and backups (F1), per-user invite links (G3).

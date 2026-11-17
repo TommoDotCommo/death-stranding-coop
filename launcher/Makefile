@@ -13,9 +13,9 @@ build:
 	mkdir -p build
 build/version.rc: FORCE | build
 	python3 -B ../tools/versioninfo.py "$(VERSION)" deathstranding-coop.exe "Death Stranding Co-op launcher" $@
-build/deathstranding-coop.exe: main.cpp $(SRC) $(HEADERS) launcher.rc build/version.rc ../dist/diag.ps1 ../dist/diag-rules.json | build
+build/deathstranding-coop.exe: main.cpp $(SRC) $(CHALLENGE_SRC) challenges.h ../mod/route.h $(HEADERS) launcher.rc build/version.rc ../dist/diag.ps1 ../dist/diag-rules.json | build
 	$(WINDRES) launcher.rc -o build/launcher-res.o
-	$(CXX) $(FLAGS) -DCOOP_VERSION='"$(VERSION)"' -municode -mwindows main.cpp $(SRC) build/launcher-res.o -o $@ -lcomctl32 -lshell32 -lole32 -loleaut32 -luuid -lws2_32 -liphlpapi -lbcrypt
+	$(CXX) $(FLAGS) -DCOOP_VERSION='"$(VERSION)"' -municode -mwindows main.cpp $(SRC) $(CHALLENGE_SRC) build/launcher-res.o -o $@ -lcomctl32 -lshell32 -lole32 -loleaut32 -luuid -lws2_32 -liphlpapi -lbcrypt
 build/core-test: core_test.cpp $(SRC) $(HEADERS) ../world/signatures.cpp ../world/signatures.h | build
 	g++ -std=c++17 -O2 -Wall -Wextra -Werror core_test.cpp $(SRC) ../world/signatures.cpp -o $@
 # The install core shared with Setup (install.h), in fake folders.
@@ -29,6 +29,14 @@ build/saves-test: saves_test.cpp saves_vectors.h $(SRC) $(HEADERS) | build
 	g++ -std=c++17 -O2 -Wall -Wextra -Werror saves_test.cpp $(SRC) -o $@
 build/testsaves-test: testsaves_test.cpp saves_vectors.h $(SRC) $(HEADERS) | build
 	g++ -std=c++17 -O2 -Wall -Wextra -Werror testsaves_test.cpp $(SRC) -o $@
+# The Challenges tab without its window (challenges.h, ../docs/ROUTES.md "The launcher"), with the mod's route core.
+CHALLENGE_SRC = challenges.cpp ../mod/route.cpp
+build/challenges-test: challenges_test.cpp challenges.h $(CHALLENGE_SRC) ../mod/route.h $(SRC) $(HEADERS) | build
+	g++ -std=c++17 -O2 -Wall -Wextra -Werror challenges_test.cpp $(CHALLENGE_SRC) $(SRC) ../world/signatures.cpp -o $@
+challenges-test: build/challenges-test
+	./build/challenges-test
+	python3 -B ../mod/mutants.py --sources "challenges_test.cpp $(CHALLENGE_SRC) $(SRC) ../world/signatures.cpp" --prefix build/mutant-challenges- CHALLENGES_EDIT_POINTS CHALLENGES_SEND_FAILED CONFIG_ROUTE_DROPPED && echo KILLED 3 launcher challenge mutants
+.PHONY: challenges-test
 # Group play over real sockets: the launcher's server command line with the built server and stand-in players.
 ../world/build/coop-world: FORCE
 	$(MAKE) -C ../world build/coop-world
@@ -37,6 +45,7 @@ build/testsaves-test: testsaves_test.cpp saves_vectors.h $(SRC) $(HEADERS) | bui
 FORCE:
 test: build/core-test build/install-test build/saves-test build/testsaves-test build/invite-test build/discover-test ../world/build/coop-world ../mod/build/coop-swarm
 	python3 -B test_core.py
+	$(MAKE) challenges-test
 	python3 -B test_testsaves.py build/testsaves-test
 	python3 -B test_group.py build/core-test ../world/build/coop-world ../mod/build/coop-swarm
 	python3 -B test_identity.py build/core-test ../world/build/coop-world

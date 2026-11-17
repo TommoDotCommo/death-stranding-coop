@@ -56,6 +56,9 @@ struct Session {
     // Group play: other players' structures the server hands this game are built at once (`build_received`), skipping
     // the game's spacing and area checks for them. The player's setting, on unless he turns it off.
     bool buildReceived=true;
+    // A route challenge the player chose in Challenges (../docs/ROUTES.md): "DSR1-..." written into the game's config as
+    // `route`, in every kind of session; "" none.
+    std::string route;
 };
 // This install's key pair: made once and kept in `file` (player.key, beside launcher.ini). Its secret half is never
 // sent anywhere; the public half is the player on servers that take keys. A file that is there but cannot be read is

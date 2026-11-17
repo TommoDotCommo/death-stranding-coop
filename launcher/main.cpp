@@ -10,6 +10,7 @@
 #include "owner.h"
 #include "testsaves.h"
 #include "install.h"
+#include "challenges.h"
 #include "../world/json.h"
 #include "../common/crash_handler.h"
 #include <sstream>
@@ -37,8 +38,12 @@ uint64_t playerNumber=0;                                // this player's number 
 std::string groupPolicy="friends";                      // the rules the host's launcher gives a new group world (settings)
 Session strandSession;bool haveStrand=false;            // the group server this launcher last hosted or joined: "My strand on this server"
 world::identity::Keys keys;                             // this install's key pair (player.key beside launcher.ini; core.h playerKeys)
-std::vector<HWND> controls[4];
-enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import,Remove,GroupHost,GroupPolicy,Strand,Owner,BuildReceived,TestList,UseTest,GetTest};
+// The tabs (STANDARD.md A1: Play, Saves, the game's own tab, Settings, About).
+enum Page {PagePlay=0,PageSaves,PageChallenges,PageSettings,PageAbout,Pages};
+std::vector<HWND> controls[Pages];
+std::string challenge;   // the route challenge the next game runs (../docs/ROUTES.md; launcher.ini challenge=, Session::route)
+enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import,Remove,GroupHost,GroupPolicy,Strand,Owner,BuildReceived,TestList,UseTest,GetTest,
+      ChRecorded,ChName,ChWidth,ChStart,ChFinish,ChGrace,ChTime,ChCases,ChVehicles,ChCopy,ChPublish,ChUse,ChPaste,ChServer,ChRefresh,ChRun,ChClear,ChResults,ChSend};
 const char* PolicyNames[]={"friends","solo","public"};
 HWND child(int id){return GetDlgItem(window,id);}
 std::wstring text(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(n+1,0);GetWindowTextW(h,s.data(),n+1);s.resize(n);return s;}
@@ -194,7 +199,7 @@ void writeSettings(){
     std::string name=utf8(player),game=utf8(gameFolder);
     if(name.find_first_of("\r\n")!=std::string::npos||game.find_first_of("\r\n")!=std::string::npos)return;
     atomicWrite(settingsFile,settingsText(readIni(),{{"name",name},{"game",game},{"choice",std::to_string(choice)},{"port",std::to_string(port)},{"lan",std::to_string(lan)},{"tailscale",std::to_string(tailscale)},
-        {"privacy",std::to_string(privacy)},{"world",std::to_string(sharedWorld)},{"group",std::to_string(groupHost)},{"group_secret",std::to_string(groupSecret)},{"player_id",std::to_string(playerNumber)},{"group_policy",groupPolicy},{"build_received",std::to_string(buildReceived)}}));
+        {"privacy",std::to_string(privacy)},{"world",std::to_string(sharedWorld)},{"group",std::to_string(groupHost)},{"group_secret",std::to_string(groupSecret)},{"player_id",std::to_string(playerNumber)},{"group_policy",groupPolicy},{"build_received",std::to_string(buildReceived)},{"challenge",challenge}}));
 }
 void saveSettings(){if(!initializing)writeSettings();}
 // A headless report (one line of JSON): to standard output for "-", else to that file.
@@ -223,7 +228,7 @@ uint32_t groupKey(){if(!groupSecret){groupSecret=random32();writeSettings();}ret
 // Windows Firewall's verdict for the game's two UDP ports, read when the launcher starts and when a lobby opens.
 Firewall firewall=Firewall::Unknown;
 void readFirewallNow(){if(!gameFolder.empty())firewall=readFirewall(fs::path(gameFolder)/"ds.exe",{port,port+1});}
-Session chosenSession(){Session s;s.name=utf8(player);s.port=port;s.sharedWorld=sharedWorld;s.playerId=playerNumber;s.policy=groupPolicy;s.buildReceived=buildReceived;return s;}   // a guest's choice is replaced by the host's (net_win.h)
+Session chosenSession(){Session s;s.name=utf8(player);s.port=port;s.sharedWorld=sharedWorld;s.playerId=playerNumber;s.policy=groupPolicy;s.buildReceived=buildReceived;s.route=challenge;return s;}   // a guest's choice is replaced by the host's (net_win.h)
 void render();
 // ---- A group server's rules (strand.h): the join screen and "My strand on this server", each a window of its own
 // over the launcher, which is disabled while one is open. Built without being seen on a screen (README).
@@ -583,7 +588,68 @@ fs::path saveDiagnosticsZip(){
         return zip;
     }catch(...){cleanup();throw;}
 }
-void switchTab(int next){selectedTab=next;TabCtrl_SetCurSel(tab,next);if(next==1)loadTestSaves();render();}
+// ---- The Challenges tab (../docs/ROUTES.md, "The launcher"; challenges.h has everything but the window) -----------------
+std::vector<challenges::Recorded> recorded;std::vector<challenges::Result> runResults;std::vector<challenges::Listed> serverList;
+void setClipboard(const std::wstring& value,const char* what){
+    if(!OpenClipboard(window))throw std::runtime_error(std::string("Clipboard is busy. Try ")+what+" again.");
+    auto memory=GlobalAlloc(GMEM_MOVEABLE,(value.size()+1)*sizeof(wchar_t));if(!memory){CloseClipboard();throw std::runtime_error("Cannot allocate the clipboard.");}
+    auto p=GlobalLock(memory);if(!p){GlobalFree(memory);CloseClipboard();throw std::runtime_error("Cannot write the clipboard.");}
+    memcpy(p,value.c_str(),(value.size()+1)*sizeof(wchar_t));GlobalUnlock(memory);EmptyClipboard();
+    if(!SetClipboardData(CF_UNICODETEXT,memory)){GlobalFree(memory);CloseClipboard();throw std::runtime_error(std::string("Cannot copy. Try ")+what+" again.");}
+    CloseClipboard();}
+void listInto(int id,const std::vector<std::string>& rows){
+    int selected=int(SendMessageW(child(id),LB_GETCURSEL,0,0));SendMessageW(child(id),LB_RESETCONTENT,0,0);
+    for(auto& r:rows){auto w=wtext(r);SendMessageW(child(id),LB_ADDSTRING,0,reinterpret_cast<LPARAM>(w.c_str()));}
+    if(selected>=0&&selected<int(rows.size()))SendMessageW(child(id),LB_SETCURSEL,selected,0);}
+int selectedRow(int id){return int(SendMessageW(child(id),LB_GETCURSEL,0,0));}
+void showChosen(){set(244,wtext(challenge.empty()?std::string("The next game runs no challenge."):"The next game runs: "+challenges::describe(challenge)));EnableWindow(child(ChClear),!challenge.empty());}
+void loadChallenges(){
+    recorded=challenges::recordings(options.data);runResults=challenges::results(options.data);
+    std::vector<std::string> rows;for(auto& r:recorded)rows.push_back(r.file.filename().string().substr(9,15)+"  "+challenges::describe(r.text));listInto(ChRecorded,rows);
+    rows.clear();for(auto& r:runResults)rows.push_back(r.file.filename().string().substr(7,15)+"  "+challenges::describe(r));listInto(ChResults,rows);
+    showChosen();}
+void showRecorded(){
+    int i=selectedRow(ChRecorded);if(i<0||i>=int(recorded.size()))return;
+    auto e=challenges::editOf(recorded[size_t(i)].text);
+    set(ChName,wtext(e.name));set(ChWidth,std::to_wstring(e.rules.width));set(ChStart,std::to_wstring(e.rules.startRadius));set(ChFinish,std::to_wstring(e.rules.finishRadius));
+    set(ChGrace,std::to_wstring(e.rules.grace));set(ChTime,std::to_wstring(e.rules.timeLimit/60));set(ChCases,std::to_wstring(e.rules.minCases));
+    SendMessageW(child(ChVehicles),BM_SETCHECK,e.rules.noVehicles?BST_CHECKED:BST_UNCHECKED,0);}
+// The selected recording with the name and rules in the fields: a new string, or the reason it cannot be one.
+std::string editedRoute(){
+    int i=selectedRow(ChRecorded);if(i<0||i>=int(recorded.size()))throw std::runtime_error("Choose a recorded route first (press K in the game to record one).");
+    auto number=[&](int id,const char* what){auto v=utf8(text(child(id)));if(v.empty()||v.size()>5||v.find_first_not_of("0123456789")!=std::string::npos)throw std::runtime_error(std::string(what)+" is a whole number.");return unsigned(std::stoul(v));};
+    auto e=challenges::editOf(recorded[size_t(i)].text);e.name=utf8(text(child(ChName)));
+    e.rules.width=number(ChWidth,"The corridor's width");e.rules.startRadius=number(ChStart,"The start zone's radius");e.rules.finishRadius=number(ChFinish,"The finish zone's radius");
+    e.rules.grace=number(ChGrace,"The grace");e.rules.timeLimit=number(ChTime,"The time limit")*60;e.rules.minCases=number(ChCases,"The number of cases");
+    e.rules.noVehicles=SendMessageW(child(ChVehicles),BM_GETCHECK,0,0)==BST_CHECKED;
+    try{return challenges::edited(recorded[size_t(i)].text,e);}catch(const std::exception& x){throw std::runtime_error(std::string("This route cannot be shared so: ")+x.what()+".");}}
+void runChallenge(const std::string& text){challenge=challenges::canonical(text);writeSettings();showChosen();}
+// The group server this launcher last hosted or joined, identified as every launcher call is (its keys when it takes keys).
+strand::Target challengeTarget(strand::Transport& send){
+    if(!haveStrand)throw std::runtime_error("Host or join a group server first: challenges are kept on the group's server.");
+    auto t=targetOf(strandSession);send=strand::transport(t);strand::Policy rules;std::string why;
+    auto fetched=strand::fetchPolicy(t,send,rules);if(fetched!=strand::Fetch::Ok)throw std::runtime_error(strand::fetchText(fetched));
+    if(!strand::identify(t,rules,int64_t(std::time(nullptr)),why))throw std::runtime_error(why);
+    if(t.account.empty())throw std::runtime_error("Your Steam account is not known yet. Start Steam, then try again.");
+    return t;}
+void refreshServer(){
+    strand::Transport send;auto t=challengeTarget(send);std::string why;
+    if(!challenges::fetchList(t,send,serverList,why))throw std::runtime_error(why);
+    std::vector<std::string> rows;for(auto& l:serverList)rows.push_back(l.id+"  "+l.text());listInto(ChServer,rows);
+    if(serverList.empty())set(243,L"The group server has no challenges yet.");}
+void publishRoute(){
+    auto text=editedRoute();strand::Transport send;auto t=challengeTarget(send);std::string id,why;
+    if(!challenges::publish(t,send,text,id,why))throw std::runtime_error("Not published: "+why);
+    refreshServer();MessageBoxW(window,wtext("Published on the group server as "+id+". Everyone there can run it.").c_str(),L"Challenge published",MB_OK);}
+void sendResult(){
+    int i=selectedRow(ChResults);if(i<0||i>=int(runResults.size()))throw std::runtime_error("Choose a finished run first.");
+    auto& r=runResults[size_t(i)];if(r.outcome!="finished")throw std::runtime_error("Only a finished run goes to the server.");
+    strand::Transport send;auto t=challengeTarget(send);std::string why;
+    if(!challenges::fetchList(t,send,serverList,why))throw std::runtime_error(why);
+    auto id=challenges::challengeOf(serverList,r);if(id.empty())throw std::runtime_error("That challenge is not on the group server: publish it there first, then run it again.");
+    int64_t place=0;if(!challenges::submit(t,send,id,r,place,why))throw std::runtime_error("Not counted: "+why);
+    refreshServer();MessageBoxW(window,wtext("Counted: place "+std::to_string(place)+" on "+id+".").c_str(),L"Run sent",MB_OK);}
+void switchTab(int next){selectedTab=next;TabCtrl_SetCurSel(tab,next);if(next==PageSaves)loadTestSaves();if(next==PageChallenges)loadChallenges();render();}
 void scan(bool force=false){
     if(choice!=1||net->lobby||selectedTab!=0||joinAfterScan)return;
     auto now=GetTickCount();if(!net->scanning&&(force||now-lastScan>=5000)){lastScan=now;net->scan(lan,tailscale,port,utf8(text(child(Paste))));}
@@ -604,7 +670,7 @@ void render(){
     if(!window||!tab)return;
     RECT rect;GetClientRect(window,&rect);int w=rect.right,h=rect.bottom;
     MoveWindow(tab,20,65,w-40,32,TRUE);
-    for(int page=0;page<4;++page)for(auto c:controls[page])ShowWindow(c,page==selectedTab?SW_SHOW:SW_HIDE);
+    for(int page=0;page<Pages;++page)for(auto c:controls[page])ShowWindow(c,page==selectedTab?SW_SHOW:SW_HIDE);
     TCITEMW item{};item.mask=TCIF_TEXT;item.pszText=const_cast<wchar_t*>(net->lobby?L"Lobby":L"Play");TabCtrl_SetItem(tab,0,&item);
     if(selectedTab==0){
         place(200,30,115,120,24);place(Name,155,110,w-185,28);
@@ -629,9 +695,20 @@ void render(){
     }
     if(selectedTab==1){int half=(w-75)/2;place(210,30,115,w-60,45);place(211,30,160,w-60,85);place(OpenSaves,30,250,half,36);place(BackUp,45+half,250,half,36);place(Import,30,292,w-60,36);
         place(212,30,342,w-60,25);place(TestList,30,370,half,150);place(213,45+half,370,half,150);place(UseTest,30,530,half,36);place(GetTest,45+half,530,half,36);}
-    if(selectedTab==2){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(Lan,30,265,w-60,30);place(Tailscale,30,300,w-60,30);place(Privacy,30,335,w-60,30);place(World,30,370,w-60,30);place(GroupHost,30,405,w-60,30);place(BuildReceived,30,440,w-60,46);place(223,30,497,330,25);place(GroupPolicy,370,493,w-400,120);place(224,30,535,w-60,40);place(Protocol,30,580,w-60,36);place(222,30,622,w-60,50);
+    if(selectedTab==PageSettings){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(Lan,30,265,w-60,30);place(Tailscale,30,300,w-60,30);place(Privacy,30,335,w-60,30);place(World,30,370,w-60,30);place(GroupHost,30,405,w-60,30);place(BuildReceived,30,440,w-60,46);place(223,30,497,330,25);place(GroupPolicy,370,493,w-400,120);place(224,30,535,w-60,40);place(Protocol,30,580,w-60,36);place(222,30,622,w-60,50);
         bool edit=!net->lobby;for(int id:{GamePath,Port,Lan,Tailscale,Privacy,World,GroupHost,BuildReceived,GroupPolicy})EnableWindow(child(id),edit);}
-    if(selectedTab==3){place(230,30,120,w-60,240);place(Guide,30,390,w-60,40);place(Home,30,445,w-60,40);place(Diagnose,30,500,w-60,40);place(Remove,30,555,w-60,40);}
+    if(selectedTab==PageChallenges){int half=(w-75)/2,q=(w-60-3*10)/4;
+        place(240,30,110,w-60,22);place(ChRecorded,30,134,w-60,80);
+        place(241,30,222,90,22);place(ChName,125,218,w-155,26);
+        place(245,30,254,q-55,22);place(ChWidth,30+q-50,250,50,26);place(246,40+q,254,q-55,22);place(ChStart,40+2*q-50,250,50,26);
+        place(247,50+2*q,254,q-55,22);place(ChFinish,50+3*q-50,250,50,26);place(248,60+3*q,254,q-55,22);place(ChGrace,60+4*q-50,250,50,26);
+        place(249,30,286,q-55,22);place(ChTime,30+q-50,282,50,26);place(250,40+q,286,q-55,22);place(ChCases,40+2*q-50,282,50,26);place(ChVehicles,50+2*q,282,2*q+10,26);
+        int third=(w-80)/3;place(ChCopy,30,316,third,32);place(ChUse,40+third,316,third,32);place(ChPublish,50+2*third,316,third,32);
+        place(242,30,360,w-60,22);place(ChPaste,30,384,w-60,26);place(243,30,414,w-60,36);
+        place(ChServer,30,452,w-60,70);place(ChRefresh,30,528,half,32);place(ChRun,45+half,528,half,32);
+        place(244,30,568,w-60-half-15,36);place(ChClear,45+half,568,half,32);
+        place(251,30,610,w-60,22);place(ChResults,30,634,w-60-140,h-650>40?h-650:40);place(ChSend,w-160,634,130,32);}
+    if(selectedTab==PageAbout){place(230,30,120,w-60,240);place(Guide,30,390,w-60,40);place(Home,30,445,w-60,40);place(Diagnose,30,500,w-60,40);place(Remove,30,555,w-60,40);}
 }
 void copyInvite(){
     bool group=hostingGroup();auto code=group?groupCode():net->invite();char msg[1024];ci_message(group?utf8(player).c_str():net->session.name.c_str(),"Death Stranding co-op","https://tommodotcommo.github.io/death-stranding-coop/join/",code.c_str(),msg,sizeof(msg));
@@ -703,6 +780,9 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
         if(msg==WM_NOTIFY&&reinterpret_cast<NMHDR*>(lp)->hwndFrom==tab&&reinterpret_cast<NMHDR*>(lp)->code==TCN_SELCHANGE){switchTab(TabCtrl_GetCurSel(tab));scan(true);return 0;}
         if(msg==WM_COMMAND){int id=LOWORD(wp),event=HIWORD(wp);
             if(id==TestList&&event==LBN_SELCHANGE)showTestSave();
+            if(id==ChRecorded&&event==LBN_SELCHANGE)showRecorded();
+            if(id==ChServer&&event==LBN_SELCHANGE){int i=selectedRow(ChServer);if(i>=0&&i<int(serverList.size()))set(243,wtext(serverList[size_t(i)].text()));}
+            if(id==ChPaste&&event==EN_CHANGE){auto v=utf8(text(child(ChPaste)));set(243,v.empty()?L"":wtext(challenges::describe(v)));}
             if(id==Name&&event==EN_CHANGE){player=text(child(Name));saveSettings();}
             if(id==GamePath&&event==EN_CHANGE){gameFolder=text(child(GamePath));saveSettings();}
             if(id==Port&&event==EN_CHANGE){auto v=utf8(text(child(Port)));if(!v.empty()&&v.find_first_not_of("0123456789")==std::string::npos&&v.size()==5){auto p=std::stoul(v);if(p>=49000&&p<=49014){port=unsigned(p);saveSettings();}}}
@@ -721,6 +801,16 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
                 if(id==Ready){net->setReady();render();}
                 if(id==HostSave){net->wantSave=SendMessageW(child(id),BM_GETCHECK,0,0)==BST_CHECKED;}
                 if(id==Import)importSaves(h);
+                if(id==ChCopy){setClipboard(wtext(editedRoute()),"Copy string");set(243,L"Challenge string copied. Send it to anyone who plays with the co-op mod.");}
+                if(id==ChUse)runChallenge(editedRoute());
+                if(id==ChPublish)publishRoute();
+                if(id==ChRefresh)refreshServer();
+                if(id==ChRun){auto pasted=utf8(text(child(ChPaste)));int i=selectedRow(ChServer);
+                    if(!pasted.empty())runChallenge(pasted);
+                    else if(i>=0&&i<int(serverList.size()))runChallenge(serverList[size_t(i)].route);
+                    else throw std::runtime_error("Paste a challenge string, or choose one of the server's.");}
+                if(id==ChClear){challenge.clear();writeSettings();showChosen();}
+                if(id==ChSend)sendResult();
                 if(id==UseTest)useTestSave(h);
                 if(id==GetTest)ShellExecuteW(h,L"open",wtext(testsaves::ReleasePage).c_str(),nullptr,nullptr,SW_SHOWNORMAL);
                 if(id==Remove)removeSetup(h);
@@ -742,7 +832,7 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
 }
 void buildControls(){
     tab=CreateWindowExW(0,WC_TABCONTROLW,L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP,0,0,0,0,window,nullptr,nullptr,nullptr);SendMessageW(tab,WM_SETFONT,reinterpret_cast<WPARAM>(font),TRUE);
-    for(auto name:{L"Play",L"Saves",L"Settings",L"About"}){TCITEMW t{};t.mask=TCIF_TEXT;t.pszText=const_cast<wchar_t*>(name);TabCtrl_InsertItem(tab,TabCtrl_GetItemCount(tab),&t);}
+    for(auto name:{L"Play",L"Saves",L"Challenges",L"Settings",L"About"}){TCITEMW t{};t.mask=TCIF_TEXT;t.pszText=const_cast<wchar_t*>(name);TabCtrl_InsertItem(tab,TabCtrl_GetItemCount(tab),&t);}
     auto title=CreateWindowExW(0,L"STATIC",L"DEATH STRANDING  /  CO-OP",WS_CHILD|WS_VISIBLE,25,18,710,32,window,nullptr,nullptr,nullptr);SendMessageW(title,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),TRUE);
     label(0,200,L"Your name");control(0,Name,L"EDIT",player.c_str(),ES_AUTOHSCROLL);SendMessageW(child(Name),EM_SETLIMITTEXT,32,0);
     control(0,Host,L"BUTTON",L"Host a game",BS_AUTORADIOBUTTON|WS_GROUP);control(0,Join,L"BUTTON",L"Join a friend",BS_AUTORADIOBUTTON);control(0,Solo,L"BUTTON",L"Play solo",BS_AUTORADIOBUTTON);
@@ -755,20 +845,34 @@ void buildControls(){
     label(1,212,L"Test saves: ready-made co-op saves to start from (a separate download beside each release)");
     control(1,TestList,L"LISTBOX",L"",LBS_NOTIFY|WS_VSCROLL|WS_BORDER);label(1,213,L"");
     control(1,UseTest,L"BUTTON",L"Use this test save");control(1,GetTest,L"BUTTON",L"Get test saves...");
-    label(2,220,L"Launcher / game folder (applies next start)\nSteam mode must use the folder registered with Steam.");control(2,GamePath,L"EDIT",gameFolder.c_str(),ES_AUTOHSCROLL);
-    label(2,221,L"Network / host UDP port (49000..49014)");control(2,Port,L"EDIT",std::to_wstring(port).c_str(),ES_NUMBER|ES_AUTOHSCROLL);
-    control(2,Lan,L"BUTTON",L"Find games on my network",BS_AUTOCHECKBOX);control(2,Tailscale,L"BUTTON",L"Find friends on Tailscale",BS_AUTOCHECKBOX);control(2,Privacy,L"BUTTON",L"Invite only (host decides)",BS_AUTOCHECKBOX);control(2,World,L"BUTTON",L"Shared world (experimental; the host decides): each other's ladders and cairns through the game's own online layer",BS_AUTOCHECKBOX);
+    label(PageChallenges,240,L"Recorded routes (press K in the game to start and stop recording; the newest first)");control(PageChallenges,ChRecorded,L"LISTBOX",L"",LBS_NOTIFY|WS_VSCROLL|WS_BORDER);
+    label(PageChallenges,241,L"Name");control(PageChallenges,ChName,L"EDIT",L"",ES_AUTOHSCROLL);SendMessageW(child(ChName),EM_SETLIMITTEXT,32,0);
+    label(PageChallenges,245,L"Corridor m");control(PageChallenges,ChWidth,L"EDIT",L"10",ES_NUMBER);label(PageChallenges,246,L"Start zone m");control(PageChallenges,ChStart,L"EDIT",L"10",ES_NUMBER);
+    label(PageChallenges,247,L"Finish zone m");control(PageChallenges,ChFinish,L"EDIT",L"10",ES_NUMBER);label(PageChallenges,248,L"Grace s");control(PageChallenges,ChGrace,L"EDIT",L"5",ES_NUMBER);
+    label(PageChallenges,249,L"Minutes (0 none)");control(PageChallenges,ChTime,L"EDIT",L"0",ES_NUMBER);label(PageChallenges,250,L"Cases (0 none)");control(PageChallenges,ChCases,L"EDIT",L"0",ES_NUMBER);
+    control(PageChallenges,ChVehicles,L"BUTTON",L"No vehicles",BS_AUTOCHECKBOX);
+    for(int id:{ChWidth,ChStart,ChFinish,ChGrace,ChTime,ChCases})SendMessageW(child(id),EM_SETLIMITTEXT,4,0);
+    control(PageChallenges,ChCopy,L"BUTTON",L"Copy string");control(PageChallenges,ChUse,L"BUTTON",L"Run it next game");control(PageChallenges,ChPublish,L"BUTTON",L"Publish on the group server");
+    label(PageChallenges,242,L"Run a challenge: paste a DSR1- string, or choose one of the group server's (Refresh)");control(PageChallenges,ChPaste,L"EDIT",L"",ES_AUTOHSCROLL);SendMessageW(child(ChPaste),EM_SETLIMITTEXT,4100,0);
+    label(PageChallenges,243,L"");control(PageChallenges,ChServer,L"LISTBOX",L"",LBS_NOTIFY|WS_VSCROLL|WS_BORDER);
+    control(PageChallenges,ChRefresh,L"BUTTON",L"Refresh the server's challenges");control(PageChallenges,ChRun,L"BUTTON",L"Run this challenge next game");
+    label(PageChallenges,244,L"");control(PageChallenges,ChClear,L"BUTTON",L"Run no challenge");
+    label(PageChallenges,251,L"Your runs (a finished run of a server's challenge can go on its board)");control(PageChallenges,ChResults,L"LISTBOX",L"",LBS_NOTIFY|WS_VSCROLL|WS_BORDER);
+    control(PageChallenges,ChSend,L"BUTTON",L"Send to server");
+    label(PageSettings,220,L"Launcher / game folder (applies next start)\nSteam mode must use the folder registered with Steam.");control(PageSettings,GamePath,L"EDIT",gameFolder.c_str(),ES_AUTOHSCROLL);
+    label(PageSettings,221,L"Network / host UDP port (49000..49014)");control(PageSettings,Port,L"EDIT",std::to_wstring(port).c_str(),ES_NUMBER|ES_AUTOHSCROLL);
+    control(PageSettings,Lan,L"BUTTON",L"Find games on my network",BS_AUTOCHECKBOX);control(PageSettings,Tailscale,L"BUTTON",L"Find friends on Tailscale",BS_AUTOCHECKBOX);control(PageSettings,Privacy,L"BUTTON",L"Invite only (host decides)",BS_AUTOCHECKBOX);control(PageSettings,World,L"BUTTON",L"Shared world (experimental; the host decides): each other's ladders and cairns through the game's own online layer",BS_AUTOCHECKBOX);
     SendMessageW(child(Lan),BM_SETCHECK,lan?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Tailscale),BM_SETCHECK,tailscale?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Privacy),BM_SETCHECK,privacy?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(World),BM_SETCHECK,sharedWorld?BST_CHECKED:BST_UNCHECKED,0);
-    control(2,GroupHost,L"BUTTON",L"Group server (experimental): Host a game starts a server for many players, each in their own save, instead of a two-player lobby",BS_AUTOCHECKBOX);SendMessageW(child(GroupHost),BM_SETCHECK,groupHost?BST_CHECKED:BST_UNCHECKED,0);
-    control(2,BuildReceived,L"BUTTON",L"Build other players' structures when they arrive (group servers). They skip the game's spacing and area checks, so one may overlap something in your world",BS_AUTOCHECKBOX|BS_MULTILINE|BS_TOP);
+    control(PageSettings,GroupHost,L"BUTTON",L"Group server (experimental): Host a game starts a server for many players, each in their own save, instead of a two-player lobby",BS_AUTOCHECKBOX);SendMessageW(child(GroupHost),BM_SETCHECK,groupHost?BST_CHECKED:BST_UNCHECKED,0);
+    control(PageSettings,BuildReceived,L"BUTTON",L"Build other players' structures when they arrive (group servers). They skip the game's spacing and area checks, so one may overlap something in your world",BS_AUTOCHECKBOX|BS_MULTILINE|BS_TOP);
     SendMessageW(child(BuildReceived),BM_SETCHECK,buildReceived?BST_CHECKED:BST_UNCHECKED,0);
-    label(2,223,L"Rules of a new group world:");control(2,GroupPolicy,L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL);
+    label(PageSettings,223,L"Rules of a new group world:");control(PageSettings,GroupPolicy,L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL);
     for(auto name:{L"Friends: everything shared",L"Solo archive: one player",L"Public: members, review, limits"})SendMessageW(child(GroupPolicy),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
     for(int i=0;i<3;++i)if(groupPolicy==PolicyNames[i])SendMessageW(child(GroupPolicy),CB_SETCURSEL,i,0);
-    label(2,224,wtext("Your player key (made by this launcher; its secret half never leaves this PC): "+world::identity::shortText(keys.pub)+". On group servers that take keys it is you, and the host's key is the owner's.").c_str());
-    control(2,Protocol,L"BUTTON",L"Open deathstranding-coop invite links in this launcher");label(2,222,L"Settings are saved on change. Each game uses two adjacent UDP ports. A group world that exists keeps its own rules.\nCo-op networking is always enforced offline. Voice, controller navigation and router mapping are not available yet.");
-    label(3,230,(L"Death Stranding co-op "+wtext(COOP_VERSION)+L"\nSteam Director's Cut build 13300582\n\nExperimental; not a playable release. Native Windows launcher.\nCo-op mod standard: Play, Saves, Settings, About; DS invites and LAN/Tailscale discovery.\n\nInvite/discovery reference code: coop-mod-kit (MIT).\nNot affiliated with Kojima Productions or the game's publishers.\n\nWire version: "+wtext(wireVersion())).c_str());
-    control(3,Guide,L"BUTTON",L"Quick guide (F1)");control(3,Home,L"BUTTON",L"Project and issue tracker");control(3,Diagnose,L"BUTTON",L"Send diagnostics");control(3,Remove,L"BUTTON",L"Remove co-op from the game");
+    label(PageSettings,224,wtext("Your player key (made by this launcher; its secret half never leaves this PC): "+world::identity::shortText(keys.pub)+". On group servers that take keys it is you, and the host's key is the owner's.").c_str());
+    control(PageSettings,Protocol,L"BUTTON",L"Open deathstranding-coop invite links in this launcher");label(PageSettings,222,L"Settings are saved on change. Each game uses two adjacent UDP ports. A group world that exists keeps its own rules.\nCo-op networking is always enforced offline. Voice, controller navigation and router mapping are not available yet.");
+    label(PageAbout,230,(L"Death Stranding co-op "+wtext(COOP_VERSION)+L"\nSteam Director's Cut build 13300582\n\nExperimental; not a playable release. Native Windows launcher.\nCo-op mod standard: Play, Saves, Challenges, Settings, About; DS invites and LAN/Tailscale discovery.\n\nInvite/discovery reference code: coop-mod-kit (MIT).\nNot affiliated with Kojima Productions or the game's publishers.\n\nWire version: "+wtext(wireVersion())).c_str());
+    control(PageAbout,Guide,L"BUTTON",L"Quick guide (F1)");control(PageAbout,Home,L"BUTTON",L"Project and issue tracker");control(PageAbout,Diagnose,L"BUTTON",L"Send diagnostics");control(PageAbout,Remove,L"BUTTON",L"Remove co-op from the game");
 }
 }
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
@@ -792,6 +896,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         port=GetPrivateProfileIntW(L"launcher",L"port",49000,settingsFile.c_str());if(port<49000||port>49014)port=49000;
         lan=GetPrivateProfileIntW(L"launcher",L"lan",1,settingsFile.c_str());tailscale=GetPrivateProfileIntW(L"launcher",L"tailscale",1,settingsFile.c_str());privacy=GetPrivateProfileIntW(L"launcher",L"privacy",0,settingsFile.c_str());sharedWorld=GetPrivateProfileIntW(L"launcher",L"world",0,settingsFile.c_str())!=0;groupHost=GetPrivateProfileIntW(L"launcher",L"group",0,settingsFile.c_str())!=0;
         buildReceived=GetPrivateProfileIntW(L"launcher",L"build_received",1,settingsFile.c_str())!=0;   // on unless turned off
+        try{challenge=challenges::chosen(readIni());if(!challenge.empty())challenge=challenges::canonical(challenge);}catch(const std::exception&){challenge.clear();}   // a damaged one is dropped
         {auto kept=utf8(read(L"group_policy",L"friends"));for(auto name:PolicyNames)if(kept==name)groupPolicy=name;}
         std::string listTests,useTest;bool listTestsOnly=false;   // --list-test-saves, --use-test-save ID
         bool registerOnly=false,devStart=false,diagnosticsOnly=false,diagnosticsZipOnly=false,firewallOnly=false,forceWorld=false,devSessionGiven=false;std::string devPeer="127.0.0.1",groupTarget;uint32_t devSession=1;fs::path takeSave;

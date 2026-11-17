@@ -179,7 +179,7 @@ The dream is Sams everywhere as you play, and ten of them helping in a boss figh
 |---|---|
 | [`core/`](core/CORE.md) | Game-free presence core: versioned handshake, quantised player snapshots, clock and RTT estimates, interpolation, reconnect, and a reliable exactly-once channel for cargo events. Tested in a simulator with a fuzzer and mutants. |
 | [`mod/`](mod/README.md) | The in-process mod: Winsock transport, the game adapter (reads the local player's pose through the game's own player path), presence log, the partner's body (the mod's own Sam, or the game's resident Sam double) and vehicle, shared cargo, a stand-in partner (`coop-partner`) for testing with one copy, and analysis tools. [`mod/game_offsets.md`](mod/game_offsets.md) holds the reverse-engineering notes for the pinned build. |
-| [`launcher/`](launcher/README.md) | Native Windows Play / Saves / Settings / About launcher: LAN/Tailscale lobbies, standard invites, Steam launch with isolated co-op saves, and backups. A development foundation; see its remaining standard work. |
+| [`launcher/`](launcher/README.md) | Native Windows Play / Saves / Challenges / Settings / About launcher: LAN/Tailscale lobbies, standard invites, Steam launch with isolated co-op saves, and backups. A development foundation; see its remaining standard work. |
 | [`install/`](install/README.md) | What goes where, and the one install logic (`launcher/install.*`) that Setup and the launcher share. |
 | [`dist/`](dist/README.txt) | Setup: `DeathStrandingCoop-Setup.exe` (payload with SHA-256 check), its PowerShell window and verbs, the player README. |
 | [`tools/`](install/README.md#release) | `release.sh` (zip, single-file Setup, checksums, `coop-mod.json`, VERSIONINFO, notes) and its checks. |
