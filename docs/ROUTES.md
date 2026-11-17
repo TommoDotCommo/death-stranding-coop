@@ -143,8 +143,7 @@ written (or "Route too short: nothing recorded." for less than two points):
   rules (10 m wide, 10 m zones, 5 s grace, no limits) and the player's nickname as the author; the launcher changes
   them.
 
-Recording needs the game provider (positions); it does not need a partner, a server or `notices` (without `notices`
-the log lines are all there is). A recording that reaches 20000 samples is halved (every second sample kept) and goes
+Recording needs the game provider (positions); it does not need a partner, a server or `notices`. A recording that reaches 20000 samples is halved (every second sample kept) and goes
 on. The simplification is flat, like the corridor: a hill on a straight path keeps no point on its top, so the
 heights shown are those of the corners.
 
@@ -155,7 +154,8 @@ ASCII, so the config stays plain). The config parser checks its form (`DSR1-`, t
 4000 characters; it needs the game provider); the mod decodes it whole when it starts and refuses to start with the
 reason ("route: This challenge is incomplete. ...") when it is not a good challenge. Then, while the game runs:
 
-- in the info log (with `notices`; always in the game's log as `ROUTE ...` lines): "Challenge <name>: go to the
+- in the info log (whether or not `notices` is on: group play has no partner notices; and in the game's log as
+  `ROUTE ...` lines): "Challenge <name>: go to the
   start (340 m).", "At the start of <name>. Go when ready.", "<name> started.", "Leaving the corridor: 5 s.
   Corridor: 12 m to your left.", "Back in the corridor.", "<name> failed: left the corridor.", "<name> finished in
   12:34.5.";

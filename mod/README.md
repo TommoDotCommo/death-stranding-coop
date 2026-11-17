@@ -2228,13 +2228,14 @@ stay inside the corridor. The whole design, the formats and the server side: [..
   refused) starts and stops it. K is free in the game's default bindings ("Keys" in `game_offsets.md`) and is no shared
   co-op key. The mod samples the porter's position (the presence axes, `cache.local`), simplifies it to at most 300
   points and writes `ROUTE recorded <n> points, <m> m: DSR1-...` to the log and `routes\recorded-<UTC>.txt` in the
-  co-op data folder (the parent of `diag::DefaultLogsDir()`). With `notices` the info log says "Recording a route." and
+  co-op data folder (the parent of `diag::DefaultLogsDir()`). The info log says "Recording a route." and
   "Route recorded: 412 m. ...".
 - **Running:** `"route":"DSR1-..."` (the launcher writes it; the config checks its form, the mod decodes it at start
   and refuses to start with the reason). Every tick in the world the checker (`route.h` `Checker`) gets the porter's
   position, facing, the presence flags `Vehicle` and `Passenger`, and, with a carrying rule, the carried cases
   (`carry_visual.h` `readCarried`, twice a second). What it says goes to the log as `ROUTE <kind>: <sentence>` and, with
-  `notices`, to the info log (`notice.h` kind Route); at the end `ROUTE result finished|failed <ms> ms ... track=DST1-...`
+  the info log (`notice.h` kind Route; the first route line brings the info log up even without `notices`, with no partner
+  lines); at the end `ROUTE result finished|failed <ms> ms ... track=DST1-...`
   and `routes\result-<UTC>-<id>.json`. The status JSON has `route` (state, elapsed_ms, progress_m, outside_m, reason,
   recording, recorded_samples).
 - Not used: the provider's own Teleport flag (5 m between samples is a truck in a long frame), the map pins (the

@@ -100,14 +100,16 @@ def route_property(library):
             oracle(re.search(r'ROUTE failed: .* failed: left the corridor\.',text) and 'ROUTE result failed' in text,('the log lines',text[-1200:]))
             res=json.loads(next(routes(state).glob('result-*.json')).read_text());oracle(res['outcome']=='failed' and res['reason']=='left the corridor',res)
 
-            # Dee jumps 35 m between two ticks.
-            state=root/'state-Dee';d=game(folder,library,'Dee',state,{'route':route})
+            # Dee jumps 35 m between two ticks. Her config has no notices (as in group play): the route's lines still reach
+            # the info log.
+            state=root/'state-Dee';d=game(folder,library,'Dee',state,{'route':route,'notices':False})
             try:
                 hold(d,.3);walk(d,[(0,0,5),(20,0,15)],8,.2)
-                d.place((55,0,7));d.tick();hold(d,.5)
+                d.place((55,0,7));d.tick();hold(d,3.2)   # notices are 2.5 s apart
                 s=d.status();text=log(d)
             finally:d.close()
             oracle(s['route']['state']=='failed' and s['route']['reason']=='teleported',('Dee was not failed',s['route'],text[-1200:]))
+            oracle(any(n.endswith('failed: teleported.') for n in s['notices_shown']),('the info log without notices',s['notices_shown']))
 
             # A string that is not a good challenge refuses the start, with the reason.
             os.environ['XDG_STATE_HOME']=str(root/'state-Eve')

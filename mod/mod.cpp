@@ -1171,7 +1171,7 @@ struct Runtime final:ds::Transport {
     // A config `route` is a challenge this game runs: the checker is fed every tick with the porter's position; what it
     // says goes into the log (ROUTE ...) and, with `notices`, the info log; at the end a result file for the launcher.
     mod::route::Recorder routeRecorder;mod::marker::KeyEdge routeEdge;std::optional<mod::route::Checker> routeRun;
-    std::string routeString;std::vector<std::u16string> routeLines;bool routeOver=false;
+    std::string routeString;std::vector<std::u16string> routeLines;bool routeOver=false,routeTold=false;   // routeTold: a line was ever said
     uint64_t routeCasesAt=0;std::optional<unsigned> routeCasesSeen;
     static std::u16string routeWide(const std::string& s){std::u16string w;for(unsigned char c:s)w+=char16_t(c>=0x20&&c<0x7f?c:'?');return w;}
     static std::string routeStamp(){
@@ -1197,7 +1197,9 @@ struct Runtime final:ds::Transport {
         bool ok=::write(fd,text.data(),text.size())==ssize_t(text.size());::close(fd);return ok;
 #endif
     }
-    void routeSay(const std::string& line){routeLines.push_back(routeWide(line));if(routeLines.size()>8)routeLines.erase(routeLines.begin());}
+    // Route lines reach the info log whether or not `notices` is on (group play has no partner notices): the first one
+    // brings the info log up, without a partner (Notifier::partnerless).
+    void routeSay(const std::string& line){routeTold=true;routeLines.push_back(routeWide(line));if(routeLines.size()>8)routeLines.erase(routeLines.begin());}
     void routeStart(){
         if(config.route.empty())return;
         std::string why;auto r=mod::route::decode(config.route,&why);
@@ -1275,7 +1277,7 @@ struct Runtime final:ds::Transport {
     std::vector<std::u16string> fakeNotices;   // the fake world's info log: every line shown, in order
 #endif
     void tickNotices(uint64_t now) {
-        if(!config.notices&&!noticeTest&&!config.strandNotices)return;
+        if(!config.notices&&!noticeTest&&!config.strandNotices&&!routeTold)return;
 #ifndef MOD_FAKE_NETWORK
         if(!noticeApi&&!noticeTried){
             auto* sp=&*sampler;if(!noticeJob.ready([sp]{return mod::notice::nativeApi(*sp);}))return;   // checked beside the game
@@ -1288,7 +1290,7 @@ struct Runtime final:ds::Transport {
         if(!noticeApi)return;
         if(noticeTest){noticeTest=false;note(noticeApi->show(u"Co-op mod: test notice.",mod::notice::PlainIcon)?"NOTICE test shown\n":"NOTICE test refused: no info log now\n");}
 #ifndef MOD_MUTANT_STRAND_PARTNER
-        if(!config.notices&&!config.strandNotices)return;
+        if(!config.notices&&!config.strandNotices&&!routeTold)return;
 #else
         if(!config.notices)return;   // the mutant: strand lines only beside the partner's notices
 #endif
@@ -3190,7 +3192,6 @@ struct Runtime final:ds::Transport {
                 if(resting!=localResting){localResting=resting;note(resting?"REST this porter sits down to rest\n":"REST this porter is up again\n");}}}
             stages.enter("route",mod::nowUs());
             tickRoute(now);
-            if(!config.notices)routeLines.clear();   // without notices the log lines are all there is
             // The porter's own animation controls (controls.h), every frame: a one-frame pulse is seen only so.
             stages.enter("controls",mod::nowUs());
             bool othersUp=others&&others->connected();   // other players (others.h) get the controls too, at their own rate
