@@ -8,6 +8,7 @@
 #include "firewall_win.h"
 #include "strand.h"
 #include "owner.h"
+#include "testsaves.h"
 #include "../world/json.h"
 #include "../common/crash_handler.h"
 #include <sstream>
@@ -32,7 +33,7 @@ std::string groupPolicy="friends";                      // the rules the host's 
 Session strandSession;bool haveStrand=false;            // the group server this launcher last hosted or joined: "My strand on this server"
 world::identity::Keys keys;                             // this install's key pair (player.key beside launcher.ini; core.h playerKeys)
 std::vector<HWND> controls[4];
-enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import,Remove,GroupHost,GroupPolicy,Strand,Owner,BuildReceived};
+enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import,Remove,GroupHost,GroupPolicy,Strand,Owner,BuildReceived,TestList,UseTest,GetTest};
 const char* PolicyNames[]={"friends","solo","public"};
 HWND child(int id){return GetDlgItem(window,id);}
 std::wstring text(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(n+1,0);GetWindowTextW(h,s.data(),n+1);s.resize(n);return s;}
@@ -77,6 +78,36 @@ void importSaves(HWND h){
     auto aside=options.data/"backups"/("before-import-"+std::to_string(std::time(nullptr)));
     int copied=saves::importOrdinary(from,to,aside);
     MessageBoxW(h,(std::to_wstring(copied)+L" save(s) copied into co-op. Continue in the game loads the newest."+(have?L"\n\nEarlier co-op saves: "+aside.wstring():L"")).c_str(),L"Copy complete",MB_OK);
+}
+// Test saves (testsaves.h): the pack beside the launcher (or --test-saves-pack), listed on the Saves tab.
+fs::path testPackGiven;                       // --test-saves-pack PATH: a pack somewhere else
+std::optional<testsaves::Pack> testPack;std::string testPackNote;
+std::optional<fs::path> testPackPath(){if(!testPackGiven.empty())return testPackGiven;return testsaves::find(executable.parent_path());}
+std::string testSaveText(int index){
+    if(!testPack||index<0||size_t(index)>=testPack->sets.size())return testPackNote;
+    auto& s=testPack->sets[size_t(index)];std::string facts;
+    if(s.episode)facts+="Episode "+std::to_string(s.episode);
+    if(!s.playTime.empty())facts+=(facts.empty()?"":", ")+s.playTime+" played";
+    return s.title+(facts.empty()?"":"\n"+facts)+(s.description.empty()?"":"\n\n"+s.description)+(s.source.empty()?"":"\n\nFrom: "+s.source);
+}
+void showTestSave(){auto i=int(SendMessageW(child(TestList),LB_GETCURSEL,0,0));set(213,wtext(testSaveText(i)));EnableWindow(child(UseTest),testPack&&i>=0);}
+void loadTestSaves(){
+    testPack.reset();SendMessageW(child(TestList),LB_RESETCONTENT,0,0);
+    auto where=testPackPath();
+    if(!where)testPackNote="No test saves yet. Get test saves... opens the release page: download deathstranding-coop-test-saves-<version>.zip and put it beside the launcher (no need to extract it).";
+    else try{testPack=testsaves::Pack::open(*where);testPackNote="Choose a test save.";}catch(const std::exception& e){testPackNote=e.what();}
+    if(testPack)for(auto& s:testPack->sets)SendMessageW(child(TestList),LB_ADDSTRING,0,reinterpret_cast<LPARAM>(wtext(s.title).c_str()));
+    if(testPack&&!testPack->sets.empty())SendMessageW(child(TestList),LB_SETCURSEL,0,0);
+    showTestSave();
+}
+void useTestSave(HWND h){
+    auto i=int(SendMessageW(child(TestList),LB_GETCURSEL,0,0));if(!testPack||i<0||size_t(i)>=testPack->sets.size())return;
+    auto set=testPack->sets[size_t(i)];
+    if(!backupAllowed(net->lobby,gameRunning(gameFolder)))throw std::runtime_error("Leave the lobby and close the game before using a test save.");
+    if(MessageBoxW(h,wtext("Use the test save \""+set.title+"\"?\n\nYour current co-op saves move to a backups folder (never deleted). The test save is signed for your Steam account. Your ordinary Steam saves are not touched.").c_str(),L"Use this test save",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
+    auto o=testsaves::useCommand(testPack->location(),set.id,options.data,known(FOLDERID_LocalAppData),steamAccount(),backupAllowed(net->lobby,gameRunning(gameFolder)),std::time(nullptr));
+    if(o.code!=testsaves::ExitOk)throw std::runtime_error(o.message);
+    MessageBoxW(h,wtext(o.message+"\n\nStart the game with Play solo, Host or Join.").c_str(),L"Test save ready",MB_OK);
 }
 // Setup: the package this launcher was started from goes into the game (core.h). Asked once per start while needed.
 void offerSetup(HWND h){
@@ -493,7 +524,7 @@ fs::path saveDiagnosticsZip(){
         return zip;
     }catch(...){cleanup();throw;}
 }
-void switchTab(int next){selectedTab=next;TabCtrl_SetCurSel(tab,next);render();}
+void switchTab(int next){selectedTab=next;TabCtrl_SetCurSel(tab,next);if(next==1)loadTestSaves();render();}
 void scan(bool force=false){
     if(choice!=1||net->lobby||selectedTab!=0||joinAfterScan)return;
     auto now=GetTickCount();if(!net->scanning&&(force||now-lastScan>=5000)){lastScan=now;net->scan(lan,tailscale,port,utf8(text(child(Paste))));}
@@ -537,7 +568,8 @@ void render(){
         if(hostingGroup()){std::string code;try{code=groupCode();}catch(const std::exception& e){code=e.what();}set(Invite,wtext(code));}
         set(Status,wtext(net->status));refreshRows();
     }
-    if(selectedTab==1){place(210,30,120,w-60,65);place(211,30,200,w-60,180);place(OpenSaves,30,400,(w-75)/2,40);place(BackUp,45+(w-75)/2,400,(w-75)/2,40);place(Import,30,455,w-60,40);}
+    if(selectedTab==1){int half=(w-75)/2;place(210,30,115,w-60,45);place(211,30,160,w-60,85);place(OpenSaves,30,250,half,36);place(BackUp,45+half,250,half,36);place(Import,30,292,w-60,36);
+        place(212,30,342,w-60,25);place(TestList,30,370,half,150);place(213,45+half,370,half,150);place(UseTest,30,530,half,36);place(GetTest,45+half,530,half,36);}
     if(selectedTab==2){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(Lan,30,265,w-60,30);place(Tailscale,30,300,w-60,30);place(Privacy,30,335,w-60,30);place(World,30,370,w-60,30);place(GroupHost,30,405,w-60,30);place(BuildReceived,30,440,w-60,46);place(223,30,497,330,25);place(GroupPolicy,370,493,w-400,120);place(224,30,535,w-60,40);place(Protocol,30,580,w-60,36);place(222,30,622,w-60,50);
         bool edit=!net->lobby;for(int id:{GamePath,Port,Lan,Tailscale,Privacy,World,GroupHost,BuildReceived,GroupPolicy})EnableWindow(child(id),edit);}
     if(selectedTab==3){place(230,30,120,w-60,240);place(Guide,30,390,w-60,40);place(Home,30,445,w-60,40);place(Diagnose,30,500,w-60,40);place(Remove,30,555,w-60,40);}
@@ -611,6 +643,7 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
         if(msg==WM_TIMER){timer();return 0;}
         if(msg==WM_NOTIFY&&reinterpret_cast<NMHDR*>(lp)->hwndFrom==tab&&reinterpret_cast<NMHDR*>(lp)->code==TCN_SELCHANGE){switchTab(TabCtrl_GetCurSel(tab));scan(true);return 0;}
         if(msg==WM_COMMAND){int id=LOWORD(wp),event=HIWORD(wp);
+            if(id==TestList&&event==LBN_SELCHANGE)showTestSave();
             if(id==Name&&event==EN_CHANGE){player=text(child(Name));saveSettings();}
             if(id==GamePath&&event==EN_CHANGE){gameFolder=text(child(GamePath));saveSettings();}
             if(id==Port&&event==EN_CHANGE){auto v=utf8(text(child(Port)));if(!v.empty()&&v.find_first_not_of("0123456789")==std::string::npos&&v.size()==5){auto p=std::stoul(v);if(p>=49000&&p<=49014){port=unsigned(p);saveSettings();}}}
@@ -629,6 +662,8 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
                 if(id==Ready){net->setReady();render();}
                 if(id==HostSave){net->wantSave=SendMessageW(child(id),BM_GETCHECK,0,0)==BST_CHECKED;}
                 if(id==Import)importSaves(h);
+                if(id==UseTest)useTestSave(h);
+                if(id==GetTest)ShellExecuteW(h,L"open",wtext(testsaves::ReleasePage).c_str(),nullptr,nullptr,SW_SHOWNORMAL);
                 if(id==Remove)removeSetup(h);
                 if(id==Lan||id==Tailscale||id==Privacy||id==World||id==GroupHost||id==BuildReceived){auto checked=SendMessageW(child(id),BM_GETCHECK,0,0)==BST_CHECKED;if(id==Lan)lan=checked;if(id==Tailscale)tailscale=checked;if(id==Privacy)privacy=checked;if(id==World)sharedWorld=checked;if(id==GroupHost)groupHost=checked;if(id==BuildReceived)buildReceived=checked;saveSettings();}
                 if(id==Protocol){registerHandler(executable);MessageBoxW(h,L"Invite links now open this launcher for your Windows account.",L"Invite links",MB_OK);}
@@ -656,8 +691,11 @@ void buildControls(){
     label(0,202,L"LAN and Tailscale hosts appear below.");control(0,Rows,L"LISTBOX",L"",LBS_NOTIFY|WS_VSCROLL|WS_BORDER);label(0,Status,L"");control(0,Primary,L"BUTTON",L"Open lobby",BS_DEFPUSHBUTTON);
     label(0,203,L"");control(0,Strand,L"BUTTON",L"My strand on this server");control(0,Owner,L"BUTTON",L"Server owner");control(0,Invite,L"EDIT",L"",ES_READONLY|ES_MULTILINE);control(0,Copy,L"BUTTON",L"Copy invite");control(0,Leave,L"BUTTON",L"Leave lobby");control(0,Ready,L"BUTTON",L"Ready");control(0,HostSave,L"BUTTON",L"",BS_AUTOCHECKBOX|BS_MULTILINE|BS_TOP);
     label(1,210,L"Co-op saves\nOnly the separate co-op save trees are included in backups. Close the game first.");
-    label(1,211,(L"Co-op data:\n"+options.data.wstring()+L"\n\nSave trees: redirect-data\\local, roaming, documents, savedgames, profile\n\nBackups: backups\\<time>\nYour ordinary game saves are opened only when you choose Copy my Steam saves, and then only read.").c_str());
+    label(1,211,(L"Co-op data: "+options.data.wstring()+L"\nSave trees: redirect-data\\local, roaming, documents, savedgames, profile. Backups: backups\\<time>\nYour ordinary game saves are opened only when you choose Copy my Steam saves, and then only read.").c_str());
     control(1,OpenSaves,L"BUTTON",L"Open co-op save folder");control(1,BackUp,L"BUTTON",L"Back up co-op saves");control(1,Import,L"BUTTON",L"Copy my Steam saves into co-op");
+    label(1,212,L"Test saves: ready-made co-op saves to start from (a separate download beside each release)");
+    control(1,TestList,L"LISTBOX",L"",LBS_NOTIFY|WS_VSCROLL|WS_BORDER);label(1,213,L"");
+    control(1,UseTest,L"BUTTON",L"Use this test save");control(1,GetTest,L"BUTTON",L"Get test saves...");
     label(2,220,L"Launcher / game folder (applies next start)\nSteam mode must use the folder registered with Steam.");control(2,GamePath,L"EDIT",gameFolder.c_str(),ES_AUTOHSCROLL);
     label(2,221,L"Network / host UDP port (49000..49014)");control(2,Port,L"EDIT",std::to_wstring(port).c_str(),ES_NUMBER|ES_AUTOHSCROLL);
     control(2,Lan,L"BUTTON",L"Find games on my network",BS_AUTOCHECKBOX);control(2,Tailscale,L"BUTTON",L"Find friends on Tailscale",BS_AUTOCHECKBOX);control(2,Privacy,L"BUTTON",L"Invite only (host decides)",BS_AUTOCHECKBOX);control(2,World,L"BUTTON",L"Shared world (experimental; the host decides): each other's ladders and cairns through the game's own online layer",BS_AUTOCHECKBOX);
@@ -689,6 +727,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         lan=GetPrivateProfileIntW(L"launcher",L"lan",1,settingsFile.c_str());tailscale=GetPrivateProfileIntW(L"launcher",L"tailscale",1,settingsFile.c_str());privacy=GetPrivateProfileIntW(L"launcher",L"privacy",0,settingsFile.c_str());sharedWorld=GetPrivateProfileIntW(L"launcher",L"world",0,settingsFile.c_str())!=0;groupHost=GetPrivateProfileIntW(L"launcher",L"group",0,settingsFile.c_str())!=0;
         buildReceived=GetPrivateProfileIntW(L"launcher",L"build_received",1,settingsFile.c_str())!=0;   // on unless turned off
         {auto kept=utf8(read(L"group_policy",L"friends"));for(auto name:PolicyNames)if(kept==name)groupPolicy=name;}
+        std::string listTests,useTest;bool listTestsOnly=false;   // --list-test-saves, --use-test-save ID
         bool registerOnly=false,devStart=false,diagnosticsOnly=false,diagnosticsZipOnly=false,firewallOnly=false,forceWorld=false,devSessionGiven=false;std::string devPeer="127.0.0.1",groupTarget;uint32_t devSession=1;fs::path takeSave;
         int groupMode=0;   // --group-host (1), --group-join INVITE-OR-ADDRESS (2)
         strand::Choices given;std::string strandReport;bool policyGiven=false;   // --strand-builds, --strand-old, --strand-policy FILE|-; --group-policy
@@ -706,6 +745,9 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
             else if(a==L"--diagnostics")diagnosticsOnly=true;
             else if(a==L"--diagnostics-zip")diagnosticsZipOnly=true;
             else if(a==L"--firewall-status")firewallOnly=true;
+            else if(a==L"--list-test-saves")listTestsOnly=true;
+            else if(a==L"--use-test-save")useTest=utf8(value());
+            else if(a==L"--test-saves-pack")testPackGiven=value();
             else if(a==L"--dev-start")devStart=true;
             else if(a==L"--dev-peer")devPeer=utf8(value());
             else if(a==L"--dev-session"){auto v=utf8(value());if(v.empty()||v.size()>10||v.find_first_not_of("0123456789")!=std::string::npos||std::stoull(v)>UINT32_MAX)throw std::runtime_error("Invalid development session.");devSession=uint32_t(std::stoull(v));devSessionGiven=true;}
@@ -755,6 +797,15 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         if(firewallOnly){std::string line=std::string(firewallText(firewall))+"\n";DWORD n=0;HANDLE out=GetStdHandle(STD_OUTPUT_HANDLE);if(out&&out!=INVALID_HANDLE_VALUE)WriteFile(out,line.data(),DWORD(line.size()),&n,nullptr);return int(firewall);}
         if(diagnosticsZipOnly){options.game=gameFolder;saveDiagnosticsZip();return 0;}
         if(diagnosticsOnly){options.game=gameFolder;saveDiagnostics();return 0;}
+        // Headless test saves (testsaves.h): the list, or one set installed; the message to standard output (when
+        // redirected) and the exit code: 0 done, 1 failed, 3 pack missing or damaged, 4 the game is running.
+        if(listTestsOnly||!useTest.empty()){
+            auto o=listTestsOnly?testsaves::listCommand(testPackPath())
+                :testsaves::useCommand(testPackPath(),useTest,options.data,known(FOLDERID_LocalAppData),steamAccount(),backupAllowed(false,gameRunning(gameFolder)),std::time(nullptr));
+            auto line=o.message+(o.message.empty()||o.message.back()=='\n'?"":"\n");DWORD n=0;HANDLE out=GetStdHandle(STD_OUTPUT_HANDLE);
+            if(out&&out!=INVALID_HANDLE_VALUE)WriteFile(out,line.data(),DWORD(line.size()),&n,nullptr);
+            return o.code;
+        }
         std::ifstream recents(options.data/"recents.tsv",std::ios::binary);char store[CD_RECENT_BYTES+1];recents.read(store,sizeof(store));auto count=recents.gcount();if(count<=CD_RECENT_BYTES)cd_recents_decode(&net->recents,store,size_t(count));
         settingsFile=options.data/"launcher.ini";
         options.game=gameFolder;

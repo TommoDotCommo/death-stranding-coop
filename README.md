@@ -62,6 +62,22 @@ server above.
 
 ✅ works in the real game (two copies on one PC) · 🧪 built and tested without the game · ⚠️ works with issues · ❌ not yet
 
+## 🧪 Test saves
+
+To test a part of the game you have not reached, start from a test save: ready-made co-op saves at different points
+of the story. They come as a separate download beside each release,
+`deathstranding-coop-test-saves-<version>.zip`, never in this repository.
+
+1. In the launcher, Saves, **Get test saves...** opens the release page. Download the test saves zip and put it
+   beside `deathstranding-coop.exe`. There is no need to extract it.
+2. Close the game. Choose a test save in the list and **Use this test save**.
+3. Start the game from the launcher (Play solo, Host or Join). **Continue** loads the test save.
+
+Your co-op saves from before move to `backups\before-test-save-<time>` in the co-op data folder
+(`%LOCALAPPDATA%\DeathStrandingCoop`); nothing is deleted. Each save is signed for your own Steam account. Your
+ordinary Death Stranding saves (outside co-op) are never touched. Details: [launcher/README.md](launcher/README.md)
+("Test saves").
+
 ## 🐞 Known issues
 
 - 🖥️ Everything live so far ran as **two copies on one PC**. Two PCs, a router and a firewall between them have not been tried.

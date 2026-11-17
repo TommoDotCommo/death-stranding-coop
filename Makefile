@@ -3,6 +3,7 @@
 test:
 	python3 -B tools/test_diag.py
 	$(MAKE) -C common test
+	python3 -B tools/test_make_test_saves.py
 	cd mod && python3 -B -m unittest -q test_find_message_calls
 	$(MAKE) -C core test        # also runs the mod's host tests
 	$(MAKE) -C mod discovery-test

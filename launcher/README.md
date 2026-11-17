@@ -372,6 +372,37 @@ Any explicit isolation environment selects the old fail-closed lab path instead;
 not have to start a new story; settings and key bindings come along when the co-op side has none. The ordinary saves
 are only read. Co-op saves already there move to `backups\before-import-<time>`. It needs the game and lobby closed.
 
+**Test saves** (Saves) are ready-made co-op saves to start from at different points of the story, so a
+tester does not have to play there first. They are a separate download beside each release,
+`deathstranding-coop-test-saves-<version>.zip`, never part of this repository. **Get test saves...** opens the
+release page. The launcher finds the pack as `test-saves\` beside it (extracted, with `test-saves.json` at its root)
+or else as the newest `deathstranding-coop-test-saves-*.zip` beside it, read in place (nothing to extract); the list
+shows each set's title and its description, episode, play time and credit. **Use this test save**, with the game and
+the lobby closed (the same check as Back up), checks every file of the set against the pack's SHA-256 and size,
+moves the co-op saves that were there to `backups\before-test-save-<time>` (never deleted, as when starting
+from the host's save; linked save folders are refused), re-signs each checkpoint for the account signed in to Steam (as for the host's save) and writes
+them into the co-op account folder, the set's first checkpoint last. The profile (settings and key bindings) stays.
+Then it says "Continue in the game loads <title>". The ordinary Steam saves are never opened.
+
+A pack is refused whole, before anything changes, when its list is of another schema, a file does not match its
+size or SHA-256, it holds a file its list does not name, a listed file is not a checkpoint folder's `checkpoint.dat`
+(`<set id>/<autosaveN|manualsaveN|quicksaveN>/checkpoint.dat`, lower case) or not a checkpoint inside, or it was
+re-packed with compression (entries are stored: the saves are encrypted and do not compress).
+
+```text
+deathstranding-coop.exe --list-test-saves            # "id<TAB>title" per set
+deathstranding-coop.exe --use-test-save ID           # the same steps, no window and no question
+deathstranding-coop.exe --test-saves-pack PATH ...   # a pack (zip or folder) somewhere else
+```
+
+Exit codes: 0 done, 1 failed (unknown id, no Steam account, a save folder that cannot be changed), 3 pack missing or
+damaged, 4 the game is running. The message goes to standard output when it is redirected.
+
+The pack (`testsaves.h`): `test-saves.json` at the zip's root, schema 1: `{"schema":1,"version":"...","sets":[{"id",
+"title","description","episode","play_time","source","files":[{"path","sha256","size"}]}]}`, and one folder per set
+holding its checkpoint folders. The first file of a set is the checkpoint Continue should load. Making one:
+`../tools/README.md`, "Test saves".
+
 The save transfer (`saves.h`) is a pull on the lobby socket: `DSS1` query, offer (size, CRC-32, title), get(index),
 chunk (1 KiB). Every datagram carries the lobby's secret and nonce and only the lobby's two endpoints are served;
 the host keeps no state per guest. A file is handed over only when its checksum matches and it parses as a
@@ -404,9 +435,20 @@ the same link/code into the launcher works without a hosted page.
 make -C launcher test   # production config round trip, DS codec/URIs, discovery,
                        # lobby packets, startup tickets, backup confinement;
                        # saves: format against independent vectors, install,
-                       # copy-in, transfer over a lossy link; fuzzers and mutants
+                       # copy-in, transfer over a lossy link; test saves:
+                       # the pack against its manifest, refusals, use;
+                       # fuzzers and mutants
 make all               # mod, both proxies, launcher and Windows fixtures
 ```
+
+Test saves: `testsaves_test.cpp` builds packs from the synthetic saves (`saves_vectors.h`) and checks the list,
+an extracted pack, which pack is found, every refusal (each before anything changes, a linked save folder too) and a set used: the co-op saves
+moved aside, every checkpoint re-signed for the player, the ordinary saves byte-for-byte unchanged, the exit codes.
+`test_testsaves.py` runs it on a pack made by `tools/make_test_saves.py`. Mutants: `TESTSAVES_HASH` (a file that does
+not match its SHA-256 used), `TESTSAVES_PATH` (a listed file that is not a checkpoint taken), `TESTSAVES_EXTRA` (an
+unlisted file in the pack taken), `TESTSAVES_RESIGN` (installed without re-signing), `TESTSAVES_BACKUP` (the co-op
+saves deleted, not moved aside), `TESTSAVES_ORDINARY` (installed into the ordinary saves), `TESTSAVES_RUNNING` (used
+while the game runs).
 
 `test_group.py` (part of `make -C launcher test`) starts the built `coop-world` with exactly the command line the
 launcher makes for a group, signs in at the addresses the launcher writes for the host and for a joiner on the same

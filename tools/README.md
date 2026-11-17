@@ -36,3 +36,30 @@ This checks both log locations, UTF-16 conversion, newest-first byte limits incl
 preservation, shared redaction rules, original chain results and every manifest hash. `--powershell pwsh` selects
 PowerShell 7 when installed. Windows system/network queries and About/Explorer behaviour need separate validation
 on Windows; the portable tests cannot establish them.
+
+# Test saves
+
+```sh
+python3 tools/make_test_saves.py SETS_DIR deathstranding-coop-test-saves-<version>.zip --version <version>
+TEST_SAVES_DIR=SETS_DIR tools/build_test_saves.sh [OUT_DIR]   # the release asset and its .sha256
+python3 -B tools/test_make_test_saves.py
+```
+
+The test save pack is a release asset, never committed: keep `SETS_DIR` outside the repository (`build_test_saves.sh`
+refuses one inside it). `SETS_DIR` holds `sets.json` (`{"sets":[{"id","title","description","episode","play_time",
+"source","continue"}]}`; `continue` is the folder Continue loads, by default the newest) and one folder per set id
+holding checkpoint folders (`autosaveN`, `manualsaveN`, `quicksaveN`), each with a `checkpoint.dat` and nothing else.
+Anything else (a `profile.dat`, another file or folder, a link, a set not in `sets.json`, a file that is not a
+checkpoint) is refused and nothing is written. Every checkpoint is re-signed for a placeholder account
+(`steam_76561197960265728`, nobody's) so the asset names no player's Steam account and its size fields carry no
+leftover bytes; the launcher re-signs it for the player. The zip stores its entries uncompressed, in a fixed order
+with fixed times, so the same input makes the same bytes. The format and the launcher's checks are in
+`../launcher/README.md` ("Test saves") and `../launcher/testsaves.h`.
+
+`build_test_saves.sh` takes the version from `VERSION` or the tag (`git describe`, without a leading `v`) and writes
+`OUT_DIR` (default `build/release`). A release script calls it when `TEST_SAVES_DIR` is set.
+
+The tests use only the synthetic saves of `launcher/saves_vectors.h`: the container against the launcher's vectors
+(re-signing gives the launcher's bytes), the pack and its manifest, every refusal, the release script, and mutants of
+the builder (save folder names, checkpoint-only folders, the checkpoint check, stray files, the placeholder account,
+the manifest hashes) run side by side through `mod/mutants.py`.

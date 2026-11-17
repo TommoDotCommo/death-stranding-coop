@@ -74,6 +74,21 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
         return name
     for name in mutants.parallel(save, ['SAVE_LINKS', 'SAVE_SECRET', 'SAVE_RESIGN', 'SAVE_KEEP', 'SAVE_CHECKSUM', 'SAVE_NAMED_OTHER', 'SAVE_PADDING']):
         print('killed', name)
+    # Test saves (testsaves.h): the pack against its manifest, checkpoints only, re-signed for the player, the co-op
+    # saves moved aside first, never the ordinary saves, never while the game runs.
+    def testsave(name):
+        exe = work/name
+        result = run(['g++', '-std=c++17', '-O1', '-Wall', '-Wextra', '-Werror', '-DMUTANT_'+name,
+                      'testsaves_test.cpp', 'testsaves.cpp', 'saves.cpp', 'core.cpp', 'strand.cpp', '../mod/config.cpp', '../redirect/path_map.cpp', *KEYS, '-o', str(exe)])
+        if result.returncode:
+            raise SystemExit(result.stderr)
+        with tempfile.TemporaryDirectory(dir=work) as fixture:
+            result = run([str(exe), fixture])
+        if result.returncode != 1 or 'launcher oracle:' not in result.stderr:
+            raise SystemExit(f'SURVIVED or crashed {name}: {result.returncode}\n{result.stdout}\n{result.stderr}')
+        return name
+    for name in mutants.parallel(testsave, ['TESTSAVES_HASH', 'TESTSAVES_PATH', 'TESTSAVES_EXTRA', 'TESTSAVES_RESIGN', 'TESTSAVES_BACKUP', 'TESTSAVES_ORDINARY', 'TESTSAVES_RUNNING']):
+        print('killed', name)
     changes = [
         ('invite-crc', 'coop_invite.h', ' || ci_crc8(b, n - 1) != b[n - 1]', '', 'coop_invite_test.c'),
         ('invite-prefix', 'coop_invite.h', 'if (which != mine)', 'if (0 && which != mine)', 'coop_invite_test.c'),
