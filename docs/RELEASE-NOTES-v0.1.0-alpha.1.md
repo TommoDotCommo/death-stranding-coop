@@ -36,13 +36,15 @@ details and dates are in [STATUS.md](../STATUS.md).
 - Setup and the release package, game-free (Linux): the install logic shared by Setup and the launcher
   (`launcher/install_test.cpp`, 17 mutants), Setup's payload check and container (`dist/test_dist.py`, 4 mutants),
   `tools/release.sh` end to end on stand-in binaries with six tampered releases refused (`tools/test_release.py`).
-  The PowerShell scripts parse in Windows PowerShell 5.1.
+  The PowerShell scripts parse in Windows PowerShell 5.1. On Windows (`tools/test_setup_windows.ps1`, fake folders):
+  the single-file Setup unpacks its verified payload, and `status`/`install` through both Setup forms answer with the
+  right exit codes for no `ds.exe` (1), another build (3), no `--yes` (2) and an unknown verb (2), writing nothing.
 
 ## Not verified
 
 - **Setup on Windows:** the window, the cards, the button, the firewall step with its administrator prompt, the
-  shortcut and invite links, the verbs through `DeathStrandingCoop-Setup.exe`, SmartScreen's wording, an install into
-  and an uninstall from a real Steam library. None of this has run on Windows before this alpha.
+  shortcut and invite links, SmartScreen's wording, and an install into and an uninstall from a real Steam library
+  with build 13300582. Only the refusals above have run on Windows.
 - **Two PCs** and anything across the internet, routers and firewalls (the README says not yet tried; cite the run
   here if one has happened by release time).
 - **The diagnostics zip and F2 marker** described in the README are being built alongside this release; check that

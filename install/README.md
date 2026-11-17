@@ -94,5 +94,8 @@ unpacks it), the `.sha256` files, `NEXUS-<version>.txt` and `PUBLISH-<version>.t
 --prerelease` command, never run), and finishes with `tools/check_release_package.py`. Everything goes to
 `local/release/` (ignored by git). `SIGN_CMD` signs every exe and dll before it is hashed and embedded.
 
-Not verified yet (needs Windows): the Setup window, the elevated firewall step, the verbs' output through
-`DeathStrandingCoop-Setup.exe`, and an install into a real Steam library.
+On Windows, [`tools/test_setup_windows.ps1`](../tools/test_setup_windows.ps1) (optional, game-free, cleans up after
+itself) checks a built release: the single-file Setup's `/extract`, the launcher's verbs on fake folders and the same
+verbs through both Setup forms (the refusals: no `ds.exe`, another build, no `--yes`, an unknown verb). It found the
+verb script dropping the verb (fixed). Not verified yet: the Setup window, the elevated firewall step, the shortcut and
+invite links, and an install into (and uninstall from) a real Steam library with build 13300582.
