@@ -561,6 +561,18 @@ produce READY/MOD_STARTED only in the co-op data folder. Hash ordinary saves bef
 and after every live run using the existing verifier. These live checks are not
 established by the portable tests or cross-build.
 
+### First live run of the Steam path (2026-11-17)
+
+On a real Steam install (a second PC, its own Steam account): the launcher, started from the extracted package,
+installed `avrt.dll` (the only file added to the game folder), Play solo wrote the ticket, Steam started the
+registered `ds.exe`, the proxy consumed the ticket (`READY allowlist`), and after the fix below `MOD_STARTED guarded
+game-thread dispatch`; Continue loaded a co-op save seeded into the co-op data folder and the mod reported `POSE
+available`. The publisher's online service was refused (`NET_DENY ... wwsga.me`). Found and fixed: the ticket did not
+turn on the game-thread observer that the launcher's `game_thread` config needs, so the proxy refused the mod
+("game_thread requires observer hooks"); a valid ticket now sets it. Also seen: when Steam already counts the app as
+running (any copy), `steam://run` starts nothing new ("WaitingPrevProcess" in Steam's log): the launcher should
+refuse Play while any `ds.exe` of this app runs, not only the selected one.
+
 ## Remaining standard work
 
 Group play (above) is outside the standard's two-player lobby flow: it has no lobby, roster, ready state or

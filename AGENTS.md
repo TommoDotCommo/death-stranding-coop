@@ -8,8 +8,10 @@ built and tested.
 Rules:
 
 1. No game files, assets, saves, logs or dumps in this repository. Addresses and layouts in notes are fine.
-2. Work only in disposable test copies of the game; never install the proxy into the real game folder and never
-   write to the real saves. Hash the real saves before and after every live run.
+2. Lab work (the lab proxy `d3dcompiler_47.dll`, test commands, memory experiments) happens only in disposable test
+   copies of the game. The player build (`avrt.dll` installed by the launcher or Setup) may be tested in a real
+   install when its owner agrees; it must stay removable by Uninstall and keep the player's ordinary saves
+   untouched. Hash the real saves before and after every lab run.
 3. Keep modded copies off the publisher's online service: the network policy defaults to `enforce` (loopback and
    listed partner addresses only); do not ship a change that weakens it, and never run a memory-writing feature
    under `log-only`. A private server run by the players on loopback or a listed partner address is allowed.

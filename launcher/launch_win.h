@@ -24,7 +24,8 @@ inline fs::path registryPath(HKEY hive,const wchar_t* subkey,const wchar_t* valu
 inline fs::path steamRoot() {return registryPath(HKEY_CURRENT_USER,L"Software\\Valve\\Steam",L"SteamPath");}
 inline fs::path steamGame() {return registryPath(HKEY_LOCAL_MACHINE,L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Steam App 1850570",L"InstallLocation");}
 inline bool equalPath(const fs::path& a,const fs::path& b) {return redirect::canonical(a.wstring())==redirect::canonical(b.wstring())&&!redirect::canonical(a.wstring()).empty();}
-inline bool gameRunning(const fs::path& game) {
+// any: every ds.exe counts (the Steam path: Steam starts nothing while it counts the app as running, whatever copy).
+inline bool gameRunning(const fs::path& game,bool any=false) {
     auto snap=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
     if(snap==INVALID_HANDLE_VALUE)throw std::runtime_error("Cannot check whether the game is running. Close the game and try again.");
     PROCESSENTRY32W process{};process.dwSize=sizeof(process);bool found=false;
@@ -35,7 +36,7 @@ inline bool gameRunning(const fs::path& game) {
         wchar_t path[32768];DWORD count=32768;
         // An unreadable ds.exe is not proof that backing up or starting another copy is safe.
         if(!h||!QueryFullProcessImageNameW(h,0,path,&count))found=true;
-        else found=found||equalPath(path,game/L"ds.exe");
+        else found=found||any||equalPath(path,game/L"ds.exe");
         if(h)CloseHandle(h);
     }while(Process32NextW(snap,&process));
     CloseHandle(snap);return found;
@@ -72,6 +73,8 @@ inline void launchGame(const LaunchOptions& o,Session s,bool solo=false,const st
     s.solo=solo;
     auto exe=o.game/L"ds.exe";
     if(gameRunning(o.game))throw std::runtime_error("This game copy is already running. Close it before starting a new session.");
+    // Steam starts nothing while any copy of the app runs ("WaitingPrevProcess"), so the Steam path refuses them all.
+    if(!o.direct&&gameRunning(o.game,true))throw std::runtime_error("Death Stranding is already running (another copy). Close it first: Steam will not start a second one.");
     if(fileHash(exe)!=mod::discovery::PinnedHash)throw std::runtime_error("This game build is unsupported. Use Steam Director's Cut build 13300582.");
     if(!o.direct&&!equalPath(o.game,steamGame()))throw std::runtime_error("Steam is registered to another game folder, or its install path is unavailable. Select the registered Steam install in Settings. Test copies require --dev-direct.");
     if(!fs::is_regular_file(o.data/"redirect-data/mod/mod.dll"))throw std::runtime_error("The co-op mod is missing. Install or repair the package first.");
