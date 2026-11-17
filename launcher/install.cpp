@@ -64,7 +64,7 @@ std::string receiptText(const std::string& version,const std::string& installed,
 }
 void replaceFile(const fs::path& from,const fs::path& to) {
 #ifdef _WIN32
-    if(!MoveFileExW(from.c_str(),to.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw Error("Windows could not replace "+to.u8string()+".");
+    if(!MoveFileExW(from.c_str(),to.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw Error("Windows could not replace "+to.u8string()+". Close the co-op launcher and the game, then try again.");
 #else
     fs::rename(from,to);
 #endif
@@ -324,7 +324,15 @@ Removed uninstall(const Layout& l,const std::function<bool()>& running) {
     if(running&&running())throw Error("The game is running. Close it, then try again.",GameRunning);
 #endif
     Removed out;std::set<std::string> seen;
-    auto drop=[&](const fs::path& target,const std::string& name){removeFile(target);removeFile(receiptOf(target));out.removed.push_back(name);};
+    // A file Windows will not delete (the launcher or the game still running) is reported, never counted as removed.
+    auto drop=[&](const fs::path& target,const std::string& name) {
+#ifndef MUTANT_INSTALL_UNINSTALL_IGNORES_FAILURE
+        if(!removeFile(target)&&present(target)){out.kept.push_back(name+" (in use: close the co-op launcher and the game, then uninstall again)");return;}
+#else
+        removeFile(target);
+#endif
+        removeFile(receiptOf(target));out.removed.push_back(name);
+    };
     // What the receipts name, whatever version installed it.
     for(auto& [root,target]:receipted(l)) {
         auto name=(root=="game"?target.filename():target.lexically_relative(l.data)).generic_u8string();

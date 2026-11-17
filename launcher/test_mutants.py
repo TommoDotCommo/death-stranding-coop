@@ -74,7 +74,8 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
         return name
     for name in mutants.parallel(installer, ['OVERWRITE_FOREIGN', 'TRUSTS_EXISTENCE', 'RECEIPT_IGNORES_PENDING', 'NO_BUILD_CHECK', 'IGNORES_RUNNING',
                                              'NO_PACKAGE_CHECK', 'STALE_KEPT', 'NO_ROLLBACK', 'UNINSTALL_DELETES_CHANGED', 'UNINSTALL_DELETES_FOREIGN',
-                                             'MANIFEST_ESCAPE', 'FOLLOWS_LINKS', 'VDF_ESCAPES', 'VDF_FIRST_ONLY', 'ACF_IGNORED', 'GAME_DUPLICATES']):
+                                             'MANIFEST_ESCAPE', 'FOLLOWS_LINKS', 'VDF_ESCAPES', 'VDF_FIRST_ONLY', 'ACF_IGNORED', 'GAME_DUPLICATES',
+                                             'UNINSTALL_IGNORES_FAILURE']):
         print('killed install', name)
     def save(name):
         exe = work/name

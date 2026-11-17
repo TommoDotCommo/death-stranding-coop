@@ -80,8 +80,8 @@ deathstranding-coop.exe --setup uninstall <game folder> --yes
 folders (states and the button, receipts beside every file, install leaving the game byte-for-byte as it was apart from
 the proxy, update with a dropped file, repair, an interrupted update, rollback after a failure part-way, a damaged
 package, a linked folder, a manifest path that escapes, uninstall keeping changed and foreign files and the co-op data,
-by-hand and mod-manager installs, the launcher's own layout, `libraryfolders.vdf` in both formats with escapes,
-`appmanifest` and duplicate games) and 16 mutants that must fail it (`launcher/test_mutants.py`, `MUTANT_INSTALL_*`).
+by-hand and mod-manager installs, a file that cannot be deleted, the launcher's own layout, `libraryfolders.vdf` in both formats with escapes,
+`appmanifest` and duplicate games) and 17 mutants that must fail it (`launcher/test_mutants.py`, `MUTANT_INSTALL_*`).
 `make -C dist test` covers Setup's own core and the release tools ([`dist/test_dist.py`](../dist/test_dist.py),
 [`tools/test_release.py`](../tools/test_release.py)).
 

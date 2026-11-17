@@ -154,6 +154,15 @@ int main(int argc,char** argv) {
         chmod(game.c_str(),0755);
         check(c!=0&&!fs::exists(data/"app")&&!fs::exists(data/"redirect-data/mod/mod.dll")&&tree(game)==before,"rolled back after a failure part-way");
     }
+    if(geteuid()!=0) {   // a file that cannot be deleted (in use on Windows) is kept and said, with its receipt
+        install(l,none);
+        chmod((data/"app").c_str(),0555);
+        auto u=uninstall(l,none);
+        chmod((data/"app").c_str(),0755);
+        bool said=false;for(auto& k:u.kept)said|=k.find("in use")!=std::string::npos;
+        check(said&&fs::exists(data/"app"/"deathstranding-coop.exe")&&fs::exists(data/"app"/(std::string("deathstranding-coop.exe")+ReceiptSuffix)),"a file that cannot be removed is reported, not counted as removed");
+        uninstall(l,none);check(!fs::exists(data/"app")&&tree(game)==before,"and goes on the next uninstall");
+    }
     {   // a damaged package: refused before anything is written
         put(pkg/"coop-world.exe","truncated");
         auto why=message([&]{install(l,none);});

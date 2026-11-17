@@ -34,7 +34,7 @@ details and dates are in [STATUS.md](../STATUS.md).
 - The game's connections to the publisher's online service refused while co-op runs; a co-op save kept apart from
   the ordinary saves: live, two copies.
 - Setup and the release package, game-free (Linux): the install logic shared by Setup and the launcher
-  (`launcher/install_test.cpp`, 16 mutants), Setup's payload check and container (`dist/test_dist.py`, 4 mutants),
+  (`launcher/install_test.cpp`, 17 mutants), Setup's payload check and container (`dist/test_dist.py`, 4 mutants),
   `tools/release.sh` end to end on stand-in binaries with six tampered releases refused (`tools/test_release.py`).
   The PowerShell scripts parse in Windows PowerShell 5.1.
 
