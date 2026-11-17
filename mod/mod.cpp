@@ -495,7 +495,7 @@ struct Runtime final:ds::Transport {
     std::filesystem::path vehicleCommand;std::unique_ptr<mod::vehicle::Monitor> vehicleMonitor;
     // Optional environment sampling and host time setter. Only the verified callback can call the export.
     std::filesystem::path environmentCommand;std::unique_ptr<mod::environment::Reader> environmentReader;
-    std::unique_ptr<mod::environment::Sync> environmentSync;uint64_t environmentReadAt=0,environmentApplyAt=0;bool environmentSend=false;
+    std::unique_ptr<mod::environment::Sync> environmentSync;uint64_t environmentReadAt=0,environmentApplyAt=0;bool environmentSend=false;std::string environmentLastRow;
     std::unique_ptr<mod::weather::Share> weatherShare;std::optional<float> hostRain;uint64_t hostRainAt=0;   // guest: shared rain
     std::function<void(uint32_t)> cargoGive,cargoDelete;std::function<void(uint8_t,const mod::puppet::Transform&,bool)> construct;std::function<uint32_t(uint8_t,const mod::puppet::Transform&,const std::vector<uint16_t>&)> constructRequest;std::function<bool(uint64_t,unsigned,bool)> partToggle;
     std::function<void(const std::array<float,4>&,const std::array<float,4>&,const mod::puppet::Transform&,bool,bool,bool)> unconstruct;
@@ -3237,7 +3237,10 @@ struct Runtime final:ds::Transport {
                 std::array<double,3> position{cache.local.position[0],cache.local.position[2],cache.local.position[1]};
                 if(!cache.available)position.fill(std::nan("")); // no stale porter position for a weather query in menus
                 if(requested||(environmentSend&&gameplay&&now>=environmentReadAt)) {
-                    auto observation=environmentReader->read(position);note(mod::environment::row(observation).c_str());
+                    auto observation=environmentReader->read(position);
+                    // A host reads every second: log a reading only when it changed (or a test asked for it), not 3600 lines an hour.
+                    auto envRow=mod::environment::row(observation);
+                    if(requested||envRow!=environmentLastRow){note(envRow.c_str());environmentLastRow=envRow;}
                     environmentReadAt=now+1000;
                     if(environmentSend&&gameplay&&observation.available&&config.role=="host"){
                         ds::Environment sample{uint32_t(std::min<double>(ds::EnvironmentDayMs-1,std::llround(double(observation.hour)*3600000)))};
