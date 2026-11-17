@@ -8,7 +8,7 @@ test:
 	$(MAKE) -C core test        # also runs the mod's host tests
 	$(MAKE) -C mod discovery-test
 	$(MAKE) -C redirect test
-	$(MAKE) -C install test
+	$(MAKE) -C dist test           # Setup's core with its mutants, release.sh on stand-in binaries
 	$(MAKE) -C launcher test
 	$(MAKE) -C world test
 	cd mod && python3 -B -m unittest -q test_analyse_presence

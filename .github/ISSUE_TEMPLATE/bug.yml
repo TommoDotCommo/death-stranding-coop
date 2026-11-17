@@ -1,0 +1,68 @@
+name: Bug report
+description: Something broke, crashed or looked wrong while playing, or Setup did not work.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing! Press **F2** in the game the moment something goes wrong: it marks that moment in the
+        co-op log. Then, in the co-op launcher: **About > Save diagnostics for a bug report**. It writes
+        `DeathStrandingCoop-diagnostics-<time>.zip` to your Desktop with user and computer names, addresses and
+        Steam ids taken out. Look inside before you attach it.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How it happened
+      description: What you and the others were doing just before. Can it be made to happen again?
+  - type: input
+    id: version
+    attributes:
+      label: Mod version
+      description: In the launcher's About tab (or Setup's title bar).
+      placeholder: e.g. v0.1.0-alpha.1
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where it went wrong
+      options: [Setup (install, update or uninstall), the launcher, starting the game, in the game, leaving or after the game]
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: You were
+      options: [hosting the group's server, joining a group, hosting a two-player lobby, joining a two-player lobby, playing solo, not playing yet (Setup)]
+  - type: input
+    id: players
+    attributes:
+      label: Players and connection
+      placeholder: e.g. 3 players, server on a VPS, two of us on Wi-Fi
+  - type: input
+    id: story
+    attributes:
+      label: Episode and place in the game
+      placeholder: e.g. Episode 3, near the Weather Station
+  - type: input
+    id: markers
+    attributes:
+      label: F2 marker numbers
+      placeholder: e.g. marker 2 and 3
+  - type: textarea
+    id: logs
+    attributes:
+      label: Diagnostics zip and screenshots
+      description: |
+        Drag the `DeathStrandingCoop-diagnostics-...zip` from your Desktop here, plus any screenshots. If the launcher
+        does not start, run `deathstranding-coop.exe --diagnostics` from `%LOCALAPPDATA%\DeathStrandingCoop\app`.
+        For a Setup problem, copy the text Setup showed.
+    validations:
+      required: true

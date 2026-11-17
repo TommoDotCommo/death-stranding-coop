@@ -62,6 +62,42 @@ server above.
 
 ✅ works in the real game (two copies on one PC) · 🧪 built and tested without the game · ⚠️ works with issues · ❌ not yet
 
+## 📥 Install (alpha)
+
+The first alpha for testers (`v0.1.0-alpha.1`) is being prepared; until it is on the
+[Releases page](https://github.com/TommoDotCommo/death-stranding-coop/releases) these steps describe the package that
+`tools/release.sh` builds. You need DEATH STRANDING DIRECTOR'S CUT on Steam, **build 13300582** (betas: None),
+64-bit Windows 10 or 11, and Steam running.
+
+1. Download **`DeathStrandingCoop-Setup.exe`**. To check it, compare
+   `Get-FileHash .\DeathStrandingCoop-Setup.exe` (PowerShell) with `DeathStrandingCoop-Setup.exe.sha256`.
+2. Run it. The alpha is not code-signed, so Windows SmartScreen may say "Windows protected your PC": choose
+   **More info**, then **Run anyway**. Setup asks for no administrator rights (only the optional firewall rule does).
+3. Setup lists every copy of the game in your Steam libraries with a build check (Browse for another folder). One
+   button says what it will do: **Install**, **Update**, **Repair**, **Up to date** or **Needs attention**. Options:
+   a desktop shortcut and invite links (`deathstranding-coop://`) ticked, the Windows Firewall rule for hosting not
+   ticked (it asks for administrator permission once).
+4. **Play** opens the co-op launcher.
+
+Setup adds one file to the game folder, `avrt.dll` (the game loads it but does not ship one, so no game file is
+replaced), and puts the launcher, the mod, co-op saves, settings and logs in `%LOCALAPPDATA%\DeathStrandingCoop`.
+Every file it installs has a `.coop-receipt.json` beside it. It never replaces another mod's `avrt.dll`: the proxy
+cannot load another one after itself yet, so Setup stops and says so. Starting the game from Steam without the
+launcher plays it as before, co-op off. Details: [install/README.md](install/README.md).
+
+**Without Setup:** extract `deathstranding-coop-<version>.zip` anywhere and start `deathstranding-coop.exe` from that
+folder; it offers the same install (without the shortcut, firewall and link options). For scripts:
+`DeathStrandingCoop-Setup.exe status [--json] [<game folder>] | install <game folder> --yes | uninstall <game folder> --yes`
+(exit codes 0 done, 1 failed, 2 usage, 3 unsupported game build, 4 the game is running).
+
+**Uninstall:** run Setup and choose **Uninstall**: the co-op files, the shortcut, the invite links and the firewall
+rules go; your co-op saves and settings stay in `%LOCALAPPDATA%\DeathStrandingCoop` (delete it by hand to remove
+them). A file changed after installing, or another program's file, is left where it is and listed. The launcher's
+About, **Remove co-op from the game**, takes only the mod out of the game.
+
+**Updating** is manual for now: run the new `DeathStrandingCoop-Setup.exe`; the button says **Update**. Everyone in a
+group needs the same version.
+
 ## 🧪 Test saves
 
 To test a part of the game you have not reached, start from a test save: ready-made co-op saves at different points
@@ -87,6 +123,25 @@ ordinary Death Stranding saves (outside co-op) are never touched. Details: [laun
 - 🧟 A dead partner is laid down stiffly: there is no death animation for him yet.
 - 🔓 Keys and objects travel **unencrypted**: play on a LAN or a VPN such as Tailscale.
 - 🔄 **Only build 13300582** is supported. Other builds are refused rather than risk a crash.
+- 🛡️ **Alpha:** the Setup and the binaries are not code-signed, so SmartScreen and some antivirus programs warn. Setup,
+  its window and its firewall step have only been checked game-free (Linux tests and a Windows script parse); the
+  first testers' installs are the first real ones.
+- 🧩 Another mod's `avrt.dll` in the game folder blocks the install (no chain-loading yet).
+
+## 🐛 Reporting a bug
+
+1. In the game, press **F2** when something goes wrong: it marks the moment in the co-op log.
+2. In the launcher, About, **Save diagnostics for a bug report**: it writes
+   `DeathStrandingCoop-diagnostics-<time>.zip` to your Desktop, with Windows user and computer names, addresses and
+   Steam ids taken out. Look inside before you send it.
+3. Open an issue with the [bug form](https://github.com/TommoDotCommo/death-stranding-coop/issues/new/choose) (or the
+   playtest report after a session) and attach the zip.
+
+## 🔒 Privacy
+
+The mod, the launcher and Setup have no telemetry and send nothing to the author. The game talks only to the co-op
+server you choose and to the players in your session; the publisher's online service is blocked while co-op runs.
+Setup makes no network connection. Diagnostics leave your PC only when you send them.
 
 ## 🗺️ Next steps
 
@@ -125,7 +180,9 @@ The dream is Sams everywhere as you play, and ten of them helping in a boss figh
 | [`core/`](core/CORE.md) | Game-free presence core: versioned handshake, quantised player snapshots, clock and RTT estimates, interpolation, reconnect, and a reliable exactly-once channel for cargo events. Tested in a simulator with a fuzzer and mutants. |
 | [`mod/`](mod/README.md) | The in-process mod: Winsock transport, the game adapter (reads the local player's pose through the game's own player path), presence log, the partner's body (the mod's own Sam, or the game's resident Sam double) and vehicle, shared cargo, a stand-in partner (`coop-partner`) for testing with one copy, and analysis tools. [`mod/game_offsets.md`](mod/game_offsets.md) holds the reverse-engineering notes for the pinned build. |
 | [`launcher/`](launcher/README.md) | Native Windows Play / Saves / Settings / About launcher: LAN/Tailscale lobbies, standard invites, Steam launch with isolated co-op saves, and backups. A development foundation; see its remaining standard work. |
-| [`install/`](install/README.md) | Game-free package/install/uninstall core for the drop-in `avrt.dll` release layout. |
+| [`install/`](install/README.md) | What goes where, and the one install logic (`launcher/install.*`) that Setup and the launcher share. |
+| [`dist/`](dist/README.txt) | Setup: `DeathStrandingCoop-Setup.exe` (payload with SHA-256 check), its PowerShell window and verbs, the player README. |
+| [`tools/`](install/README.md#release) | `release.sh` (zip, single-file Setup, checksums, `coop-mod.json`, VERSIONINFO, notes) and its checks. |
 | [`redirect/`](redirect/README.md) | The loader proxy that isolates each test copy: saves, loaded modules, the single-instance guard and network access. |
 | [`vendor/`](vendor/monocypher/README.md) | Monocypher (CC0 or BSD-2-Clause), unchanged: Ed25519 and SHA-512 for the players' keys (`world/identity.h`). |
 
@@ -137,6 +194,7 @@ Needs `g++`, the MinGW-w64 cross-compiler, Python 3 and a checkout of
 ```sh
 make test     # every game-free test and mutant
 make all      # Windows binaries (proxy, mod, probes)
+tools/release.sh v0.1.0-alpha.1   # the release into local/release/ (builds everything; publishes nothing)
 ```
 
 The supported build host is Linux with the cross-compiler. Building natively on Windows with MSYS2
@@ -185,7 +243,8 @@ and network checks, and a file manifest. Nothing is uploaded. `--diagnostics` st
 - Modded copies never talk to the publisher's online service (see `redirect/network_policy.h`). A private server
   that the players run themselves, reached over loopback or a listed partner address, is allowed (since 2026-11-11):
   `world/` is that server.
-- Test copies only: never install the proxy into your real game folder, never touch your real saves.
+- Development and tests use test copies, never your real saves. Players install the release with Setup into their
+  own game folder (one added file, removed by Uninstall); co-op saves stay separate from the ordinary ones.
 - No game files in this repository. Reverse-engineering notes describe addresses and layouts, not game content.
 
 Made with the [coop-anything](https://github.com/cranebeaker/coop-anything) playbook.

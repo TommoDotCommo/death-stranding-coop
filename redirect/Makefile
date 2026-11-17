@@ -11,8 +11,9 @@ build/d3dcompiler_47.dll: $(PROXY_DEPS) d3dcompiler_47.def | build
 	$(CXX) $(FLAGS) -shared $(PROXY_SRC) d3dcompiler_47.def -o $@ $(LIBS)
 AVRT_DEPS = $(PROXY_DEPS) avrt.def avrt_stubs.inc
 # Proxy named after a system DLL the game imports but does not ship: installs without replacing a game file.
+# AVRT_VERSION_RES: the release's VERSIONINFO resource object (tools/release.sh), empty otherwise.
 build/avrt.dll: $(AVRT_DEPS) | build
-	$(CXX) $(FLAGS) -DCOOP_PROXY_AVRT -shared $(PROXY_SRC) avrt.def -o $@ $(LIBS)
+	$(CXX) $(FLAGS) -DCOOP_PROXY_AVRT -shared $(PROXY_SRC) avrt.def $(AVRT_VERSION_RES) -o $@ $(LIBS)
 build/mutant-avrt-forward-broken.dll: $(AVRT_DEPS) | build
 	$(CXX) $(FLAGS) -DCOOP_PROXY_AVRT -DMUTANT_FORWARD_BROKEN -shared $(PROXY_SRC) avrt.def -o $@ $(LIBS)
 build/mutant-missing-config-closes.dll: $(AVRT_DEPS) | build

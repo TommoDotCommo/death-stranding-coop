@@ -13,8 +13,9 @@ identity:
 	python3 build_id.py
 	python3 ../core/build_id.py
 all: identity build/puppet-test.exe build/mod.dll build/mod_probe.exe build/mod-no-build.dll build/mod-no-interpolation.dll build/coop-partner.exe build/coop-swarm.exe
+# MOD_VERSION_RES: the release's VERSIONINFO resource object (tools/release.sh), empty otherwise.
 build/mod.dll: $(SRC) $(HEADERS) | build
-	$(MINGW) $(WINFLAGS) -shared $(SRC) -o $@ -lws2_32 -lbcrypt -lwinmm
+	$(MINGW) $(WINFLAGS) -shared $(SRC) $(MOD_VERSION_RES) -o $@ -lws2_32 -lbcrypt -lwinmm
 build/mod-no-build.dll: $(SRC) $(HEADERS) | build
 	$(MINGW) $(WINFLAGS) -DDS_TESTING -DMOD_MUTANT_BUILD -shared $(SRC) -o $@ -lws2_32 -lbcrypt -lwinmm
 build/mod-no-interpolation.dll: $(SRC) $(HEADERS) | build

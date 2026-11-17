@@ -339,10 +339,18 @@ same sentence is in the diagnostics file, and `deathstranding-coop.exe --firewal
 
 ## Setup
 
-Started from an extracted package (the launcher with `avrt.dll` and `redirect-data\\mod\\mod.dll` beside it), the
-launcher asks once per start whether to install or update: it adds `avrt.dll` to the Steam game folder and the mod to
-the co-op data folder. A different `avrt.dll` already there is named in the question before it is replaced. About,
-**Remove co-op from the game** takes the proxy out again (only while it is this package's); saves stay.
+Setup and the launcher share one install logic, [`install.h`](install.h) ([install/README.md](../install/README.md)).
+Started from an extracted package (the launcher with `coop-mod.json`, `avrt.dll` and `redirect-data\\mod\\mod.dll`
+beside it), the launcher asks once per start whether to install, update or repair: it adds `avrt.dll` to the Steam game
+folder and the mod to the co-op data folder, each with a `.coop-receipt.json`. Another mod's `avrt.dll` (or one changed
+since it was installed) is never replaced: the launcher says why and changes nothing. About, **Remove co-op from the
+game** takes out what the receipts name (and our files without one); saves stay.
+
+Setup's verbs run here without a window: `--setup status [--json] [<game folder>]` (no folder: every install in the
+Steam libraries), `--setup install <game folder> --yes`, `--setup uninstall <game folder> --yes`; exit codes 0 done,
+1 failed, 2 usage, 3 unsupported build, 4 the game is running. Setup's install also copies this launcher and its
+package to `%LOCALAPPDATA%\DeathStrandingCoop\app\`. The About page shows the release version (`VERSION` in the
+Makefile, set by `tools/release.sh`).
 
 ## Steam and data
 

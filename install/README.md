@@ -1,75 +1,98 @@
-# install: put the co-op package into a game folder, and take it out again
+# install: what goes where, and the one install logic
 
-`coop_install.py` (standard library only) installs, uninstalls and verifies the package in a game folder. It never
-runs the game and its tests use temporary fake game folders only. It follows the co-op mod standard (rules J1 to J10).
+Setup (`dist/`) and the launcher's own window install the mod the same way, because both run the same code:
+[`launcher/install.h`](../launcher/install.h) / [`install.cpp`](../launcher/install.cpp). It is portable C++17 on
+`std::filesystem` (no Windows calls), so it builds and is tested on Linux. It follows the co-op mod standard
+(rules G1, G2, J1 to J10).
 
-```sh
-python3 coop_install.py status    <game folder> [--json] [--package DIR]
-python3 coop_install.py verify    <game folder>
-python3 coop_install.py install   <game folder> --yes [--data-dir DIR]
-python3 coop_install.py uninstall <game folder> --yes
-```
-
-Exit codes: 0 ok, 1 failed, 2 usage, 3 unsupported game build, 4 game running.
+**The choice (2026-11-17): Setup calls the launcher's install.** Setup's window (`dist/installer-gui.ps1`) and its
+verbs (`dist/deathstranding-coop-setup.ps1`) run `deathstranding-coop.exe --setup ...` from the package and draw its
+answer; they decide nothing about files. The launcher's earlier `setupInstall` became this core, and the Python
+installer (`coop_install.py`, `make_package.py`) is retired: one install logic, one test, one set of mutants.
+PowerShell keeps only what is Windows-only and outside the files: the desktop shortcut, the firewall rule and the
+invite-link registration (which is the launcher's own `--register-protocol`).
 
 ## What goes where
 
 | File | Where | Why |
 |---|---|---|
-| `avrt.dll` (the proxy) | game folder, next to `ds.exe` | `ds.exe` imports `AVRT.dll`, the game does not ship it, so adding it replaces nothing. Steam's file verify and updates leave it alone. |
-| `coop-mod.json` (manifest) | game folder | read by Setup, updater and diagnostics |
-| `coop-mod.receipt.json` | game folder | what Setup installed, with hashes; written at install time only |
-| `redirect-data/mod/mod.dll` | the co-op data folder | where the proxy looks for the mod |
+| `avrt.dll` (the proxy) | the game folder, beside `ds.exe` | `ds.exe` imports `AVRT.dll` and the game does not ship one, so adding it replaces nothing. Steam's verify and updates leave it alone. Without the launcher's start ticket it only forwards to the system's `avrt.dll` (co-op off). |
+| `mod.dll` | `%LOCALAPPDATA%\DeathStrandingCoop\redirect-data\mod\` | where the proxy loads the mod from |
+| the launcher and its package | `%LOCALAPPDATA%\DeathStrandingCoop\app\` | `deathstranding-coop.exe`, `coop-world.exe`, a copy of `avrt.dll` and `redirect-data\mod\mod.dll` (the package the installed launcher compares the game against), `coop-mod.json`, README, licences. Setup's install only; the launcher's own window leaves its folder where the player extracted it. |
+| `<file>.coop-receipt.json` | beside every installed file | `{"schema":1,"id","version","installed","pending"}`: the SHA-256 Setup put there and, while a replacement is under way, the one it is putting there |
 
-Install only adds files. If `avrt.dll` (any letter case) or another destination already exists and is not ours,
-install stops with a conflict and changes nothing. Uninstall removes exactly the files the receipt lists whose
-content is unchanged, then the folders install created (only when empty). Afterwards the game folder is
-byte-for-byte what it was. A file the player changed is kept and reported (exit 1); the receipt keeps listing it.
+`coop-mod.json` ([`tools/mod_manifest.py`](../tools/mod_manifest.py), standard J5) lists every file with its root
+(`game` or `data`), path, SHA-256 and size; a `data` path starting `app/` is the launcher's folder and comes from the
+package file without `app/`. The supported `ds.exe` build is the pinned hash in `mod/discovery_options.h`, the same
+one the launcher and the mod check: one source of truth. Co-op saves, settings (`mod.json`, `launcher.ini`), player
+keys and logs live in the same data folder and are never part of an install or an uninstall.
 
-States (`status`): `not-a-game-folder`, `unsupported-build`, `not-installed`, `up-to-date`, `update-available`,
-`needs-repair` (a listed file is missing or changed), `conflict`, `installed-by-mod-manager` (files match the release
-but there is no receipt; hard-linked files read as Vortex). Install of a mod-manager install, or of an up-to-date
-one, changes nothing; install in `update-available` and `needs-repair` replaces only files the receipt lists.
-An install that fails part-way undoes itself.
+## States and the one button
 
-## Where the co-op saves go
+| State (`status --json`) | Button | When |
+|---|---|---|
+| `not-a-game-folder` | Needs attention | no `ds.exe` |
+| `unsupported-build` | Needs attention | `ds.exe` is not build 13300582 (exit 3) |
+| `not-installed` | Install | none of the files is there |
+| `update-available` | Update | a file is what an earlier Setup installed (its receipt says so), an older co-op proxy without a receipt (it carries the proxy's marker text), or a receipt names another version |
+| `needs-repair` | Repair | a file is missing, or the right files are there without receipts (copied by hand: Repair writes the receipts) |
+| `installed-by-mod-manager` | Up to date | the right files without receipts, hard-linked (a mod manager's deployment): Setup leaves them alone |
+| `conflict` | Needs attention | another program's file with our name (another mod's `avrt.dll`), or a file changed since Setup installed it: never replaced, never removed |
+| `up-to-date` | Up to date (then Play) | every file is the package's, with a receipt of this version |
 
-The proxy redirects every save, settings and profile location of the game into the co-op data folder
-(`<data folder>/redirect-data/{local,roaming,documents,savedgames,profile}`), so the player's own saves are neither
-read nor written. The data folder is `%LOCALAPPDATA%\DeathStrandingCoop` by default (`user_data` in the manifest).
-Uninstall removes the mod file only and keeps `redirect-data` and everything in it.
+Install is all or nothing: the co-op data first, the proxy last; before each file its receipt is written with the
+`pending` hash, the file is staged, checked and moved into place, then the receipt is completed. A failure part-way
+puts every file and receipt back. A file an earlier version installed that this one no longer ships is removed when
+unchanged. Install refuses a running game (exit 4), another build (exit 3) and a damaged package.
 
-## Package
+Uninstall removes every file whose receipt still matches it (whatever version installed it) and our files without a
+receipt; it keeps a file changed since install (listed, exit 1) and another program's file (listed); it removes the
+launcher's folder when empty and nothing else of the data folder. Setup's uninstall also removes the shortcut, the
+invite links and the firewall rules.
 
-`make_package.py --out DIR --version V --proxy redirect/build/avrt.dll --mod mod/build/mod.dll` writes the
-drop-in folder. Add `--launcher launcher/build/deathstranding-coop.exe` to include the native launcher beside `ds.exe`.
-The manifest is `coop-mod.json` (schema 1: `id`, `version`, `game` with the supported `ds.exe` build hashes,
-`proxy`, `proton.dll_overrides`, `files` with SHA-256 and size, `user_data`). Entries with `"root": "data"` go to the
-data folder.
+**Chain-loading another `avrt.dll` (J3) is not supported:** `redirect/` has no chain loader (no `avrt.chain.dll`), so
+`coop-mod.json` says `"chain_file": null` and Setup refuses with "The game folder already has an avrt.dll that is not
+from the co-op mod (another mod's file?). The co-op proxy cannot load another avrt.dll after itself, so Setup changes
+nothing. Remove or rename that file (or uninstall the other mod), then run Setup again."
 
-## Setup from the launcher (no Python)
+## Finding the game
 
-A player does not need this script: the package's launcher installs itself. Started from the extracted package it
-finds the Steam game folder, and when the proxy or the mod is missing or differs it asks once and copies `avrt.dll`
-into the game folder and `mod.dll` into the co-op data folder (`launcher/core.h`, `setupInstall`); About has
-**Remove co-op from the game**, which deletes the proxy only while it is this package's. It writes no receipt, so
-`coop_install.py status` reports such an install as `installed-by-mod-manager`. The package carries
-`HOW-TO-PLAY.txt` with the steps for both players.
+`findGames` reads every Steam root the registry names (HKCU `SteamPath`, HKLM `InstallPath` in both views), each
+root's `steamapps/libraryfolders.vdf` (current and old format; `config/libraryfolders.vdf` too), and in every library
+`steamapps/appmanifest_1850570.acf`, whose `installdir` names the folder under `steamapps/common`; Steam's uninstall
+entry for app 1850570 is added. Only folders with `ds.exe` count, each once.
+
+## Verbs (J9)
+
+```
+deathstranding-coop.exe --setup status [--json] [<game folder>]     (no folder: every install found)
+deathstranding-coop.exe --setup install <game folder> --yes
+deathstranding-coop.exe --setup uninstall <game folder> --yes
+```
+
+`DeathStrandingCoop-Setup.exe status|install|uninstall ...` passes the same words on (through
+`deathstranding-coop-setup.ps1`, which adds the options' removal to uninstall). Exit codes: 0 done, 1 failed, 2 usage,
+3 unsupported game build, 4 the game is running. `--data-dir <folder>` replaces the data folder, for tests only.
 
 ## Tests
 
-`make -C install test`: 18 behaviour tests (install adds only, shipped files byte-identical, uninstall restores the
-folder byte-for-byte, conflict, case variants, unsupported build, running game, rollback, update, repair, mod-manager
-detection, CLI exit codes) and 8 mutants that must fail them (uninstall leaving a file or folder, install
-overwriting, no rollback, status ignoring content, build not checked, running game ignored, uninstall deleting a
-changed file).
+`make -C launcher test` runs [`install_test.cpp`](../launcher/install_test.cpp) in fake game, package and data
+folders (states and the button, receipts beside every file, install leaving the game byte-for-byte as it was apart from
+the proxy, update with a dropped file, repair, an interrupted update, rollback after a failure part-way, a damaged
+package, a linked folder, a manifest path that escapes, uninstall keeping changed and foreign files and the co-op data,
+by-hand and mod-manager installs, the launcher's own layout, `libraryfolders.vdf` in both formats with escapes,
+`appmanifest` and duplicate games) and 16 mutants that must fail it (`launcher/test_mutants.py`, `MUTANT_INSTALL_*`).
+`make -C dist test` covers Setup's own core and the release tools ([`dist/test_dist.py`](../dist/test_dist.py),
+[`tools/test_release.py`](../tools/test_release.py)).
 
-## What a Setup program still needs (not built)
+## Release
 
-- The release proxy now has a defined unconfigured path: `avrt.dll` forwards to System32, co-op off. The
-  [launcher](../launcher/README.md) publishes a short-lived, executable-bound ticket in the co-op data folder
-  before requesting a Steam launch. Explicit environment configurations and the `d3dcompiler_47.dll` lab build
-  keep their existing fail-closed behavior. Native Windows startup still needs the documented fixture/live checks.
-- Chain-loading a foreign `avrt.dll` (J3) is not implemented; install reports a conflict instead.
-- A native Setup exe: window, game discovery in Steam libraries, desktop shortcut, firewall rule, and the real
-  "game running" check (this core asks the OS to open `ds.exe` for update; a Windows test with a running image is not done).
+`tools/release.sh <version>` builds everything (`make all` with the version in every VERSIONINFO and the launcher's
+About), stages the package (`tools/package.py`), writes `coop-mod.json`, builds the zip's payload-less Setup and the
+single-file Setup with the package embedded (`tools/payload.py`; the exe checks the payload's SHA-256 before it
+unpacks it), the `.sha256` files, `NEXUS-<version>.txt` and `PUBLISH-<version>.txt` (the `gh release create
+--prerelease` command, never run), and finishes with `tools/check_release_package.py`. Everything goes to
+`local/release/` (ignored by git). `SIGN_CMD` signs every exe and dll before it is hashed and embedded.
+
+Not verified yet (needs Windows): the Setup window, the elevated firewall step, the verbs' output through
+`DeathStrandingCoop-Setup.exe`, and an install into a real Steam library.

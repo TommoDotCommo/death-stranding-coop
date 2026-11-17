@@ -152,12 +152,14 @@ void out(HANDLE h,const std::string& s){DWORD n=0;if(h&&h!=INVALID_HANDLE_VALUE)
 std::string plain(const install::Report& r){std::string s=std::string(install::stateName(r.state))+" ("+install::button(r.state)+")\n";for(auto& p:r.problems)s+="  "+p+"\n";return s;}
 int setupVerb(int argc,wchar_t** argv){
     HANDLE so=GetStdHandle(STD_OUTPUT_HANDLE),se=GetStdHandle(STD_ERROR_HANDLE);
-    bool json=false,yes=false;std::vector<std::wstring> rest;
-    for(int i=2;i<argc;++i){std::wstring a=argv[i];if(a==L"--json")json=true;else if(a==L"--yes")yes=true;else rest.push_back(a);}
+    bool json=false,yes=false;std::vector<std::wstring> rest;fs::path data=known(FOLDERID_LocalAppData)/"DeathStrandingCoop";
+    for(int i=2;i<argc;++i){std::wstring a=argv[i];if(a==L"--json")json=true;else if(a==L"--yes")yes=true;
+        else if(a==L"--data-dir"&&i+1<argc)data=argv[++i];   // tests only: a scratch data folder instead of the player's
+        else rest.push_back(a);}
     auto usage=[&](const char* why){out(se,std::string(why)+"\nUse: --setup status [--json] [<game folder>] | --setup install <game folder> --yes | --setup uninstall <game folder> --yes\n");return int(install::Usage);};
     if(rest.empty())return usage("No setup verb.");
     wchar_t self[32768];if(!GetModuleFileNameW(nullptr,self,32768))return install::Failed;
-    install::Layout l{fs::path(self).parent_path(),{},known(FOLDERID_LocalAppData)/"DeathStrandingCoop",true};
+    install::Layout l{fs::path(self).parent_path(),{},data,true};
     try {
         if(rest[0]==L"status") {
             if(rest.size()>2)return usage("status takes one game folder at most.");

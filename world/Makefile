@@ -51,8 +51,9 @@ build/presence-test: presence_test.cpp $(RELAY) $(PLAYER) | build
 	$(CXX) $(FLAGS) presence_test.cpp relay.cpp ../core/broadcast_client.cpp ../core/core.cpp -o $@
 build/coop-world: ../common/diag_log.h ../common/crash_handler.h main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
 	$(CXX) $(FLAGS) main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp identity.cpp signatures.cpp $(MONO) -o $@
+# WORLD_VERSION_RES: the release's VERSIONINFO resource object (tools/release.sh), empty otherwise.
 build/coop-world.exe: ../common/diag_log.h ../common/crash_handler.h main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
-	$(MINGW) $(WINFLAGS) main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp identity.cpp signatures.cpp $(MONO) -o $@ -lws2_32 -lbcrypt
+	$(MINGW) $(WINFLAGS) main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp identity.cpp signatures.cpp $(MONO) $(WORLD_VERSION_RES) -o $@ -lws2_32 -lbcrypt
 # The swarm of stand-in players (mod/swarm.cpp) talks to the built server over real sockets.
 ../mod/build/coop-swarm: FORCE
 	$(MAKE) -C ../mod build/coop-swarm
