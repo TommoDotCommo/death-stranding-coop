@@ -57,6 +57,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "notice.h"
 #include "strand_notices.h"
 #include "received.h"
+#include "offer_strand.h"
 #include "weather.h"
 #include "environment.h"
 #include "auto_continue.h"
@@ -1108,13 +1109,47 @@ struct Runtime final:ds::Transport {
         for(auto& c:receivedBuilder.step(*sampler,sampler->base,imageSize,receivedWrite))note(mod::received::Builder::line(c).c_str());
         if(!receivedTimed){receivedTimed=true;std::ostringstream o;o<<"RECEIVED first scan: "<<(mod::nowUs()-t0)/1000.<<" ms\n";note(o.str().c_str());}
     }
+    // --- Offering the existing strand (offer_strand.h): opt-in `offer_strand`. While the game is signed in to the server
+    // the config names and that server says this player's older strand may be offered (its notices answer, read with
+    // the notice token below), the construction records he built that the game uploads are asked for, one at a time,
+    // through the game's own upload call on the game thread: an empty online id with 0x2c9ed40, an id of the original
+    // service with the uploader's re-create. The code and the uploader are checked before every call.
+    mod::offer_strand::Offerer offerer;std::function<bool(uint64_t,bool)> offerAsk;bool offerTried=false;
+    void tickOffer(uint64_t now) {
+        if(!config.offerStrand)return;
+        // Without strand_notices the token's reads are for the server's word only: their lines are not told.
+        if(strandPoller&&!config.strandNotices){for(auto& row:strandPoller->logs())note(row.c_str());
+#ifndef MOD_MUTANT_OFFER_LINES
+            strandPoller->lines();
+#endif
+        }
+        const std::string old=strandPoller?strandPoller->offerOld():std::string();
+        bool on=sampler&&mod::offer_strand::active(config.offerStrand,!config.onlineServer.empty(),onlineSeen.signedIn(),old);
+        if(on&&!offerTried){
+            offerTried=true;
+#ifdef _WIN32
+            try{offerAsk=mod::offer_strand::nativeAsk(*sampler);note("OFFER the game's upload call and re-create queue are this build's\n");}
+            catch(const std::exception& e){note((std::string("OFFER unavailable: ")+e.what()+"\n").c_str());}
+#else
+            note("OFFER unavailable: the game's upload call is Windows only\n");
+#endif
+        }
+        if(!offerAsk)return;
+        if(!imageSize)for(auto& sec:sampler->sections)imageSize=std::max(imageSize,sec.address+sec.size-sampler->base);
+        mod::offer_strand::Offerer::Calls calls;
+        calls.scan=[this]{return mod::own_strand::readStructures(*sampler,sampler->base,imageSize,mod::offer_strand::select());};
+        calls.ask=offerAsk;
+        calls.queued=[this](uint64_t object,bool again){return mod::offer_strand::queued(*sampler,mod::offer_strand::uploader(*sampler),object,again);};
+        for(auto& line:offerer.step(on,poseAvailable&&!inEvent,now,calls))note(line.c_str());
+    }
     // --- What the game is told about this player's builds on the server (strand_notices.h): opt-in `strand_notices`.
     // The server's API is read on a thread of its own with the notice token the launcher took (`strand_token`); its
-    // lines go into the notices' queue below.
+    // lines go into the notices' queue below. With `offer_strand` alone it is read for the server's word on his older
+    // strand only (tickOffer), and nothing is told.
     std::unique_ptr<mod::strand::Poller> strandPoller;
     void strandStart() {
 #ifndef MOD_MUTANT_STRAND_OFF
-        if(!config.strandNotices)return;
+        if(!config.strandNotices&&!config.offerStrand)return;
 #else
         if(config.onlineServer.empty())return;   // the mutant: every game with a server reads, whatever its config says
 #endif
@@ -1123,7 +1158,7 @@ struct Runtime final:ds::Transport {
         const uint16_t port=uint16_t(std::stoul(url.substr(colon+1,slash-colon-1)));const std::string token=config.strandToken;
         const std::string base=mod::serverApiBase(url).value_or(std::string());
         strandPoller=std::make_unique<mod::strand::Poller>(base,[a=*address,port,token](const std::string& target){return mod::strand::get(a,port,target,token,mod::strand::ConnectMs);});
-        note("STRAND notices on: this player's builds on the server are read every 5 s\n");
+        note(config.strandNotices?"STRAND notices on: this player's builds on the server are read every 5 s\n":"STRAND read on: the server's word on this player's older strand is read every 5 s (offer_strand)\n");
     }
     // --- Notices (notice.h): opt-in `notices`. The partner joined / left / nobody yet, in the game's own info log.
     // `puppet.ride` "notice" shows a test line whatever the session does. With `strand_notices` alone (group play has
@@ -1152,7 +1187,10 @@ struct Runtime final:ds::Transport {
 #endif
         if(!notices){notices=std::make_unique<mod::notice::Notifier>(*noticeApi,[this](const std::string& row){note(row.c_str());});
             if(config.group||!config.notices)notices->partnerless();}   // nobody is expected: no "No partner yet"
-        if(strandPoller){for(auto& row:strandPoller->logs())note(row.c_str());for(auto& line:strandPoller->lines())notices->strand(line,now);}
+        if(strandPoller&&config.strandNotices){for(auto& row:strandPoller->logs())note(row.c_str());for(auto& line:strandPoller->lines())notices->strand(line,now);}
+#ifdef MOD_MUTANT_OFFER_LINES
+        else if(strandPoller){for(auto& line:strandPoller->lines())notices->strand(line,now);}
+#endif
         if(!config.notices){notices->tick(now,poseAvailable&&!inEvent,false,{});return;}
         bool connected=core&&core->connected();
         // Away: he reports an event or private room, or no pose of his has arrived (his game is at the title screen or
@@ -3233,6 +3271,8 @@ struct Runtime final:ds::Transport {
             if(gameContext)tickOnline(now);
             stage="received";stages.enter("received",mod::nowUs());
             if(gameContext)tickReceived();
+            stage="offer";stages.enter("offer",mod::nowUs());
+            if(gameContext)tickOffer(now);
             stage="notices";stages.enter("notices",mod::nowUs());
             if(gameContext)tickNotices(now);
             stage="cargo command";stages.enter("cargo command",mod::nowUs());
@@ -3978,7 +4018,11 @@ unsigned mod_status(char* out,unsigned cap) {
         o<<",\"received_structures\":{\"on\":"<<(r.receivedOn?"true":"false")<<",\"answers\":\""<<mod::received::label(r.receivedEarly)<<"\",\"built\":"<<r.receivedBuilder.changed()<<",\"skipped\":"<<r.receivedBuilder.skipped()<<"}";
         {mod::strand::Poller::Counters k;if(r.strandPoller)k=r.strandPoller->counters();
          o<<",\"strand\":{\"on\":"<<(r.strandPoller?"true":"false")<<",\"reads\":"<<k.reads<<",\"answers\":"<<k.answers<<",\"failures\":"<<k.failures<<",\"told\":"<<k.told
-          <<",\"known\":"<<k.known<<",\"refused\":"<<(k.refused?"true":"false")<<",\"pending\":"<<(r.notices?r.notices->pending():0)<<"}";}
+          <<",\"known\":"<<k.known<<",\"refused\":"<<(k.refused?"true":"false")<<",\"pending\":"<<(r.notices?r.notices->pending():0)
+          <<",\"offer_old\":\""<<(r.strandPoller?r.strandPoller->offerOld():std::string())<<"\"}";}
+        {auto& k=r.offerer.counters();
+         o<<",\"offer_strand\":{\"on\":"<<(k.on?"true":"false")<<",\"asked\":"<<k.asked<<",\"uploaded\":"<<k.uploaded<<",\"sent_again\":"<<k.recreated<<",\"refused\":"<<k.refused
+          <<",\"no_answer\":"<<k.timedOut<<",\"not_queued\":"<<k.unqueued<<",\"gone\":"<<k.gone<<",\"left_out\":"<<k.left<<",\"stopped\":"<<(k.broken?"true":"false")<<"}";}
 #ifdef MOD_FAKE_NETWORK
         {auto ascii=[](const std::u16string& n){std::string t;for(auto ch:n)t+=(ch>=0x20&&ch<0x7f&&ch!='"'&&ch!='\\')?char(ch):'?';return t;};
          o<<",\"label_names\":[";bool first=true;for(auto& [id,l]:r.fakeLabels){o<<(first?"":",")<<"\""<<ascii(l.name)<<"\"";first=false;}

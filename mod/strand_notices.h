@@ -22,7 +22,9 @@ namespace mod::strand {
 // One of his objects as the server lists it: its kind ("ladder"), state (shared, held, kept, waiting, remnant) and why
 // (held: build, member, limit; kept: choice, owner, server; waiting: you, owner).
 struct Item { std::string id,kind,state,why; };
-struct Answer { std::string name,version;bool full=false;std::vector<Item> items; };
+// offerOld: what applies to his older strand on that server ("yes" or "no"; "" from a server that does not say), which
+// `offer_strand` (offer_strand.h) acts on.
+struct Answer { std::string name,version;bool full=false;std::vector<Item> items;std::string offerOld; };
 constexpr size_t MaxItems=8000,MaxAnswerBytes=2*1024*1024;
 // The server's answer; nullopt for anything that is not exactly one (bounded).
 std::optional<Answer> parse(const std::string& body);
@@ -60,11 +62,14 @@ public:
     std::vector<std::string> logs();
     struct Counters { unsigned reads=0,answers=0,failures=0,told=0;bool refused=false;size_t known=0; };
     Counters counters() const;
+    // The server's last word on his older strand: the last answer's offer_old ("" before one, from a server that does
+    // not say, and once the token is refused). Kept while the server is away.
+    std::string offerOld() const;
 private:
     void run();
     std::string base_;Fetch fetch_;Schedule schedule_;Tracker tracker_;
     mutable std::mutex lock_;std::condition_variable wake_;bool stop_=false;
-    std::deque<std::u16string> lines_;std::deque<std::string> logs_;Counters counters_;
+    std::deque<std::u16string> lines_;std::deque<std::string> logs_;Counters counters_;std::string offerOld_;
     std::thread thread_;
 };
 }

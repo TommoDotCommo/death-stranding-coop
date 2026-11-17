@@ -265,6 +265,9 @@ private:
     std::string importedId(char type,const std::pair<std::string,std::string>& origin) const;
     Shared sharedOf(const Object&) const;
     json::Value objectResponse(const Object&) const;
+    // An upload's body as it is stored and served: the account names in its materials ("mt", "rmt": "c" of each
+    // contributor) kept only for players of this world, every other one "" (README "An object's own id").
+    json::Value servedPost(const json::Value& post) const;
     Reply gateway(const Player&,const std::string& name,const json::Value& in,int64_t now);
     const Player* playerById(const std::string& id) const;
     void note(const std::string& line) const {if(log)log(line);}

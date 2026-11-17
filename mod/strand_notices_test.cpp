@@ -22,11 +22,15 @@ static void reading(){
     auto a=parse(R"({"format":1,"name":"North","version":"ab12-7","full":false,"objects":[{"id":"lAbc123","kind":"ladder","state":"held","why":"member"},{"id":"e9","kind":"cairn","state":"shared","why":""}]})");
     CHECK(a&&a->name=="North"&&a->version=="ab12-7"&&!a->full&&a->items.size()==2&&a->items[0].kind=="ladder"&&a->items[0].why=="member"&&a->items[1].state=="shared");
     CHECK(parse(R"({"format":1,"name":"","version":"x-0","full":true,"objects":[]})").has_value());
+    // What applies to his older strand: yes or no, nothing from a server that does not say.
+    CHECK(a->offerOld.empty()&&parse(R"({"format":1,"name":"","version":"x-0","full":true,"objects":[],"offer_old":"yes"})")->offerOld=="yes");
+    CHECK(parse(R"({"format":1,"name":"","version":"x-0","full":true,"objects":[],"offer_old":"no"})")->offerOld=="no");
     for(const char* bad:{"","[]","{}",R"({"format":2,"name":"","version":"x","full":true,"objects":[]})",R"({"format":1,"version":"x","full":true,"objects":[]})",
                          R"({"format":1,"name":"","version":"x","full":"yes","objects":[]})",R"({"format":1,"name":"","version":"x","full":true,"objects":{}})",
                          R"({"format":1,"name":"","version":"x","full":true,"objects":[{"id":"l-1","kind":"ladder","state":"held","why":""}]})",
                          R"({"format":1,"name":"","version":"x","full":true,"objects":[{"id":"l1","kind":"ladder","state":"lost","why":""}]})",
-                         R"({"format":1,"name":"","version":"x","full":true,"objects":[7]})"})
+                         R"({"format":1,"name":"","version":"x","full":true,"objects":[7]})",R"({"format":1,"name":"","version":"x","full":true,"objects":[],"offer_old":"maybe"})",
+                         R"({"format":1,"name":"","version":"x","full":true,"objects":[],"offer_old":true})"})
         CHECK(!parse(bad));
     std::string many=R"({"format":1,"name":"","version":"x","full":true,"objects":[)";
     for(size_t i=0;i<=MaxItems;++i)many+=std::string(i?",":"")+R"({"id":"l)"+std::to_string(i+10)+R"(","kind":"ladder","state":"held","why":"member"})";
@@ -102,6 +106,25 @@ static void polling(){
     }
     CHECK(targets==std::vector<std::string>({"/w77/coop/notices","/w77/coop/notices?since=e-1","/w77/coop/notices?since=e-1","/w77/coop/notices?since=e-1","/w77/coop/notices?since=e-2","/w77/coop/notices?since=e-2"}));
 }
+static void older(){
+    // The server's last word on his older strand: each answer's, kept while the server is away, gone with a refused token
+    // and with an answer that does not say.
+    auto body=[](const char* version,const char* old){return std::string(R"({"format":1,"name":"North","version":")")+version+R"(","full":true,"objects":[])"+
+                                                            (old?std::string(R"(,"offer_old":")")+old+"\"":std::string())+"}";};
+    for(bool refuse:{false,true}){
+        std::vector<Fetched> script={{200,body("e-1","yes")},{0,""},{0,""}};
+        if(refuse)script.push_back({403,"{}"});else script.push_back({200,body("e-2",nullptr)});
+        std::atomic<size_t> at{0};std::atomic<bool> hold{true};
+        Poller p("",[&](const std::string&){size_t i=at++;while(hold&&i==script.size()-1)std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                     return i<script.size()?script[i]:Fetched{0,""};},[](int s,bool good,unsigned& n){return delayAfter(s,good,n)?uint64_t(1):0;});
+        for(int i=0;i<200&&at<script.size();++i)std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        CHECK(p.offerOld()=="yes");   // the first answer's, through two reads that failed
+        hold=false;
+        for(int i=0;i<200&&p.counters().reads<script.size();++i)std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        CHECK(p.offerOld().empty()&&p.counters().refused==refuse);
+    }
+}
 static void http(){
     // One real read over loopback: the header carries the token, the answer is taken only whole.
     int listener=socket(AF_INET,SOCK_STREAM,0);sockaddr_in a{};a.sin_family=AF_INET;a.sin_addr.s_addr=htonl(0x7f000001);
@@ -123,7 +146,7 @@ static void http(){
     CHECK(get(0x7f000001,port,"/","t",500).status==0);   // nobody there
 }
 int main(){
-    reading();words();tracking();schedule();polling();http();
+    reading();words();tracking();schedule();polling();older();http();
     if(failures){std::fprintf(stderr,"strand oracle: %u failures\n",failures);return 1;}
     std::puts("strand notices tests passed");return 0;
 }

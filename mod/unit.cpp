@@ -193,6 +193,17 @@ int main() {
       assert(refused(withKeys(game,"\"build_received\":true")));                                       // no online server
       assert(!mod::parseConfig(withKeys(game,"\"build_received\":false")).buildReceived);
       assert(refused(withKeys(online,"\"build_received\":1"))&&refused(withKeys(online,"\"build_received\":\"true\"")));}
+     // Offering the existing strand (offer_strand.h): off by default; with online_server and the notice token only.
+     {auto online=withKeys(game,"\"online_server\":\"http://10.1.2.3:49100/w77/auth/ds\"");
+      auto offer=mod::parseConfig(withKeys(online,"\"offer_strand\":true,\"strand_token\":\"abcDEF123\""));
+      assert(offer.offerStrand&&offer.strandToken=="abcDEF123"&&!offer.strandNotices&&!mod::parseConfig(online).offerStrand);
+      auto both=mod::parseConfig(withKeys(online,"\"offer_strand\":true,\"strand_notices\":true,\"strand_token\":\"abc\""));assert(both.offerStrand&&both.strandNotices);
+      assert(!mod::parseConfig(withKeys(online,"\"offer_strand\":false")).offerStrand);
+      for(auto bad:{"\"offer_strand\":true","\"offer_strand\":true,\"strand_token\":\"\"","\"offer_strand\":true,\"strand_token\":\"a-b\"",
+                    "\"offer_strand\":true,\"strand_token\":\"abcdefghijklmnopqrstuvwxyz0123456\"","\"offer_strand\":1,\"strand_token\":\"abc\"","\"offer_strand\":false,\"strand_token\":\"abc\""})
+          assert(refused(withKeys(online,bad)));
+      assert(refused(withKeys(game,"\"offer_strand\":true,\"strand_token\":\"abc\"")));                                   // no online server
+      assert(refused(withKeys(withKeys(game,"\"online_server\":\"http://10.1.2.3:49100/w77/gate\""),"\"offer_strand\":true,\"strand_token\":\"abc\"")));}
      assert(mod::onlineAddress("http://10.1.2.3:80/a",0x7f000001,0x0a010203)&&!mod::onlineAddress("http://10.1.2.4:80/a",0x7f000001,0x0a010203)&&!mod::onlineAddress("http://10.1.2.3:80/a",0x7f000001));
      // A partner and a server on a third PC: both addresses are listed, nothing else.
      auto both=withKeys(probe,"\"others\":4,\"server\":\"10.1.2.3\"");

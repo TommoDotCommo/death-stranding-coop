@@ -229,7 +229,7 @@ Choices defaults(const Policy& p){
 }
 std::string choicesText(const Choices& c){
     return std::string(c.offerBuilds=="yes"?"what you build here is shared":c.offerBuilds=="no"?"what you build here is kept for you":"what you build here waits for your answer")
-           +"; "+(c.offerOld=="yes"?"your older strand may be taken over":"your older strand is not taken over");
+           +"; "+(c.offerOld=="yes"?"your older strand may be offered":"your older strand is not offered");
 }
 std::string iniGet(const std::string& ini,const std::string& name,const std::string& key){
     std::istringstream in(ini);std::string row;bool inside=false;

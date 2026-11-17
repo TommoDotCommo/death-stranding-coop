@@ -191,7 +191,9 @@ of his own contributions. So before the joiner's game starts, the launcher asks 
   for his answer or the owner's, held by the rules, kept, remnants, likes), or that he has not played there yet.
 - His two choices for this server: **Share what I build here**: Yes (the other players can be handed it, as the rules
   say), No (kept for him alone, a personal archive on that server) or Ask me (it waits until he offers it, below);
-  **Let this server take my older strand**: Yes or No (recorded only: nothing is taken over yet). Ticked: what the
+  **Let this server take my older strand**: Yes or No. The server keeps it and tells his game's mod; a game whose
+  `mod.json` has `offer_strand` on (the launcher does not write it yet) then has the game upload the structures its
+  save already holds (`../mod/README.md`, "Offering your existing strand"; not run live). Ticked: what the
   server has for him if he chose there before, else what this launcher remembers for this server, else the server's
   own values for a player who chose nothing (its `offer_builds` and `offer_old`).
 - **Join with these choices**: they are remembered in `launcher.ini` under `[server-ID]` (the world's id, so a server

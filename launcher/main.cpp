@@ -182,7 +182,7 @@ bool choicesScreen(const strand::Policy& rules,const std::string& mine,strand::C
         popupControl(h,BuildYes,L"BUTTON",L"Yes: the other players can be handed it, as the rules above say",BS_AUTORADIOBUTTON|WS_GROUP,40,362,720,26);
         popupControl(h,BuildNo,L"BUTTON",L"No: keep it for me alone (a personal archive on this server)",BS_AUTORADIOBUTTON,40,390,720,26);
         popupControl(h,BuildAsk,L"BUTTON",L"Ask me: it waits until I offer it (Play, My strand on this server)",BS_AUTORADIOBUTTON,40,418,720,26);
-        popupControl(h,0,L"STATIC",L"Let this server take my older strand (recorded only: nothing is taken over yet):",SS_LEFT,20,458,744,24);
+        popupControl(h,0,L"STATIC",L"Let this server take my older strand (offered only by a game whose mod has offer_strand on):",SS_LEFT,20,458,744,24);
         popupControl(h,OldYes,L"BUTTON",L"Yes",BS_AUTORADIOBUTTON|WS_GROUP,40,485,120,26);popupControl(h,OldNo,L"BUTTON",L"No",BS_AUTORADIOBUTTON,180,485,120,26);
         popupControl(h,Go,L"BUTTON",go,BS_DEFPUSHBUTTON|WS_GROUP,20,545,480,40);popupControl(h,Cancel,L"BUTTON",L"Cancel",0,520,545,244,40);
         SendMessageW(GetDlgItem(h,c.offerBuilds=="no"?BuildNo:c.offerBuilds=="ask"?BuildAsk:BuildYes),BM_SETCHECK,BST_CHECKED,0);
