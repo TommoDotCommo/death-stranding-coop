@@ -9,7 +9,7 @@ HEADERS = core.h strand.h owner.h ../world/json.h ../world/identity.h ../vendor/
 all: build/deathstranding-coop.exe build/net-fixture.exe build/discover-win-test.exe
 build:
 	mkdir -p build
-build/deathstranding-coop.exe: main.cpp $(SRC) $(HEADERS) launcher.rc | build
+build/deathstranding-coop.exe: main.cpp $(SRC) $(HEADERS) launcher.rc ../dist/diag.ps1 ../dist/diag-rules.json | build
 	$(WINDRES) launcher.rc -o build/launcher-res.o
 	$(CXX) $(FLAGS) -municode -mwindows main.cpp $(SRC) build/launcher-res.o -o $@ -lcomctl32 -lshell32 -lole32 -loleaut32 -luuid -lws2_32 -liphlpapi -lbcrypt
 build/core-test: core_test.cpp $(SRC) $(HEADERS) ../world/signatures.cpp ../world/signatures.h | build

@@ -157,9 +157,10 @@ Other players are shown as presence only (position, pose, name); cargo, structur
 and the rest of the two-player layer are not shared with them. The key travels in the clear: use a LAN or a VPN.
 The launcher steps are in [launcher/README.md](launcher/README.md).
 
-When a session goes wrong, the launcher's About tab has **Save diagnostics for a bug report** (also
-`deathstranding-coop.exe --diagnostics`): one text file with the versions, the config and the ends of the logs,
-without the session code, invites or your Windows user name ([launcher/README.md](launcher/README.md)).
+When a session goes wrong, the launcher's About tab has **Send diagnostics** (also
+`deathstranding-coop.exe --diagnostics-zip`): a redacted zip on the Desktop containing recent logs, settings, system
+and network checks, and a file manifest. Nothing is uploaded. `--diagnostics` still produces the bounded text report
+([launcher/README.md](launcher/README.md), [diagnostics reader](tools/README.md)).
 
 ## 📜 Rules this project keeps
 

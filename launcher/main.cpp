@@ -441,6 +441,56 @@ fs::path saveDiagnostics(){
     auto file=options.data/("diagnostics-"+std::to_string(std::time(nullptr))+".txt");
     atomicWrite(file,diagnostics(options.data,head));return file;
 }
+// The matching exporter and privacy rules travel inside this executable. No upload.
+fs::path saveDiagnosticsZip(){
+    auto report=saveDiagnostics();
+    auto run=options.data/("diagnostics-run-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(GetTickCount64()));
+    fs::create_directories(run);
+    bool keepRun=false;
+    auto cleanup=[&]{if(!keepRun){std::error_code ec;fs::remove_all(run,ec);}};
+    try {
+        for(auto item:{std::pair<int,const char*>{101,"diag.ps1"},{102,"diag-rules.json"}}){
+            auto resource=FindResourceW(nullptr,MAKEINTRESOURCEW(item.first),RT_RCDATA);
+            auto loaded=resource?LoadResource(nullptr,resource):nullptr;
+            auto bytes=loaded?LockResource(loaded):nullptr;
+            if(!bytes)throw std::runtime_error("Diagnostics exporter is missing. Reinstall the launcher and try Send diagnostics again.");
+            atomicWrite(run/item.second,std::string(static_cast<const char*>(bytes),SizeofResource(nullptr,resource)));
+        }
+        wchar_t system[MAX_PATH];if(!GetSystemDirectoryW(system,MAX_PATH))throw std::runtime_error("Windows system folder is unavailable.");
+        auto powershell=fs::path(system)/L"WindowsPowerShell/v1.0/powershell.exe";
+        auto quoted=[](const fs::path& p){
+            std::wstring out=L"\"";size_t slashes=0;
+            for(auto c:p.wstring()){
+                if(c==L'\\'){++slashes;continue;}
+                out.append(c==L'"'?2*slashes+1:slashes,L'\\');out+=c;slashes=0;
+            }
+            out.append(2*slashes,L'\\');return out+L"\"";
+        };
+        auto command=quoted(powershell)+L" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "+quoted(run/"diag.ps1")
+            +L" -DataDir "+quoted(options.data)+L" -ReportFile "+quoted(report)+L" -ResultFile "+quoted(run/"result.txt")+L" -NoOpen";
+        if(!gameFolder.empty())command+=L" -GameDir "+quoted(gameFolder);
+        STARTUPINFOW startup{};startup.cb=sizeof(startup);startup.dwFlags=STARTF_USESHOWWINDOW;startup.wShowWindow=SW_HIDE;
+        PROCESS_INFORMATION process{};
+        if(!CreateProcessW(powershell.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&startup,&process))
+            throw std::runtime_error("Windows could not start the diagnostics exporter. Check Windows PowerShell, then try Send diagnostics again.");
+        CloseHandle(process.hThread);
+        // A bounded wait; the exporter never starts or stops a game. Keep About responsive.
+        bool done=false;auto began=GetTickCount64();
+        while(GetTickCount64()-began<120000){
+            DWORD wait=MsgWaitForMultipleObjects(1,&process.hProcess,FALSE,100,QS_PAINT);
+            if(wait==WAIT_OBJECT_0){done=true;break;}
+            MSG msg;while(PeekMessageW(&msg,nullptr,WM_PAINT,WM_PAINT,PM_REMOVE))DispatchMessageW(&msg);
+        }
+        if(!done){keepRun=true;CloseHandle(process.hProcess);throw std::runtime_error("Diagnostics is taking longer than expected. The exporter is still working; check the Desktop for the zip.");}
+        DWORD code=1;GetExitCodeProcess(process.hProcess,&code);CloseHandle(process.hProcess);
+        std::ifstream f(run/"result.txt",std::ios::binary);std::string result((std::istreambuf_iterator<char>(f)),{});
+        if(result.compare(0,3,"\xef\xbb\xbf")==0)result.erase(0,3);
+        if(code||result.rfind("OK ",0)!=0)throw std::runtime_error("Diagnostics export failed. Check that the Desktop is writable, then try Send diagnostics again.");
+        auto zip=fs::path(wtext(result.substr(3)));cleanup();
+        ShellExecuteW(window,L"open",L"explorer.exe",(L"/select,\""+zip.wstring()+L"\"").c_str(),nullptr,SW_SHOWNORMAL);
+        return zip;
+    }catch(...){cleanup();throw;}
+}
 void switchTab(int next){selectedTab=next;TabCtrl_SetCurSel(tab,next);render();}
 void scan(bool force=false){
     if(choice!=1||net->lobby||selectedTab!=0||joinAfterScan)return;
@@ -584,8 +634,9 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
                 if(id==BackUp){if(!backupAllowed(net->lobby,gameRunning(gameFolder)))throw std::runtime_error("Leave the lobby and close the game before backing up.");auto dest=options.data/"backups"/std::to_string(std::time(nullptr));backup(options.data,dest);MessageBoxW(h,(L"Co-op saves backed up to:\n"+dest.wstring()).c_str(),L"Backup complete",MB_OK);}
                 if(id==Guide)MessageBoxW(h,L"Host: Open lobby, copy invite, wait for Ready, Start game.\nJoin: paste an invite or choose a LAN/Tailscale host, Join, Ready.\nGroup (experimental): Settings, Group server; Host starts the server and your game; friends paste the group invite under Join.\nTab moves focus; Enter confirms; Esc returns to Play.\nCo-op saves are separate. Back up with the game closed.\nThis development build exchanges read-only presence.\nNo internet matchmaking, Steam friends, voice or shared story yet.",L"Quick guide",MB_OK);
                 if(id==Home)ShellExecuteW(h,L"open",L"https://github.com/TommoDotCommo/death-stranding-coop",nullptr,nullptr,SW_SHOWNORMAL);
-                if(id==Diagnose){auto file=saveDiagnostics();ShellExecuteW(h,L"open",L"explorer.exe",(L"/select,\""+file.wstring()+L"\"").c_str(),nullptr,SW_SHOWNORMAL);
-                    MessageBoxW(h,(L"Saved:\n"+file.wstring()+L"\n\nAttach this file to a bug report. Your session code, invites and Windows user name are not in it; other addresses are shortened.").c_str(),L"Diagnostics saved",MB_OK);}
+                if(id==Diagnose){EnableWindow(child(Diagnose),FALSE);try{auto file=saveDiagnosticsZip();
+                    MessageBoxW(h,(L"Saved:\n"+file.wstring()+L"\n\nAttach this zip to a bug report. Nothing was uploaded.").c_str(),L"Diagnostics saved",MB_OK);
+                    }catch(...){EnableWindow(child(Diagnose),TRUE);throw;}EnableWindow(child(Diagnose),TRUE);}
             }return 0;
         }
         if(msg==WM_CLOSE){if(net->lobby&&MessageBoxW(h,net->hosting?L"Close the lobby? Your friend will need to join again.":L"Leave the lobby? The host can keep playing.",L"Leave co-op",MB_YESNO)!=IDYES)return 0;net->leave();DestroyWindow(h);return 0;}
@@ -618,7 +669,7 @@ void buildControls(){
     label(2,224,wtext("Your player key (made by this launcher; its secret half never leaves this PC): "+world::identity::shortText(keys.pub)+". On group servers that take keys it is you, and the host's key is the owner's.").c_str());
     control(2,Protocol,L"BUTTON",L"Open deathstranding-coop invite links in this launcher");label(2,222,L"Settings are saved on change. Each game uses two adjacent UDP ports. A group world that exists keeps its own rules.\nCo-op networking is always enforced offline. Voice, controller navigation and router mapping are not available yet.");
     label(3,230,(L"Death Stranding co-op 0.1.0-dev\nSteam Director's Cut build 13300582\n\nExperimental; not a playable release. Native Windows launcher.\nCo-op mod standard: Play, Saves, Settings, About; DS invites and LAN/Tailscale discovery.\n\nInvite/discovery reference code: coop-mod-kit (MIT).\nNot affiliated with Kojima Productions or the game's publishers.\n\nWire version: "+wtext(wireVersion())).c_str());
-    control(3,Guide,L"BUTTON",L"Quick guide (F1)");control(3,Home,L"BUTTON",L"Project and issue tracker");control(3,Diagnose,L"BUTTON",L"Save diagnostics for a bug report");control(3,Remove,L"BUTTON",L"Remove co-op from the game");
+    control(3,Guide,L"BUTTON",L"Quick guide (F1)");control(3,Home,L"BUTTON",L"Project and issue tracker");control(3,Diagnose,L"BUTTON",L"Send diagnostics");control(3,Remove,L"BUTTON",L"Remove co-op from the game");
 }
 }
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
@@ -632,7 +683,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         lan=GetPrivateProfileIntW(L"launcher",L"lan",1,settingsFile.c_str());tailscale=GetPrivateProfileIntW(L"launcher",L"tailscale",1,settingsFile.c_str());privacy=GetPrivateProfileIntW(L"launcher",L"privacy",0,settingsFile.c_str());sharedWorld=GetPrivateProfileIntW(L"launcher",L"world",0,settingsFile.c_str())!=0;groupHost=GetPrivateProfileIntW(L"launcher",L"group",0,settingsFile.c_str())!=0;
         buildReceived=GetPrivateProfileIntW(L"launcher",L"build_received",1,settingsFile.c_str())!=0;   // on unless turned off
         {auto kept=utf8(read(L"group_policy",L"friends"));for(auto name:PolicyNames)if(kept==name)groupPolicy=name;}
-        bool registerOnly=false,devStart=false,diagnosticsOnly=false,firewallOnly=false,forceWorld=false,devSessionGiven=false;std::string devPeer="127.0.0.1",groupTarget;uint32_t devSession=1;fs::path takeSave;
+        bool registerOnly=false,devStart=false,diagnosticsOnly=false,diagnosticsZipOnly=false,firewallOnly=false,forceWorld=false,devSessionGiven=false;std::string devPeer="127.0.0.1",groupTarget;uint32_t devSession=1;fs::path takeSave;
         int groupMode=0;   // --group-host (1), --group-join INVITE-OR-ADDRESS (2)
         strand::Choices given;std::string strandReport;bool policyGiven=false;   // --strand-builds, --strand-old, --strand-policy FILE|-; --group-policy
         owner::Action ownerAction;std::string ownerReport;   // --owner-... (one action) and --owner-report FILE|-: the server owner's calls without the window
@@ -647,6 +698,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
             else if(a==L"--shared-world")forceWorld=true;
             else if(a==L"--register-protocol")registerOnly=true;
             else if(a==L"--diagnostics")diagnosticsOnly=true;
+            else if(a==L"--diagnostics-zip")diagnosticsZipOnly=true;
             else if(a==L"--firewall-status")firewallOnly=true;
             else if(a==L"--dev-start")devStart=true;
             else if(a==L"--dev-peer")devPeer=utf8(value());
@@ -695,6 +747,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         readFirewallNow();
         // Headless: the firewall sentence to standard output (when redirected) and the exit code (the verdict's number).
         if(firewallOnly){std::string line=std::string(firewallText(firewall))+"\n";DWORD n=0;HANDLE out=GetStdHandle(STD_OUTPUT_HANDLE);if(out&&out!=INVALID_HANDLE_VALUE)WriteFile(out,line.data(),DWORD(line.size()),&n,nullptr);return int(firewall);}
+        if(diagnosticsZipOnly){options.game=gameFolder;saveDiagnosticsZip();return 0;}
         if(diagnosticsOnly){options.game=gameFolder;saveDiagnostics();return 0;}
         std::ifstream recents(options.data/"recents.tsv",std::ios::binary);char store[CD_RECENT_BYTES+1];recents.read(store,sizeof(store));auto count=recents.gcount();if(count<=CD_RECENT_BYTES)cd_recents_decode(&net->recents,store,size_t(count));
         settingsFile=options.data/"launcher.ini";

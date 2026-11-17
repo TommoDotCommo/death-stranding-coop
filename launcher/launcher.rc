@@ -20,3 +20,7 @@ BEGIN
   VALUE "Translation", 0x409, 1200
  END
 END
+
+// Diagnostics exporter and its shared privacy policy.
+101 RCDATA "../dist/diag.ps1"
+102 RCDATA "../dist/diag-rules.json"

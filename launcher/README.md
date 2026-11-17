@@ -315,7 +315,14 @@ owner's window does not refresh by itself (Refresh), and there is no ban.
 
 ## Diagnostics for a bug report
 
-About → **Save diagnostics for a bug report** (or `deathstranding-coop.exe --diagnostics`, which shows no window)
+About → **Send diagnostics** (or `deathstranding-coop.exe --diagnostics-zip`) saves a redacted diagnostics zip on
+the Desktop and selects it in Explorer. Nothing is uploaded. It includes both log layouts, capped at 60 MiB of input
+logs/dumps by default, masked settings, the text report, hardware/build/WER/Defender/overlay information, network
+checks, a hashed mod-file listing, and `manifest.json`. The exporter and its privacy rules are embedded in the
+launcher and run hidden using Windows PowerShell; see [dist/README.md](../dist/README.md). The developer-side
+[reader](../tools/README.md) merges both players' timelines, aligns BUGMARKs and maps crashes.
+
+`deathstranding-coop.exe --diagnostics` (which shows no window) still
 writes `diagnostics-<time>.txt` into the co-op data folder: the launcher version, the game folder and whether its
 executable is the supported build, which parts are installed, the mod config, the files in the data folder and the
 last lines of the newest mod, proxy and crash logs. The session code, invites, a group's key (in the invite, the
