@@ -54,7 +54,7 @@ void Run(const diag::fs::path& exe,const diag::fs::path& dir,const wchar_t* mode
         if(ext==L".crash")++markers;
         if(ext==L".dmp"){
             ++dumps;std::ifstream in(f.path(),std::ios::binary);MINIDUMP_HEADER header{};in.read(reinterpret_cast<char*>(&header),sizeof header);
-            Require(in.good()&&header.Signature==MINIDUMP_SIGNATURE&&header.Flags==MiniDumpNormal,"small MiniDumpNormal");
+            Require(in.good()&&header.Signature==MINIDUMP_SIGNATURE&&(header.Flags&~ULONG64(0x00200000))==MiniDumpNormal,"small MiniDumpNormal");   // 0x200000: AVX state, added by newer dbghelp to every dump
             Require(diag::fs::exists(diag::fs::path(f.path()).replace_extension(L".crash")),"dump shares marker stem");
         }
         if(ext==L".log"&&f.path().filename()!=L"legacy.log"){
