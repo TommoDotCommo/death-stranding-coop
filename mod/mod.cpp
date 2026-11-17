@@ -3418,7 +3418,7 @@ struct Runtime final:ds::Transport {
                         if(!*pv){
                             o<<"ROAD test: "<<all.size()<<" pavers\n";
                             for(auto& p:all){auto need=api.missing(p.address);double at[3]{};sampler->read(p.address+0x40,at,24);
-                                o<<"ROAD paver "<<p.id<<" level "<<p.level<<" at "<<int(at[0])<<","<<int(at[1])<<" own";for(auto v:p.own)o<<" "<<v;o<<" net";for(auto v:p.net)o<<" "<<v;o<<" needs";for(auto v:need)o<<" "<<v;o<<"\n";}
+                                o<<"ROAD paver "<<p.id<<" level "<<p.level<<" at "<<int(at[0])<<","<<int(at[1])<<" own";for(auto v:p.own)o<<" "<<v;o<<" net";for(auto v:p.net)o<<" "<<v;o<<" needs";for(auto v:need)o<<" "<<v;int32_t pending[6]{};if(sampler->read(p.address+0x524,pending,sizeof pending)){o<<" online pending";for(auto v:pending)o<<" "<<v;}o<<"\n";}
                         }else{
                             bool found=false;
                             for(auto& p:all)if(p.id==id){found=true;mod::roads::Set s{};if(*pv>=1000000)s=api.missing(p.address);else s[*pv%10%mod::roads::Kinds]=100;
