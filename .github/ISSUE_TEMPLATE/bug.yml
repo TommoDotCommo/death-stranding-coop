@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Thanks for testing! Press **F2** in the game the moment something goes wrong: it marks that moment in the
-        co-op log. Then, in the co-op launcher: **About > Save diagnostics for a bug report**. It writes
+        co-op log. Then, in the co-op launcher: **About > Send diagnostics**. It writes
         `DeathStrandingCoop-diagnostics-<time>.zip` to your Desktop with user and computer names, addresses and
         Steam ids taken out. Look inside before you attach it.
   - type: textarea

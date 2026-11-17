@@ -131,7 +131,7 @@ ordinary Death Stranding saves (outside co-op) are never touched. Details: [laun
 ## 🐛 Reporting a bug
 
 1. In the game, press **F2** when something goes wrong: it marks the moment in the co-op log.
-2. In the launcher, About, **Save diagnostics for a bug report**: it writes
+2. In the launcher, About, **Send diagnostics**: it writes
    `DeathStrandingCoop-diagnostics-<time>.zip` to your Desktop, with Windows user and computer names, addresses and
    Steam ids taken out. Look inside before you send it.
 3. Open an issue with the [bug form](https://github.com/TommoDotCommo/death-stranding-coop/issues/new/choose) (or the

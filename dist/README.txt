@@ -61,7 +61,7 @@ Known issues (alpha)
 
 Reporting a bug
   1. When something goes wrong in the game, press F2: it marks the moment in the co-op log.
-  2. In the launcher: About, "Save diagnostics for a bug report". It writes DeathStrandingCoop-diagnostics-<time>.zip
+  2. In the launcher: About, "Send diagnostics". It writes DeathStrandingCoop-diagnostics-<time>.zip
      to your Desktop, with user names, computer names, addresses and Steam ids taken out. Look inside before you send it.
   3. Open an issue with the bug form: https://github.com/TommoDotCommo/death-stranding-coop/issues/new/choose
      and attach the zip. Say what you did, what you expected and what happened.
