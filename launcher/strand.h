@@ -6,6 +6,7 @@
 // (Winsock on Windows, POSIX sockets elsewhere), so the game-free tests run it against the built coop-world.
 #include "core.h"
 #include "../world/identity.h"
+#include <filesystem>
 #include <functional>
 namespace launcher::strand {
 // The server and the account a session's game signs in as there. The account key is the NAME of a /k/NAME sign-in
@@ -106,4 +107,18 @@ std::string shortKeyText(const std::string& typed);   // "A1B2C3D4 e5f6a7b8" -> 
 // Offer (`call` "offer") or withdraw ("withdraw") one of his objects, or all of them (`object` ""). `result` is what
 // happened, or why it was refused.
 bool act(const Target&,const Transport&,const std::string& call,const std::string& object,std::string& result);
+// Collections (../docs/COLLECTIONS.md): a DSK string made by the server from his own objects (named rows, or everything
+// within `nearMetres` of where his game is), and a DSK string imported as his structures, at the original place or
+// here. `relayId`: his game's relay id (the launcher's player number; under keys the server takes his key's own).
+struct Made { std::string text,description;int64_t count=0;std::vector<std::string> leftOut;std::string message() const; };
+struct Imported { int64_t imported=0,shared=0,held=0,kept=0,waiting=0;std::string source,description;std::vector<std::string> leftOut;std::string message() const; };
+bool makeCollection(const Target&,const Transport&,const std::vector<std::string>& objects,int64_t nearMetres,const std::string& name,uint64_t relayId,Made&,std::string& why);
+bool importCollection(const Target&,const Transport&,const std::string& text,const std::string& place,uint64_t relayId,Imported&,std::string& why);
+// A pasted text or a .dsk file's contents: the DSK string in it, checked, and what it holds in words. false with `why`.
+bool readCollection(const std::string& pasted,std::string& text,std::string& description,std::string& why);
+// A .dsk file in `folder` (made when missing): "<name or collection>-<UTC yyyymmdd-hhmmss>.dsk", the string and a line
+// break, written whole (temporary file, then rename). Returns the path, or "" with `why`.
+std::string saveCollection(const std::filesystem::path& folder,const std::string& text,const std::string& name,int64_t utcSeconds,std::string& why);
+bool loadCollection(const std::filesystem::path& file,std::string& text,std::string& description,std::string& why);
+std::string collectionFileName(const std::string& name,int64_t utcSeconds);
 }

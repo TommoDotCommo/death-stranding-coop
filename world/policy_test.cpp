@@ -47,7 +47,7 @@ static void presets(){
     CHECK(q.build=="members"&&q.join=="open"&&q.acceptOffers=="never"&&q.limit==4000&&q.players==16&&q.offerBuilds=="ask"&&q.offerOld=="yes");
     for(const char* wrong:{"","build","build=","build=all","limit=-1","limit=4001","limit=x","players=0","players=17","offer_builds=maybe","offer_old=ask","withdraw=go","colour=red","accept_offers=Auto"}){
         Policy before=q;CHECK(throws([&]{setPolicy(q,wrong);}));CHECK(policyItems(q)==policyItems(before));}
-    auto items=policyItems(p);CHECK(items.size()==13&&items[0].first=="join"&&items[3]==std::make_pair(std::string("limit"),std::string("200"))&&items[11]==std::make_pair(std::string("identity"),std::string("keys")));
+    auto items=policyItems(p);CHECK(items.size()==15&&items[0].first=="join"&&items[3]==std::make_pair(std::string("limit"),std::string("200"))&&items[11]==std::make_pair(std::string("identity"),std::string("keys")));
     CHECK(f.identity=="none"&&s.identity=="none"&&p.identity=="keys");
     // How many players near one player he is shown on the relay: generous for friends, 16 for a public server.
     CHECK(f.nearCap==32&&s.nearCap==32&&p.nearCap==16&&items[12]==std::make_pair(std::string("near_cap"),std::string("16")));

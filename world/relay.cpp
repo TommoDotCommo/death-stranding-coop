@@ -380,6 +380,14 @@ void Relay::tick(uint64_t now){
     fightTick(now);
     for(size_t i=0;i<links_.size();++i)linkTick(links_[i],i,now);
     flush(now);
+    // Where each player of this server is, for the server's collections: about once a second, only with a position.
+    if(config_.spotted)for(auto& entry:players_){
+        Player& p=entry.second;
+        if(p.link||now<p.spottedAt+1000)continue;
+#ifndef MUTANT_RELAY_SPOT_NO_POSITION
+        if(!p.have)continue;
+#endif
+        p.spottedAt=now;config_.spotted(p.id,p.area,where(p),p.mode==bc::Version&&p.haveYaw,p.yaw);}
 }
 
 // ---- Broadcast mode ---------------------------------------------------------------------------------------------------
@@ -430,6 +438,10 @@ bool Relay::publish(Player& s,const bc::Update& u,uint64_t now){
     if(u.parts&bc::HasPresence){
         auto at=bc::presencePosition(u.presence);
         if(positionValid(at)){s.at=at;s.haveAt=s.have;}
+#ifndef MUTANT_RELAY_SPOT_YAW
+        // His facing (collections): the core's yaw, int16 of pi at frame byte 90 (block byte 22).
+        s.yaw=double(int16_t(uint16_t(ds::relay::detail::get(u.presence+22,2))))*3.14159265358979323846/32767.;s.haveYaw=true;
+#endif
         teleport=(bc::presenceFlags(u.presence)&bc::TeleportFlag)!=0;}
     ++stats_.published;
     Reach reach{config_.fullMetres*config_.fullMetres,config_.animationMetres*config_.animationMetres,config_.intervalMs};

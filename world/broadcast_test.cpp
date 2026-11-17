@@ -11,6 +11,7 @@
 // Bug marks: one line in the server's log, the mark to the players near who are shown the sender and to nobody else,
 // one every 2 s and 30 an hour, nothing from an address that never said HELLO, in another's name, or refused by the keys.
 #include "relay.h"
+#include <tuple>
 #include "../core/broadcast_client.h"
 #include <cmath>
 #include <cstdio>
@@ -449,8 +450,24 @@ static void marks(){
     CHECK(keyedLines.empty()&&ann.count(bc::Type::Marked)==0&&ann.client->takeMarks().empty());
 }
 
+// Where each player is, for the server's collections (RelayConfig::spotted): a broadcast player with his facing from
+// his presence, a player of the other mode without one; about once a second each.
+static void spots(){
+    RelayConfig config;std::map<uint64_t,std::vector<std::tuple<std::array<double,3>,bool,double,uint64_t>>> got;Sim* sim=nullptr;
+    config.spotted=[&](uint64_t id,uint32_t,const std::array<double,3>& at,bool haveYaw,double yaw){got[id].emplace_back(at,haveYaw,yaw,sim->now);};
+    Sim s(config);sim=&s;auto& a=s.add(1,"Ann",{50,0,-20});a.pose=[](double){ds::State x;x.position={50,3,-20};x.yaw=-2.25;x.action=3;return x;};
+    s.addPairs(2,"Bob",{60,0,-20});
+    // A broadcast player publishes only while another is near him: alone, his place is known and his facing is not.
+    s.run(2000);
+    if(!got[1].empty())CHECK(!std::get<1>(got[1].back()));
+    s.add(3,"Cy",{55,0,-20});s.run(3000);
+    CHECK(got[1].size()>=4&&got[1].size()<=6&&got[2].size()>=4&&got[2].size()<=6);
+    if(!got[1].empty()){auto& [at,haveYaw,yaw,when]=got[1].back();(void)when;CHECK(haveYaw&&std::abs(yaw+2.25)<0.001&&distance(at,{50,3,-20})<0.02);}
+    if(!got[2].empty()){auto& [at,haveYaw,yaw,when]=got[2].back();(void)yaw;(void)when;CHECK(!haveYaw&&distance(at,{60,0,-20})<0.02);}
+    for(auto& [id,list]:got)for(size_t i=1;i<list.size();++i)CHECK(std::get<3>(list[i])>=std::get<3>(list[i-1])+1000);
+}
 int main(){
-    marks();
+    marks();spots();
     interest();teleport();shownState();senders();orderAndStamp();modesAndBuilds();batching();crowd();
     nearCap();nearHysteresis();showChoice();hundred();
     if(failures)return 1;

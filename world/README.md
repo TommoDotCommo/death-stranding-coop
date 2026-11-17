@@ -766,6 +766,8 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `spread` | metres, 0 for off (up to 1000) | 20 | 20 | 20 |
 | `identity` | `none`, `keys` | none | none | keys |
 | `near_cap` | players near one player he is shown on the relay, 0 for no cap (up to 1024) | 32 | 32 | 16 |
+| `import` | `everyone`, `members`, `owner`, `nobody` | everyone | everyone | members |
+| `import_cost` | `free`, `materials` | free | free | free |
 
 - `join`: recorded and shown, nothing more yet (there are no invitations).
 - `build`: whose uploads are shared. `members` are the players the owner marked (`player-set ... member=yes`); anyone
@@ -785,6 +787,9 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 - `identity`: `none`, whoever has the group's key can sign in and act as any player (friends); `keys`, players are known
   by the key their launcher made, and nobody signs in, builds or withdraws in another's name ("Identity"). A world
   file from before this setting has `none`, whatever its preset.
+- `import`, `import_cost`: who may import a [collection](../docs/COLLECTIONS.md) (`owner`: a call signed with the
+  owner's key), and whether what its structures carried in materials is recorded on them (`materials`; nothing is
+  taken yet). A `coop-world` from before them refuses a world file that has them (unknown setting).
 - `near_cap`: how many of the players near one broadcast player the relay shows him ("How many players one player
   sees"), unless the server was started with `--broadcast-near`. A world file from before it has its preset's value; a
   `coop-world` from before it refuses a world file that has it (unknown setting).
@@ -894,6 +899,8 @@ sets whom he sees and his friend list (`launcher/README.md`, "A group on one ser
 | `POST …/coop/ticket` `{"player":KEY}`, signed | identity keys: a sign-in ticket for his game, `ticket` and `expires` ("Identity") |
 | `POST …/coop/relay-token` `{"player":KEY}`, signed | identity keys: a relay token, `token`, `relay_id` (made from his key) and `expires` |
 | `POST …/coop/notice-token` `{"player":KEY}` | a notice token for his game's mod ("What the game is told"), `token` and `expires`; taken as a change is (signed under keys) |
+| `POST …/coop/collection` `{"player":KEY,"objects":[ID,…]}` or `{"player":KEY,"near":METRES}` | a [collection](../docs/COLLECTIONS.md) of his own objects built here: `collection` (the DSK string), `count`, `left_out`, `anchor` ("Collections" below) |
+| `POST …/coop/import` `{"player":KEY,"collection":TEXT,"place":"here\|original"}` | the collection's structures made as his uploads: `imported`, `ids`, the counts by state, `left_out`, `anchor`, `materials` |
 
 The policy also carries `time` (the server's clock, so a launcher whose clock is off signs with the server's time) and
 `owner` (whether the world has an owner key). `KEY` is the account key the player's game signs in with: the `NAME` of
@@ -982,6 +989,31 @@ good, the states of that player's objects.
   policy no longer refuses uploads for that reason; the hard cap still does. Unknown too: what a game does when an
   object it had is no longer handed to it (withdrawn with `go`, removed by the owner).
 - A setting that changes applies to uploads from then on: nothing stored changes its state.
+
+### Collections
+
+A player's own objects built here made into a DSK string, and a DSK string made into objects of the player who imports
+it, at the original place or where his game is (`collections.cpp`, `collection.h`; the whole design, the format and its
+rules are in [../docs/COLLECTIONS.md](../docs/COLLECTIONS.md)). Built and tested without a game (2026-11-18).
+
+- **Who and what.** A collection holds only the caller's own objects built here (not a remnant, not an import), 1 to
+  200, named or within 1 to 2000 m of his spot. An import is refused unless the policy's `import` lets him; the string
+  is checked whole first (400); the hard cap of 4000 refuses the whole import (403); the rest goes through his choices
+  and the policy as uploads do (shared, held for `build` or `limit`, kept, waiting).
+- **Where.** Original place: as the string says. Here: his spot, turned by his heading minus the collection's, in the
+  area (`q`), cell and map of the nearest object with a place within 1.5 km (409 when there is none, or no spot from
+  the last 10 minutes).
+- **What a game is handed.** An imported structure closer than `spread` to one of its kind (one this import made, one
+  everyone is handed, or one of his own) is left out (`too-close`). What he imported is the one kind of his own objects
+  `findQpidObjects` hands back to him (`curate`: his save has never had it), whatever its state.
+- **The spot.** The relay gives the world each player's place, and a broadcast player's facing, about once a second
+  (`RelayConfig::spotted`); under identity keys a player's spot is his key's relay id, under identity none the one the
+  launcher names (`relay_id`). Not saved.
+- **The world file** keeps each import's source (`collection`) and, under `import_cost=materials`, what it carried
+  (`cost`). A `coop-world` from before refuses the file anyway (its policy has `import`, a setting it does not know).
+
+Unknown, for the first live run: whether a game takes structures whose builder is its own player and that its save
+does not have, and whether it places a structure with a neighbour's area and cell.
 
 ## Identity
 
@@ -1162,6 +1194,11 @@ Unknown: whether a game counts the objects it already has from the server agains
 it does when one it was handed is no longer in the answer. Nothing of this has been run with a game yet.
 
 ## Tests
+
+Collections: `collection_test.cpp` (the DSK string and its fuzzer, under the sanitizers), `collections_test.cpp` (the
+two calls, the policy, the transform, the spot), `relay_test.cpp` and `broadcast_test.cpp` (the spot the relay
+reports), `test_collections.py` (the built server, stand-in games, the importer's game handed his imports; a
+`MUTANT_COLLECTION_NOT_SELF` build must fail it). Nineteen mutants; the list is in `../docs/COLLECTIONS.md`, "Tests".
 
 `make test`: the core (`world_test.cpp`), the HTTP surface without sockets (`front_test.cpp`), the built server over a
 real socket (`test_server.py`), and a mutant for every protection (`test_mutants.py`): a call without a session, a

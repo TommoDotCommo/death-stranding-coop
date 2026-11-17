@@ -247,7 +247,23 @@ and Ctrl for several), then:
   on this server, a friend added by the short form of his key (`a1b2 c3d4 e5f6 a7b8`, shown in the same window for
   him to give his friends) and removed by selecting him. Each change is one call (`GET`/`POST …/coop/friends`), signed
   on a server with player keys; on one without them friends are not recognised on the relay, and the window says so.
+- **Make a collection of selected** (optional name beside it): the selected rows as a [collection](../docs/COLLECTIONS.md),
+  a `DSK1-...` string the server makes from its records of them. The launcher copies it to the clipboard and writes it
+  to `collections\<name>-<UTC time>.dsk` in the co-op data folder (never over another file), and says both.
+- **Collect near me** (metres, 1 to 2000, default 100): the same of everything he built on this server within that
+  distance of where his game last was (the server's relay knows it; the game must be running and have moved in the last
+  10 minutes), turned the way he faced when another player was near.
+- **Import a collection...**: a window to paste a collection into (or **Load .dsk file...**), **Here** (where his game
+  is, turned the way he faces) or **Original place**, and **Import**. The launcher checks the string before it sends
+  it (a cut or changed one is refused with the reason); the server makes the structures as his uploads under its rules
+  (its `import` setting says who may) and says how many, in which state, and what it left out and why. His game is
+  handed them when it loads that area (with "Build other players' structures" on, `build_received`).
 - **Refresh**.
+
+Under identity none the launcher names his game's relay id (its player number) for Here and Collect near me; under
+player keys the server takes his key's own. Functions: `strand.h` (`makeCollection`, `importCollection`,
+`readCollection`, `saveCollection`, `loadCollection`); tests: `core_test.cpp` and `test_collections.py` (mutant
+`LAUNCHER_COLLECTION_UNCHECKED`).
 
 Objects that came to the server from linked servers are not listed (their builder is what the other server says).
 The owner's actions are in the Server owner window (below).
@@ -298,7 +314,8 @@ choices (also with `--prepare-only`); `--strand-builds yes|no|ask` and `--strand
 with `--prepare-only`) takes the game's ticket and relay token and writes them into the config; `--group-host` with
 `--prepare-only` does so only when its server is already running (it starts none).
 
-**Not seen on a screen.** The join screen, the "My strand on this server" window, its Who I see window, the Server owner window,
+**Not seen on a screen.** The join screen, the "My strand on this server" window (with its collection buttons), its Who I see
+window, its Import a collection window, the Server owner window,
 the Settings list of rules and the Settings box for other players' structures were built and cross-compiled, and have not been looked at or clicked. The launcher's side of the API (`strand.cpp`) is
 tested on Linux sockets (below); on Windows it ran once without a window, against `coop-world.exe` on loopback: a
 server that did not answer (report `unreachable`, exit 3) and a full solo world (the rules read, the choices refused,

@@ -13,6 +13,9 @@
 #include <unistd.h>
 #endif
 #include "strand.h"
+#include "../world/collection.h"
+#include <ctime>
+#include <fstream>
 #include "../world/json.h"
 #include <cctype>
 #include <chrono>
@@ -411,4 +414,96 @@ bool act(const Target& t,const Transport& send,const std::string& call,const std
     }catch(const std::exception&){result=fetchText(Fetch::Bad);return false;}
     return true;
 }
+// ---- Collections (../docs/COLLECTIONS.md) -------------------------------------------------------------------------
+std::string Made::message() const {
+    std::string m="A collection of "+description+".";
+    if(!leftOut.empty())m+=" Left out: "+std::to_string(leftOut.size())+" ("+leftOut.front()+(leftOut.size()>1?", ...":"")+").";
+    return m;}
+std::string Imported::message() const {
+    std::string m="Imported "+std::to_string(imported)+" structures ("+description+")";
+    if(imported)m+=": "+std::to_string(shared)+" shared, "+std::to_string(held)+" held for you, "+std::to_string(kept)+" kept for you, "+std::to_string(waiting)+" waiting";
+    m+=".";
+    if(!leftOut.empty())m+=" Left out: "+std::to_string(leftOut.size())+" ("+leftOut.front()+(leftOut.size()>1?", ...":"")+").";
+    if(imported)m+=" Your game is handed them when it loads that area (with \"Build other players' structures\" on).";
+    return m;}
+bool makeCollection(const Target& t,const Transport& send,const std::vector<std::string>& objects,int64_t nearMetres,const std::string& name,uint64_t relayId,Made& out,std::string& why){
+    if(t.account.empty()){why="Your Steam account is not known yet. Start Steam, then try again.";return false;}
+    if(objects.empty()==(nearMetres<=0)){why="Select rows, or give a distance in metres.";return false;}
+    if(!name.empty()&&!collection::nameText(name)){why="A collection's name is 1 to 32 bytes of text without a space at either end.";return false;}
+    json::Value body=json::Value::object();body.set("player",t.account);
+    if(!objects.empty()){json::Value list=json::Value::array();for(auto& o:objects)list.push(o);body.set("objects",list);}
+    else body.set("near",nearMetres);
+    if(!name.empty())body.set("name",name);
+    if(!t.sign&&relayId)body.set("relay_id",std::to_string(relayId));
+    Http h;if(!call(t,send,"POST",base(t)+"/coop/collection",body.dump(),h)){why=fetchText(Fetch::Unreachable);return false;}
+    if(h.status==404&&h.body.find("not found")!=std::string::npos){why="This server makes no collections (a coop-world from before them).";return false;}
+    if(h.status!=200){why="Refused: "+message(h)+".";return false;}
+    try{
+        auto v=json::parseFile(h.body,MaxAnswer);Made m;m.text=v.get("collection").string();m.count=v.get("count").integer();
+        collection::Collection c;std::string bad;if(!collection::parse(m.text,c,bad)||int64_t(c.items.size())!=m.count)throw std::runtime_error("bad collection");
+        m.description=collection::describe(c);
+        for(auto& l:v.get("left_out").items())m.leftOut.push_back(l.get("id").string()+": "+l.get("why").string());
+        out=m;return true;
+    }catch(const std::exception&){why=fetchText(Fetch::Bad);return false;}
+}
+bool importCollection(const Target& t,const Transport& send,const std::string& text,const std::string& place,uint64_t relayId,Imported& out,std::string& why){
+    if(t.account.empty()){why="Your Steam account is not known yet. Start Steam, then try again.";return false;}
+    if(place!="here"&&place!="original"){why="Choose Here or Original place.";return false;}
+    std::string checked,description;if(!readCollection(text,checked,description,why))return false;
+    json::Value body=json::Value::object();body.set("player",t.account);body.set("collection",checked);body.set("place",place);
+    if(!t.sign&&relayId)body.set("relay_id",std::to_string(relayId));
+    Http h;if(!call(t,send,"POST",base(t)+"/coop/import",body.dump(),h)){why=fetchText(Fetch::Unreachable);return false;}
+    if(h.status==404&&h.body.find("not found")!=std::string::npos){why="This server takes no collections (a coop-world from before them).";return false;}
+    if(h.status!=200){why="Refused: "+message(h)+".";return false;}
+    try{
+        auto v=json::parseFile(h.body,MaxAnswer);Imported m;
+        m.imported=v.get("imported").integer();m.shared=v.get("shared").integer();m.held=v.get("held").integer();m.kept=v.get("kept").integer();m.waiting=v.get("waiting").integer();
+        m.source=v.get("source").string();m.description=description;
+        if(!v.get("ids").isArray()||int64_t(v.get("ids").items().size())!=m.imported)throw std::runtime_error("bad answer");
+        for(auto& l:v.get("left_out").items())m.leftOut.push_back("structure "+std::to_string(l.get("index").integer()+1)+": "+l.get("why").string());
+        out=m;return true;
+    }catch(const std::exception&){why=fetchText(Fetch::Bad);return false;}
+}
+bool readCollection(const std::string& pasted,std::string& text,std::string& description,std::string& why){
+    if(pasted.size()>4*collection::MaxTextChars){why="That is too long to be a collection.";return false;}
+    std::string found=collection::find(pasted);
+    if(found.empty()){why="There is no collection in that text: a collection begins with DSK1-.";return false;}
+    collection::Collection c;std::string bad;
+#ifndef MUTANT_LAUNCHER_COLLECTION_UNCHECKED
+    if(!collection::parse(found,c,bad)){why="That collection cannot be read: "+bad+".";return false;}
+#endif
+    text=found;description=collection::describe(c);return true;}
+std::string collectionFileName(const std::string& name,int64_t utc){
+    std::string base;
+    for(char ch:name){if((ch>='a'&&ch<='z')||(ch>='A'&&ch<='Z')||(ch>='0'&&ch<='9')||ch=='-'||ch=='_')base+=ch;else if(ch==' '&&!base.empty()&&base.back()!='-')base+='-';}
+    while(!base.empty()&&base.back()=='-')base.pop_back();
+    if(base.empty())base="collection";
+    if(base.size()>32)base.resize(32);
+    std::time_t t=std::time_t(utc);std::tm tm{};
+#ifdef _WIN32
+    gmtime_s(&tm,&t);
+#else
+    gmtime_r(&t,&tm);
+#endif
+    char stamp[32];std::strftime(stamp,sizeof stamp,"%Y%m%d-%H%M%S",&tm);
+    return base+"-"+stamp+".dsk";}
+std::string saveCollection(const std::filesystem::path& folder,const std::string& text,const std::string& name,int64_t utc,std::string& why){
+    std::string checked,description;if(!readCollection(text,checked,description,why))return {};
+    try{
+        std::filesystem::create_directories(folder);
+        auto file=folder/collectionFileName(name,utc);
+        for(int n=2;std::filesystem::exists(file)&&n<100;++n)file=folder/(collectionFileName(name,utc).substr(0,collectionFileName(name,utc).size()-4)+"-"+std::to_string(n)+".dsk");
+        auto temporary=file;temporary+=".tmp";
+        {std::ofstream f(temporary,std::ios::binary|std::ios::trunc);f<<checked<<"\r\n";f.close();if(!f)throw std::runtime_error("write");}
+        std::filesystem::rename(temporary,file);
+        return file.string();
+    }catch(const std::exception&){why="Cannot write the collection file in "+folder.string()+".";return {};}
+}
+bool loadCollection(const std::filesystem::path& file,std::string& text,std::string& description,std::string& why){
+    std::error_code e;auto size=std::filesystem::file_size(file,e);
+    if(e){why="Cannot read "+file.string()+".";return false;}
+    if(size>size_t(4*collection::MaxTextChars)){why="That file is too big to be a collection.";return false;}
+    std::ifstream f(file,std::ios::binary);std::string all((std::istreambuf_iterator<char>(f)),{});
+    if(!f&&!f.eof()){why="Cannot read "+file.string()+".";return false;}
+    return readCollection(all,text,description,why);}
 }

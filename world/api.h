@@ -34,6 +34,9 @@ RelayViewer relayViewer(const World&,uint64_t relayId,bool capGiven);
 // The relay ids of the players the owner kicked or banned since the last call (World::takeEvictions, made from their
 // keys): RelayConfig::evicted (README, "Kick and ban").
 std::vector<uint64_t> relayEvictions(World&);
+// Collections: a spot from what the relay reports (RelayConfig::spotted; its axes x, up, y) in the game's axes (x, y on the
+// ground, z up), for World::noteSpot.
+Spot relaySpot(const std::array<double,3>& relayPosition,bool haveYaw,double yaw,int64_t nowSeconds);
 // One setting's value in words, for a player deciding whether to join (`players`: how many the world has now).
 std::string settingText(const std::string& key,const std::string& value,size_t players);
 }

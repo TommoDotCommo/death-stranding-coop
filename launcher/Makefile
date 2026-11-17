@@ -4,8 +4,8 @@ WINDRES ?= $(shell command -v x86_64-w64-mingw32-windres >/dev/null 2>&1 && echo
 FLAGS = -std=c++17 -O2 -Wall -Wextra -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
 # -static: MSYS2's toolchain otherwise links libwinpthread-1.dll dynamically and the binaries fail to start (0xC000007B).
 # Players' keys: ../world/identity.* on the vendored Monocypher (../vendor/monocypher).
-SRC = core.cpp install.cpp strand.cpp owner.cpp saves.cpp testsaves.cpp ../mod/config.cpp ../redirect/path_map.cpp ../world/identity.cpp ../vendor/monocypher/monocypher.c ../vendor/monocypher/monocypher-ed25519.c
-HEADERS = ../common/diag_log.h ../common/crash_handler.h core.h install.h ../dist/sha256.h strand.h owner.h testsaves.h ../world/json.h ../world/identity.h ../vendor/monocypher/monocypher.h ../vendor/monocypher/monocypher-ed25519.h saves.h net_win.h launch_win.h firewall_win.h ../mod/config.h ../mod/identity.h ../redirect/startup_policy.h vendor/coop_invite.h vendor/coop_discover.h vendor/coop_discover_win.h
+SRC = core.cpp install.cpp strand.cpp owner.cpp saves.cpp testsaves.cpp ../mod/config.cpp ../redirect/path_map.cpp ../world/identity.cpp ../world/collection.cpp ../vendor/monocypher/monocypher.c ../vendor/monocypher/monocypher-ed25519.c
+HEADERS = ../world/collection.h ../common/diag_log.h ../common/crash_handler.h core.h install.h ../dist/sha256.h strand.h owner.h testsaves.h ../world/json.h ../world/identity.h ../vendor/monocypher/monocypher.h ../vendor/monocypher/monocypher-ed25519.h saves.h net_win.h launch_win.h firewall_win.h ../mod/config.h ../mod/identity.h ../redirect/startup_policy.h vendor/coop_invite.h vendor/coop_discover.h vendor/coop_discover_win.h
 # The release version (tools/release.sh passes the tag): the About page and the VERSIONINFO resource.
 VERSION ?= 0.1.0-dev
 all: build/deathstranding-coop.exe build/net-fixture.exe build/discover-win-test.exe
@@ -15,7 +15,7 @@ build/version.rc: FORCE | build
 	python3 -B ../tools/versioninfo.py "$(VERSION)" deathstranding-coop.exe "Death Stranding Co-op launcher" $@
 build/deathstranding-coop.exe: main.cpp $(SRC) $(HEADERS) launcher.rc build/version.rc ../dist/diag.ps1 ../dist/diag-rules.json | build
 	$(WINDRES) launcher.rc -o build/launcher-res.o
-	$(CXX) $(FLAGS) -DCOOP_VERSION='"$(VERSION)"' -municode -mwindows main.cpp $(SRC) build/launcher-res.o -o $@ -lcomctl32 -lshell32 -lole32 -loleaut32 -luuid -lws2_32 -liphlpapi -lbcrypt
+	$(CXX) $(FLAGS) -DCOOP_VERSION='"$(VERSION)"' -municode -mwindows main.cpp $(SRC) build/launcher-res.o -o $@ -lcomctl32 -lcomdlg32 -lshell32 -lole32 -loleaut32 -luuid -lws2_32 -liphlpapi -lbcrypt
 build/core-test: core_test.cpp $(SRC) $(HEADERS) ../world/signatures.cpp ../world/signatures.h | build
 	g++ -std=c++17 -O2 -Wall -Wextra -Werror core_test.cpp $(SRC) ../world/signatures.cpp -o $@
 # The install core shared with Setup (install.h), in fake folders.
@@ -41,6 +41,7 @@ test: build/core-test build/install-test build/saves-test build/testsaves-test b
 	python3 -B test_group.py build/core-test ../world/build/coop-world ../mod/build/coop-swarm
 	python3 -B test_identity.py build/core-test ../world/build/coop-world
 	python3 -B test_owner.py build/core-test ../world/build/coop-world
+	python3 -B test_collections.py build/core-test ../world/build/coop-world
 	./build/invite-test 20000
 	./build/discover-test 10000
 	python3 -B test_mutants.py

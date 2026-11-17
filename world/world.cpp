@@ -675,6 +675,10 @@ json::Value World::snapshot() const {
         if(!o.second.kept.empty())v.set("kept",o.second.kept);
 #endif
         if(o.second.remnant)v.set("remnant",true);
+#ifndef MUTANT_COLLECTION_SAVE_LOST
+        if(!o.second.collection.empty())v.set("collection",o.second.collection);
+        if(o.second.costed){Value c=Value::array();for(auto n:o.second.cost)c.push(n);v.set("cost",c);}
+#endif
         if(!o.second.originServer.empty()){Value from=Value::object();from.set("server",o.second.originServer);from.set("id",o.second.originId);from.set("via",o.second.via);
             from.set("name",o.second.originName);from.set("likes",o.second.originLikes);if(!o.second.home.empty())from.set("home",o.second.home);v.set("origin",from);}
         objects.push(v);}
@@ -741,6 +745,10 @@ void World::restore(const json::Value& v){
     for(auto& o:v.get("objects").items()){Object ob;ob.id=o.get("id").string();ob.creator=o.get("creator").string();ob.updated=o.get("updated").integer();ob.likes=o.get("likes").integer();ob.post=o.get("post");
         ob.name=o.get("name").string();ob.share=o.get("share").string();ob.remnant=o.get("remnant").boolean();ob.held=o.get("held").string();ob.heldAsk=o.get("held_ask").boolean();
         ob.kept=o.get("kept").string();
+        ob.collection=o.get("collection").string();
+        if((o.has("collection")&&(!o.get("collection").isString()||ob.collection.empty()||ob.collection.size()>64||o.has("origin")))||(o.has("cost")&&(!o.get("cost").isArray()||o.get("cost").items().size()!=6)))
+            throw std::runtime_error("world file: bad object");
+        if(o.has("cost")){ob.costed=true;size_t k=0;for(auto& n:o.get("cost").items()){if(!n.isInt()||n.integer()<0)throw std::runtime_error("world file: bad object");ob.cost[k++]=n.integer();}}
         if((!ob.kept.empty()&&ob.share!="kept")||!oneOf(ob.kept,{"","choice","owner","server"}))throw std::runtime_error("world file: bad object");
         if(ob.id.empty()||!ob.post.isObject()||!oneOf(ob.share,{"","kept","ask","review","held"})||(o.has("origin")&&(ob.remnant||!ob.share.empty()))
            ||(ob.share=="held")!=oneOf(ob.held,{"build","member","limit"})||(ob.heldAsk&&ob.share!="held"))throw std::runtime_error("world file: bad object");
@@ -1040,11 +1048,18 @@ Curated curate(const std::string& player,int64_t area,const std::map<std::string
     std::vector<const Candidate*> pool;std::map<std::string,const Candidate*> byId;
     for(auto& c:candidates){
         if(c.area!=area)continue;
+        // His own objects are in his save, except what he imported from a collection (../docs/COLLECTIONS.md): those
+        // his game has never had, so they are handed to him too, whatever their state (they are his).
+#ifndef MUTANT_COLLECTION_NOT_SELF
+        const bool importedByHim=c.collection&&c.creator==player;
+#else
+        const bool importedByHim=false;
+#endif
 #if !defined(MUTANT_WORLD_OWN)&&!defined(MUTANT_CURATE_OWN)
-        if(c.creator==player)continue;
+        if(c.creator==player&&!importedByHim)continue;
 #endif
 #ifndef MUTANT_CURATE_UNSHARED
-        if(!c.shared)continue;
+        if(!c.shared&&!importedByHim)continue;
 #endif
         pool.push_back(&c);byId[c.id]=&c;}
     // The order: newest first; with `liked`, the asker's friends first, then the most liked, then the newest.
@@ -1097,6 +1112,7 @@ Curated curate(const std::string& player,int64_t area,const std::map<std::string
 Candidate World::candidateOf(const Object& o) const {
     Candidate c;const Value& p=o.post;
     c.id=o.id;c.creator=o.creator;c.type=p.get("t").string();c.area=p.get("q").integer();c.updated=o.updated;c.likes=o.likes;c.shared=o.share.empty();
+    c.collection=!o.collection.empty()&&o.originServer.empty()&&!o.remnant;
     // The game's own reading: l / 10^exp, and an exp of zero or less counts as 2 (mod/game_offsets.md).
     if(p.get("px").isInt()&&p.get("py").isInt()&&p.get("pz").isInt()){
         int64_t e=p.get("exp").integer();if(e<=0)e=2;if(e>18)e=18;double scale=std::pow(10.0,double(e));
@@ -1124,7 +1140,7 @@ Policy presetPolicy(const std::string& name){
     Policy p;p.preset=name;
     if(name=="friends")return p;
     if(name=="solo"){p.players=1;return p;}
-    if(name=="public"){p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";p.nearCap=16;return p;}
+    if(name=="public"){p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";p.nearCap=16;p.importWho="members";return p;}
     bad("policy: unknown preset '"+name+"' (friends, solo or public)");
 }
 void setPolicy(Policy& p,const std::string& keyValue){
@@ -1148,12 +1164,15 @@ void setPolicy(Policy& p,const std::string& keyValue){
     else if(key=="spread")number(p.spread,0,1000);
     else if(key=="identity")pick(p.identity,{"none","keys"});
     else if(key=="near_cap")number(p.nearCap,0,MaxNearCap);
-    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap)");
+    else if(key=="import")pick(p.importWho,{"everyone","members","owner","nobody"});
+    else if(key=="import_cost")pick(p.importCost,{"free","materials"});
+    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, import, import_cost)");
 }
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy& p){
     return {{"join",p.join},{"build",p.build},{"accept_offers",p.acceptOffers},{"limit",std::to_string(p.limit)},{"withdrawal",p.withdrawal},
             {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld},
-            {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity},{"near_cap",std::to_string(p.nearCap)}};
+            {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity},{"near_cap",std::to_string(p.nearCap)},
+            {"import",p.importWho},{"import_cost",p.importCost}};
 }
 void World::setPolicy(const Policy& p){std::lock_guard<std::mutex> g(lock_);policy_=p;dirty_=true;++changes_;}
 bool World::servedTo(const Object& o,const std::string& player) const {
