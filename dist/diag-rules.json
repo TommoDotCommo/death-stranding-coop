@@ -1,76 +1,86 @@
 {
-  "schema": 1,
-  "default_max_log_mb": 60,
-  "rules": [
-    {
-      "id": "profile",
-      "literal": "profile",
-      "replacement": "%USERPROFILE%"
-    },
-    {
-      "id": "user",
-      "literal": "user",
-      "replacement": "<user>"
-    },
-    {
-      "id": "machine",
-      "literal": "machine",
-      "replacement": "<computer>"
-    },
-    {
-      "id": "user_path",
-      "pattern": "(?i)([\\\\/]Users[\\\\/])[^\\\\/\\r\\n\"\\t]+",
-      "replacement": "$1<user>"
-    },
-    {
-      "id": "steam",
-      "pattern": "(?i)(?:steam_\\d{5,20}|(?<![0-9])7656119[0-9]{10}(?![0-9]))",
-      "token": "steam"
-    },
-    {
-      "id": "email",
-      "pattern": "[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+",
-      "replacement": "<email>"
-    },
-    {
-      "id": "tailnet",
-      "pattern": "(?i)(?<![A-Za-z0-9-])[A-Za-z0-9-]+\\.[A-Za-z0-9-]+\\.ts\\.net",
-      "replacement": "<tailnet-host>"
-    },
-    {
-      "id": "mac",
-      "pattern": "(?i)(?<![0-9a-f])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![0-9a-f])",
-      "token": "mac"
-    },
-    {
-      "id": "ip",
-      "pattern": "(?<![0-9.])(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(?![0-9]|\\.[0-9])",
-      "token": "ip"
-    },
-    {
-      "id": "authorization",
-      "pattern": "(?im)\\b(?:Authorization|Proxy-Authorization)\\s*[:=]\\s*(?:Bearer|Basic)\\s+[^\\s,}]+",
-      "replacement": "Authorization: <secret>"
-    },
-    {
-      "id": "secret",
-      "pattern": "(?im)([\"']?(?:session|secret|group_secret|relay_key|strand_token|token|password|api_key|private_key|invite|authorization)[\"']?\\s*[:=]\\s*)(?:\"[^\"\\r\\n]*\"|'[^'\\r\\n]*'|[^,\\s}]+)",
-      "replacement": "$1\"<secret>\""
-    },
-    {
-      "id": "invite",
-      "pattern": "(?i)(?:deathstranding-coop://[^\\s\"<>]+|DSG?-[A-Z0-9-]{6,})",
-      "replacement": "<invite>"
-    },
-    {
-      "id": "world_key",
-      "pattern": "(?i)/w[a-z0-9]+(?=/|[\\s\"?#]|$)",
-      "replacement": "/w<secret>"
-    },
-    {
-      "id": "ticket",
-      "pattern": "(?i)/t/[^/\\s\"]+",
-      "replacement": "/t/<secret>"
-    }
-  ]
+ "schema": 1,
+ "default_max_log_mb": 60,
+ "rules": [
+  {
+   "id": "profile",
+   "literal": "profile",
+   "replacement": "%USERPROFILE%"
+  },
+  {
+   "id": "user",
+   "literal": "user",
+   "replacement": "<user>"
+  },
+  {
+   "id": "machine",
+   "literal": "machine",
+   "replacement": "<computer>"
+  },
+  {
+   "id": "user_path",
+   "pattern": "(?i)([\\\\/]Users[\\\\/])[^\\\\/\\r\\n\"\\t]+",
+   "replacement": "$1<user>"
+  },
+  {
+   "id": "steam",
+   "pattern": "(?i)(?:steam_\\d{5,20}|(?<![0-9])7656119[0-9]{10}(?![0-9]))",
+   "token": "steam"
+  },
+  {
+   "id": "steam_account",
+   "pattern": "(?i)((?:KojimaProductions[\\\\/]DeathStranding(?:DC)?|[\\\\/]userdata)[\\\\/])[0-9]{3,12}(?=[\\\\/\\s\"]|$)",
+   "replacement": "$1<steam-account>"
+  },
+  {
+   "id": "steam_account_word",
+   "pattern": "(?i)(?<=\\baccount[ =:])[0-9]{5,12}\\b",
+   "replacement": "<steam-account>"
+  },
+  {
+   "id": "email",
+   "pattern": "(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+",
+   "replacement": "<email>"
+  },
+  {
+   "id": "tailnet",
+   "pattern": "(?i)(?<![A-Za-z0-9-])[A-Za-z0-9-]+\\.[A-Za-z0-9-]+\\.ts\\.net",
+   "replacement": "<tailnet-host>"
+  },
+  {
+   "id": "mac",
+   "pattern": "(?i)(?<![0-9a-f])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![0-9a-f])",
+   "token": "mac"
+  },
+  {
+   "id": "ip",
+   "pattern": "(?<![0-9.])(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(?![0-9]|\\.[0-9])",
+   "token": "ip"
+  },
+  {
+   "id": "authorization",
+   "pattern": "(?im)\\b(?:Authorization|Proxy-Authorization)\\s*[:=]\\s*(?:Bearer|Basic)\\s+[^\\s,}]+",
+   "replacement": "Authorization: <secret>"
+  },
+  {
+   "id": "secret",
+   "pattern": "(?im)([\"']?(?:session|secret|group_secret|relay_key|strand_token|token|password|api_key|private_key|invite|authorization)[\"']?\\s*[:=]\\s*)(?:\"[^\"\\r\\n]*\"|'[^'\\r\\n]*'|[^,\\s}]+)",
+   "replacement": "$1\"<secret>\""
+  },
+  {
+   "id": "invite",
+   "pattern": "(?i)(?:deathstranding-coop://[^\\s\"<>]+|DSG?-[A-Z0-9-]{6,})",
+   "replacement": "<invite>"
+  },
+  {
+   "id": "world_key",
+   "pattern": "(?i)/w[a-z0-9]+(?=/|[\\s\"?#]|$)",
+   "replacement": "/w<secret>"
+  },
+  {
+   "id": "ticket",
+   "pattern": "(?i)/t/[^/\\s\"]+",
+   "replacement": "/t/<secret>"
+  }
+ ]
 }

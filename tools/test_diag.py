@@ -29,6 +29,9 @@ CASES = {
     'user_path': (r'D:\Users\AnotherPerson\game', 'AnotherPerson'),
     'ip': ('peer 198.51.100.42:49100', '198.51.100.42'),
     'steam': ('76561198012345678 steam_123456', '76561198012345678'),
+    # The 32-bit Steam account number names the save folder (2026-11-18: a live bundle showed it hundreds of times).
+    'steam_account': (r'C:\Users\x\AppData\Local\KojimaProductions\DeathStrandingDC\239700001\profile', '239700001'),
+    'steam_account_word': ('STORY resync on: host, key, account 239700002', '239700002'),
     'mac': ('aa:bb:cc:dd:ee:ff', 'aa:bb:cc:dd:ee:ff'),
     'email': ('someone@example.invalid', 'someone@example.invalid'),
     'tailnet': ('node.tail.ts.net', 'node.tail.ts.net'),
