@@ -574,7 +574,8 @@ fs::path saveDiagnosticsZip(){
         }
         if(!done){keepRun=true;CloseHandle(process.hProcess);throw std::runtime_error("Diagnostics is taking longer than expected. The exporter is still working; check the Desktop for the zip.");}
         DWORD code=1;GetExitCodeProcess(process.hProcess,&code);CloseHandle(process.hProcess);
-        std::ifstream f(run/"result.txt",std::ios::binary);std::string result((std::istreambuf_iterator<char>(f)),{});
+        std::string result;{std::ifstream f(run/"result.txt",std::ios::binary);result.assign((std::istreambuf_iterator<char>(f)),{});}
+        // (closed here: Windows will not delete an open file, and the run folder was left behind in the data folder)
         if(result.compare(0,3,"\xef\xbb\xbf")==0)result.erase(0,3);
         if(code||result.rfind("OK ",0)!=0)throw std::runtime_error("Diagnostics export failed. Check that the Desktop is writable, then try Send diagnostics again.");
         auto zip=fs::path(wtext(result.substr(3)));cleanup();
