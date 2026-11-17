@@ -51,6 +51,7 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-identity-') as d:
         check(j.get('start')==['1'] and j.get('keyed')==['1'] and one(j,'account')==one(joiner,'account'),'the joiner joins as his key: %r'%j)
         check('/t/' in one(j,'online') and '/k/' not in one(j,'online') and one(j,'player')==one(joiner,'relay') and one(j,'key') not in (prefix,one(h,'key')),'the joiner\'s game: his own ticket and token: %r'%j)
         check(h.get('strand')==['1'] and j.get('strand')==['1'] and len(one(h,'token'))>=16 and one(h,'token')!=one(j,'token'),'each game reads its own builds with a token of its own: %r %r'%(h,j))
+        check(all(g.get('offer')==['1'] and g.get('build')==['1'] for g in (h,j)),'each game offers its older strand (as the server says) and builds what it receives: %r %r'%(h,j))
         c=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
         def get(path,headers={}):
             c.request('GET',path,headers=headers);r=c.getresponse();return r.status,json.loads(r.read() or b'{}')
