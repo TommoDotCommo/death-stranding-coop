@@ -64,6 +64,8 @@ the player path (Setup or the launcher's install, the game started by Steam), no
   manifest, log chain, size limit, old log folders, dumps). Fixed on the way: the Steam account number was not
   redacted, and one redaction rule was quadratic (minutes for a 1 MB log; now seconds).
 - **Crash recorder**: the Windows fixture writes a small dump and marker; the four crash mutants fail.
+- **F2 in group play**: one F2 on one PC wrote the mark in that game's log, in the other player's log (`BUGMARK n from
+  Laptop`, with its own flight file) and in the server's log (`bugmark n from <player> (Laptop)`), through the relay.
 
 ## Not verified
 
@@ -73,7 +75,7 @@ the player path (Setup or the launcher's install, the game started by Steam), no
   GitHub. Uninstall from the window ran (the game folder back as it was).
 - **The internet**: every two-PC run so far went over Tailscale; a rented server on a public address and players behind
   ordinary home routers have not been tried (`deploy/vps` is checked on loopback only).
-- **F2** (bug marker) in a real game, and an actual game crash producing a dump.
+- An actual game crash producing a dump.
 - Structures from other players skip the game's spacing checks (`build_received`); they may overlap.
 - Roads paved through the server: the game asks and is answered but takes nothing yet.
 
