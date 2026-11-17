@@ -1,0 +1,295 @@
+/* DeathStrandingCoop-Setup.exe: a small windowless entry point; the window is readable PowerShell (installer-gui.ps1) and
+ * every file decision is the launcher's (deathstranding-coop.exe --setup ..., launcher/install.cpp). Adapted from the
+ * MDK2 co-op Setup.
+ *
+ * Two forms of the same program (tools/release.sh builds both):
+ *  - the single-file Setup (the main download) carries the release files as resource 10, checks them against the SHA-256 in
+ *    resource 12, writes them into a fresh folder %LOCALAPPDATA%\DeathStrandingCoop\setup\<version> and starts
+ *    installer-gui.ps1 there;
+ *  - the copy inside the zip has no payload and starts the scripts beside it. If they are missing (Setup was double-clicked
+ *    inside the zip without extracting) it says what to do instead.
+ * "Setup.exe /extract <new folder>" writes the payload to a folder and stops: for tests and for anyone who wants to read the
+ * scripts first. DS_COOP_SETUP_LOG=<file> makes messages go to that file instead of a message box (tests).
+ * Scriptable verbs (co-op mod standard J9), run by deathstranding-coop-setup.ps1 without a window, waiting for it and
+ * returning its exit code:
+ *   Setup.exe status [--json] [<game folder>] | install <game folder> --yes | uninstall <game folder> --yes
+ *   exit codes 0 done, 1 failed (including a damaged Setup), 2 usage, 3 unsupported game build, 4 the game is running.
+ * Output goes to Setup's own standard output (redirect it: Setup.exe status --json > status.json), else to the console of
+ * the command prompt it was started from. */
+#include <windows.h>
+#include <wchar.h>
+#include <stdio.h>
+#include "setup-core.h"
+
+enum { RES_PAYLOAD = 10, RES_VERSION = 11, RES_SHA256 = 12 };
+enum { EXIT_OK = 0, EXIT_FAIL = 1, EXIT_USAGE = 2, EXIT_DAMAGED = 3, EXIT_UNSAFE = 4, EXIT_NO_FILES = 5 };
+#define TITLE L"Death Stranding Co-op Setup"
+#define VERBS L"deathstranding-coop-setup.ps1"
+
+static void say(const wchar_t *text)
+{
+    wchar_t log[MAX_PATH];
+    if (GetEnvironmentVariableW(L"DS_COOP_SETUP_LOG", log, MAX_PATH) && log[0]) {
+        HANDLE h = CreateFileW(log, FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h != INVALID_HANDLE_VALUE) {
+            DWORD n;
+            WriteFile(h, text, (DWORD)(wcslen(text) * sizeof(wchar_t)), &n, NULL);
+            WriteFile(h, L"\r\n", 4, &n, NULL);
+            CloseHandle(h);
+        }
+        return;
+    }
+    MessageBoxW(NULL, text, TITLE, MB_OK | MB_ICONERROR);
+}
+
+static const unsigned char *resource(int id, DWORD *size)
+{
+    HRSRC r = FindResourceW(NULL, MAKEINTRESOURCEW(id), MAKEINTRESOURCEW(10));
+    HGLOBAL g = r ? LoadResource(NULL, r) : NULL;
+    if (!g) return NULL;
+    *size = SizeofResource(NULL, r);
+    return (const unsigned char *)LockResource(g);
+}
+
+/* A folder we are about to trust: a real directory, not a junction or symbolic link. */
+static int plain_dir(const wchar_t *path)
+{
+    DWORD a = GetFileAttributesW(path);
+    if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY)) return 0;
+    return !(a & FILE_ATTRIBUTE_REPARSE_POINT);
+}
+
+static int ensure_dir(const wchar_t *path)
+{
+    if (CreateDirectoryW(path, NULL)) return 1;
+    return GetLastError() == ERROR_ALREADY_EXISTS && plain_dir(path);
+}
+
+/* Write every payload file below `leaf` (created by us a moment ago). Each file is created new: never over anything. */
+static int write_files(const wchar_t *leaf, const struct sc_file *files, int count)
+{
+    int i;
+    for (i = 0; i < count; i++) {
+        wchar_t path[MAX_PATH], *p;
+        const char *n = files[i].name;
+        size_t used = wcslen(leaf), k;
+        HANDLE h;
+        DWORD wrote = 0, total = 0;
+        if (used + 1 + strlen(n) >= MAX_PATH) return EXIT_FAIL;
+        wcscpy(path, leaf);
+        path[used++] = L'\\';
+        for (k = 0; n[k]; k++) path[used + k] = n[k] == '/' ? L'\\' : (wchar_t)n[k];
+        path[used + k] = 0;
+        for (p = path + used; *p; p++) {
+            if (*p == L'\\') {
+                *p = 0;
+                if (!ensure_dir(path)) return EXIT_UNSAFE;
+                *p = L'\\';
+            }
+        }
+        h = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+        if (h == INVALID_HANDLE_VALUE) return EXIT_FAIL;
+        while (total < files[i].size) {
+            if (!WriteFile(h, files[i].data + total, files[i].size - total, &wrote, NULL) || !wrote) { CloseHandle(h); return EXIT_FAIL; }
+            total += wrote;
+        }
+        if (!CloseHandle(h)) return EXIT_FAIL;
+    }
+    return EXIT_OK;
+}
+
+/* Check the embedded payload against its SHA-256 and parse it. */
+static int load_payload(const unsigned char **blob, DWORD *len, struct sc_file *files, int *count)
+{
+    DWORD hashlen = 0;
+    const unsigned char *want = resource(RES_SHA256, &hashlen);
+    *blob = resource(RES_PAYLOAD, len);
+    if (!*blob || !want) return EXIT_NO_FILES;
+    if (!sc_verify(*blob, *len, want, hashlen)) return EXIT_DAMAGED;
+    *count = sc_parse(*blob, *len, files);
+    return *count < 0 ? EXIT_DAMAGED : EXIT_OK;
+}
+
+static int powershell_path(wchar_t *out)
+{
+    if (!GetSystemDirectoryW(out, MAX_PATH) || wcslen(out) + 40 >= MAX_PATH) return 0;
+    wcscat(out, L"\\WindowsPowerShell\\v1.0\\powershell.exe");
+    return 1;
+}
+
+static void start_gui(const wchar_t *dir, int *code)   /* the Setup exe's own path goes along for the window icon */
+{
+    wchar_t script[MAX_PATH], powershell[MAX_PATH], self[MAX_PATH], cmd[MAX_PATH * 4];
+    STARTUPINFOW startup = { 0 };
+    PROCESS_INFORMATION process = { 0 };
+    if (wcslen(dir) + 1 + wcslen(L"installer-gui.ps1") >= MAX_PATH) { *code = EXIT_FAIL; return; }
+    swprintf(script, MAX_PATH, L"%ls\\installer-gui.ps1", dir);
+    if (!powershell_path(powershell)) { *code = EXIT_FAIL; return; }
+    if (!GetModuleFileNameW(NULL, self, MAX_PATH)) self[0] = 0;
+    swprintf(cmd, MAX_PATH * 4, L"\"%ls\" -NoProfile -ExecutionPolicy Bypass -STA -File \"%ls\" -SetupExe \"%ls\"", powershell, script, self);
+    startup.cb = sizeof(startup);
+    if (!CreateProcessW(powershell, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, dir, &startup, &process)) {
+        say(L"Could not start the installer. Windows PowerShell is required.");
+        *code = EXIT_FAIL;
+        return;
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+}
+
+/* A verb: deathstranding-coop-setup.ps1 in dir with the arguments as given; the exit code is the script's. */
+static int run_verb(const wchar_t *dir, int argc, wchar_t **argv)
+{
+    wchar_t powershell[MAX_PATH], cmd[4096];
+    STARTUPINFOW startup = { 0 };
+    PROCESS_INFORMATION process = { 0 };
+    DWORD code = EXIT_FAIL;
+    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE), err = GetStdHandle(STD_ERROR_HANDLE);
+    int i;
+    if (!powershell_path(powershell)) return EXIT_FAIL;
+    if (swprintf(cmd, 4096, L"\"%ls\" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%ls\\" VERBS L"\"", powershell, dir) < 0)
+        return EXIT_FAIL;
+    for (i = 1; i < argc; i++) {
+        size_t n = wcslen(cmd);
+        if (wcschr(argv[i], L'"') || n + wcslen(argv[i]) + 4 >= 4096) return EXIT_USAGE;
+        swprintf(cmd + n, 4096 - n, L" \"%ls", argv[i]);
+        {   /* a folder ending in backslashes: double them, or the closing quote would be escaped */
+            size_t k = wcslen(argv[i]), b = 0;
+            while (b < k && argv[i][k - 1 - b] == L'\\') b++;
+            n = wcslen(cmd);
+            if (n + b + 2 >= 4096) return EXIT_USAGE;
+            while (b--) cmd[n++] = L'\\';
+            cmd[n++] = L'"';
+            cmd[n] = 0;
+        }
+    }
+    if (!out || out == INVALID_HANDLE_VALUE) {     /* not redirected: the console of the prompt that started Setup */
+        if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+            out = CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+            err = out;
+        }
+    }
+    startup.cb = sizeof(startup);
+    if (out && out != INVALID_HANDLE_VALUE) {
+        SetHandleInformation(out, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+        if (err && err != INVALID_HANDLE_VALUE) SetHandleInformation(err, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+        startup.dwFlags = STARTF_USESTDHANDLES;
+        startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+        startup.hStdOutput = out;
+        startup.hStdError = err && err != INVALID_HANDLE_VALUE ? err : out;
+    }
+    if (!CreateProcessW(powershell, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, dir, &startup, &process))
+        return EXIT_FAIL;
+    WaitForSingleObject(process.hProcess, INFINITE);
+    GetExitCodeProcess(process.hProcess, &code);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return (int)code;
+}
+
+static int is_verb(int argc, wchar_t **argv)
+{
+    return argv && argc >= 2 && (!wcscmp(argv[1], L"status") || !wcscmp(argv[1], L"install") || !wcscmp(argv[1], L"uninstall"));
+}
+
+static int exists(const wchar_t *dir, const wchar_t *name)
+{
+    wchar_t path[MAX_PATH];
+    if (wcslen(dir) + 1 + wcslen(name) >= MAX_PATH) return 0;
+    swprintf(path, MAX_PATH, L"%ls\\%ls", dir, name);
+    return GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES;
+}
+
+static int run_beside(const wchar_t *self, int argc, wchar_t **argv)
+{
+    static const wchar_t *need[] = { L"installer-gui.ps1", VERBS, L"install-state.ps1", L"deathstranding-coop.exe",
+                                     L"avrt.dll", L"redirect-data\\mod\\mod.dll", L"coop-mod.json" };
+    wchar_t dir[MAX_PATH], temp[MAX_PATH], longself[MAX_PATH], longtemp[MAX_PATH], *end;
+    size_t i;
+    int missing = 0, code = EXIT_OK;
+    wcscpy(dir, self);
+    if (!(end = wcsrchr(dir, L'\\'))) return EXIT_FAIL;
+    *end = 0;
+    for (i = 0; i < sizeof(need) / sizeof(*need); i++) if (!exists(dir, need[i])) missing = 1;
+    wcscpy(longself, self);
+    GetLongPathNameW(self, longself, MAX_PATH);
+    temp[0] = 0;
+    if (GetTempPathW(MAX_PATH, temp)) { wcscpy(longtemp, temp); GetLongPathNameW(temp, longtemp, MAX_PATH); } else longtemp[0] = 0;
+    if (missing || (longtemp[0] && sc_run_from_zip(longself, longtemp))) {
+        say(L"Setup cannot find the files that belong with it.\n\nExtract the whole zip first (right-click the zip, Extract All, "
+            L"then open the extracted folder), or download the single DeathStrandingCoop-Setup.exe from the release page: "
+            L"that one needs no extracting.");
+        return is_verb(argc, argv) ? EXIT_FAIL : EXIT_NO_FILES;
+    }
+    if (is_verb(argc, argv)) return run_verb(dir, argc, argv);
+    start_gui(dir, &code);
+    return code;
+}
+
+static int run_payload(const wchar_t *explicit_leaf, int argc, wchar_t **argv)
+{
+    const unsigned char *blob, *ver;
+    DWORD len, verlen = 0;
+    struct sc_file files[SC_MAX_FILES];
+    int count = 0, code = load_payload(&blob, &len, files, &count);
+    wchar_t leaf[MAX_PATH], version[64];
+    size_t i;
+    if (code == EXIT_DAMAGED) {
+        say(L"This Setup file is damaged (its contents do not match their checksum). Download DeathStrandingCoop-Setup.exe again.");
+        return is_verb(argc, argv) ? EXIT_FAIL : code;
+    }
+    if (code) return is_verb(argc, argv) ? EXIT_FAIL : code;
+    if (explicit_leaf) {
+        if (wcslen(explicit_leaf) >= MAX_PATH - 100 || !CreateDirectoryW(explicit_leaf, NULL)) return EXIT_FAIL;
+        wcscpy(leaf, explicit_leaf);
+        return write_files(leaf, files, count);
+    }
+    ver = resource(RES_VERSION, &verlen);
+    for (i = 0; ver && i < verlen && i < 63 && ver[i]; i++) version[i] = (wchar_t)ver[i];
+    version[ver ? i : 0] = 0;
+    for (i = 0; version[i]; i++) {      /* a version names a folder: letters, digits, dot, underscore, plus and hyphen only */
+        wchar_t c = version[i];
+        if (!((c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z') || (c >= L'0' && c <= L'9') || c == L'.' || c == L'_' || c == L'+' || c == L'-')) {
+            version[0] = 0; break;
+        }
+    }
+    if (!version[0] || !wcscmp(version, L".") || !wcscmp(version, L"..")) wcscpy(version, L"setup");
+    {
+        wchar_t base[MAX_PATH];
+        int n;
+        if (!GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH - 120) || !base[0]) { say(L"Setup could not find your user profile folder (LOCALAPPDATA)."); return EXIT_FAIL; }
+        if (!plain_dir(base)) { say(L"Your user profile folder is not a normal folder; Setup stopped."); return EXIT_UNSAFE; }
+        wcscat(base, L"\\DeathStrandingCoop");
+        if (!ensure_dir(base)) { say(L"Setup stopped: the DeathStrandingCoop folder in your profile is a link or cannot be created."); return EXIT_UNSAFE; }
+        wcscat(base, L"\\setup");
+        if (!ensure_dir(base)) { say(L"Setup stopped: the DeathStrandingCoop\\setup folder in your profile is a link or cannot be created."); return EXIT_UNSAFE; }
+        /* a fresh folder every run: exclusive create, so nothing already there is ever reused or overwritten */
+        for (n = 1; n < 100; n++) {
+            if (n == 1) swprintf(leaf, MAX_PATH, L"%ls\\%ls", base, version);
+            else swprintf(leaf, MAX_PATH, L"%ls\\%ls-%d", base, version, n);
+            if (CreateDirectoryW(leaf, NULL)) break;
+            if (GetLastError() != ERROR_ALREADY_EXISTS) { say(L"Setup could not create its working folder in your profile."); return EXIT_FAIL; }
+        }
+        if (n >= 100) { say(L"Setup found too many old working folders in %LOCALAPPDATA%\\DeathStrandingCoop\\setup. Delete them and try again."); return EXIT_FAIL; }
+    }
+    code = write_files(leaf, files, count);
+    if (code) { say(L"Setup could not unpack its files into your profile folder."); return is_verb(argc, argv) ? EXIT_FAIL : code; }
+    if (is_verb(argc, argv)) return run_verb(leaf, argc, argv);
+    start_gui(leaf, &code);
+    return code;
+}
+
+int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command, int show)
+{
+    wchar_t self[MAX_PATH];
+    DWORD size = 0;
+    int argc = 0, hasPayload;
+    wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    (void)instance; (void)previous; (void)command; (void)show;
+    hasPayload = resource(RES_PAYLOAD, &size) != NULL;
+    if (argv && argc == 3 && !wcscmp(argv[1], L"/extract")) return hasPayload ? run_payload(argv[2], 0, NULL) : EXIT_NO_FILES;
+    if (argc != 1 && !is_verb(argc, argv)) return EXIT_USAGE;
+    if (hasPayload) return run_payload(NULL, argc, argv);
+    if (!GetModuleFileNameW(NULL, self, MAX_PATH)) return EXIT_FAIL;
+    return run_beside(self, argc, argv);
+}

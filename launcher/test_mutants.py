@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
                                       'KEYS_KEEP', 'STRAND_SIGN', 'STRAND_NO_PASSES', 'GROUP_TICKET', 'GROUP_RELAY_TOKEN', 'DIAG_TICKET', 'GROUP_NOTICE_TOKEN', 'GROUP_PAIRS', 'GROUP_BUILD_RECEIVED', 'GROUP_BUILD_SETTING', 'GROUP_OFFER_STRAND', 'STRAND_NOTICE_FATAL', 'DIAG_NOTICE_TOKEN',
                                       'OWNER_UNSIGNED', 'OWNER_CLOCK', 'OWNER_REJECT_ALL', 'OWNER_REFUSAL', 'OWNER_REMOVE_TEXT', 'OWNER_HOST_ONLY', 'OWNER_PARSE',
                                       'BACKUP_RUNNING', 'NESTED_LAB', 'NESTED_RELEASE',
-                                      'DIAG_SECRET', 'DIAG_ADDRESS', 'DIAG_USER', 'DIAG_BOUND', 'FIREWALL_BLOCK_WINS', 'FIREWALL_ANY_PROGRAM', 'SETUP_OVERWRITE', 'SETUP_REMOVE_ANY']):
+                                      'DIAG_SECRET', 'DIAG_ADDRESS', 'DIAG_USER', 'DIAG_BOUND', 'FIREWALL_BLOCK_WINS', 'FIREWALL_ANY_PROGRAM']):
         print('killed', name)
     # The socket test (test_group.py) must fail too when the games' key is not the server's, the server has no relay,
     # a joiner on the host's PC signs in or acts as the host's account, the host's rules do not reach a new world, or
@@ -61,6 +61,21 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
         return name
     for name in map(owned, ['OWNER_UNSIGNED', 'OWNER_REJECT_ALL', 'OWNER_REFUSAL']):
         print('killed', name, '(owner socket test)')
+    # The install core (install.h, shared with Setup): every protection of install_test.cpp has its mutant.
+    def installer(name):
+        exe = work/('install-'+name)
+        result = run(['g++', '-std=c++17', '-O1', '-Wall', '-Wextra', '-DMUTANT_INSTALL_'+name, 'install_test.cpp', 'install.cpp', '-o', str(exe)])
+        if result.returncode:
+            raise SystemExit(result.stderr)
+        with tempfile.TemporaryDirectory(dir=work) as fixture:
+            result = run([str(exe), fixture])
+        if result.returncode != 1 or 'install oracle:' not in result.stderr:
+            raise SystemExit(f'SURVIVED or crashed install {name}: {result.returncode}\n{result.stdout}\n{result.stderr}')
+        return name
+    for name in mutants.parallel(installer, ['OVERWRITE_FOREIGN', 'TRUSTS_EXISTENCE', 'RECEIPT_IGNORES_PENDING', 'NO_BUILD_CHECK', 'IGNORES_RUNNING',
+                                             'NO_PACKAGE_CHECK', 'STALE_KEPT', 'NO_ROLLBACK', 'UNINSTALL_DELETES_CHANGED', 'UNINSTALL_DELETES_FOREIGN',
+                                             'MANIFEST_ESCAPE', 'FOLLOWS_LINKS', 'VDF_ESCAPES', 'VDF_FIRST_ONLY', 'ACF_IGNORED', 'GAME_DUPLICATES']):
+        print('killed install', name)
     def save(name):
         exe = work/name
         result = run(['g++', '-std=c++17', '-O1', '-Wall', '-Wextra', '-Werror', '-DMUTANT_'+name,

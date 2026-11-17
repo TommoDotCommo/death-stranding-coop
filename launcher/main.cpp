@@ -9,10 +9,15 @@
 #include "strand.h"
 #include "owner.h"
 #include "testsaves.h"
+#include "install.h"
 #include "../world/json.h"
 #include "../common/crash_handler.h"
 #include <sstream>
 #include <memory>
+// The release version (tools/release.sh passes the tag through the Makefile's VERSION).
+#ifndef COOP_VERSION
+#define COOP_VERSION "0.1.0-dev"
+#endif
 using namespace launcher;
 namespace {
 diag::Session diagnostic;
@@ -109,26 +114,77 @@ void useTestSave(HWND h){
     if(o.code!=testsaves::ExitOk)throw std::runtime_error(o.message);
     MessageBoxW(h,wtext(o.message+"\n\nStart the game with Play solo, Host or Join.").c_str(),L"Test save ready",MB_OK);
 }
-// Setup: the package this launcher was started from goes into the game (core.h). Asked once per start while needed.
+// Setup: the package this launcher was started from goes into the game, by the install logic Setup uses too
+// (install.h). Asked once per start while needed. The launcher's own folder stays where it is (Setup's install puts a
+// copy into the co-op data folder's app folder).
+install::Layout ownLayout(){return install::Layout{executable.parent_path(),gameFolder,options.data,false};}
+std::wstring lines(const std::vector<std::string>& v){std::wstring out;for(auto& s:v)out+=L"\n\n"+wtext(s);return out;}
 void offerSetup(HWND h){
     if(options.direct||gameFolder.empty())return;
-    auto package=executable.parent_path();auto s=setupState(package,gameFolder,options.data);
-    if(!s.needed())return;
-    bool update=s.proxy==Part::Current||s.mod==Part::Different;
-    std::wstring ask=std::wstring(update?L"Update the co-op mod in your game to this package's version?":L"Install the co-op mod into your game?")
+    auto l=ownLayout();
+    if(!fs::is_regular_file(l.package/install::ManifestName))return;   // a development build: no package beside the launcher
+    auto r=install::status(l);
+    if(r.state==install::State::Conflict){MessageBoxW(h,(L"Co-op cannot be installed into this game folder yet."+lines(r.problems)).c_str(),L"Death Stranding co-op setup",MB_OK|MB_ICONWARNING);return;}
+    if(r.state!=install::State::NotInstalled&&r.state!=install::State::UpdateAvailable&&r.state!=install::State::NeedsRepair)return;
+    std::wstring ask=std::wstring(r.state==install::State::UpdateAvailable?L"Update the co-op mod in your game to this package's version?":r.state==install::State::NeedsRepair?L"Repair the co-op mod in your game?":L"Install the co-op mod into your game?")
         +L"\n\nGame: "+gameFolder+L"\nCo-op data and saves: "+options.data.wstring()
-        +L"\n\nIt adds one file (avrt.dll) to the game folder; no file of the game is replaced, and your ordinary saves are not touched."
-        +(s.proxy==Part::Different?L"\n\nThe game folder already has a different avrt.dll (an older co-op version, or another mod's). It will be replaced.":L"");
+        +L"\n\nIt adds one file (avrt.dll) to the game folder; no file of the game is replaced, and your ordinary saves are not touched.";
     if(MessageBoxW(h,ask.c_str(),L"Death Stranding co-op setup",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
-    if(gameRunning(gameFolder))throw std::runtime_error("Close the game before installing.");
-    setupInstall(package,gameFolder,options.data,true);
+    install::install(l,[&]{return gameRunning(gameFolder);});
     MessageBoxW(h,L"Installed. Choose Host, Join or Play solo.\n\nTo remove it later: About, Remove co-op from the game.",L"Death Stranding co-op setup",MB_OK);
 }
 void removeSetup(HWND h){
-    if(net->lobby||gameRunning(gameFolder))throw std::runtime_error("Leave the lobby and close the game first.");
+    if(net->lobby)throw std::runtime_error("Leave the lobby first.");
     if(MessageBoxW(h,L"Remove the co-op mod from the game folder?\n\nYour co-op saves and settings are kept.",L"Remove co-op",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
-    if(!setupRemove(executable.parent_path(),gameFolder))throw std::runtime_error("The avrt.dll in the game folder is not this package's (another version or another mod). It was left alone.");
-    MessageBoxW(h,L"Removed. The game starts without co-op.",L"Remove co-op",MB_OK);
+    auto u=install::uninstall(ownLayout(),[&]{return gameRunning(gameFolder);});
+    std::wstring done=L"Removed. The game starts without co-op.";
+    if(!u.kept.empty())done=L"Removed, except files changed since they were installed (left in place):"+lines(u.kept);
+    if(!u.foreign.empty())done+=L"\n\nLeft alone (not the co-op mod's files):"+lines(u.foreign);
+    MessageBoxW(h,done.c_str(),L"Remove co-op",MB_OK);
+}
+// Setup's verbs, without a window (../dist/deathstranding-coop-setup.ps1 runs them; co-op mod standard J9):
+//   --setup status [--json] [<game folder>]   without a folder: every install found in the Steam libraries
+//   --setup install <game folder> --yes | --setup uninstall <game folder> --yes
+// The package is this launcher's folder; the files go to the game folder and %LOCALAPPDATA%\DeathStrandingCoop, the
+// launcher with its package into its app folder. Exit codes as install.h Exit: 0 done, 1 failed, 2 usage, 3 unsupported
+// game build, 4 the game is running.
+void out(HANDLE h,const std::string& s){DWORD n=0;if(h&&h!=INVALID_HANDLE_VALUE)WriteFile(h,s.data(),DWORD(s.size()),&n,nullptr);}
+std::string plain(const install::Report& r){std::string s=std::string(install::stateName(r.state))+" ("+install::button(r.state)+")\n";for(auto& p:r.problems)s+="  "+p+"\n";return s;}
+int setupVerb(int argc,wchar_t** argv){
+    HANDLE so=GetStdHandle(STD_OUTPUT_HANDLE),se=GetStdHandle(STD_ERROR_HANDLE);
+    bool json=false,yes=false;std::vector<std::wstring> rest;
+    for(int i=2;i<argc;++i){std::wstring a=argv[i];if(a==L"--json")json=true;else if(a==L"--yes")yes=true;else rest.push_back(a);}
+    auto usage=[&](const char* why){out(se,std::string(why)+"\nUse: --setup status [--json] [<game folder>] | --setup install <game folder> --yes | --setup uninstall <game folder> --yes\n");return int(install::Usage);};
+    if(rest.empty())return usage("No setup verb.");
+    wchar_t self[32768];if(!GetModuleFileNameW(nullptr,self,32768))return install::Failed;
+    install::Layout l{fs::path(self).parent_path(),{},known(FOLDERID_LocalAppData)/"DeathStrandingCoop",true};
+    try {
+        if(rest[0]==L"status") {
+            if(rest.size()>2)return usage("status takes one game folder at most.");
+            if(rest.size()==2) {
+                l.game=rest[1];auto r=install::status(l);out(so,json?install::reportJson(r)+"\n":plain(r));
+                using S=install::State;
+                return r.state==S::UnsupportedBuild?install::UnsupportedBuild:r.state==S::UpToDate||r.state==S::NotInstalled||r.state==S::UpdateAvailable||r.state==S::ByModManager?install::Ok:install::Failed;
+            }
+            std::string list;
+            for(auto& g:install::findGames(steamRoots(),{steamGame()})){l.game=g;auto r=install::status(l);list+=json?(list.empty()?"":",")+install::reportJson(r):utf8(g.wstring())+": "+plain(r);}
+            out(so,json?"{\"schema\":1,\"games\":["+list+"]}\n":list.empty()?"No DEATH STRANDING DIRECTOR'S CUT found in the Steam libraries.\n":list);
+            return install::Ok;
+        }
+        if(rest[0]==L"install"||rest[0]==L"uninstall") {
+            if(rest.size()!=2)return usage("Give the game folder.");
+            if(!yes)return usage("install and uninstall need --yes.");
+            l.game=rest[1];auto running=[&]{return gameRunning(l.game);};
+            if(rest[0]==L"install"){auto r=install::install(l,running);out(so,json?install::reportJson(r)+"\n":plain(r));return install::Ok;}
+            auto u=install::uninstall(l,running);
+            auto array=[](const std::vector<std::string>& v){json::Value a=json::Value::array();for(auto& s:v)a.push(s);return a;};
+            json::Value r=json::Value::object();r.set("removed",array(u.removed));r.set("kept",array(u.kept));r.set("foreign",array(u.foreign));
+            out(so,json?r.dump()+"\n":"removed "+std::to_string(u.removed.size())+" files"+(u.kept.empty()?std::string():"; kept (changed since install): "+std::to_string(u.kept.size()))+"\n");
+            return u.kept.empty()?install::Ok:install::Failed;
+        }
+        return usage("Unknown setup verb.");
+    }catch(const install::Error& e){out(se,std::string(e.what())+"\n");return e.code;}
+    catch(const std::exception& e){out(se,std::string(e.what())+"\n");return install::Failed;}
 }
 // launcher.ini: the [launcher] settings, and a [server-ID] section per group server with the player's choices there.
 std::string readIni(){std::ifstream f(settingsFile,std::ios::binary);return std::string((std::istreambuf_iterator<char>(f)),{});}
@@ -708,13 +764,16 @@ void buildControls(){
     for(int i=0;i<3;++i)if(groupPolicy==PolicyNames[i])SendMessageW(child(GroupPolicy),CB_SETCURSEL,i,0);
     label(2,224,wtext("Your player key (made by this launcher; its secret half never leaves this PC): "+world::identity::shortText(keys.pub)+". On group servers that take keys it is you, and the host's key is the owner's.").c_str());
     control(2,Protocol,L"BUTTON",L"Open deathstranding-coop invite links in this launcher");label(2,222,L"Settings are saved on change. Each game uses two adjacent UDP ports. A group world that exists keeps its own rules.\nCo-op networking is always enforced offline. Voice, controller navigation and router mapping are not available yet.");
-    label(3,230,(L"Death Stranding co-op 0.1.0-dev\nSteam Director's Cut build 13300582\n\nExperimental; not a playable release. Native Windows launcher.\nCo-op mod standard: Play, Saves, Settings, About; DS invites and LAN/Tailscale discovery.\n\nInvite/discovery reference code: coop-mod-kit (MIT).\nNot affiliated with Kojima Productions or the game's publishers.\n\nWire version: "+wtext(wireVersion())).c_str());
+    label(3,230,(L"Death Stranding co-op "+wtext(COOP_VERSION)+L"\nSteam Director's Cut build 13300582\n\nExperimental; not a playable release. Native Windows launcher.\nCo-op mod standard: Play, Saves, Settings, About; DS invites and LAN/Tailscale discovery.\n\nInvite/discovery reference code: coop-mod-kit (MIT).\nNot affiliated with Kojima Productions or the game's publishers.\n\nWire version: "+wtext(wireVersion())).c_str());
     control(3,Guide,L"BUTTON",L"Quick guide (F1)");control(3,Home,L"BUTTON",L"Project and issue tracker");control(3,Diagnose,L"BUTTON",L"Send diagnostics");control(3,Remove,L"BUTTON",L"Remove co-op from the game");
 }
 }
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
     struct EndLog {~EndLog(){diagnostic.Close();}} endLog;
     try {
+        {int n=0;auto v=CommandLineToArgvW(GetCommandLineW(),&n);   // Setup's verbs: no window, no network
+         if(v&&n>=2&&std::wstring(v[1])==L"--setup"){auto c=setupVerb(n,v);LocalFree(v);return c;}
+         if(v)LocalFree(v);}
         SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);WSADATA ws;if(WSAStartup(MAKEWORD(2,2),&ws))return 1;net=std::make_unique<Network>();
         options.data=known(FOLDERID_LocalAppData)/"DeathStrandingCoop";settingsFile=options.data/"launcher.ini";
         auto maxMb=GetPrivateProfileIntW(L"launcher",L"max_log_mb",diag::DefaultMaxLogMb,settingsFile.c_str());

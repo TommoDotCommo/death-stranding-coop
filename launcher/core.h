@@ -126,17 +126,8 @@ struct Packet { Kind kind=Kind::join;uint32_t secret=0,nonce=0;unsigned port=490
 std::string packet(const Packet&);
 bool parsePacket(const std::string&,Packet&);
 bool allowJoin(const Packet&,uint32_t secret,bool inviteOnly,bool occupied);
-// Setup from the launcher. A package folder holds the launcher, the proxy (avrt.dll) and redirect-data/mod/mod.dll.
-// Installing adds the proxy to the game folder (the game ships no avrt.dll, so nothing of the game is replaced) and
-// the mod to the co-op data folder. A different avrt.dll already in the game folder is replaced only when the caller
-// says so (an older co-op version, or another mod's file: the player decides). Removing takes the proxy out again
-// only while it is this package's; saves and the data folder stay.
-enum class Part : uint8_t {Missing,Current,Different};
-struct Setup { bool package=false;Part proxy=Part::Missing,mod=Part::Missing;
-    bool needed() const {return package&&(proxy!=Part::Current||mod!=Part::Current);} };
-Setup setupState(const std::filesystem::path& package,const std::filesystem::path& game,const std::filesystem::path& data);
-void setupInstall(const std::filesystem::path& package,const std::filesystem::path& game,const std::filesystem::path& data,bool replaceProxy);
-bool setupRemove(const std::filesystem::path& package,const std::filesystem::path& game);   // false: the proxy there is not this package's
+// Setup from the launcher (offer to install, About "Remove co-op from the game") and Setup itself share one install
+// logic: install.h.
 inline bool backupAllowed(bool inLobby,bool running) {
 #ifdef MUTANT_BACKUP_RUNNING
     (void)running;return !inLobby;

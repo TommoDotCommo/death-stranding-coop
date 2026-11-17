@@ -22,6 +22,11 @@ inline fs::path environment(const wchar_t* key) {wchar_t b[32768];auto n=GetEnvi
 inline fs::path known(REFKNOWNFOLDERID key) {PWSTR s=nullptr;if(FAILED(SHGetKnownFolderPath(key,KF_FLAG_DONT_VERIFY,nullptr,&s)))throw std::runtime_error("Windows could not locate a required user folder.");fs::path p=s;CoTaskMemFree(s);return p;}
 inline fs::path registryPath(HKEY hive,const wchar_t* subkey,const wchar_t* value) {wchar_t b[32768];DWORD bytes=sizeof(b);return RegGetValueW(hive,subkey,value,RRF_RT_REG_SZ,nullptr,b,&bytes)==ERROR_SUCCESS?fs::path(b):fs::path();}
 inline fs::path steamRoot() {return registryPath(HKEY_CURRENT_USER,L"Software\\Valve\\Steam",L"SteamPath");}
+// Every Steam root the registry names (install.h findGames reads their library lists): the user's SteamPath and the
+// machine's InstallPath, 32- and 64-bit views.
+inline std::vector<fs::path> steamRoots() {
+    return {steamRoot(),registryPath(HKEY_LOCAL_MACHINE,L"Software\\WOW6432Node\\Valve\\Steam",L"InstallPath"),registryPath(HKEY_LOCAL_MACHINE,L"Software\\Valve\\Steam",L"InstallPath")};
+}
 inline fs::path steamGame() {return registryPath(HKEY_LOCAL_MACHINE,L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Steam App 1850570",L"InstallLocation");}
 inline bool equalPath(const fs::path& a,const fs::path& b) {return redirect::canonical(a.wstring())==redirect::canonical(b.wstring())&&!redirect::canonical(a.wstring()).empty();}
 // any: every ds.exe counts (the Steam path: Steam starts nothing while it counts the app as running, whatever copy).
