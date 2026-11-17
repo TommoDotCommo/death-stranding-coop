@@ -67,8 +67,8 @@ On the test server, which the organiser runs:
 
 ## Report a problem
 
-1. If something goes wrong while playing, press **F2** in the game: it marks the moment in the logs (and in the logs
-   of the players near you), so the organiser can find it.
+1. If something goes wrong while playing, press **F2** in the game: it marks the moment in your logs (in a two-player
+   game also in your partner's), so the organiser can find it.
 2. In the launcher: About → **Send diagnostics**. This saves a zip on your Desktop (`DeathStrandingCoop-diagnostics-...zip`)
    and shows it in Explorer. Before it is saved, it is cleaned: your Windows user name and computer name, network
    addresses, Steam ids and account numbers, and e-mail addresses are replaced; open the zip and look if you like. Nothing is sent by the launcher: you send the zip yourself.
