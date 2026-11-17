@@ -182,9 +182,9 @@ bool choicesScreen(const strand::Policy& rules,const std::string& mine,strand::C
         popupControl(h,BuildYes,L"BUTTON",L"Yes: the other players can be handed it, as the rules above say",BS_AUTORADIOBUTTON|WS_GROUP,40,362,720,26);
         popupControl(h,BuildNo,L"BUTTON",L"No: keep it for me alone (a personal archive on this server)",BS_AUTORADIOBUTTON,40,390,720,26);
         popupControl(h,BuildAsk,L"BUTTON",L"Ask me: it waits until I offer it (Play, My strand on this server)",BS_AUTORADIOBUTTON,40,418,720,26);
-        popupControl(h,0,L"STATIC",L"Let this server take my older strand (the structures my save already holds, built before I joined here):",SS_LEFT,20,456,744,24);
-        popupControl(h,OldYes,L"BUTTON",L"Yes: my game uploads them to this server one by one while I play, then as the rules above say",BS_AUTORADIOBUTTON|WS_GROUP,40,483,720,26);
-        popupControl(h,OldNo,L"BUTTON",L"No: nothing from before; only what I build while connected goes to this server",BS_AUTORADIOBUTTON,40,511,720,26);
+        popupControl(h,0,L"STATIC",L"Let this server take my older strand (the structures already in my save):",SS_LEFT,20,456,744,24);
+        popupControl(h,OldYes,L"BUTTON",L"Yes: my game uploads them to this server one by one while I play",BS_AUTORADIOBUTTON|WS_GROUP,40,483,720,26);
+        popupControl(h,OldNo,L"BUTTON",L"No: only what I build while connected goes to this server",BS_AUTORADIOBUTTON,40,511,720,26);
         popupControl(h,Go,L"BUTTON",go,BS_DEFPUSHBUTTON|WS_GROUP,20,555,480,40);popupControl(h,Cancel,L"BUTTON",L"Cancel",0,520,555,244,40);
         SendMessageW(GetDlgItem(h,c.offerBuilds=="no"?BuildNo:c.offerBuilds=="ask"?BuildAsk:BuildYes),BM_SETCHECK,BST_CHECKED,0);
         SendMessageW(GetDlgItem(h,c.offerOld=="yes"?OldYes:OldNo),BM_SETCHECK,BST_CHECKED,0);SetFocus(GetDlgItem(h,Go));})==1;
@@ -610,7 +610,7 @@ void buildControls(){
     control(2,Lan,L"BUTTON",L"Find games on my network",BS_AUTOCHECKBOX);control(2,Tailscale,L"BUTTON",L"Find friends on Tailscale",BS_AUTOCHECKBOX);control(2,Privacy,L"BUTTON",L"Invite only (host decides)",BS_AUTOCHECKBOX);control(2,World,L"BUTTON",L"Shared world (experimental; the host decides): each other's ladders and cairns through the game's own online layer",BS_AUTOCHECKBOX);
     SendMessageW(child(Lan),BM_SETCHECK,lan?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Tailscale),BM_SETCHECK,tailscale?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Privacy),BM_SETCHECK,privacy?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(World),BM_SETCHECK,sharedWorld?BST_CHECKED:BST_UNCHECKED,0);
     control(2,GroupHost,L"BUTTON",L"Group server (experimental): Host a game starts a server for many players, each in their own save, instead of a two-player lobby",BS_AUTOCHECKBOX);SendMessageW(child(GroupHost),BM_SETCHECK,groupHost?BST_CHECKED:BST_UNCHECKED,0);
-    control(2,BuildReceived,L"BUTTON",L"Build other players' structures when they arrive (group servers): their bridges and rain shelters stand at once, but skip the game's spacing and area checks, so one may overlap something in your world",BS_AUTOCHECKBOX|BS_MULTILINE|BS_TOP);
+    control(2,BuildReceived,L"BUTTON",L"Build other players' structures when they arrive (group servers). They skip the game's spacing and area checks, so one may overlap something in your world",BS_AUTOCHECKBOX|BS_MULTILINE|BS_TOP);
     SendMessageW(child(BuildReceived),BM_SETCHECK,buildReceived?BST_CHECKED:BST_UNCHECKED,0);
     label(2,223,L"Rules of a new group world:");control(2,GroupPolicy,L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL);
     for(auto name:{L"Friends: everything shared",L"Solo archive: one player",L"Public: members, review, limits"})SendMessageW(child(GroupPolicy),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));

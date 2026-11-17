@@ -210,9 +210,9 @@ of his own contributions. So before the joiner's game starts, the launcher asks 
   for his answer or the owner's, held by the rules, kept, remnants, likes), or that he has not played there yet.
 - His two choices for this server: **Share what I build here**: Yes (the other players can be handed it, as the rules
   say), No (kept for him alone, a personal archive on that server) or Ask me (it waits until he offers it, below);
-  **Let this server take my older strand** (the structures his save already holds, built before he joined there):
-  **Yes** ("my game uploads them to this server one by one while I play, then as the rules above say") or **No**
-  ("nothing from before; only what I build while connected goes to this server"). The server keeps it and tells his
+  **Let this server take my older strand** (the structures already in his save, built before he joined there):
+  **Yes** ("my game uploads them to this server one by one while I play"; then as the rules say for any upload) or
+  **No** ("only what I build while connected goes to this server"). The server keeps it and tells his
   game's mod, and the launcher's group config has `offer_strand` on (above), so Yes has his game upload them, one at a
   time, while he plays (`../mod/README.md`, "Offering your existing strand"; live once,
   not yet started from the launcher). Ticked: what the
