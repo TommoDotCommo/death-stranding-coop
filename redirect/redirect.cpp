@@ -29,6 +29,7 @@
 #include "virtual_kbm.h"
 #include "frame_cap.h"
 #include "crash_record.h"
+#include "../common/diag_log.h"
 #include <set>
 #include <winternl.h>
 #include <atomic>
@@ -42,6 +43,15 @@ thread_local unsigned load_depth=0;
 thread_local bool draining=false;
 thread_local const wchar_t* load_origin=L"native/transitive (delay/static unknown)";
 HANDLE log_file=INVALID_HANDLE_VALUE;
+diag::Session player_log,player_game_log;
+void player_crashed(){player_log.MarkCrashed();player_game_log.MarkCrashed();}
+const diag::Host game_log_host{&player_game_log,
+    [](void* p,unsigned mb){return static_cast<diag::Session*>(p)->Open(diag::DefaultLogsDir(),"game",mb);},
+    [](void* p,const char* text){return static_cast<diag::Session*>(p)->Line(text);},
+    [](void* p,const char* text,uint64_t now){static_cast<diag::Session*>(p)->Flight(text,now);},
+    [](void* p,uint32_t mark,uint64_t now){return static_cast<diag::Session*>(p)->Bugmark(mark,now);},
+    [](void* p){static_cast<diag::Session*>(p)->MarkCrashed();},
+    [](void* p,bool nonblocking){static_cast<diag::Session*>(p)->Close(nonblocking);}};
 redirect::Throttle throttle;
 SRWLOCK log_lock=SRWLOCK_INIT;
 auto real_gpa=::GetProcAddress;
@@ -74,6 +84,9 @@ std::wstring env(const wchar_t* key) {
 void note(const wchar_t* kind,const std::wstring& from,const std::wstring& to) {
     bool ok=true;
     auto sink=[&](const std::wstring& line) {
+        auto size=WideCharToMultiByte(CP_UTF8,0,line.data(),int(line.size()),nullptr,0,nullptr,nullptr);
+        std::string utf8(size,0);if(size)WideCharToMultiByte(CP_UTF8,0,line.data(),int(line.size()),utf8.data(),size,nullptr,nullptr);
+        player_log.Line(utf8);
         DWORD n=0,bytes=(DWORD)(line.size()*sizeof(wchar_t));
         ok=ok && WriteFile(log_file,line.data(),bytes,&n,nullptr) && n==bytes && FlushFileBuffers(log_file);
     };
@@ -1014,7 +1027,7 @@ HINTERNET WINAPI hook_WinHttpConnect(HINTERNET session,LPCWSTR server,INTERNET_P
     return ::WinHttpConnect(session,server,port,reserved);
 }
 }
-void flush_redirect_log() {flush_counts();}
+void flush_redirect_log() {flush_counts();player_game_log.Close(true);player_log.Close(true);}
 void install_redirect(void* self,bool releaseSession) {
     own=(HMODULE)self;game_thread_owner=GetCurrentThreadId();
     policy.allowNestedInstance=releaseSession;
@@ -1084,6 +1097,15 @@ void install_redirect(void* self,bool releaseSession) {
     auto log=policy.instance+L"\\redirect-"+std::to_wstring(GetCurrentProcessId())+L"-"+stamp+L".log";
     log_file=real_cf(log.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
     if(log_file==INVALID_HANDLE_VALUE) fatal("redirect: cannot exclusively create log\n");
+    if(releaseSession) {
+        unsigned maxMb=diag::DefaultMaxLogMb;
+        // Read the same strict config as bootstrap_mod; never derive a write path from it.
+        auto cfg=policy.instance+L"\\mod\\mod.json";
+        HANDLE f=real_cf(cfg.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(f!=INVALID_HANDLE_VALUE){char bytes[4097];DWORD n=0;bool ok=ReadFile(f,bytes,sizeof bytes,&n,nullptr);CloseHandle(f);
+            if(ok&&n<=4096)maxMb=mod::parseConfig(std::string(bytes,n)).maxLogMb;}
+        if(!player_log.Open(diag::DefaultLogsDir(),"proxy",maxMb))OutputDebugStringA("redirect: player diagnostic log unavailable");
+    }
     for(auto& e:modules.extra) note(L"MODULE_EXTRA",e,L"admitted by the player's extra-modules.txt for this copy");
 #define ADD(module,name) {auto m=GetModuleHandleW(L##module); auto o=m?real_gpa(m,#name):nullptr; if(!o) fatal("redirect: missing required API " #name "\n");entries.push_back({#name,(FARPROC)hook_##name,o});}
     ADD("kernel32.dll",CreateFileW);ADD("kernel32.dll",CreateFile2);
@@ -1174,12 +1196,14 @@ void install_redirect(void* self,bool releaseSession) {
         if(n>=16 || !redirect::crash::parse(n?value:L"",level)) fatal("redirect: invalid crash record option\n");
         wchar_t hang[16]{};n=::GetEnvironmentVariableW(L"COOP_CRASH_HANG_SECONDS",hang,16);uint32_t hang_seconds=0;
         if(n>=16 || !redirect::crash::parse_hang_seconds(n?hang:L"",hang_seconds)) fatal("redirect: invalid crash hang seconds\n");
+        if(releaseSession)level=1; // Player crash recording cannot be disabled by a missing lab switch.
         if(level) {
             // The hang note needs the main thread's message-pump heartbeat, which only the thread-trace hooks see.
             if(!trace_enabled) hang_seconds=0;
             auto stem=L"crash-"+std::to_wstring(GetCurrentProcessId())+L"-"+stamp;
             redirect::crash::Options o;o.level=level;o.hang_seconds=hang_seconds;
             o.folder=policy.instance.c_str();o.stem=stem.c_str();o.load_dbghelp=crash_dbghelp;
+            if(releaseSession){o.player_stem=player_log.Base().c_str();o.on_unhandled=player_crashed;}
             if(!redirect::crash::install(o)) fatal("redirect: crash recorder failed to start\n");
             // Keep the recorder in front of the handler and filter the game registers later (crash_record.h).
             auto kernel=GetModuleHandleW(L"kernel32.dll");
@@ -1252,6 +1276,8 @@ BOOL CALLBACK bootstrap_mod(PINIT_ONCE,PVOID,PVOID*) {
         auto callback=mod_handle?reinterpret_cast<GameTick>(real_gpa(mod_handle,"mod_game_thread_tick")):nullptr;
         if(c.gameThread&&!callback)fatal("redirect: game_thread callback export missing\n");
         auto stop=mod_handle?real_gpa(mod_handle,"mod_shutdown"):nullptr;
+        auto bindLog=mod_handle?reinterpret_cast<void(*)(const diag::Host*)>(real_gpa(mod_handle,"mod_diag_bind")):nullptr;
+        if(bindLog)bindLog(&game_log_host);
         auto error=mod_handle?reinterpret_cast<const char*(*)()>(real_gpa(mod_handle,"mod_last_error")):nullptr;
         bool started=false;
         if(init&&tick&&stop&&error) {

@@ -5,7 +5,7 @@ FLAGS = -std=c++17 -O2 -Wall -Wextra -D_WIN32_WINNT=0x0602 -static-libgcc -stati
 # -static: MSYS2's toolchain otherwise links libwinpthread-1.dll dynamically and the binaries fail to start (0xC000007B).
 # Players' keys: ../world/identity.* on the vendored Monocypher (../vendor/monocypher).
 SRC = core.cpp strand.cpp owner.cpp saves.cpp ../mod/config.cpp ../redirect/path_map.cpp ../world/identity.cpp ../vendor/monocypher/monocypher.c ../vendor/monocypher/monocypher-ed25519.c
-HEADERS = core.h strand.h owner.h ../world/json.h ../world/identity.h ../vendor/monocypher/monocypher.h ../vendor/monocypher/monocypher-ed25519.h saves.h net_win.h launch_win.h firewall_win.h ../mod/config.h ../mod/identity.h ../redirect/startup_policy.h vendor/coop_invite.h vendor/coop_discover.h vendor/coop_discover_win.h
+HEADERS = ../common/diag_log.h ../common/crash_handler.h core.h strand.h owner.h ../world/json.h ../world/identity.h ../vendor/monocypher/monocypher.h ../vendor/monocypher/monocypher-ed25519.h saves.h net_win.h launch_win.h firewall_win.h ../mod/config.h ../mod/identity.h ../redirect/startup_policy.h vendor/coop_invite.h vendor/coop_discover.h vendor/coop_discover_win.h
 all: build/deathstranding-coop.exe build/net-fixture.exe build/discover-win-test.exe
 build:
 	mkdir -p build

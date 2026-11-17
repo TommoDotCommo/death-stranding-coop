@@ -80,6 +80,7 @@ struct Config {
     // Off by default; not run live with the mod.
     bool offerStrand=false;
     unsigned presenceLogMaxMiB=8;
+    unsigned maxLogMb=200;
     std::string shareEnvironment="off"; // "host": the host's time and rain; "rain": its rain only (weather.h)
     discovery::Options discoveryOptions;
 };

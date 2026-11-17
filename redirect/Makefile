@@ -3,7 +3,7 @@ FLAGS = -std=c++17 -O2 -Wall -Wextra -D_WIN32_WINNT=0x0602 -static-libgcc -stati
 # -static: MSYS2's toolchain otherwise links libwinpthread-1.dll dynamically and the binaries fail to start (0xC000007B).
 LIBS = -lshell32 -lole32 -luuid -lws2_32 -lwinhttp -lbcrypt -lwinmm
 PROXY_SRC = path_map.cpp module_policy.cpp audit_throttle.cpp objects.cpp network_policy.cpp crash_record.cpp redirect.cpp proxy.cpp ../mod/config.cpp
-PROXY_DEPS = $(PROXY_SRC) ../mod/config.h redirect.h startup_policy.h release_startup_win.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h virtual_pad.h virtual_kbm.h frame_cap.h iat_patch.h module_hold.h crash_record.h ../mod/game_thread.h ../mod/mod.h
+PROXY_DEPS = ../common/diag_log.h ../common/crash_handler.h $(PROXY_SRC) ../mod/config.h redirect.h startup_policy.h release_startup_win.h hook_list.h module_policy.h audit_throttle.h objects.h network_policy.h thread_trace.h virtual_pad.h virtual_kbm.h frame_cap.h iat_patch.h module_hold.h crash_record.h ../mod/game_thread.h ../mod/mod.h
 all: build/thread_trace_probe_module.dll build/thread_trace_probe.exe build/d3dcompiler_47.dll build/avrt.dll build/mutant-avrt-forward-broken.dll build/mutant-missing-config-closes.dll build/proxy_fixture.exe build/redirect_probe.exe build/redirect_probe_module.dll build/hooks-disabled.dll build/mutant-queries-unmapped.dll build/mutant-find-unmapped.dll build/mutant-attributes-unmapped.dll build/mutant-net-unhooked.dll build/net_probe.exe build/pad_probe.exe build/research-crash-fault.dll
 build:
 	mkdir -p build

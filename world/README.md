@@ -1316,3 +1316,12 @@ server), all live.
   cargo, rankings, profiles, relationships. The game's shapes for paths and missions, and a plan for each: `../mod/game_offsets.md`,
   "Roads, signs and lost cargo through the server". Signs (`t`) are uploaded and served as objects like any other
   kind (the sign's kind in `st`, its comment answered as `cm`); no game has been handed one yet.
+
+## Session diagnostics
+
+The Windows server writes UTF-8 session logs to
+`%LOCALAPPDATA%\DeathStrandingCoop\logs\`; Linux uses
+`$XDG_STATE_HOME/DeathStrandingCoop/logs` or `~/.local/state/DeathStrandingCoop/logs`.
+`--max-log-mb N` sets the startup pruning budget (5–2000, default 200).
+Existing `--log` output is unchanged. Windows unhandled exceptions create a
+crash marker and a small minidump. See [shared diagnostics](../common/README.md).

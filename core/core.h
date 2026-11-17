@@ -124,8 +124,8 @@ struct Packet {
 // id is a stable nonzero identity chosen by the sender; the receiver delivers each id once for the lifetime of the
 // Core, so an event resent after a reconnection (its acknowledgement lost) is not delivered twice.
 // CARGO event types 1..CargoTypeMax (2 pick-up, 3 structure, 4 dismantle, 5 ping, 6 carry summary, 7 gear, 8 outfit,
-// 9 like, 10 name, 11 an enemy went down, 12 an order changed, 13 BT news, 14 road news, 15 a structure reached a level, 16 where a carried case sits, 17 a voidout crater, 18 the cases on a cart, 19 an order case's tag, 20 a shout or a scan, 21 vitals, 22 story resync news, 23 a facility's connection total); a receiver refuses any other type as out of range.
-constexpr uint8_t CargoTypeMax=23;
+// 9 like, 10 name, 11 an enemy went down, 12 an order changed, 13 BT news, 14 road news, 15 a structure reached a level, 16 where a carried case sits, 17 a voidout crater, 18 the cases on a cart, 19 an order case's tag, 20 a shout or a scan, 21 vitals, 22 story resync news, 23 a facility's connection total, 24 a diagnostic bug mark); a receiver refuses any other type as out of range.
+constexpr uint8_t CargoTypeMax=24;
 struct CargoEvent { uint32_t sequence=0; uint8_t type=1; uint32_t item=0; std::array<double,3> position{}; double yaw=0; uint64_t id=0, ref=0; };
 // Optional host-only sample, independent of presence/cargo and the handshake.
 // Milliseconds since midnight, not an elapsed world/forecast clock. Weather is unknown.
@@ -215,7 +215,8 @@ public:
     // slowly enough that the change does not show.
     uint32_t presentationDelayMs() const { return uint32_t(delay_+.5); }
     void queueCargo(CargoEvent);              // sequence is assigned here
-    std::vector<CargoEvent> takeCargo();      // received events, each exactly once, in order
+    // onlyType=0 drains all; a typed consumer leaves other features' events queued.
+    std::vector<CargoEvent> takeCargo(uint8_t onlyType=0);
     size_t cargoPending() const { return cargoOut_.size(); }
     bool sendEnvironment(Environment,uint64_t now); // connected host only, at most once per 30 seconds
     std::optional<Environment> latestEnvironment(uint64_t now) const; // expires after 2 s; cleared on reconnect

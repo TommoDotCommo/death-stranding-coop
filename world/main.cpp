@@ -45,12 +45,14 @@ static void closeSocket(sock_t s){closesocket(s);}
 using sock_t=int;
 static void closeSocket(sock_t s){close(s);}
 #endif
+#include "../common/crash_handler.h"
 namespace {
 constexpr size_t MaxHeader=16*1024,MaxBody=4*1024*1024;constexpr int MaxConnections=32,IdleSeconds=60;
 std::mutex outLock;std::atomic<int> connections{0};std::atomic<int64_t> lastRequest{0};
+diag::Session* diagnostic=new diag::Session; // worker threads may still run at process exit
 std::string dataPath,logPath,tracePath;
 void line(const std::string& text){
-    std::lock_guard<std::mutex> g(outLock);std::cout<<text<<std::endl;
+    std::lock_guard<std::mutex> g(outLock);diagnostic->Line(text);std::cout<<text<<std::endl;
     if(!logPath.empty()){std::ofstream f(logPath,std::ios::app);f<<text<<'\n';}}
 int64_t nowSeconds(){return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();}
 void save(world::World& w){
@@ -342,6 +344,15 @@ bool parseBuild(const std::string& text,world::RelayConfig& c){
     c.game=uint32_t(game);c.pinBuild=true;return true;}
 }
 int main(int argc,char** argv){
+    unsigned maxLogMb=diag::DefaultMaxLogMb;
+    for(int i=1;i<argc;++i)if(std::string(argv[i])=="--max-log-mb") {
+        if(i+1>=argc){std::cerr<<"--max-log-mb needs 5..2000\n";return 2;}
+        std::string v=argv[++i];
+        if(v.empty()||v.size()>4||v.find_first_not_of("0123456789")!=std::string::npos||!diag::ValidMaxLogMb(std::strtoul(v.c_str(),nullptr,10))){std::cerr<<"--max-log-mb needs 5..2000\n";return 2;}
+        maxLogMb=unsigned(std::strtoul(v.c_str(),nullptr,10));
+    }
+    if(diagnostic->Open(diag::DefaultLogsDir(),"world",maxLogMb))diag::crash::Install(*diagnostic);
+    std::atexit([]{diagnostic->Close(true);});
     if(argc>1&&argv[1][0]!='-')return offline(argc,argv);
     std::string bind="127.0.0.1",prefix,relayKey;int port=0,relayPort=0;long idleExit=0;bool haveRelayKey=false,nearGiven=false;world::RelayConfig relayConfig;
     std::vector<world::LinkConfig> links;
@@ -353,6 +364,7 @@ int main(int argc,char** argv){
     for(int i=1;i<argc;++i){
         std::string a=argv[i];auto next=[&]{if(i+1>=argc){std::cerr<<"missing value for "<<a<<"\n";std::exit(2);}return std::string(argv[++i]);};
         if(a=="--port")port=std::atoi(next().c_str());else if(a=="--bind")bind=next();else if(a=="--data")dataPath=next();
+        else if(a=="--max-log-mb"){next();}
         else if(a=="--prefix")prefix=next();else if(a=="--log")logPath=next();else if(a=="--trace")tracePath=next();else if(a=="--idle-exit")idleExit=std::atol(next().c_str());
         else if(a=="--relay-port")relayPort=std::atoi(next().c_str());else if(a=="--relay-key"){relayKey=next();haveRelayKey=true;}
         else if(a=="--relay-enter")relayConfig.enterMetres=std::atof(next().c_str());else if(a=="--relay-leave")relayConfig.leaveMetres=std::atof(next().c_str());
@@ -463,7 +475,7 @@ int main(int argc,char** argv){
     if(idleExit>0){
         // Started by a launcher for one session: leave when no game has asked anything for this long.
         lastRequest=nowSeconds();
-        std::thread([idleExit,&w]{while(true){std::this_thread::sleep_for(std::chrono::seconds(5));if(nowSeconds()-lastRequest.load()>=idleExit){save(w);line("idle: leaving");std::_Exit(0);}}}).detach();}
+        std::thread([idleExit,&w]{while(true){std::this_thread::sleep_for(std::chrono::seconds(5));if(nowSeconds()-lastRequest.load()>=idleExit){save(w);line("idle: leaving");diagnostic->Close();std::_Exit(0);}}}).detach();}
     line("coop-world listening on "+bind+":"+std::to_string(port)+(prefix.empty()?"":" (secret prefix set)"));
     for(size_t i=0;i<links.size();++i){
         line("link "+links[i].name+": "+(links[i].exportFilter.none?"gives nothing":"gives objects")+", "+(links[i].importFilter.none?"takes nothing":"takes objects from "+links[i].url)+" (this server is "+w.serverId()+")");

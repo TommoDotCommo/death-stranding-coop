@@ -9,10 +9,12 @@
 #include "strand.h"
 #include "owner.h"
 #include "../world/json.h"
+#include "../common/crash_handler.h"
 #include <sstream>
 #include <memory>
 using namespace launcher;
 namespace {
+diag::Session diagnostic;
 HWND window,tab;
 HFONT font,titleFont;
 std::unique_ptr<Network> net;
@@ -36,7 +38,7 @@ HWND child(int id){return GetDlgItem(window,id);}
 std::wstring text(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(n+1,0);GetWindowTextW(h,s.data(),n+1);s.resize(n);return s;}
 std::string utf8(const std::wstring& s){if(s.empty())return {};int n=WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),nullptr,0,nullptr,nullptr);std::string v(n,0);WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),v.data(),n,nullptr,nullptr);return v;}
 void set(int id,const std::wstring& s){if(text(child(id))!=s)SetWindowTextW(child(id),s.c_str());}
-void error(const std::exception& e){MessageBoxW(window,wtext(e.what()).c_str(),L"Death Stranding co-op - try again",MB_OK|MB_ICONERROR);}
+void error(const std::exception& e){diagnostic.Line(std::string("error: ")+e.what());MessageBoxW(window,wtext(e.what()).c_str(),L"Death Stranding co-op - try again",MB_OK|MB_ICONERROR);}
 HWND control(int page,int id,const wchar_t* klass,const wchar_t* label,DWORD style=0){auto h=CreateWindowExW(wcscmp(klass,L"EDIT")==0?WS_EX_CLIENTEDGE:0,klass,label,WS_CHILD|(wcscmp(klass,L"STATIC")?WS_TABSTOP:0)|style,0,0,0,0,window,reinterpret_cast<HMENU>(INT_PTR(id)),nullptr,nullptr);SendMessageW(h,WM_SETFONT,reinterpret_cast<WPARAM>(font),TRUE);controls[page].push_back(h);return h;}
 void label(int page,int id,const wchar_t* s){control(page,id,L"STATIC",s,SS_LEFT);}
 void place(int id,int x,int y,int w,int h){MoveWindow(child(id),x,y,w,h,TRUE);}
@@ -598,7 +600,7 @@ void timer(){
     if(net->launch){options.game=gameFolder;launchGame(options,net->session);net->launched();}
     scan();
     std::string state=std::to_string(net->lobby)+std::to_string(net->hosting)+std::to_string(net->joined)+std::to_string(net->ready)+std::to_string(net->peerReady)+std::to_string(net->incoming.offered)+std::to_string(net->fetchingSave())+net->incoming.title+saveNote+net->status;
-    if(state!=lastState){lastState=state;render();}
+    if(state!=lastState){diagnostic.Line("STATE "+state);lastState=state;render();}
 }
 LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
     try {
@@ -673,9 +675,13 @@ void buildControls(){
 }
 }
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
+    struct EndLog {~EndLog(){diagnostic.Close();}} endLog;
     try {
         SetProcessDPIAware();CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);WSADATA ws;if(WSAStartup(MAKEWORD(2,2),&ws))return 1;net=std::make_unique<Network>();
         options.data=known(FOLDERID_LocalAppData)/"DeathStrandingCoop";settingsFile=options.data/"launcher.ini";
+        auto maxMb=GetPrivateProfileIntW(L"launcher",L"max_log_mb",diag::DefaultMaxLogMb,settingsFile.c_str());
+        if(!diag::ValidMaxLogMb(maxMb))maxMb=diag::DefaultMaxLogMb;
+        if(diagnostic.Open(diag::DefaultLogsDir(),"launcher",maxMb))diag::crash::Install(diagnostic);
         auto read=[&](const wchar_t* key,const wchar_t* fallback){wchar_t b[32768];GetPrivateProfileStringW(L"launcher",key,fallback,b,32768,settingsFile.c_str());return std::wstring(b);};
         player=read(L"name",L"Porter");gameFolder=read(L"game",steamGame().c_str());
         choice=int(GetPrivateProfileIntW(L"launcher",L"choice",0,settingsFile.c_str()));if(choice<0||choice>2)choice=0;
@@ -811,5 +817,5 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
             }catch(const std::exception& e){error(e);}
         }
         net.reset();DeleteObject(font);DeleteObject(titleFont);WSACleanup();CoUninitialize();return 0;
-    }catch(const std::exception& e){MessageBoxW(nullptr,wtext(e.what()).c_str(),L"Death Stranding co-op",MB_OK|MB_ICONERROR);return 1;}
+    }catch(const std::exception& e){diagnostic.Line(std::string("fatal: ")+e.what());MessageBoxW(nullptr,wtext(e.what()).c_str(),L"Death Stranding co-op",MB_OK|MB_ICONERROR);return 1;}
 }

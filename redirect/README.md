@@ -326,3 +326,13 @@ proxy; the base was no longer in the module list). Each listed module is now hel
 (`module_hold.h`), and one that is already gone is skipped with a `MODULE_GONE` record. `make -C redirect
 module-hold-test` (native Windows, no game) loads and frees a DLL in a loop while another thread walks snapshots the
 same way: the run must see listed modules gone before the read, and the mutant without the hold must fault on one.
+
+## Player diagnostics
+
+A launcher-ticket player session also writes UTF-8 chained logs in
+`%LOCALAPPDATA%\DeathStrandingCoop\logs\`. The legacy UTF-16 audit and
+crash logs remain available at their original locations. Player crash recording
+is enabled without `COOP_CRASH_RECORD`: an unhandled exception marks the proxy
+and game logs crashed and writes one small process dump under the proxy log's
+stem. The existing exception-filter chain stays intact. Lab recorder switches
+keep their existing behavior. See [shared diagnostics](../common/README.md).

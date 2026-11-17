@@ -21,6 +21,10 @@ HANDLE log_file=INVALID_HANDLE_VALUE;
 uint64_t log_written=0;
 bool log_full=false;
 wchar_t log_name[MAX_PATH], dump_name[MAX_PATH];
+bool player_record=false;
+void (*player_unhandled)()=nullptr;
+EXCEPTION_RECORD player_exception{};CONTEXT player_context{};
+EXCEPTION_POINTERS player_pointers{&player_exception,&player_context};
 unsigned level=0;
 uint32_t hang_seconds=0;
 HMODULE (*load_dbghelp)(wchar_t*,size_t)=nullptr;
@@ -180,9 +184,11 @@ void record(const char* stage,EXCEPTION_POINTERS* e,DWORD tid) noexcept {
 // Hands one dump to the watchdog thread and waits a bounded time. Never called while holding the owner word.
 void request_dump(EXCEPTION_POINTERS* e,DWORD tid) noexcept {
     if(!dump_fn.load(std::memory_order_acquire) || tid==watchdog_tid || dump_taken.exchange(true)) return;
-    dump_pointers=e;dump_tid=tid;
+    if(player_record){player_exception=*e->ExceptionRecord;player_exception.ExceptionRecord=nullptr;player_context=*e->ContextRecord;dump_pointers=&player_pointers;}
+    else dump_pointers=e;
+    dump_tid=tid;
     SetEvent(dump_request);
-    WaitForSingleObject(dump_done,30000);
+    WaitForSingleObject(dump_done,player_record?2000:30000);
 }
 void write_dump() noexcept {
     auto fn=dump_fn.load(std::memory_order_acquire);
@@ -190,7 +196,7 @@ void write_dump() noexcept {
     BOOL ok=FALSE;DWORD error=0;
     if(f!=INVALID_HANDLE_VALUE) {
         MINIDUMP_EXCEPTION_INFORMATION x{dump_tid,dump_pointers,FALSE};
-        auto type=MINIDUMP_TYPE(MiniDumpNormal|MiniDumpWithThreadInfo|MiniDumpWithUnloadedModules);
+        auto type=player_record?MiniDumpNormal:MINIDUMP_TYPE(MiniDumpNormal|MiniDumpWithThreadInfo|MiniDumpWithUnloadedModules);
         ok=fn(GetCurrentProcess(),GetCurrentProcessId(),f,type,&x,nullptr,nullptr);
         if(!ok) error=GetLastError();
         CloseHandle(f);
@@ -222,6 +228,9 @@ LONG CALLBACK on_exception(EXCEPTION_POINTERS* e) noexcept {
     return EXCEPTION_CONTINUE_SEARCH;   // never handled here, whatever happens above
 }
 LONG WINAPI on_unhandled(EXCEPTION_POINTERS* e) {
+#ifndef MUTANT_DIAG_PLAYER_MARKER
+    if(player_unhandled)player_unhandled();
+#endif
     DWORD tid=GetCurrentThreadId();
     if(acquire(tid,500)) {
         if(unhandled_records<UnhandledCap) {++unhandled_records;record("unhandled",e,tid);}
@@ -390,10 +399,13 @@ bool install(const Options& o) noexcept {
 #else
     if(!o.level || !o.folder || !o.stem || veh_handle.load()) return false;
     level=o.level;hang_seconds=o.hang_seconds;load_dbghelp=o.load_dbghelp;
+    player_record=o.player_stem!=nullptr;player_unhandled=o.on_unhandled;
     Text<MAX_PATH> path;path.add(o.folder).put(L'\\').add(o.stem).add(".log");
     if(path.overflow()) return false;
     lstrcpynW(log_name,path.data(),MAX_PATH);
-    path.clear();path.add(o.folder).put(L'\\').add(o.stem).add(".dmp");
+    path.clear();
+    if(o.player_stem)path.add(o.player_stem);else path.add(o.folder).put(L'\\').add(o.stem);
+    path.add(".dmp");
     if(path.overflow()) return false;
     lstrcpynW(dump_name,path.data(),MAX_PATH);
     log_file=CreateFileW(log_name,GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);

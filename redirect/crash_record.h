@@ -155,6 +155,10 @@ struct Options {
     // Called once on the watchdog thread (never under the loader lock or in a handler) to load System32's
     // dbghelp.dll. Returns nullptr and a reason when the module policy cannot admit it: then no dump is written.
     HMODULE (*load_dbghelp)(wchar_t* reason,size_t capacity)=nullptr;
+    // Player diagnostics: legacy crash log stays in folder; marker and small
+    // dump share the UTF-8 session stem. Callback must not allocate or lock.
+    const wchar_t* player_stem=nullptr;
+    void (*on_unhandled)()=nullptr;
 };
 // Call once, on the process's main thread (the thread whose stack the hang note samples). DllMain-safe: registers
 // the vectored handler and the unhandled-exception filter, opens the log, writes the startup module map and starts

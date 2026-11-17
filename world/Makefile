@@ -49,9 +49,9 @@ build/fight-test: fight_test.cpp $(RELAY) $(PLAYER) | build
 # Linked servers' presence: two and three relays in memory with real players' sides.
 build/presence-test: presence_test.cpp $(RELAY) $(PLAYER) | build
 	$(CXX) $(FLAGS) presence_test.cpp relay.cpp ../core/broadcast_client.cpp ../core/core.cpp -o $@
-build/coop-world: main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
+build/coop-world: ../common/diag_log.h ../common/crash_handler.h main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
 	$(CXX) $(FLAGS) main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp identity.cpp signatures.cpp $(MONO) -o $@
-build/coop-world.exe: main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
+build/coop-world.exe: ../common/diag_log.h ../common/crash_handler.h main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
 	$(MINGW) $(WINFLAGS) main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp identity.cpp signatures.cpp $(MONO) -o $@ -lws2_32 -lbcrypt
 # The swarm of stand-in players (mod/swarm.cpp) talks to the built server over real sockets.
 ../mod/build/coop-swarm: FORCE

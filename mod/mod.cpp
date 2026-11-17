@@ -53,6 +53,8 @@ constexpr int INVALID_SOCKET=-1;
 #include "rewards.h"
 #include "guard_win.h"
 #include "link.h"
+#include "bugmark.h"
+#include "../common/diag_log.h"
 #include "nametag.h"
 #include "notice.h"
 #include "strand_notices.h"
@@ -109,7 +111,7 @@ template<class T> struct Background {
 namespace wiretypes {
 constexpr uint8_t all[]={2,3,4,5,mod::carry::WireType,mod::gear::GearWireType,mod::outfit::WireType,mod::likes::WireType,mod::nametag::WireType,
     mod::enemies::WireType,mod::orders::WireType,mod::bts::WireType,mod::roads::WireType,15,mod::carryplace::WireType,mod::voidout::WireType,
-    mod::carryplace::CartWireType,mod::orderload::WireType,mod::signals::EventWireType,mod::signals::VitalsWireType,mod::story::WireType,mod::rewards::WireType};
+    mod::carryplace::CartWireType,mod::orderload::WireType,mod::signals::EventWireType,mod::signals::VitalsWireType,mod::story::WireType,mod::rewards::WireType,mod::bugmark::WireType};
 constexpr bool distinct(){for(size_t i=0;i<sizeof all;++i)for(size_t j=i+1;j<sizeof all;++j)if(all[i]==all[j])return false;return true;}
 static_assert(distinct(),"two CARGO event features share a wire type");
 // ... and the core delivers it: a type above its limit is refused and the ordered stream stops at that event.
@@ -118,6 +120,7 @@ static_assert(delivered(),"a CARGO event type is above the core's CargoTypeMax")
 }
 static_assert(mod::OthersMax==mod::others::MaxOthers,"config `others` and others.h agree on the most players");
 namespace {
+const diag::Host* diagnosticHost=nullptr;
 std::string error;
 std::mutex lifecycle;
 void checksum(uint8_t* b,size_t n) {
@@ -198,6 +201,7 @@ struct Cache final:ds::StateProvider {
 };
 struct Runtime final:ds::Transport {
     mod::Config config;
+    diag::Session diagnostic;mod::bugmark::Button bugButton;uint64_t flightAt=0;
     // Session progress and join-at-host: a decision and a log, plus one native move only with join_move native.
     mod::join::Decision joinDecision;uint64_t nextProgressRead=0,handshakeNoted=0;bool progressRefusalNoted=false;std::string progressReason;uint64_t firstProgressRead=0;
     std::unique_ptr<mod::join::Mover> joinMover;   // join_move native only (join.h)
@@ -1291,7 +1295,7 @@ struct Runtime final:ds::Transport {
                 if(markers){markers->enable(on);pingKey=on?0x42:0;}   // B: V is the game's Melee (game_offsets.md, "Keys")
             }
             else if(text=="ping "+stamp+"\n")ping=true;
-            else if(auto vk=mod::puppet::parseCargoCommand(text,stamp,"key");vk&&*vk<=0xfe){pingKey=*vk;note(("MARKER ping key "+std::to_string(*vk)+"\n").c_str());}
+            else if(auto vk=mod::puppet::parseCargoCommand(text,stamp,"key");vk&&*vk<=0xfe&&*vk!=mod::bugmark::Key){pingKey=*vk;note(("MARKER ping key "+std::to_string(*vk)+"\n").c_str());}
             else note("MARKER ignored command for another process\n");
         }
         auto incoming=std::move(pingIn);pingIn.clear();
@@ -2306,6 +2310,8 @@ struct Runtime final:ds::Transport {
 #endif
     struct Pending {uint64_t receivedUs;uint64_t due;std::vector<uint8_t> b;size_t size;};std::vector<Pending> pending;mod::link::Profile linkProfile;uint64_t linkLost=0;uint32_t notedDelay=120;
     void note(const char* s) {
+        diagnostic.Line(s);
+        if(!std::strncmp(s,"LINK",4)||!std::strncmp(s,"STATE",5)||!std::strncmp(s,"POSE",4)||!std::strncmp(s,"HANDSHAKE",9))diagnostic.Flight(s);
         std::cerr<<"mod: "<<s<<'\n';
 #ifdef _WIN32
         OutputDebugStringA(s);if(log!=INVALID_HANDLE_VALUE) {DWORD n=0;auto len=DWORD(strlen(s));if(!WriteFile(log,s,len,&n,nullptr)||n!=len||!FlushFileBuffers(log)) throw std::runtime_error("mod log write failure");}
@@ -2444,6 +2450,9 @@ struct Runtime final:ds::Transport {
     }
     void init(const std::filesystem::path& path) {
         config=mod::parseConfig(readConfig(path));config.link=mod::link::chosen(config.link,std::getenv("COOP_LINK"));mod::link::profile(config.link,linkProfile);
+        diagnostic.Bind(diagnosticHost);
+        if(!diagnostic.Open(diag::DefaultLogsDir(),"game",config.maxLogMb))
+            std::cerr<<"mod: player diagnostic log unavailable\n";
         cache.progressReady=config.provider!="game";
         if(config.logging) {
 #ifdef _WIN32
@@ -2778,6 +2787,7 @@ struct Runtime final:ds::Transport {
 #endif
     }
     bool writePresence(const std::string& line) {
+        if(line.find("\"animation\"")==std::string::npos)diagnostic.Flight("PRESENCE "+line);
 #ifdef _WIN32
         DWORD n=0;return WriteFile(presenceLog,line.data(),DWORD(line.size()),&n,nullptr)&&n==line.size()&&FlushFileBuffers(presenceLog);
 #else
@@ -3038,8 +3048,21 @@ struct Runtime final:ds::Transport {
         if(failed) {err=failure;return false;}
         try {
             auto clock=mod::nowUs();auto now=clock/1000;
+            if(core)for(auto& e:core->takeCargo(mod::bugmark::WireType))
+                if(auto mark=mod::bugmark::Decode(e))diagnostic.Bugmark(*mark);
             if(lastProvider)providerTick.add(clock-lastProvider);
             lastProvider=clock;++ticks;
+            if(auto mark=bugButton.press(modKey(mod::bugmark::Key),config.slot)) {
+                diagnostic.Bugmark(*mark);
+                if(core&&core->connected()&&!config.group)core->queueCargo(mod::bugmark::Encode(*mark));
+            }
+            if(now>=flightAt){flightAt=now+250;std::ostringstream row;
+                row<<"STATE presence="<<cache.available<<" gated="<<cache.gated<<" link="<<(core&&core->connected())
+                   <<" sent="<<sent<<" received="<<received<<" dropped="<<dropped
+                   <<" local="<<cache.local.position[0]<<","<<cache.local.position[1]<<","<<cache.local.position[2]
+                   <<" partner="<<cache.remote.state.position[0]<<","<<cache.remote.state.position[1]<<","<<cache.remote.state.position[2];
+                diagnostic.Flight(row.str());}
+
             stages.enter("provider",mod::nowUs());
             cache.sampledAt=now;cache.available=provider->readLocal(cache.local);cache.gated=provider->isInCutsceneOrLoading();
             // Riding along on the partner's truck (passenger.h): the porter moves with the truck, not on his feet. The
@@ -3820,6 +3843,7 @@ struct Runtime final:ds::Transport {
         relayStop();
         strandPoller.reset();   // its thread ends within a read's time-outs, before the sockets' library goes
         if(socket!=INVALID_SOCKET)closesocket(socket);
+        diagnostic.Close();
 #ifdef _WIN32
         if(wsa)WSACleanup();
         if(log!=INVALID_HANDLE_VALUE)CloseHandle(log);
@@ -3835,6 +3859,8 @@ struct Runtime final:ds::Transport {
 Runtime* runtime=nullptr;
 }
 extern "C" {
+// The proxy hosts file IO so save redirection never moves player diagnostics.
+MOD_API void mod_diag_bind(const diag::Host* host) {diagnosticHost=host;}
 #ifdef MOD_FAKE_NETWORK
 // Test-only datagram boundary. Production DLLs never export these functions.
 // Move the fake player (game axes, z up; rotation row-major) and enter the world; menu=1 returns to the main menu.

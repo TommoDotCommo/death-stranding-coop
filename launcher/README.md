@@ -584,3 +584,12 @@ rename/pin/forget, automatic lobby return after game exit, and in-game discovery
 replies remain unimplemented. The launcher releases its lobby port before the mod
 binds it, so hosts are discoverable in the pre-game lobby only. Internet play uses
 LAN/VPN routes; there is no NAT traversal. Named hosts use Windows IPv4 DNS.
+
+## Session diagnostics
+
+The launcher writes a UTF-8 chained session log under
+`%LOCALAPPDATA%\DeathStrandingCoop\logs\`, alongside the game, proxy and
+Windows server logs. `[launcher] max_log_mb` in `launcher.ini` accepts 5–2000
+(default 200). Windows unhandled exceptions create a crash marker and a small
+minidump. Legacy diagnostic files remain readable. See
+[shared diagnostics](../common/README.md) for formats and retention.

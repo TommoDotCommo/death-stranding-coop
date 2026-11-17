@@ -524,7 +524,18 @@ void Core::queueCargo(CargoEvent e) {
     if(!e.id) { uint64_t salt=(config_.nonce*0x9e3779b97f4a7c15ull)>>31; e.id=((salt<<20)|(++cargoIds_&0xfffff))&((1ull<<53)-1); if(!e.id) e.id=1; }
     e.sequence=++cargoNext_; cargoOut_.push_back(e);
 }
-std::vector<CargoEvent> Core::takeCargo() { std::vector<CargoEvent> out; out.swap(cargoIn_); return out; }
+std::vector<CargoEvent> Core::takeCargo(uint8_t onlyType) {
+    std::vector<CargoEvent> out;
+    if(!onlyType){out.swap(cargoIn_);return out;}
+    for(auto it=cargoIn_.begin();it!=cargoIn_.end();) {
+#ifdef MUTANT_DIAG_CONSUME
+        out.push_back(*it);it=cargoIn_.erase(it);
+#else
+        if(it->type==onlyType){out.push_back(*it);it=cargoIn_.erase(it);}else ++it;
+#endif
+    }
+    return out;
+}
 void Core::sendCargo(const CargoEvent& e,uint64_t now) {
     Packet q; q.kind=Kind::Cargo; q.role=config_.role; q.session=config_.session; q.nonce=config_.nonce; q.echo=peer_; q.stamp=now;
     q.sequence=e.sequence; q.state.action=e.type; q.t0=e.item; q.t1=e.id; q.t2=e.ref; q.state.position=e.position; q.state.yaw=e.yaw;

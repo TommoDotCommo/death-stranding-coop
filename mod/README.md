@@ -28,6 +28,14 @@ There is no game-thread hook. `game_offsets.md` describes the signature seam.
 
 ## Config, paths and identity
 
+Player diagnostics are always recorded separately in
+`%LOCALAPPDATA%\DeathStrandingCoop\logs\`; `max_log_mb` accepts 5–2000
+(default 200). Legacy instance logs and presence JSONL remain available to
+existing tools. F2 writes a bug mark and the last 60 seconds of presence/link/state
+observations, and sends the same mark to a connected partner. Holding it fires
+once; F2 is reserved from other mod bindings. See [shared diagnostics](../common/README.md)
+for the chain format, pruning, crash recorder and platform limitations.
+
 Place an exclusively copied (never linked) mod in
 `<instance>/redirect-data/mod/mod.dll`, config at `mod.json` beside it:
 
