@@ -71,8 +71,8 @@ config names the server instead:
 | `relay_key` | the group's key, the one the server was started with; on a server that takes player keys, this player's relay token, which the launcher takes from the server just before the game starts (the same field, at most 32 letters and digits) |
 | `online_server` (group) | `http://SERVER:PORT/KEY/auth/ds`; on a server that takes player keys `http://SERVER:PORT/KEY/t/TICKET/auth/ds`, with the sign-in ticket the launcher took (good for 30 minutes until the game signs in). The mod passes the address on as it is |
 | `strand_notices`, `strand_token` | with `online_server`: lines in the game's info log about this player's builds on the server, read with the notice token the launcher took ("Strand notices", below); the launcher writes both |
-| `build_received` | with `online_server`: other players' structures that server hands the game are built at once, without the game's range, placement and area checks ("Received structures built", below); off by default; live: served bridges are built straight from the answer; received rain shelters were still removed before the area check was skipped (2026-11-17, not run since) |
-| `offer_strand` | with `online_server` and `strand_token`: the structures this player's save already holds are offered to that server through the game's own upload, one at a time, while the server says his older strand may be ("Offering your existing strand", below); off by default; live: all 26 own structures of an Episode 3 save offered in about 3 minutes |
+| `build_received` | with `online_server`: other players' structures that server hands the game are built at once, without the game's range, placement and area checks ("Received structures built", below); off by default; the launcher writes it in group play from its setting (on unless the player turns it off); live: served bridges are built straight from the answer; received rain shelters were still removed before the area check was skipped (2026-11-17, not run since) |
+| `offer_strand` | with `online_server` and `strand_token`: the structures this player's save already holds are offered to that server through the game's own upload, one at a time, while the server says his older strand may be ("Offering your existing strand", below); off by default; the launcher writes it on in group play with `strand_token`, so the player's `offer_old` on that server decides; live: all 26 own structures of an Episode 3 save offered in about 3 minutes |
 | `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
 | `show_others` | `"everyone"` (default), `"friends"` or `"nobody"`: who of the players near this player the server shows him (broadcast only, sent in every HELLO; `world/README.md`, "How many players one player sees"). The server's own record of his choice, set from the launcher, comes first; `friends` needs a server with player keys. Requires `relay_mode` `"broadcast"`. A server from before this refuses a HELLO with anything but everyone |
 | `slot` | still required (0..15), but no port is bound from it |
@@ -2094,7 +2094,8 @@ unchanged. Not seen yet: another player's game receiving them.
 The structures a save already holds were built before this server: some never reached any server (no online id),
 some have an id from the original online service. The owner's decision (2026-11-17): offering them is an option.
 The player says whether his older strand may be offered to a server (`offer_old` in the launcher, kept by the server:
-`../world/README.md`, "The players' choices"); this option lets his game act on it.
+`../world/README.md`, "The players' choices"); this option lets his game act on it. The launcher turns it on in
+every group config that has a notice token, so his choice on that server alone decides (`../launcher/README.md`).
 
 What is live and what is not:
 
