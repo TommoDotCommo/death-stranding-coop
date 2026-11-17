@@ -71,8 +71,8 @@ config names the server instead:
 | `relay_key` | the group's key, the one the server was started with; on a server that takes player keys, this player's relay token, which the launcher takes from the server just before the game starts (the same field, at most 32 letters and digits) |
 | `online_server` (group) | `http://SERVER:PORT/KEY/auth/ds`; on a server that takes player keys `http://SERVER:PORT/KEY/t/TICKET/auth/ds`, with the sign-in ticket the launcher took (good for 30 minutes until the game signs in). The mod passes the address on as it is |
 | `strand_notices`, `strand_token` | with `online_server`: lines in the game's info log about this player's builds on the server, read with the notice token the launcher took ("Strand notices", below); the launcher writes both |
-| `build_received` | with `online_server`: other players' structures that server hands the game are built at once, without the game's range and placement checks ("Received structures built", below); off by default; the scan built a served bridge live, the change to the game's request builder that keeps rain shelters is not run live yet |
-| `offer_strand` | with `online_server` and `strand_token`: the structures this player's save already holds are offered to that server through the game's own upload, one at a time, while the server says his older strand may be ("Offering your existing strand", below); off by default, not run live in the mod |
+| `build_received` | with `online_server`: other players' structures that server hands the game are built at once, without the game's range and placement checks ("Received structures built", below); off by default; live: served bridges are built straight from the answer; received rain shelters are still removed |
+| `offer_strand` | with `online_server` and `strand_token`: the structures this player's save already holds are offered to that server through the game's own upload, one at a time, while the server says his older strand may be ("Offering your existing strand", below); off by default; live: all 26 own structures of an Episode 3 save offered in about 3 minutes |
 | `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
 | `show_others` | `"everyone"` (default), `"friends"` or `"nobody"`: who of the players near this player the server shows him (broadcast only, sent in every HELLO; `world/README.md`, "How many players one player sees"). The server's own record of his choice, set from the launcher, comes first; `friends` needs a server with player keys. Requires `relay_mode` `"broadcast"`. A server from before this refuses a HELLO with anything but everyone |
 | `slot` | still required (0..15), but no port is bound from it |
@@ -1982,7 +1982,13 @@ The mod then does three things in the game (`online.h`; addresses in `game_offse
 The log says `ONLINE server …`, `ONLINE sign-in asked` and each change of the login task, with `(signed in)` at the
 end. Game-free tests: the address rules and the asking logic, five mutants (`online_test.cpp`).
 
-### Received structures built (`build_received`, off by default; the scan live once, the request change not run live)
+### Received structures built (`build_received`, off by default; live for bridges, 2026-11-17)
+
+**Live (2026-11-17).** With the scan alone, a served 30 m bridge was found in state 0 on the first scan (0.28 ms) and
+built at once. With the change to the answer's requests ("RECEIVED answer requests changed"), a served bridge was
+built straight from the answer with no scan write, unloaded at 1.3 km and built again on return. A served rain
+shelter was removed in both runs with no record left: the range and placement checks are not what takes received
+shelters down. No fault, saves unchanged.
 
 The game makes another player's structure from the server's answer as a pending Net record and then holds it back:
 a bridge, safe house or jump stand is built only while the porter is at least 1 km from it, and every received
@@ -2057,7 +2063,15 @@ structure reader also gives each object's flag bytes (`+0xa8..+0xab`) and can sk
 scans with it (above). Game-free: `own_strand_test.cpp` over a fake process memory, eleven mutants (family `own` in
 `test_game_thread_mutants.py`).
 
-### Offering your existing strand (`offer_strand`, off by default; built without a game, not run live in the mod)
+### Offering your existing strand (`offer_strand`, off by default; live once, 2026-11-17)
+
+**Live (2026-11-17, one real game on the Episode 3 save, signed in to `coop-world` on the same PC, the player's
+`offer_old` set to yes).** The mod logged "OFFER 13 own structures to upload, 13 to send again with their ids, 4 left
+out", had the game send the 13 with ids of the original service again (ladders, posts, climbing ropes, a charger, in
+areas 102 to 205), which the server kept under those ids, and then upload the 13 others (ladders, a climbing rope, two
+chargers, a 30 m bridge, a safe house), each record taking the server's id. 26 objects under the player, none refused,
+no `deleteObject` from the game, about 3 minutes in all, records far from the porter included; no fault, saves
+unchanged. Not seen yet: another player's game receiving them.
 
 The structures a save already holds were built before this server: some never reached any server (no online id),
 some have an id from the original online service. The owner's decision (2026-11-17): offering them is an option.
