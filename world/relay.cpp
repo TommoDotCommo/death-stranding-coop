@@ -405,6 +405,12 @@ void Relay::receiveBroadcast(const RelayAddress& from,Player* sender,const uint8
     case bc::Type::Fight:if(auto* p=from2(m.fight.player))fight(*p,m.fight,now);return;
     case bc::Type::Join:if(auto* p=from2(m.join.player))join(*p,m.join);return;
     case bc::Type::Post:if(auto* p=from2(m.post.player))post(*p,m.post);return;
+    case bc::Type::Mark:
+#ifdef MUTANT_RELAY_MARK_ANY_SOURCE
+        if(!sender){auto it=players_.find(m.mark.player);if(it!=players_.end()){mark(it->second,m.mark,now);return;}}
+#endif
+        if(auto* p=from2(m.mark.player))mark(*p,m.mark,now);
+        return;
     case bc::Type::Bye:
         if(sender&&sender->id==m.bye.id&&rightToken(m.bye.token,m.bye.id))remove(sender->id,"left");
         return;
@@ -549,6 +555,30 @@ void Relay::share(Player& to,const Player& from,size_t k){
     for(size_t i=0;i<bc::StateKinds;++i)h.versions[i]=from.states[i].version;
     h.payload=from.states[k].bytes.data();h.size=h.version?from.states[k].bytes.size():0;
     auto b=bc::encode(h);send_(to.address,b.data(),b.size());++stats_.shares;
+}
+
+// ---- Bug marks (README.md, "Bug marks") -------------------------------------------------------------------------------
+// One line in the server's log, and the mark to the players near who are sent this player's updates (shown him).
+void Relay::mark(Player& s,const bc::Mark& k,uint64_t now){
+    if(s.link)return;   // a linked server's player sends nothing here
+    while(!s.marks.empty()&&s.marks.front()+bc::MarkHourMs<=now)s.marks.pop_front();
+#ifndef MUTANT_RELAY_MARK_RATE
+    if((!s.marks.empty()&&now<s.marks.back()+bc::MarkEveryMs)||s.marks.size()>=bc::MarksPerHour){++stats_.marksRefused;return;}
+#endif
+    s.marks.push_back(now);++stats_.marks;
+    note("bugmark "+std::to_string(k.mark)+" from "+hex(s.id)+" ("+(s.nickname.empty()?std::string("no name"):s.nickname)+") at "+std::to_string(utc?utc():now));
+    bc::Mark out;out.player=s.id;out.mark=k.mark;Buffer b=bc::encodeMarked(out);
+#ifndef MUTANT_RELAY_MARK_FAR
+    for(auto id:s.nearby){
+        auto it=players_.find(id);if(it==players_.end())continue;
+        Player& r=it->second;if(r.mode!=bc::Version||r.link)continue;
+#ifndef MUTANT_RELAY_MARK_HIDDEN
+        if(!r.shown.count(s.id))continue;   // near, but not shown him: he is sent nothing of him
+#endif
+        send_(r.address,b.data(),b.size());++stats_.marksSent;}
+#else
+    for(auto& [id,r]:players_)if(id!=s.id&&r.mode==bc::Version&&!r.link){send_(r.address,b.data(),b.size());++stats_.marksSent;}
+#endif
 }
 
 // ---- Fights with visitors (README.md, "The fight channel") ------------------------------------------------------------

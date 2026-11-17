@@ -8,6 +8,8 @@
 // How many one player sees: at most the cap, the nearest, kept while about as near (no flapping), friends first,
 // only friends or nobody by choice (the server's record before the HELLO's), state handed out to whoever starts being
 // shown, and nothing at all of the players near who are not shown; 100 players in one place with and without a cap.
+// Bug marks: one line in the server's log, the mark to the players near who are shown the sender and to nobody else,
+// one every 2 s and 30 an hour, nothing from an address that never said HELLO, in another's name, or refused by the keys.
 #include "relay.h"
 #include "../core/broadcast_client.h"
 #include <cmath>
@@ -406,7 +408,49 @@ static void hundred(){
     CHECK(shown16==16&&shownAll==99&&b16*4<bAll&&b16<16*20*(bc::EntryHeader+bc::PresenceBytes)*1.3);
 }
 
+static Buffer markRaw(uint64_t player,uint32_t mark){bc::Mark k;k.player=player;k.mark=mark;return bc::encodeMark(k);}
+static void marks(){
+    Sim s;std::vector<std::string> lines;
+    s.relay->log=[&](const std::string& l){if(l.rfind("bugmark ",0)==0)lines.push_back(l);};s.relay->utc=[]{return uint64_t(1763000000123ull);};
+    // Bob near and shown Ann; Cy near but shown nobody (his choice); Di far away.
+    auto& a=s.add(1,"Ann",{0,0,0});auto& b=s.add(2,"Bob",{10,0,0});auto& c=s.add(3,"Cy",{20,0,0},buildOf(1),ds::GameBuild,bc::Show::Nobody);auto& d=s.add(4,"Di",{1000,0,0});
+    s.run(1000);CHECK(b.sees(1)&&s.relay->shows(2,1)&&s.relay->areNear(3,1)&&!s.relay->shows(3,1)&&!s.relay->areNear(4,1));
+    s.clear();
+    auto marked=[&](Sim::Peer& p){return p.count(bc::Type::Marked);};
+    uint64_t first=s.now;
+    CHECK(a.client->mark(0x00100001u,a.clock(s.now)));s.step(10);
+    CHECK(lines.size()==1&&lines[0]=="bugmark 1048577 from 0000000000000001 (Ann) at 1763000000123");
+    auto got=b.client->takeMarks();CHECK(got.size()==1&&got[0].source==1&&got[0].name=="Ann"&&got[0].mark==0x00100001u);
+    CHECK(marked(b)==1&&marked(a)==0&&marked(c)==0&&marked(d)==0&&c.client->takeMarks().empty()&&d.client->takeMarks().empty());
+    CHECK(s.relay->stats().marks==1&&s.relay->stats().marksSent==1);
+    // The rate: a second mark within 2 s is dropped (the server's own check, the game's skipped); then one every 2 s
+    // until 30 in the hour; the first an hour old, one more.
+    s.now=first+1000;s.raw(a.address,markRaw(1,0x00100002u));
+    CHECK(lines.size()==1&&marked(b)==1&&s.relay->stats().marksRefused==1);
+    for(unsigned i=1;i<=34;++i){s.step(first+2000*i-s.now);s.raw(a.address,markRaw(1,0x00100010u+i));}
+    CHECK(lines.size()==bc::MarksPerHour&&marked(b)==bc::MarksPerHour&&s.relay->stats().marksRefused==6);
+    while(s.now+2000<first+bc::MarkHourMs)s.step(2000);
+    s.step(first+bc::MarkHourMs+20-s.now);s.raw(a.address,markRaw(1,0x00100100u));   // the first was taken at first+10
+    CHECK(lines.size()==bc::MarksPerHour+1&&lines.back().rfind("bugmark 1048832 from 0000000000000001 (Ann)",0)==0);
+    CHECK(marked(c)==0&&marked(d)==0&&b.sees(1));
+    // Not from an address that never said HELLO, and not in another player's name.
+    auto unknown=s.relay->stats().unknownSource,spoofed=s.relay->stats().spoofed;size_t toBob=marked(b);
+    s.step(2500);s.raw(Stranger,markRaw(1,77));s.raw(c.address,markRaw(1,78));s.raw(d.address,markRaw(2,79));
+    CHECK(s.relay->stats().unknownSource==unknown+1&&s.relay->stats().spoofed==spoofed+2&&lines.size()==bc::MarksPerHour+1&&marked(b)==toBob&&s.stray.empty());
+    // Di's own mark: logged under his id, and passed to nobody (nobody near).
+    CHECK(d.client->mark(5,d.clock(s.now)));s.step(10);
+    CHECK(lines.size()==bc::MarksPerHour+2&&lines.back()=="bugmark 5 from 0000000000000004 (Di) at 1763000000123"&&marked(a)==0&&marked(b)==toBob&&marked(c)==0);
+    // Player keys: a HELLO the server's keys refuse makes no player; his marks go nowhere.
+    RelayConfig keyed;keyed.admit=[](uint64_t id,const std::string&){return id!=9;};
+    Sim k(keyed);std::vector<std::string> keyedLines;k.relay->log=[&](const std::string& l){if(l.rfind("bugmark ",0)==0)keyedLines.push_back(l);};
+    auto& ann=k.add(1,"Ann",{0,0,0});auto& eve=k.add(9,"Eve",{5,0,0});k.run(1000);
+    CHECK(!k.relay->known(9)&&!eve.client->online()&&!eve.client->mark(3,eve.clock(k.now)));
+    k.raw(eve.address,markRaw(9,4));k.raw(eve.address,markRaw(1,4));k.step(10);
+    CHECK(keyedLines.empty()&&ann.count(bc::Type::Marked)==0&&ann.client->takeMarks().empty());
+}
+
 int main(){
+    marks();
     interest();teleport();shownState();senders();orderAndStamp();modesAndBuilds();batching();crowd();
     nearCap();nearHysteresis();showChoice();hundred();
     if(failures)return 1;

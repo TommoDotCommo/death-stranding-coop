@@ -64,8 +64,10 @@ In `peer` mode the mod borrows the [resident double](#resident-double) instead. 
 each game sends one update a tick to the server, and the server copies it to every player near. The launcher uses it
 for group play. Compare [pairs mode](#pairs). *Where:* `core/broadcast.h`, `world/relay.h`, `mod/crowd.h`.
 
-<a id="bugmark"></a>**BUGMARK** (aka F2 marker) **(planned)**: pressing F2 in the game will write a numbered `BUGMARK
-<n>` line into the game's [log](#logs) and keep the last 60 seconds in a flight file beside it. When both players
+<a id="bugmark"></a>**BUGMARK** (aka F2 marker): pressing F2 in the game writes a numbered `BUGMARK
+<n>` line into the game's [log](#logs) and keeps the last 60 seconds in a flight file beside it. The partner's game
+(two players) or the games of the players near (group play: `BUGMARK <n> from <name>`, and a line in the server's log)
+write the same number. When both players
 press F2 at the moment something goes wrong, the [diagnostics reader](#diagnostics) lines up their two timelines on
 that number. The reader already understands them: `tools/diag_report.py --align`.
 

@@ -406,7 +406,7 @@ void serveRelay(sock_t s,world::RelayConfig config){
     world::Relay relay(std::move(config),[s](const world::RelayAddress& to,const uint8_t* data,size_t size){
         sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(to.port);a.sin_addr.s_addr=htonl(to.ip);
         sendto(s,reinterpret_cast<const char*>(data),int(size),0,reinterpret_cast<const sockaddr*>(&a),sizeof a);});
-    relay.log=[](const std::string& text){line(text);};
+    relay.log=[](const std::string& text){line(text);};relay.utc=[]{return diag::UtcMs();};   // bug mark lines carry the UTC time
     std::vector<uint8_t> buffer(ds::relay::MaxDatagram+1);uint64_t nextTick=0;   // one byte more: a longer datagram is seen as too long
     while(true){
         // Wait for a datagram, at most until the next FRAME of the broadcast mode is due (and a quarter second).

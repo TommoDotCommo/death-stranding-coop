@@ -22,8 +22,12 @@ F2 writes `BUGMARK <number>` and `<stem>.flight-<number>.txt` from the previous
 60 seconds of presence, link and state observations. The memory ring has an
 8 MiB safety bound, and each flight file is capped too. A held F2 fires once.
 Reliable event type 24 carries marks to a connected partner; receivers do not
-echo them. Both players need the same build identity. Group broadcast mode
-does not carry the partner event stream.
+echo them. Both players need the same build identity. In group play the mark
+goes through the server to the players near (`../mod/README.md`, "F2 bug
+marks"); their games write `BUGMARK <number> from <name>` and a flight file of
+their own. The proxy's host callback takes that name, so the binder export is
+`mod_diag_bind2` (`diag::HostBind`): a proxy and a mod of different layouts do
+not bind, and the mod then logs on its own.
 
 Player crashes create `<stem>.crash` and a small `MiniDumpNormal` `.dmp`.
 Only unhandled exceptions create crash markers; previous filters still run.

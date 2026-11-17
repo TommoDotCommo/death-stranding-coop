@@ -20,6 +20,9 @@
 // a visitor it joins (JOIN until answered) and posts its reports. It takes a DELIVER only for its own role: a visitor the
 // state of the fight it joined from that fight's owner, an owner a report on its fight from someone else, each source's
 // versions only forward; the server checks the same before anything is sent.
+//
+// Bug marks (F2): mark() sends this player's mark to the server, at most one every MarkEveryMs and MarksPerHour in an
+// hour; takeMarks() gives the marks the server passed on from players in the roster (anyone else's are dropped).
 #include "broadcast.h"
 #include "core.h"
 #include <deque>
@@ -52,7 +55,13 @@ struct Counters {
     uint64_t fights=0,joins=0,posts=0;                  // FIGHT, JOIN and POST sent
     uint64_t offers=0,statuses=0,delivered=0;           // OFFER, STATUS and DELIVER taken
     uint64_t fightRefused=0;   // a DELIVER or STATUS that is not for this player's fight, its role or its source, or older
+    // Bug marks.
+    uint64_t marks=0,marksHeld=0;    // MARK sent; marks not sent for the rate (one every 2 s, 30 an hour) or offline
+    uint64_t marked=0,markRefused=0; // MARKED taken; refused (a source not in the roster, or this player himself)
 };
+// A bug mark the server passed on: who it came from (the server's record, and his name as the roster gave it).
+struct MarkNews { uint64_t source=0; std::string name; uint32_t mark=0; };
+constexpr size_t MarkNewsMax=64;   // marks kept for the adapter at most (the server sends at most one per source in 2 s)
 // The fight channel's timing on the player's side.
 constexpr uint64_t FightKeepMs=1000,FightJoinEveryMs=500,FightOfferMs=3000;
 // What the fight channel brought: a STATUS for this player's fight, or a DELIVER taken (a visitor: the owner's state;
@@ -120,6 +129,9 @@ public:
     bool joined() const {return visiting_&&joined_;}
     bool fightsHere() const {return fightsHere_;}            // the server said Open to this player's FIGHT
     uint8_t visitors() const {return hosting_?visitors_:0;}   // the owner's visitors, as the server last said
+    // Bug marks: true when sent (online, and within the rate); the adapter writes its own log line either way.
+    bool mark(uint32_t mark,uint64_t now);
+    std::vector<MarkNews> takeMarks();
 private:
     struct Blob {std::vector<uint8_t> bytes;uint32_t version=0;uint16_t generation=0;bool have=false;uint64_t revision=0;};
     struct AnimationSample {Animation animation;uint64_t time=0;uint32_t sequence=0;};
@@ -163,5 +175,8 @@ private:
     bool hosting_=false,visiting_=false,joined_=false,fightsHere_=false;FightInfo host_{};uint64_t keepAt_=0,joinAt_=0;uint8_t visitors_=0;
     uint64_t visitOwner_=0;uint32_t visitFight_=0,postVersion_=0;std::map<uint64_t,uint32_t> deliveredVersion_;
     std::map<uint64_t,std::pair<Offer,uint64_t>> offers_;std::vector<FightNews> fightNews_;
+    // Bug marks: when this player's were sent (the last hour), and the ones passed on to him.
+    void marked(const Mark&);
+    std::deque<uint64_t> markTimes_;std::vector<MarkNews> marks_;
 };
 }

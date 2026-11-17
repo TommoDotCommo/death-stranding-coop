@@ -176,11 +176,12 @@ static void wire(){
      Fight g;g.player=3;g.info=info;Offer o;o.owner=3;o.info=info;Join j;j.player=4;j.owner=3;j.fight=1;Status st;st.owner=3;st.fight=1;
      Post q;q.player=4;q.owner=3;q.fight=1;q.version=1;q.payload=payload.data();q.size=10;
      for(auto x:{encode(g),encode(o),encode(j),encode(st),encodePost(q),encodeDeliver(q)})samples.push_back(x);}
+    {Mark k;k.player=5;k.mark=0x12300001;samples.push_back(encodeMark(k));samples.push_back(encodeMarked(k));}
     for(auto& s:samples){
         for(size_t n=0;n<s.size();++n){Message m;CHECK(parse(s.data(),n,m)!=WireError::None);}
         auto more=s;more.push_back(0);CHECK(parseBuffer(more)!=WireError::None);
         auto v=s;v[0]='X';CHECK(parseBuffer(v)==WireError::Magic);v=s;v[7]=1;CHECK(parseBuffer(v)==WireError::Reserved);
-        v=s;v[6]=0;CHECK(parseBuffer(v)==WireError::Type);v[6]=17;CHECK(parseBuffer(v)==WireError::Type);
+        v=s;v[6]=0;CHECK(parseBuffer(v)==WireError::Type);v[6]=TypeLast+1;CHECK(parseBuffer(v)==WireError::Type);
         v=s;v[4]=1;CHECK(parseBuffer(v)==WireError::Version);}
     {Message m;CHECK(parse(nullptr,0,m)==WireError::Length);Buffer big(MaxDatagram+1,0);std::memcpy(big.data(),"DSR1\x02\x00\x06\x00",8);CHECK(parseBuffer(big)==WireError::Length);}
     // Damaged datagrams: never accepted with a wrong shape, never a crash.
@@ -481,8 +482,42 @@ static void fights(){
     }
 }
 
+// Bug marks (F2): MARK and MARKED byte for byte and refused when bad; the player's side sends at most one every 2 s and
+// 30 an hour, nothing offline, and takes a passed-on mark only from a player in the roster, with the roster's name.
+static void marks(){
+    {   Mark k;k.player=0x1122334455667788ull;k.mark=0x5a100003;
+        for(auto b:{encodeMark(k),encodeMarked(k)}){
+            CHECK(b.size()==MarkSize&&MarkSize==24&&!std::memcmp(b.data(),"DSR1",4)&&b[4]==2&&get(b,8,8)==k.player&&get(b,16,4)==k.mark&&get(b,20,4)==0);
+            Message m;CHECK(parseBuffer(b,m)==WireError::None&&m.mark.player==k.player&&m.mark.mark==k.mark);
+            auto v=b;v[16]=v[17]=v[18]=v[19]=0;CHECK(parseBuffer(v)==WireError::Range);    // mark 0
+            v=b;for(size_t i=8;i<16;++i)v[i]=0;CHECK(parseBuffer(v)==WireError::Range);      // player 0
+            v=b;v[22]=1;CHECK(parseBuffer(v)==WireError::Reserved);
+            v=b;v.push_back(0);CHECK(parseBuffer(v)==WireError::Length);}
+        CHECK(encodeMark(k)[6]==uint8_t(Type::Mark)&&encodeMarked(k)[6]==uint8_t(Type::Marked)&&uint8_t(Type::Mark)==17&&uint8_t(Type::Marked)==18);
+        k.mark=0;CHECK(throws([&]{encodeMark(k);}));k.mark=1;k.player=0;CHECK(throws([&]{encodeMarked(k);}));}
+    {   // Sending: offline nothing; online one, then none within 2 s; 30 in an hour; the hour over, again.
+        Bench t;CHECK(!t.client.mark(7,t.now)&&t.take(Type::Mark).empty());
+        t.online();CHECK(t.client.mark(7,t.now));auto sent=t.take(Type::Mark);CHECK(sent.size()==1&&sent[0].mark.player==1&&sent[0].mark.mark==7);
+        CHECK(!t.client.mark(8,t.now+1999)&&t.take(Type::Mark).size()==1);
+        uint64_t first=t.now;unsigned taken=1;
+        for(unsigned i=1;i<40;++i){t.now=first+2000*i;t.client.tick(t.now);t.answer(1,1,{},0,false);taken+=t.client.mark(100+i,t.now);}
+        CHECK(taken==MarksPerHour&&t.take(Type::Mark).size()==MarksPerHour&&t.client.counters().marksHeld>=10);
+        t.now=first+MarkHourMs;t.client.tick(t.now);t.answer(1,1,{},0,false);CHECK(t.client.online()&&t.client.mark(200,t.now));}
+    {   // Receiving: from a player in the roster with his name; from a stranger, or this player himself, nothing.
+        Bench t;t.online();t.roster({{true,2,"Ann"}});
+        auto marked=[&](uint64_t source,uint32_t mark){Mark k;k.player=source;k.mark=mark;auto b=encodeMarked(k);t.client.receive(b.data(),b.size(),t.now);};
+        marked(2,11);marked(9,12);marked(1,13);
+        auto got=t.client.takeMarks();CHECK(got.size()==1&&got[0].source==2&&got[0].name=="Ann"&&got[0].mark==11);
+        CHECK(t.client.counters().marked==1&&t.client.counters().markRefused==2&&t.client.takeMarks().empty());
+        // A MARK (the server's type) sent to a player is not his.
+        {Mark k;k.player=2;k.mark=14;auto b=encodeMark(k);t.client.receive(b.data(),b.size(),t.now);}CHECK(t.client.takeMarks().empty());
+        // Kept for the adapter at most MarkNewsMax.
+        for(unsigned i=0;i<MarkNewsMax+10;++i){marked(2,100+i);}
+        CHECK(t.client.takeMarks().size()==MarkNewsMax);}
+}
+
 int main(){
-    wire();clockAndRoster();entries();state();publishing();interpolation();fights();
+    wire();clockAndRoster();entries();state();publishing();interpolation();fights();marks();
     if(failures)return 1;
     std::puts("broadcast tests passed");return 0;
 }

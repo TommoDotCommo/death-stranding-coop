@@ -42,12 +42,15 @@ using Mutex=std::mutex;
 // A mod loaded behind save redirection delegates diagnostics to its proxy.
 // Only these fixed-purpose operations cross the DLL boundary; no file-system
 // permission or caller-selected path is granted to the game or the mod.
+// The mod exports its binder as HostBind: the name changes whenever this
+// layout does, so a proxy and a mod of different layouts never bind.
+constexpr const char* HostBind="mod_diag_bind2";   // 2: bugmark takes who the mark came from ("" this player)
 struct Host {
     void* context;
     bool (*open)(void*,unsigned);
     bool (*line)(void*,const char*);
     void (*flight)(void*,const char*,uint64_t);
-    bool (*bugmark)(void*,uint32_t,uint64_t);
+    bool (*bugmark)(void*,uint32_t,uint64_t,const char*);
     void (*crash)(void*);
     void (*close)(void*,bool);
 };
@@ -290,13 +293,15 @@ public:
         if(host_){host_->flight(host_->context,text.c_str(),now);return;}
         std::lock_guard<Mutex> l(mutex_);ring_.push_back({now,text});ringBytes_+=text.size();Trim(now);
     }
-    bool Bugmark(uint32_t mark,uint64_t now=UtcMs()) {
-        if(host_)return host_->bugmark(host_->context,mark,now);
+    // from: the name of the player whose mark this is ("" this player's own F2): "BUGMARK <n> from <name>".
+    bool Bugmark(uint32_t mark,uint64_t now=UtcMs(),const std::string& from={}) {
+        if(host_)return host_->bugmark(host_->context,mark,now,from.c_str());
         std::lock_guard<Mutex> l(mutex_);
         if(!mark||!file_.Ready())return false;
-        Write("BUGMARK "+std::to_string(mark));Trim(now);
+        std::string head="BUGMARK "+std::to_string(mark)+(from.empty()?std::string():" from "+from);
+        Write(head);Trim(now);
         File flight;if(!flight.Open(fs::path(base_).concat(".flight-"+std::to_string(mark)+".txt")))return false;
-        std::string text="BUGMARK "+std::to_string(mark)+"\n";
+        std::string text=head+"\n";
         for(auto& row:ring_)text+=std::to_string(row.at)+" "+row.line+(row.line.empty()||row.line.back()!='\n'?"\n":"");
 #ifdef MUTANT_DIAG_FLIGHT_CAP
         return flight.Write(text);

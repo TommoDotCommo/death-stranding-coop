@@ -21,7 +21,8 @@ You need DEATH STRANDING DIRECTOR'S CUT on Steam, build 13300582, and 64-bit Win
   the game folder (`avrt.dll`); the rest, and co-op's own saves, into `%LOCALAPPDATA%\DeathStrandingCoop`.
 - The co-op launcher (Play, Saves, Settings, About), the group server `coop-world`, the proxy and the mod at the state
   of [STATUS.md](../STATUS.md) on the release commit.
-- Bug reports: F2 in the game and the launcher's diagnostics (see "Not verified").
+- Bug reports: F2 in the game and the launcher's diagnostics (see "Not verified"). In group play F2 also marks the
+  logs of the players near you and the server's log (tested without the game: the fake world through the real server).
 
 ## Verified
 

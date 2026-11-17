@@ -45,6 +45,9 @@ build/fake-group-sends.so: $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_GROUP_SENDS -fPIC -shared $(SRC) -o $@
 build/fake-others-undressed.so: $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_OTHERS_UNDRESSED -fPIC -shared $(SRC) -o $@
+# F2 in group play kept to the player's own log (test_bugmark_group.py must fail on it).
+build/fake-mark-group.so: $(SRC) $(HEADERS) | build
+	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_MARK_GROUP -fPIC -shared $(SRC) -o $@
 # relay_mode "broadcast" ignored (test_others_broadcast.py must fail on it).
 build/fake-relay-mode.so: $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMOD_MUTANT_RELAY_MODE -fPIC -shared $(SRC) -o $@
@@ -75,7 +78,7 @@ FORCE:
 build/unit: unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp $(HEADERS) | build
 	$(CXX) $(FLAGS) unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o $@
 host: identity build/mod.so build/mod-no-build.so build/mod-no-interpolation.so build/mod_probe build/unit
-test: environment-test join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so build/fake-others-to-partner.so build/fake-others-no-relay.so build/fake-group-sends.so build/fake-others-undressed.so build/fake-relay-mode.so build/fake-strand-once.so build/fake-strand-partner.so build/fake-strand-off.so build/fake-offer-lines.so $(FIGHT_FAKES) build/coop-swarm ../world/build/coop-world
+test: environment-test join-test vehicle-test game-thread-test discovery-test pose-test timing-test host build/fake.so build/fake-no-build.so build/fake-no-interpolation.so build/fake-others-to-partner.so build/fake-others-no-relay.so build/fake-group-sends.so build/fake-others-undressed.so build/fake-relay-mode.so build/fake-mark-group.so build/fake-strand-once.so build/fake-strand-partner.so build/fake-strand-off.so build/fake-offer-lines.so $(FIGHT_FAKES) build/coop-swarm ../world/build/coop-world
 	./build/unit
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_PARTNER unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-partner && if ./build/unit-config-partner >/dev/null 2>&1; then echo SURVIVED CONFIG_PARTNER; exit 1; else echo KILLED MUTANT_CONFIG_PARTNER; fi
 	@$(CXX) $(FLAGS) -DMUTANT_CONFIG_MARKER unit.cpp config.cpp providers.cpp pose.cpp discovery.cpp ../core/core.cpp -o build/unit-config-marker && if ./build/unit-config-marker >/dev/null 2>&1; then echo SURVIVED CONFIG_MARKER; exit 1; else echo KILLED MUTANT_CONFIG_MARKER; fi
@@ -92,6 +95,7 @@ test: environment-test join-test vehicle-test game-thread-test discovery-test po
 	python3 -B test_others_partner.py
 	python3 -B test_others_partner_mutants.py
 	python3 -B test_others_broadcast.py ../world/build/coop-world build/coop-swarm
+	python3 -B test_bugmark_group.py ../world/build/coop-world build/coop-swarm
 	python3 -B test_strand_notices.py ../world/build/coop-world
 	python3 -B test_fights.py ../world/build/coop-world
 .PHONY: all identity host test FORCE

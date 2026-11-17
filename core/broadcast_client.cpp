@@ -169,6 +169,7 @@ void Client::receive(const uint8_t* data,size_t size,uint64_t now){
     case Type::Offer:++counters_.offers;offers_[m.offer.owner]={m.offer,now};return;
     case Type::Status:fightStatus(m.status);return;
     case Type::Deliver:delivered(m.post);return;
+    case Type::Marked:marked(m.mark);return;
     default:++counters_.malformed;return;   // the player's own message types are not for the player
     }
 }
@@ -370,4 +371,27 @@ void Client::delivered(const Post& p){
     deliveredVersion_[p.player]=p.version;++counters_.delivered;
     FightNews n;n.delivered=true;n.source=p.player;n.version=p.version;n.status.owner=p.owner;n.status.fight=p.fight;n.bytes.assign(p.payload,p.payload+p.size);
     fightNews_.push_back(std::move(n));}
+
+// ---- Bug marks (F2) ------------------------------------------------------------------------------------------------------
+bool Client::mark(uint32_t mark,uint64_t now){
+    if(!online_||!mark){++counters_.marksHeld;return false;}
+    while(!markTimes_.empty()&&markTimes_.front()+MarkHourMs<=now)markTimes_.pop_front();
+#ifndef MUTANT_BCAST_CLIENT_MARK_RATE
+    if(!markTimes_.empty()&&now<markTimes_.back()+MarkEveryMs){++counters_.marksHeld;return false;}
+    if(markTimes_.size()>=MarksPerHour){++counters_.marksHeld;return false;}
+#endif
+    markTimes_.push_back(now);
+    Mark k;k.player=config_.id;k.mark=mark;sendDatagram(encodeMark(k));++counters_.marks;return true;}
+// Only from a player in the roster (the server's own record of the sender), never one of this player's own.
+void Client::marked(const Mark& k){
+    auto it=near_.find(k.player);
+#ifndef MUTANT_BCAST_CLIENT_MARK_STRANGER
+    if(it==near_.end()||k.player==config_.id){++counters_.markRefused;return;}
+    std::string name=it->second;
+#else
+    std::string name=it==near_.end()?std::string():it->second;
+#endif
+    if(marks_.size()>=MarkNewsMax){++counters_.markRefused;return;}
+    ++counters_.marked;marks_.push_back({k.player,name,k.mark});}
+std::vector<MarkNews> Client::takeMarks(){auto n=std::move(marks_);marks_.clear();return n;}
 }

@@ -356,6 +356,28 @@ four a second) and once a second unchanged, one DELIVER to the owner each. The s
 
 Tests: `fight_test.cpp` (next under "Tests").
 
+### Bug marks (F2)
+
+F2 in a broadcast player's game (`../mod/README.md`, "F2 bug marks") sends a MARK (`../core/CORE.md`, "Bug marks",
+types 17 and 18) with the mark's number. The server writes one line to its log (the session log under "Session
+diagnostics", and `--log` and the console as every relay line):
+
+```
+bugmark 1048577 from 0000000000000001 (Ann) at 1794945178124
+```
+
+the mark's number, the sender's relay id (16 hex digits, as in the relay's other lines; under player keys a relay id
+is the player's, made from his key), his name as his HELLO gave it, and the server's UTC time in milliseconds. The
+organiser finds every report of a session in this one file, and each player's own log has the same number.
+
+| Rule | Why |
+|---|---|
+| A mark is from the player whose address sent it: a MARK from an address that never said HELLO (counted `unknownSource`), or naming another player (`spoofed`), is dropped; under player keys only a relay id the keys admitted has an address | nobody marks in somebody else's name, and a stranger writes nothing in the log |
+| It goes, as MARKED with the server's record of the sender as its source, to the players near who are shown him (the players his updates go to), and to nobody else: not a player near who is not shown him (his cap or his choice), not a player far away, not a pairs player, not a linked server | a mark reaches the players who can see the porter who made it |
+| At most one mark every 2 s and 30 in an hour from one player (`marksRefused` counts the rest; a player who leaves and comes back starts again) | a player holding the key or a broken game cannot fill the log or the others' logs |
+
+`RelayStats` counts `marks` (taken and logged), `marksRefused` and `marksSent` (MARKED datagrams).
+
 ### A swarm of stand-in players (`coop-swarm`)
 
 `mod/swarm.cpp` (built by `make -C mod build/coop-swarm`, or `build/coop-swarm.exe` with the Windows binaries) is K
@@ -379,7 +401,9 @@ bytes from and to the relay; heard: the stand-in and player pairs a presence sam
 `SWARM traffic` line before the last gives the same over the whole run, so the two modes can be compared under the
 same crowd (those numbers: 8 stand-ins on a 10 m circle in broadcast; in pairs they received and sent about 160
 datagrams, 23 kB, a second each). With `--names` (broadcast) the last lines give every player near a stand-in and the
-name he shows, read from his state as the mod reads it: `SWARM name id=1203948 "Sam 1001 · north"`.
+name he shows, read from his state as the mod reads it: `SWARM name id=1203948 "Sam 1001 · north"`. A bug mark
+the server passes to a stand-in (broadcast) gives a line at once, `SWARM mark id=1001 from=1 name="Ann" mark=1048577`,
+and the last line then ends `marks=N`.
 
 `--centre` is in the core's axes (metres; x, y up, z). `--session` is the core session number every pair shares
 (default 1); of two players the lower id is the host unless `--role` says otherwise. `--only ID` makes the stand-ins
@@ -1318,12 +1342,18 @@ cap of 1 with one player swinging 3 m about as far as the one shown (no change i
 is shown), the other coming back to 5 m farther (no change); friends only (two friends of five near, within a cap of
 3), everyone from the server's record over the HELLO's friends (a friend 100 m away first, then the nearest), nobody
 (no ROSTER, entry or SHARE), the HELLO's choice again when the record is dropped, a HELLO asking for nobody; 100
-walking players with a cap of 16 and without (each shown 16 or 99, no entry from a player not shown). Twenty-one
-mutants must fail it (`RELAY_BCAST_MODE`, `RELAY_BCAST_BUILD`, `RELAY_BCAST_SPOOF`, `RELAY_BCAST_ORDER`,
+walking players with a cap of 16 and without (each shown 16 or 99, no entry from a player not shown); bug marks: one
+F2 of a player with one player near and shown, one near who is shown nobody and one far away (the log line with the
+relay id, the name and the UTC time; a MARKED to the first only, with the name his roster gave; none back to the
+sender), a second within 2 s refused, one every 2 s until 30 in the hour, one more an hour after the first, a MARK
+from an address that never said HELLO and two naming another player (nothing logged, nothing sent), a far player's
+mark logged and sent to nobody, and a player the keys refuse whose marks go nowhere. Twenty-five mutants must fail
+it (`RELAY_BCAST_MODE`, `RELAY_BCAST_BUILD`, `RELAY_BCAST_SPOOF`, `RELAY_BCAST_ORDER`,
 `RELAY_BCAST_STAMP`, `RELAY_BCAST_ANIMATION_FAR`, `RELAY_BCAST_TELEPORT`, `RELAY_BCAST_INTEREST`, `RELAY_BCAST_ROSE`,
 `RELAY_BCAST_BUDGET`, `RELAY_BCAST_ENTER_STATE`, `RELAY_BCAST_STATE_OLD`, `RELAY_BCAST_FETCH_FAR`, `RELAY_NEAR_CAP`,
 `RELAY_NEAR_NEAREST`, `RELAY_NEAR_HYSTERESIS`, `RELAY_NEAR_HIDDEN`, `RELAY_NEAR_FRIENDS_FIRST`, `RELAY_SHOW_FRIENDS`,
-`RELAY_SHOW_NOBODY`, `RELAY_SHOW_HELLO_FIRST`). `test_broadcast.py` runs the built server on loopback UDP with 26 players written byte by
+`RELAY_SHOW_NOBODY`, `RELAY_SHOW_HELLO_FIRST`, `RELAY_MARK_FAR`, `RELAY_MARK_HIDDEN`, `RELAY_MARK_RATE`,
+`RELAY_MARK_ANY_SOURCE`). `test_broadcast.py` runs the built server on loopback UDP with 26 players written byte by
 byte in Python: options out of range refused; 16 in a group, 8 on a ring 80 m out and 2 far away, each publishing
 20 times a second; every FRAME within a 600-byte budget and from a player near, more than three entries a FRAME,
 every update with its animation within 30 m, one in 200 ms and no animation beyond, a STATE handed to the 23 players

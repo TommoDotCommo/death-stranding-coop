@@ -30,11 +30,11 @@ int main()try{
         [](void* p,unsigned){++*static_cast<unsigned*>(p);return true;},
         [](void* p,const char*){++*static_cast<unsigned*>(p);return true;},
         [](void* p,const char*,uint64_t){++*static_cast<unsigned*>(p);},
-        [](void* p,uint32_t,uint64_t){++*static_cast<unsigned*>(p);return true;},
+        [](void* p,uint32_t,uint64_t,const char* from){if(from&&std::string(from)=="Ann")++*static_cast<unsigned*>(p);return true;},
         [](void* p){++*static_cast<unsigned*>(p);},
         [](void* p,bool){++*static_cast<unsigned*>(p);}};
     diag::Session bound;bound.Bind(&host);check(bound.Open({},"game",5),"proxy hosts open");
-    bound.Line("raw");bound.Flight("presence");bound.Bugmark(1);bound.MarkCrashed();bound.Close();
+    bound.Line("raw");bound.Flight("presence");bound.Bugmark(1,diag::UtcMs(),"Ann");bound.MarkCrashed();bound.Close();
     check(hosted==6,"all diagnostics hosted outside redirection");
     auto root=diag::fs::temp_directory_path()/("ds-diag-test-"+std::to_string(diag::Pid()));
     diag::fs::remove_all(root);diag::fs::create_directories(root);
@@ -79,6 +79,11 @@ int main()try{
     check(log.find(raw)!=std::string::npos,"no redaction");
     check(log.find("session end: clean exit")!=std::string::npos,"clean exit");
     check(log.find("BUGMARK 17")!=std::string::npos,"bugmark in log");
+    {   // A mark passed on from another player (group play): his name on the line and in the flight file.
+        diag::Session other;check(other.Open(root/"from","game",5),"open for a passed-on mark");
+        other.Flight("PRESENCE other",61001);check(other.Bugmark(19,61001,"Ann"),"passed-on flight file");
+        auto f=read(diag::fs::path(other.Base()).concat(".flight-19.txt"));check(f.rfind("BUGMARK 19 from Ann\n",0)==0&&f.find("PRESENCE other")!=std::string::npos,"passed-on flight header");
+        other.Close();check(read(diag::fs::path(other.Base()).concat(".log")).find(" BUGMARK 19 from Ann\n")!=std::string::npos,"passed-on mark in log");}
     diag::Session collision;check(!collision.Open(logs,"game",5),"exclusive creation");
     diag::Session crashed;check(crashed.Open(logs,"proxy",5),"crash session");crashed.MarkCrashed();crashed.Close();
     check(diag::fs::exists(diag::fs::path(crashed.Base()).concat(".crash")),"marker");
@@ -86,6 +91,9 @@ int main()try{
     mod::bugmark::Button button;
     check(!button.press(false,0),"idle key");auto mark=button.press(true,0);check(mark&&*mark==1,"F2 edge");
     check(!button.press(true,0),"held F2 fires once");button.press(false,0);auto second=button.press(true,0);check(second&&*second==2,"next press");
+    {   // Group play: 12 bits of the player's relay id, then the counter; two players' first marks differ.
+        mod::bugmark::Button a,b;auto x=a.press(true,mod::bugmark::GroupPrefix(1),mod::bugmark::GroupBits),y=b.press(true,mod::bugmark::GroupPrefix(2),mod::bugmark::GroupBits);
+        check(x&&y&&*x!=*y&&(*x&0xfffff)==1&&(*x>>20)==mod::bugmark::GroupPrefix(1)&&mod::bugmark::GroupPrefix(1)<4096,"group mark numbers");}
     auto event=mod::bugmark::Encode(*mark);check(event.type<=ds::CargoTypeMax&&mod::bugmark::Decode(event)==mark,"wire mark");
     event.item=0;check(!mod::bugmark::Decode(event),"invalid mark");
     auto good=std::string(R"({"role":"host","peer":"127.0.0.1","slot":0,"peer_slot":1,"nickname":"test","provider":"synthetic","session":123)");

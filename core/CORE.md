@@ -703,6 +703,25 @@ exactly-once stream, and one per owner and visitor would bring back the pairs mo
 states (a lost one is replaced by the next, a late visitor gets the latest from the server at once) and a visitor's
 reports are cumulative (applied as differences), so loss, repetition and reordering change nothing.
 
+### Bug marks (types 17, 18)
+
+F2 in group play (`mod/README.md`, "F2 bug marks"): a player's mark goes to the server, which writes it to its own
+log and passes it to the players near who are sent his updates (`world/README.md`, "Bug marks"). Same header and rules.
+
+| Type | Direction | Size | After the 8 bytes |
+|---|---|---:|---|
+| MARK 17 | player to server | 24 | u64 player id; u32 mark (not 0); reserved[4] |
+| MARKED 18 | server to player | 24 | u64 source (the server's record of the sender); u32 mark (not 0); reserved[4] |
+
+At most one mark every `MarkEveryMs` (2 s) and `MarksPerHour` (30) in an hour (`MarkHourMs`) from one player: the
+player's side sends no more (`mark(n, now)` returns false, counted in `marksHeld`), and the server takes no more.
+`takeMarks()` gives the MARKED messages from a source in the roster, with the roster's name (`MarkNews`: source,
+name, mark), at most `MarkNewsMax` (64) kept; a MARKED from anyone else, or naming this player, is counted
+(`markRefused`). A mark is a number and nothing else: it carries no state, so a lost one is only a line missing from
+a log. **Compatibility:** a server from before this refuses both types as unknown (counted as malformed): the mark
+stays in the player's own log, as before; players near each other share one build, so a game from before this is
+never sent a MARKED. The types 1..16 are unchanged.
+
 ### Tests
 
 `make -C core broadcast-test` (part of `make test`): `tests/broadcast.cpp` pins the layout byte for byte, sends every
@@ -719,10 +738,13 @@ interpolation over the lossy link above; the fight channel: every type through t
 bad field refused (a status above 11 among them), and an owner and a visitor driven by hand-made STATUS and DELIVER
 (the keep and the join repeated until answered, posts only in a role, a visitor's report taken by the owner once per
 version, another fight's state, another visitor's report and an older version not taken by a visitor, a visit ended by
-the owner, by a refusal and by silence). Twenty-one mutants must fail it: `BCAST_WIRE_VERSION`, `BCAST_WIRE_LENGTH`, `BCAST_WIRE_RANGE`, `BCAST_WIRE_FRAME`,
+the owner, by a refusal and by silence); bug marks: MARK and MARKED byte for byte, mark 0, player 0, a reserved byte
+and a longer datagram refused, the player's side sending nothing offline, one in 2 s and 30 an hour, then one more an
+hour after the first, and taking a MARKED only from a player in the roster, with his name, at most 64 kept.
+Twenty-four mutants must fail it: `BCAST_WIRE_VERSION`, `BCAST_WIRE_LENGTH`, `BCAST_WIRE_RANGE`, `BCAST_WIRE_FRAME`,
 `BCAST_CLIENT_STRANGER`, `BCAST_CLIENT_ORDER`, `BCAST_CLIENT_CLOCK`, `BCAST_CLIENT_GAP`, `BCAST_CLIENT_STALE_STATE`,
 `BCAST_CLIENT_TELEPORT`, `BCAST_CLIENT_SPEED`, `BCAST_CLIENT_REBASE`, `BCAST_CLIENT_RESEND`, `BCAST_CLIENT_DELAY` (it
 fails the 200 ms case without loss: p95 0.06 m, shown past the newest sample 81 % of the time), `BCAST_CLIENT_ROSE`,
 `BCAST_CLIENT_STREAM`, `BCAST_CLIENT_JUMP`, `BCAST_WIRE_SHOW`, `BCAST_WIRE_FIGHT`, `BCAST_CLIENT_FIGHT_SOURCE`,
-`BCAST_CLIENT_FIGHT_ORDER`. The server's side and both sides together are tested in `world/` (README
+`BCAST_CLIENT_FIGHT_ORDER`, `BCAST_WIRE_MARK`, `BCAST_CLIENT_MARK_RATE`, `BCAST_CLIENT_MARK_STRANGER`. The server's side and both sides together are tested in `world/` (README
 there, "Broadcast mode").

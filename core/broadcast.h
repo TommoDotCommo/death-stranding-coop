@@ -57,6 +57,13 @@
 // An older server refuses types 11..16 as unknown, and offers go only to players of the owner's build, so a game
 // without them is never sent one.
 //
+// Bug marks (F2, mod/README.md "F2 bug marks"): a player's mark goes to the server, which writes it to its own log and
+// passes it to the players near who are sent his presence, and to nobody else.
+//   MARK    17  player -> server, 24 bytes: 8 u64 player id | 16 u32 mark (not 0) | 20 reserved[4]
+//   MARKED  18  server -> player, 24 bytes: 8 u64 source (the server's record of the sender) | 16 u32 mark | 20 reserved[4]
+// At most one mark every MarkEveryMs and MarksPerHour in an hour from one player: his game sends no more, the server
+// takes no more. An older server refuses both as unknown types; players near each other share one build.
+//
 // presence[52] is the core's PRESENCE frame (core.cpp) bytes 60..63 (flags, action, phase) and 72..119 (position,
 // velocity, yaw, health, stamina, the BYE reason and reserved byte, the vehicle block): the receiver rebuilds the
 // 128-byte frame around it and the core's own decoder checks every value. The animation payload is the core's
@@ -79,10 +86,13 @@ constexpr size_t AnimationMax=1100;    // the controls others are sent (held, ro
 constexpr size_t StateMax=1100;
 constexpr size_t StateKinds=4;
 constexpr size_t FightSize=44,OfferSize=44,JoinSize=32,StatusSize=24,PostHeader=36,PostMax=1100;
+constexpr size_t MarkSize=24;
+constexpr uint64_t MarkEveryMs=2000,MarkHourMs=3600000;
+constexpr size_t MarksPerHour=30;
 constexpr uint16_t FightRadiusMax=1000;
 constexpr uint8_t FightVisitorsMax=32;
-enum class Type : uint8_t { Hello=1, Welcome, Refused, Roster, Publish, Frame, State, Share, Fetch, Bye, Fight, Offer, Join, Status, Post, Deliver };
-constexpr uint8_t TypeLast=uint8_t(Type::Deliver);
+enum class Type : uint8_t { Hello=1, Welcome, Refused, Roster, Publish, Frame, State, Share, Fetch, Bye, Fight, Offer, Join, Status, Post, Deliver, Mark, Marked };
+constexpr uint8_t TypeLast=uint8_t(Type::Marked);
 enum class FightOp : uint8_t { Open=1, Close=2 };
 enum class JoinOp : uint8_t { Join=1, Leave=2 };
 // What the server says of a fight (STATUS): to the owner Open (it holds the fight; how many visitors) or Off (this
@@ -120,10 +130,12 @@ struct Join { uint64_t player=0,owner=0; uint32_t fight=0; JoinOp op=JoinOp::Joi
 struct Status { uint64_t owner=0; uint32_t fight=0; FightStatus status=FightStatus::Open; uint8_t visitors=0; };
 // POST up (player: the sender's own id) and DELIVER down (player: the source). payload points into the datagram.
 struct Post { uint64_t player=0,owner=0; uint32_t fight=0,version=0; const uint8_t* payload=nullptr; size_t size=0; };
+// A bug mark: MARK up (player: the sender's own id) and MARKED down (player: the source).
+struct Mark { uint64_t player=0; uint32_t mark=0; };
 struct Message {
     Type type=Type::Hello; Hello hello; Welcome welcome; Refused refused; relay::Roster roster; Update publish; Frame frame;
     StatePost state; Share share; Fetch fetch; relay::Bye bye;
-    Fight fight; Offer offer; Join join; Status status; Post post;
+    Fight fight; Offer offer; Join join; Status status; Post post; Mark mark;
 };
 // The version of a datagram's envelope (0 when it is no envelope at all): the server's dispatch.
 inline uint16_t versionOf(const uint8_t* b,size_t n){
@@ -233,6 +245,13 @@ inline Buffer encode(const Status& s){
     auto b=start(Type::Status,StatusSize);put(b,s.owner,8);put(b,s.fight,4);b.push_back(uint8_t(s.status));b.push_back(s.visitors);put(b,0,2);return b;}
 inline Buffer encodePost(const Post& p){return detail::postBody(Type::Post,p);}
 inline Buffer encodeDeliver(const Post& p){return detail::postBody(Type::Deliver,p);}
+namespace detail {
+inline Buffer markBody(Type t,const Mark& k){
+    need(k.player!=0,"broadcast: player id 0");need(k.mark!=0,"broadcast: mark 0");
+    auto b=start(t,MarkSize);put(b,k.player,8);put(b,k.mark,4);put(b,0,4);return b;}
+}
+inline Buffer encodeMark(const Mark& k){return detail::markBody(Type::Mark,k);}
+inline Buffer encodeMarked(const Mark& k){return detail::markBody(Type::Marked,k);}
 
 // Refused whole: another magic or version, an unknown type, a nonzero reserved byte, a size that is not the type's, a
 // player id 0, a part, kind, count or length out of range, entries that do not fill a FRAME exactly.
@@ -381,6 +400,14 @@ inline Error parse(const uint8_t* b,size_t n,Message& m){
         if(!p.player||!p.owner||!p.fight||!p.version||p.size<1||p.size>PostMax)return Error::Range;
         if(n!=PostHeader+p.size)return Error::Length;
         p.payload=b+PostHeader;return Error::None;}
+    case Type::Mark:case Type::Marked:{
+        if(!exact(MarkSize))return Error::Length;
+        if(get(b+20,4))return Error::Reserved;
+        auto& k=m.mark;k.player=get(b+8,8);k.mark=uint32_t(get(b+16,4));
+#ifndef MUTANT_BCAST_WIRE_MARK
+        if(!k.player||!k.mark)return Error::Range;
+#endif
+        return Error::None;}
     }
     return Error::Type;
 }

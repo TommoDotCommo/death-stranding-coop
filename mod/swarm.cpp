@@ -188,7 +188,7 @@ int main(int argc,char** argv){
     std::fflush(stdout);
     auto start=nowMs(),last=start;uint64_t nextStatus=start+1000,nonces=0,accepted=0,strangers=0,otherIdentity=0;ds::Error lastError=ds::Error::None;
     uint64_t animationIn=0,animationInBytes=0,animationOut=0;
-    unsigned online=0,nearby=0,sessions=0,connected=0;
+    unsigned online=0,nearby=0,sessions=0,connected=0;uint64_t marks=0;
     auto census=[&]{
         online=nearby=sessions=connected=0;accepted=0;
         for(auto& p:players){
@@ -224,6 +224,8 @@ int main(int argc,char** argv){
                     p.client->receive(raw,size_t(n),now);
                 }
                 p.client->tick(now);p.client->takeEvents();
+                // Bug marks the server passed on (F2 of a player near): one line each, as a game's log has one.
+                for(auto& m:p.client->takeMarks()){++marks;std::printf("SWARM mark id=%llu from=%llu name=\"%s\" mark=%u\n",(unsigned long long)p.id,(unsigned long long)m.source,m.name.c_str(),m.mark);}
                 for(auto& n:p.client->nearby())p.client->takeAnimation(n.first,now);   // taken as a game would, so the queues stay short
                 if(!recorded.empty()){
                     long due=p.cursor.due(recorded,moment,replay->span());
@@ -314,6 +316,7 @@ int main(int argc,char** argv){
                  double(total.in)/span,double(total.inBytes)/span,double(total.out)/span,double(total.outBytes)/span,statusSeconds?double(heardTotal)/double(statusSeconds):0.);}
     for(auto& p:players){auto now=nowMs();for(auto& s:p->sessions)s.second->core->disconnect(now);if(p->client)p->client->bye();else p->relay->bye();}
     if(broadcast)std::printf("SWARM done mode=broadcast online=%u/%u near=%u live=%u accepted=%llu",online,count,nearby,connected,(unsigned long long)accepted);
+    if(broadcast&&marks)std::printf(" marks=%llu",(unsigned long long)marks);
     else std::printf("SWARM done online=%u/%u near=%u sessions=%u connected=%u accepted=%llu",online,count,nearby,sessions,connected,(unsigned long long)accepted);
     if(animationIn||animationOut)std::printf(" animation_out=%llu animation_in=%llu animation_in_bytes=%llu",(unsigned long long)animationOut,(unsigned long long)animationIn,(unsigned long long)animationInBytes);
     if(replay)std::printf(" walked=%.1f",players.front()->walker->walked());

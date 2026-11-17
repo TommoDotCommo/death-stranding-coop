@@ -49,7 +49,7 @@ const diag::Host game_log_host{&player_game_log,
     [](void* p,unsigned mb){return static_cast<diag::Session*>(p)->Open(diag::DefaultLogsDir(),"game",mb);},
     [](void* p,const char* text){return static_cast<diag::Session*>(p)->Line(text);},
     [](void* p,const char* text,uint64_t now){static_cast<diag::Session*>(p)->Flight(text,now);},
-    [](void* p,uint32_t mark,uint64_t now){return static_cast<diag::Session*>(p)->Bugmark(mark,now);},
+    [](void* p,uint32_t mark,uint64_t now,const char* from){return static_cast<diag::Session*>(p)->Bugmark(mark,now,from?from:"");},
     [](void* p){static_cast<diag::Session*>(p)->MarkCrashed();},
     [](void* p,bool nonblocking){static_cast<diag::Session*>(p)->Close(nonblocking);}};
 redirect::Throttle throttle;
@@ -1276,7 +1276,7 @@ BOOL CALLBACK bootstrap_mod(PINIT_ONCE,PVOID,PVOID*) {
         auto callback=mod_handle?reinterpret_cast<GameTick>(real_gpa(mod_handle,"mod_game_thread_tick")):nullptr;
         if(c.gameThread&&!callback)fatal("redirect: game_thread callback export missing\n");
         auto stop=mod_handle?real_gpa(mod_handle,"mod_shutdown"):nullptr;
-        auto bindLog=mod_handle?reinterpret_cast<void(*)(const diag::Host*)>(real_gpa(mod_handle,"mod_diag_bind")):nullptr;
+        auto bindLog=mod_handle?reinterpret_cast<void(*)(const diag::Host*)>(real_gpa(mod_handle,diag::HostBind)):nullptr;
         if(bindLog)bindLog(&game_log_host);
         auto error=mod_handle?reinterpret_cast<const char*(*)()>(real_gpa(mod_handle,"mod_last_error")):nullptr;
         bool started=false;

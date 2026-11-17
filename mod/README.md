@@ -31,10 +31,32 @@ There is no game-thread hook. `game_offsets.md` describes the signature seam.
 Player diagnostics are always recorded separately in
 `%LOCALAPPDATA%\DeathStrandingCoop\logs\`; `max_log_mb` accepts 5–2000
 (default 200). Legacy instance logs and presence JSONL remain available to
-existing tools. F2 writes a bug mark and the last 60 seconds of presence/link/state
-observations, and sends the same mark to a connected partner. Holding it fires
-once; F2 is reserved from other mod bindings. See [shared diagnostics](../common/README.md)
+existing tools. See [shared diagnostics](../common/README.md)
 for the chain format, pruning, crash recorder and platform limitations.
+
+### F2 bug marks
+
+F2 writes `BUGMARK <n>` in the game's log and the last 60 seconds of presence/link/state observations in
+`<stem>.flight-<n>.txt` beside it. Holding it fires once; F2 is reserved from other mod bindings.
+
+- Two players: the mark goes to the connected partner as a reliable event (type 24); his game writes `BUGMARK <n>`
+  and a flight file of its own. `<n>` is the slot in the top 4 bits, then a counter.
+- Group play (the relay's broadcast mode, `relay_mode` `broadcast`): the mark goes to the players' server (MARK,
+  `../core/CORE.md`, "Bug marks"). The server writes `bugmark <n> from <relay id> (<name>) at <UTC ms>` in its own log,
+  so the organiser finds every report of a session in one place, and passes the mark to the players near who are
+  shown this porter (the ones his presence goes to). Each of their games writes `BUGMARK <n> from <name>` (the name
+  the server's roster gave) and a flight file of its own. Nobody else is told: not a player far away, not one near
+  who is not shown him. In group play every player has the same slot, so `<n>` is 12 bits of the player's relay id,
+  then a counter: the marks of a group seldom share a number (a flight file whose name is taken is not written).
+- At most one mark every 2 s and 30 in an hour leave a game (the server keeps the same limit); a press beyond it is
+  marked in the player's own log, with `BUGMARK <n> not sent to the server: ...`. Offline, the same.
+
+Tests: `test_diag.py` (two players through the reliable stream) and `test_bugmark_group.py` (group play: four games
+in the fake world through the real `coop-world`, with two `coop-swarm` stand-ins near the first player; one F2 gives
+`BUGMARK <n>` in her log, `BUGMARK <n> from Ann` and a flight file in the logs of the two players near her, a line
+for each stand-in, nothing for the player far away, one line in the server's log; a second press within 2 s stays in
+her log; every log's chain holds), with a mutant build that keeps the group mark in the player's own log
+(`fake-mark-group.so`).
 
 Place an exclusively copied (never linked) mod in
 `<instance>/redirect-data/mod/mod.dll`, config at `mod.json` beside it:

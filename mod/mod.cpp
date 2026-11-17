@@ -3050,11 +3050,20 @@ struct Runtime final:ds::Transport {
             auto clock=mod::nowUs();auto now=clock/1000;
             if(core)for(auto& e:core->takeCargo(mod::bugmark::WireType))
                 if(auto mark=mod::bugmark::Decode(e))diagnostic.Bugmark(*mark);
+            // Group play: the marks of the players near, passed on by the server (the sender's name as its roster gave it).
+            if(crowd)for(auto& m:crowd->client().takeMarks())
+                diagnostic.Bugmark(m.mark,diag::UtcMs(),m.name.empty()?"player "+std::to_string(m.source):m.name);
             if(lastProvider)providerTick.add(clock-lastProvider);
             lastProvider=clock;++ticks;
-            if(auto mark=bugButton.press(modKey(mod::bugmark::Key),config.slot)) {
+            if(auto mark=config.group?bugButton.press(modKey(mod::bugmark::Key),mod::bugmark::GroupPrefix(config.playerId),mod::bugmark::GroupBits)
+                                     :bugButton.press(modKey(mod::bugmark::Key),config.slot)) {
                 diagnostic.Bugmark(*mark);
                 if(core&&core->connected()&&!config.group)core->queueCargo(mod::bugmark::Encode(*mark));
+                // Group play over the broadcast relay: to the server (its log) and the players near who see this porter.
+#ifndef MOD_MUTANT_MARK_GROUP
+                if(crowd&&!crowd->client().mark(*mark,now))
+                    diagnostic.Line("BUGMARK "+std::to_string(*mark)+" not sent to the server: "+(crowd->client().online()?"at most one every 2 s and 30 an hour":"offline"));
+#endif
             }
             if(now>=flightAt){flightAt=now+250;std::ostringstream row;
                 row<<"STATE presence="<<cache.available<<" gated="<<cache.gated<<" link="<<(core&&core->connected())
@@ -3863,7 +3872,8 @@ Runtime* runtime=nullptr;
 }
 extern "C" {
 // The proxy hosts file IO so save redirection never moves player diagnostics.
-MOD_API void mod_diag_bind(const diag::Host* host) {diagnosticHost=host;}
+// diag::HostBind: the name follows the Host layout, so a proxy of another layout finds nothing to bind.
+MOD_API void mod_diag_bind2(const diag::Host* host) {diagnosticHost=host;}
 #ifdef MOD_FAKE_NETWORK
 // Test-only datagram boundary. Production DLLs never export these functions.
 // Move the fake player (game axes, z up; rotation row-major) and enter the world; menu=1 returns to the main menu.
