@@ -6131,6 +6131,172 @@ ladder, a shelter and a 30 m bridge (angles may differ by a unit from the game's
 for a record with an old id: expected a `createObject` with `"id"`. (6) Read `[0x7bf83b0]`'s like table for an own
 record with likes, and whether a loaded ladder has `obj+0x5f6`.
 
+### Roads, signs and lost cargo through the server (2026-11-17, static)
+
+Read from the pinned executable only (build 13300582), nothing called and no game run. Confidence: **high** for the
+message shapes (the reflection data and its JSON key blocks) and for loads, stores and branches read instruction by
+instruction; **medium** where a meaning is put on them; **low** where only names say it. All addresses are RVAs. Live
+fact this starts from: every signed-in run logged `getHighwayResources` as unhandled.
+
+**The calls (high).** The request descriptors follow their `otgc://gateway/e/NAME` string objects and type tables; each
+getter returns its descriptor, and the senders below are the only callers outside the request registry
+(`0x2dd0000..0x2df0000`).
+
+| Call | Getter | Sender | Body | Answer |
+|---|---:|---:|---|---|
+| `getHighwayResources` | `0x32af500` | `0x3474180` | `{"cds":[{"cid":int32,"lgd":int64}],"rids":[int]}` | `{"pr":[{"id":str,"cid":int32,"rid":int32,"n":int64,"un":int64}],"cs":[{"cid":int32,"cs":[{"u":str,"l":int64}]}],"ul":int64}` |
+| `devoteHighwayResources` | `0x32af630` | `0x3476bd0` | `{"ph":[{"ci":int32,"ri":int32,"n":int32}]}` | `{"e":int}` |
+| `sendHighwayLikes` | `0x32af760` | `0x3476e00` | `{"hls":[{"u":str,"l":int64}]}` | (none read) |
+| `deleteHighwayResources` | `0x32af3d0` | none | `{"ci":int32,"ris":[int]}` | |
+| `addMissions` | `0x32aa120` | `0x347e400` | `{"ms":[OTGCAddMissionOrderBody]}` | |
+| `findMissions` | `0x32ae300` | `0x347f010` | `{"areaId","qids","limit","targetIds","targetRate","lpb","mlpp","plpp"}` | `{"missions":[OTGCMission]}` |
+| `getOrderedMissions` | `0x32aea50` | `0x347f700` | | `{"missions":[OTGCMission]}` |
+| `setMissionProgress` | `0x32b46c0` | `0x347f8e0` | `{"cr","id","pr","bgs","did","ddi","csi","qid"}` | |
+| `deleteMissions` | `0x32aab30` | `0x347ec10` | `{"missions":[{"cr","id"}]}` | |
+| `getMissionsInProgress`, `addMissionOrder`, `refreshRoad` | `0x32ae920`, `0x32a9ff0`, `0x32b4300` | none | | |
+| `getRoadData`, `deleteRoads` | `0x32af170`, `0x32aad90` | `0x34a3852`, `0x34a3ca3` | `{"id"}` / | `{"data"}` |
+
+The answer of `getHighwayResources` (`OTGCHighwayGetResourcesResponse`, descriptor `0x4d96220`) has no key block under
+its own name: its keys `pr`, `cs`, `ul` are in the block named `OTGCHighwayGetResources` (`0x4d91ae0`, keys at
+`0x4d966a0`), which the lab's class dump does not find by name. `OTGCRoadResponse` (also missed by the dump, keys at
+`0x4d9fac0`): `id`, `sid`, `eid`, `aid`, `ver`, `uid`, `url`, `cr`, `lp`, `sq`, `eq`. `OTGCMission` and its parts:
+`id`, `mid`, `qid`, `mt`, `omt`, `aid`, `sid`, `dsi`, `eid`, `dei`, `rt`, `et`, `cr`, `wkr`, `pr`, `did`, `ddi`, `b`
+(`OTGCMissionBaggage`: `nm` name hash, `ui` user index, `x`, `y`, `z`, `a` amount, `am` ammo, `ret` returned), `an`,
+`si`, `dmi`, `csi`, `rels`.
+
+#### Roads: the highway ledger (pavers)
+
+**The manager (high).** `H = [[0x7c173b0]]` (`0x7c173b0` holds an 8-byte holder made by `0x3471c00` at `0x2e0d283`,
+whose first qword is `H`; three request objects at `H+0x18` (devote), `H+0xa0` (get, vtable `0x3ede798`, answer type `0x3472a90`: the answer class for a status
+200..299, else the common error), `H+0x128` (likes)). Its update `0x3475020` runs while the login task is signed in
+(`0x346f680`): on sign-in it sets the get timer `H+0x240` and the devote timer `H+0x244` to 5000 ms; the get is sent when
+its timer runs out, then every 300 s (`0x493e0`, or `[0x34ba180()+0xc4]` s when that is set), the devote on the same
+timer but only while something is queued, the likes when `H+0x248` is due.
+
+**What the game asks (high).** `0x3474a30` fills `H+0x268`: the pavers come from the construction manager's category 14
+(`0x2c57e50(manager, 0xe, list)`), those of the current map (`obj+0x38`), passing `0x2cf6ed0(obj)`, with an area
+(`obj+0x370` not -1) whose state is at least 2 (`0x2f46840(areas, obj+0x370, 2)`; medium: the area is connected). Each
+entry is `{cid: obj+0x30, lgd: obj+0x458}`. Normally ten at a time from a rotating cursor (`H+0x250`; while `H+0x25d`
+is set, as after sign-in, a round ends at the end of the list instead of going on from its start); when `H+0x254` names
+an area, every paver of that area. `rids` is always `[0,2,3]`
+(chiral crystals, metals, ceramics: the resources roads take, as in "Roads: auto-pavers"). `0x3474140(H, apply, area)`
+asks for one area at once (`H+0x240` = 0, `H+0x254` = area, `H+0x25e` = apply); its one caller `0x2f4b87c` runs when an
+area's state goes from below 2 to 2 or more (medium: when an area is connected, its pavers are asked for at once).
+
+**What the game does with the answer (high for the arithmetic).** `0x3475a70`, when the get request is done
+(`H+0xd0`) without error (`H+0xe8` 0), with the answer at `H+0x120`:
+
+1. `ul` goes to `H+0x238` (the player's own highway likes, shown with his own contributor entry).
+2. For each `pr` entry: the paver by `cid` (`0x2c57350`); the key text `"%d_%d"` (format at `0x3ede7c0`) of the
+   paver's construction id and `rid`, hashed; in the map `H+0x310` (entry: `+0x18` time, `+0x20` taken, `+0x28` last
+   `n`) the last `n` seen is replaced by this `n`, and `prev = min(last n, n)` (0 when the key is new). Into a per-paver
+   sum of six i32: `+= n - prev` (at most 0xffffffff). So `n` is a running total: the game takes what grew since the
+   last answer, and a smaller `n` only lowers the baseline (nothing is taken back). `un` is summed per paver into a
+   separate map; what that sum is used for was not followed (medium: the player's own share). `id` is not read.
+3. For each `cs` entry: the road system's record for `cid` (`0x2e79860` on `[0x7bfa148]`) and the contributor list
+   in `H+0x2e8` keyed by `cid`, with `u` and `l`.
+4. Each paver's sum goes to `0x34724c0(H, paver, int mats[6])`: nothing when the paver named by its `H+0x300` entry
+   (`+0xc`, a paver that must be finished first) is below level 2. Else per resource with a need: `cap = need *
+   factor` (the float at the `H+0x300` entry `+0x14`, from game data, unknown), `have` from the paver's virtual
+   `+0x120`; nothing when `have >= cap`, else at most `cap - have` (also bounded by the key's last `n`); the taken
+   amount is added to `+0x20` of the key's entry. Then `0x2cf5390(paver, now, mats, contributor)`: `paver+0x524..+0x538`
+   (online materials not yet counted) `+= mats`, `paver+0x458` = now (the `lgd` of the next ask), `paver+0x5c0` the
+   first contributor not on the block list `0x7c1c4d0`, `paver+0x5d8` the contributors' ids. With `H+0x25e`,
+   `0x2d01460(paver)` counts them at once (the routine the mod's `share_roads` calls, `0x2c321a0`, is behind it).
+
+Derived (high): the server answers per paver and resource a total `n` of what the **other** players put in that only
+grows; the asker's own deliveries must not be in it, because his game already holds them as his own (`+0x210`). An
+asker's game takes from the others at most `factor` of each requirement (medium: the factor is below 1, so other
+players alone cannot finish a road; unknown until read). `lgd` needs no answer.
+
+**What the game sends (high).** The paver deliveries (`0x2cf98e0`, `0x2d32aa0`) call `0x3473f10(H, cid, cargo list)`:
+for each cargo item the material id (item `+0x48` of `0x343ba30(record+0x28)`, u16) and its amount, and
+`0x3473fa0(H, cid, 0, crystals)` for chiral crystals. `0x3473fb0` adds the amount to the queue entry of the same paver
+and resource (`H+0x2a8` count, `+0x2b0`, 0x18-byte entries: `+8` cid, `+0xc` resource, `+0x10` amount) or appends one,
+and sets `H+0x244` = 0 (sent on the next tick). `0x34753b0` then updates the local contributor list `H+0x2e8`
+(medium: with the player's own entry); the queue is sent as `ph` and cleared. So `devoteHighwayResources` carries
+deltas, per paver and resource. What the game does with a non-zero `e` was not read.
+
+**Likes.** `sendHighwayLikes` sends `{u, l}` pairs (medium: likes for the contributors of roads the player uses;
+config names `HighwaysTotalLike`, `HighwaysSendLikeProcessInterval`, `HighwayMaxLike`). The game shows a contributor's
+`l` and its own `ul`.
+
+**The road paths `o` (medium).** Separate from the ledger. The road manager (around `0x349f000..0x34a4000`) sends its
+own `findQpidObjects` with only `ro` (`0x34a0420`: `qe` end locations from `0x349fa30`, `rlid` the location, `ver` 4,
+`ct` the count from `0x3497d10` for sync kind 15, Road, at most 10); the object manager's bodies have only `o`
+(`0x348635e`..`0x3486bd9` refer to `OTGCFindQpidWorldObjects`, never to the road part). The answer's `ro` holds
+`OTGCRoadResponse` with `url` and `uid`; the data is fetched by `getRoadData {id} -> {data}` or the `url`
+(`otgc://road_download`), and uploaded through another base, `otgc://gateway_reserve_upload/(e/)reserveRoadUpload` and
+`.../createRoad` (`OTGCReserveRoadUploadPost`, `OTGCCreateRoadBody`: `sid`, `eid`, `aid`, `ver`, `len`, `hdif`, `sq`,
+`eq`, `vq`, `data`). Medium: these are the paths porters walked between two locations, and the save's `o` elements with
+23-character ids are their ids. How the reserve-upload base maps to an address was not read.
+
+#### Signs (`t`, Signboard)
+
+**Upload (high).** The signboard handler (vtable `0x3e091c8`, create `0x34698e0`) sends an ordinary `createObject`:
+`t` from `OTGCCommonObjectType` value 10 (`t`), the cell `x`, `y`, `m`, position and angles times 10^5 with `exp` 5,
+`q`, `p`, and:
+
+- `st`: the sign's kind as the name of `EDSSignboardType` (`0x4c478e8`, 112 names `Type1001`..`TypeCheckpointYellow`)
+  of the byte at sign `+0x80`;
+- `c`: one `OTGCComment` (`p` phrases: a u16 from `[[sign+0x60]+8]+0x40`, then the u16 at `+0x2a` of each item of
+  `[sign+0x60]+0x10/+0x18`; `r` the string at `[sign+0x60]+0x20`; `pi` -1; `d` false; `wr` "");
+- `ei` `{"aq"}` with an alternative area, `lp` from `0x34666f0(sign)`.
+
+**Serve.** An `OTGCObjectResponse` has the comments as `cm` (an array) and the creator as `c`; `world/` already answers
+an upload's `c` as `cm` and keeps `st`. The game asks for signs per area like any kind (live: `t` 33 in area 226), and
+the letter map gives `t` sync type 12. The request builder for constructions makes nothing for `t` (previous sections),
+so another consumer makes the sign; which, and whether a served sign is placed, is **unknown** (live check 3 below).
+
+#### Lost cargo (missions)
+
+**Shapes (high), meaning (medium to low).** `addMissions` sends `OTGCAddMissionOrderBody` items with `mt` the name of
+`EDSMissionType` (`0x4dca278`: Delivery, Collect, LostObject, Supply, Special, Free) and `omt` the name of
+`EDSOnlineMissionType` (`0x4df9650`: Unknown_Online_Type, Online_Supply, Private, Dynamic, Static,
+Shared_Last_Stranding), both converted at `0x347e712`/`0x347e73c`. `setMissionProgress` sends `pr` as the name of
+`EDSMissionState` (`0x4dca7b0`: Invalid, Available, Ready, Progress, Failed, Success, Cancel, NotAvailable, Returned,
+Used, Missing, Consign, CompleteAutomation; `0x347fbca`). The five senders are run by one dispatcher (`0x3480140`).
+`EDSMissionCategoryDetail` names `OnlineLostMission` and `DynamicOfflineLostMission`, and the mission system keeps
+dynamic orders (lost cargo) at `S+0x110` and online ones at `S+0x118` ("Orders: the mission system"). Medium: another
+player's lost cargo is an online mission (`omt` Dynamic or Static by the kind of order it was lost from, `mt`
+LostObject), found with `findMissions` per area (`areaId`, `qids`), taken and delivered with `setMissionProgress`
+(`wkr` the porter, `pr` Progress then Success, `did` the location, `b[].ret`), and its owner learns it with
+`getOrderedMissions`. Which of these the game sends in which order was not read.
+
+#### What the server does with them (`world/`)
+
+- **Pavers: built** (`world/README.md`, "Roads paved together"). `devoteHighwayResources` adds each entry to what that
+  player put into that paver; `getHighwayResources` answers per asked paver and resource `n` (the others', only while
+  the policy shares them) and `un` (his own), `cs` (the others who put something into each asked paver, most first,
+  with their likes) and `ul`; `sendHighwayLikes` adds likes to a player whose contributions were shared. Contributions
+  count for the others exactly while an upload of that player would be shared at once (offer_builds yes, accept_offers
+  auto, build allows him), are taken back by a withdrawal of everything and by remove-player, and are kept in the world
+  file. Not built: linked servers do not carry them.
+- **Road paths: not built.** Today `findQpidObjects` answers `ro` empty, and a body with `ro` and no `o` is answered
+  with objects of every kind (a body without `ct`). Plan: answer a road request with no objects; store `createRoad`
+  bodies once the reserve-upload address is known; answer `ro` by `rlid`/`qe` and `ct`, and `getRoadData` by id.
+- **Signs: served as objects today**, through the same curation (per-kind counts, spread, picks); nothing to build until
+  a live run shows a served sign placed or not.
+- **Lost cargo: not built.** Plan: keep `addMissions` bodies per creator with an id of the game's shape; answer
+  `findMissions` with other players' missions of the asked areas that nobody has taken (at most `limit`), and
+  `getOrderedMissions` with the asker's own that changed; `setMissionProgress` by `cr` and `id` (the worker is the
+  asker); `deleteMissions` by their creator only; under the policy like uploads (a kept player's lost cargo is his own).
+
+**Live checks to run first** (one signed-in game unless said; the server's `--trace` gives the bodies):
+
+1. A delivery to a paver through its terminal: the `devoteHighwayResources` body (`ci`, `ri`, `n` as read above).
+2. Two copies on the server with `share_roads` **off**: one delivers metals to a paver the other has not finished; the
+   other's next ask (within 300 s, or at once when the area connects) and its paver's `+0x248`/`+0x524` before and
+   after. Then the same after a restart of the second game (is the last `n` per key kept in its save, or does the whole
+   `n` come again, bounded by the cap). With `share_roads` on as well, check that the materials are not counted twice.
+3. Read `H+0x300`'s factor (`+0x14`) and dependent paver (`+0xc`) for a few pavers.
+4. Place a sign while signed in: the `createObject` with `t`, `st` and `c`; then serve it to a second copy and read
+   its online objects list (state of the `t` element) and whether the sign shows.
+5. Drop cargo and leave it while signed in: whether `addMissions` is sent, with which `mt`, `omt`, `b`; and the
+   `findMissions` body of a second copy in that area.
+6. Find a `findQpidObjects` with `ro` in a trace, and the reserve-upload address (`otgc://gateway_reserve_upload/...`)
+   if a path is uploaded.
+
 
 ## Which screen is up: state flags and the open menu page (2026-11-14, static only)
 

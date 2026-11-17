@@ -62,6 +62,7 @@ loopback, a LAN or a VPN.
 | `getQpidObjects`, `reverseLookup` | from the stored objects and players |
 | `lookup` | a builder's name: this server's players by name only, a builder from a linked server as "Name · Home" ("Builder names") |
 | `sendLike`, `getLikeHistory` | a like is added to the object and to its builder's history (the last 2000 likes are kept); a player reads only his own history, after the time he names |
+| `devoteHighwayResources`, `getHighwayResources`, `sendHighwayLikes` | what each player put into the game's auto-pavers, added up; each player is answered with what the others put in that the policy shares, and his own ("Roads paved together") |
 | `getRankingSchedules`, `getWastedBaggages`, `findMissions`, `getOrderedMissions`, … | empty lists |
 | anything else | `{}` and an `unhandled NAME` line in the log |
 | `POST …/link/pull` with `Authorization: Link KEY` | not the game's: one page of objects for a linked server ("Linked servers") |
@@ -98,6 +99,47 @@ original service knew of it:
 - `lp`, the like count, is kept as the object's starting likes, as for any upload.
 
 Built and tested without a game (2026-11-17). Not tried live: no game has sent a re-create to this server yet.
+
+## Roads paved together
+
+The game's auto-pavers take materials from the other players through the server: what a player delivers to a paver
+is sent as his contribution, and every few minutes his game asks what the others put into its pavers and adds what
+grew since the last answer (static research: `../mod/game_offsets.md`, "Roads, signs and lost cargo through the
+server"). A paver is named by its construction id, the same in every game (52 pavers, ids 252 and 2031 to 2511); the
+resources are the game's six material indices, of which roads take 0 (chiral crystals), 2 (metals) and 3 (ceramics).
+
+| Call | Body | Answer |
+|---|---|---|
+| `devoteHighwayResources` | `{"ph":[{"ci":PAVER,"ri":RESOURCE,"n":AMOUNT}]}`, what he delivered since his last call | `{"e":0}`; each entry is added to what he put into that paver |
+| `getHighwayResources` | `{"cds":[{"cid":PAVER,"lgd":TIME}],"rids":[0,2,3]}`, at most ten pavers at a time | `pr`: per asked paver and resource with anything in it, `n` what the other players put in, `un` his own, `id` `"PAVER_RESOURCE"`; `cs`: per asked paver the other players who put something in, the most first, each `u` (player id) and `l` (likes for their contributions); `ul`: his own such likes |
+| `sendHighwayLikes` | `{"hls":[{"u":PLAYER,"l":N}]}` | `{}`; likes are added to a player whose contributions the others get; to anyone else (himself, nobody, a player whose contributions are not shared or who put nothing in) they are dropped |
+
+- **`n` is a total that grows.** The game keeps the last `n` it saw per paver and resource and takes the difference; a
+  smaller `n` takes nothing back. His own contributions are never in `n`: his game holds them already as his own, and
+  would count them twice. The game takes at most a part of each requirement from others (a factor from its data, not
+  read yet), and only for pavers in areas that are connected.
+- **The policy.** A player's contributions reach the others exactly while an upload of his would be shared at once
+  ("Server policy"): his choice (or the server's) is `offer_builds` yes, the server takes offers without review
+  (`accept_offers` auto), and he may build here (`build`: everyone, or members and he is one). Nobody can be asked
+  about a delivery and there is no review of one, so `ask`, `review` and `never` keep them his. `limit` counts objects
+  only. The rule is applied when the others ask: a change applies to what he put in before too (his no hides it, his
+  yes brings it back). His own `un` is answered whatever the policy.
+- **Taking back.** A withdrawal of everything (`withdraw --all`, or the API's `all`) takes his contributions and their
+  likes back, under `stay` as under `go`: a remnant of them would be counted as someone else's in his own game. What the
+  others' games already took stays there (the game never takes materials back). The owner's `remove-player` takes them
+  too.
+- **Bounds.** A call holds at most 64 entries, each amount 1 to 100000, paver 1 to 999999, resource 0 to 5; a body in
+  the wrong form is refused whole (400) and changes nothing. A player keeps at most 1024 pairs of paver and resource
+  (403 beyond), each total at most 10^9.
+- **Kept** in the world file (`highway`: player, paver, resource, amount; `highway_likes`: player, likes). A world
+  file without them loads; one with an entry for an unknown player, out of range or twice is refused. A `coop-world`
+  from before ignores them and drops them at its next save.
+- **Not carried by linked servers** (the contributions are per server), and the `lgd` the game sends is not used.
+
+Built and tested without a game (2026-11-17). Not run with a game: whether the game's ask and answer work as read,
+the share it takes from others, and whether its last `n` per paver is kept in its save (if not, a restarted game takes
+the whole `n` again, within its share). With the mod's `share_roads` on as well, two players' games in one session
+also exchange paver materials directly; whether that counts the partner's materials twice is a live check.
 
 ## The relay (`--relay-port`)
 
@@ -337,8 +379,8 @@ also show each other's players ("Presence across linked servers", 2026-11-17).
 
 What a server stores is what can travel: the built objects (every kind the game uploads: the kind is the one letter
 in `t`), each with its builder's player id and name, its area (`q`), its last change and its like count. Players,
-sessions, account keys and the like history (who liked what) never travel. Roads, missions and cargo are not stored
-by the server yet ("Not done"), so they cannot travel either. Only what every player here is handed travels: an
+sessions, account keys and the like history (who liked what) never travel. Paver materials ("Roads paved together")
+stay on their server; road paths, missions and cargo are not stored by the server yet ("Not done"). Only what every player here is handed travels: an
 object kept for its builder or waiting for an answer does not ("Server policy"); a remnant travels with the name of
 the player who built it.
 
@@ -346,7 +388,7 @@ A filter is `all`, `none`, or terms separated by `;`. A term that is left out do
 
 | Term | Passes |
 |---|---|
-| `types=l,rope,e` | these kinds: the letter, or a name for the letters that are known: `post` p, `charger` c, `safehouse` s, `watchtower` w, `bridge` b, `shelter` n, `rope` r, `ladder` l, `bike` v, `cairn` e, `road` o, `mushroom` x, `chiralbridge` g, `jumpstand` j |
+| `types=l,rope,e` | these kinds: the letter, or a name for the letters that are known: `post` p, `charger` c, `safehouse` s, `watchtower` w, `bridge` b, `shelter` n, `rope` r, `ladder` l, `bike` v, `cairn` e, `road` o, `mushroom` x, `chiralbridge` g, `jumpstand` j, `sign` t, `zipline` z, `catapult` a |
 | `owners=Ann,zygo_…` | objects of these builders, by display name or by player id (a name with `,` or `;` in it: use the id) |
 | `areas=226,227` | objects in these areas (the game's area number `q`) |
 | `max-age=30d` | objects changed within this time (`s`, `m`, `h`, `d`), by the taking side's clock against the builder's server's time |
@@ -1075,6 +1117,21 @@ builds 16 cairns on a 4 m grid and, a second later, two far away on a server on 
 player gets the two newer ones and one of the grid, at least 20 m apart; two newer ones still do not change his
 answer, nor does a restart (the picks are in the world file); after one of the three is removed the other two stay and
 the newest takes its place.
+Roads paved together: `highway_test.cpp` (two players' contributions added up per paver and resource for a third,
+the most first among the contributors; each player's own apart from `n`; a total that grows; only the asked pavers and
+resources; fifteen bodies of `devoteHighwayResources` and seven of `getHighwayResources` refused with nothing changed,
+one of them with a good entry before the bad one; a call without a session; 1024 pairs of paver and resource and the
+next one refused while an old one still grows, and a total capped at 10^9; under offer_builds no and ask, his yes over
+the server's no, accept_offers review and never, build nobody and members (no member, member), and his no and yes
+again for what he put in before; likes to two contributors counted, to himself, to a player who put nothing in, to an
+unknown id and to a player whose contributions are not shared dropped, and seven like bodies refused; one object
+withdrawn leaving his contributions and everything withdrawn taking them and their likes, under go and stay;
+remove-player; the saved world, a world file from before, and fourteen that are refused; the kind names `sign`,
+`zipline`, `catapult`). Twelve mutants must fail it (`HIGHWAY_OWN`, `HIGHWAY_ASKED`, `HIGHWAY_RANGE`, `HIGHWAY_WHOLE`,
+`HIGHWAY_KEYS`, `HIGHWAY_CHOICE`, `HIGHWAY_REVIEW`, `HIGHWAY_BUILD`, `HIGHWAY_LIKES`, `HIGHWAY_WITHDRAW`,
+`HIGHWAY_REMOVE`, `HIGHWAY_SAVE_LOST`). `test_server.py` on loopback: Ann's two deliveries (in the game's wrapped body)
+reach Bob as one total with Ann as contributor, a bad resource refused, Bob's like reaching Ann's `ul`, the world file
+and a restart keeping them, and `remove-player` on the stopped world taking them.
 The launcher's API: `api_test.cpp` through the HTTP surface (the policy in words for the three presets and a changed
 setting; a key that has not signed in, made a player by its choices before its sign-in and the same player after it;
 fourteen bodies and six keys that are refused and leave the world as it was; a full world; a player's objects in every
@@ -1255,4 +1312,7 @@ server), all live.
   no ladders. Rain shelters are made by the receiving game and taken down again.
 - Positions are `px, py, pz` divided by 10 to the power `exp` (2 when missing: centimetres), in the game's x, y, z.
   The server stores and returns what the builder sent.
-- Roads, highway resources, missions (lost cargo and shared lockers), wasted cargo, rankings, profiles, relationships.
+- Road paths (`findQpidObjects` `ro`, `createRoad`, `getRoadData`), missions (lost cargo and shared lockers), wasted
+  cargo, rankings, profiles, relationships. The game's shapes for paths and missions, and a plan for each: `../mod/game_offsets.md`,
+  "Roads, signs and lost cargo through the server". Signs (`t`) are uploaded and served as objects like any other
+  kind (the sign's kind in `st`, its comment answered as `cm`); no game has been handed one yet.
