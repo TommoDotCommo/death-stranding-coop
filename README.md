@@ -114,6 +114,8 @@ Your co-op saves from before move to `backups\before-test-save-<time>` in the co
 ordinary Death Stranding saves (outside co-op) are never touched. Details: [launcher/README.md](launcher/README.md)
 ("Test saves").
 
+What is left before a public release, and the features planned: [docs/ROADMAP.md](docs/ROADMAP.md).
+
 ## 🐞 Known issues
 
 - 🖥️ Everything live so far ran as **two copies on one PC**. Two PCs, a router and a firewall between them have not been tried.
