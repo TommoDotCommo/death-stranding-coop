@@ -1,7 +1,8 @@
 """The built server over a real socket: sign-in, a gateway call, keep-alive, the secret prefix, the saved file; the server
 policy: an upload that waits for the owner is handed to nobody else until he accepts it, one the policy does not let be
 shared is answered and held for its builder, and the policy commands; which objects a game is handed (newest first, spread
-apart, the same ones again after newer ones came and after a restart); the launcher's API on the running server."""
+apart, the same ones again after newer ones came and after a restart); the launcher's API on the running server; paver
+materials between players (roads paved together), kept over a restart and taken back by remove-player."""
 import http.client,json,math,os,socket,subprocess,sys,tempfile,time
 exe=sys.argv[1]
 def free_port():
@@ -197,6 +198,32 @@ with tempfile.TemporaryDirectory() as d:
         c.close()
     finally:
         p.kill();p.wait()
+    # Roads paved together: what Ann puts into a paver reaches Bob as the game asks for it (the body as the game wraps it),
+    # added up and kept over a restart; the owner's remove-player on the stopped world takes it back.
+    paved=os.path.join(d,'paved.json');port=free_port();p=start(port,path=paved)
+    try:
+        c=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
+        (ann,ann_id),(bob,_)=sign_in('ann'),sign_in('bob')
+        def devote(token,ci,ri,n):
+            c.request('POST','/abc/gate/e/devoteHighwayResources',body='{"data":"{"ph":[{"ci":%d,"ri":%d,"n":%d}]}"}'%(ci,ri,n),headers={'Authorization':'Bearer '+token})
+            r=c.getresponse();return r.status,json.loads(r.read() or b'{}')
+        assert devote(ann,2031,2,300)==(200,{'e':0}) and devote(ann,2031,2,100)[0]==200 and devote(ann,2031,9,1)[0]==400
+        asked={'cds':[{'cid':2031,'lgd':1700000000},{'cid':2032,'lgd':0}],'rids':[0,2,3]}
+        status,got=gate(bob,'getHighwayResources',asked);assert status==200 and got=={'pr':[{'id':'2031_2','cid':2031,'rid':2,'n':400,'un':0}],'cs':[{'cid':2031,'cs':[{'u':ann_id,'l':0}]}],'ul':0},got
+        assert gate(bob,'sendHighwayLikes',{'hls':[{'u':ann_id,'l':2}]})[0]==200 and gate(ann,'getHighwayResources',asked)[1]['ul']==2
+        c.close()
+    finally:
+        p.kill();p.wait()
+    assert json.load(open(paved))['highway']==[{'player':ann_id,'cid':2031,'rid':2,'n':400}]
+    port=free_port();p=start(port,path=paved)
+    try:
+        c=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
+        assert gate(bob,'getHighwayResources',asked)[1]['pr'][0]['n']==400
+        c.close()
+    finally:
+        p.kill();p.wait()
+    r=run('remove-player','--data',paved,'--player',ann_id);assert r.returncode==0,r.stderr
+    assert 'highway' not in json.load(open(paved)) and 'highway_likes' not in json.load(open(paved))
     # --idle-exit: a server nobody asks anything leaves by itself.
     port=free_port();p=subprocess.Popen([exe,'--port',str(port),'--idle-exit','1'],stdout=subprocess.PIPE,text=True)
     try:assert p.wait(timeout=20)==0

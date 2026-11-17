@@ -43,7 +43,7 @@ std::string trim(const std::string& s){size_t b=0,e=s.size();while(b<e&&(s[b]=='
 std::vector<std::string> split(const std::string& s,char by){std::vector<std::string> out;size_t at=0;while(true){size_t end=s.find(by,at);if(end==std::string::npos){out.push_back(trim(s.substr(at)));return out;}out.push_back(trim(s.substr(at,end-at)));at=end+1;}}
 // The kinds whose letter is known (mod/game_offsets.md, "Online protocol"); any other kind is named by its letter.
 const std::pair<const char*,char> TypeNames[]={{"post",'p'},{"charger",'c'},{"safehouse",'s'},{"watchtower",'w'},{"bridge",'b'},{"shelter",'n'},{"rope",'r'},
-    {"ladder",'l'},{"bike",'v'},{"cairn",'e'},{"road",'o'},{"mushroom",'x'},{"chiralbridge",'g'},{"jumpstand",'j'}};
+    {"ladder",'l'},{"bike",'v'},{"cairn",'e'},{"road",'o'},{"mushroom",'x'},{"chiralbridge",'g'},{"jumpstand",'j'},{"sign",'t'},{"zipline",'z'},{"catapult",'a'}};
 bool oneOf(const std::string& s,std::initializer_list<const char*> allowed){for(auto a:allowed)if(s==a)return true;return false;}
 // An account key as the API takes it (api.h accountKeyText): 1..MaxKeyBytes letters, digits, '_', '-', '.'.
 bool keyText(const std::string& k){
@@ -508,6 +508,87 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
 #endif
                 Value u=Value::object();u.set("account",o.second.creator);u.set("boundAccount","");u.set("displayName",shown);u.set("provider","steam");users.push(u);break;}}
         Value out=Value::object();out.set("users",users);return ok(out);}
+    if(name=="devoteHighwayResources"){
+        // What the player put into the game's auto-pavers since his last call (README "Roads paved together"): per entry
+        // the paver's construction id `ci`, the resource `ri` and the amount `n`. The whole body is checked first.
+        const Value& list=in.get("ph");
+        if(!list.isArray()||list.items().size()>MaxHighwayEntries)return refuse(400,"bad-highway","ph: a list of at most 64 entries");
+        std::map<std::pair<int64_t,int64_t>,int64_t> add;
+        for(auto& e:list.items()){
+            const int64_t ci=e.get("ci").integer(-1),ri=e.get("ri").integer(-1),n=e.get("n").integer(-1);
+#ifndef MUTANT_HIGHWAY_RANGE
+            if(!e.get("ci").isInt()||!e.get("ri").isInt()||!e.get("n").isInt()||ci<1||ci>MaxPaverId||ri<0||ri>=HighwayResources||n<1||n>MaxHighwayAmount)
+                return refuse(400,"bad-highway","an entry is a paver id, a resource 0..5 and an amount 1..100000");
+#endif
+#ifdef MUTANT_HIGHWAY_WHOLE
+            devoted_[me.id][{ci,ri}]+=n;continue;
+#endif
+            add[{ci,ri}]=std::min(MaxHighwayTotal,add[{ci,ri}]+n);}
+        if(add.empty()){Value out=Value::object();out.set("e",0);return ok(out);}
+        auto& mine=devoted_[me.id];
+        size_t fresh=0;for(auto& a:add)if(!mine.count(a.first))++fresh;
+#ifndef MUTANT_HIGHWAY_KEYS
+        if(mine.size()+fresh>MaxHighwayKeys){if(mine.empty())devoted_.erase(me.id);note("refused devoteHighwayResources: "+me.name+" has too many pavers");return refuse(403,"too-many","too many pavers");}
+#endif
+        for(auto& a:add)mine[a.first]=std::min(MaxHighwayTotal,mine[a.first]+a.second);
+        dirty_=true;++changes_;note("paver materials from "+me.name+": "+std::to_string(add.size())+" entries");
+        Value out=Value::object();out.set("e",0);return ok(out);}
+    if(name=="getHighwayResources"){
+        // The game asks for some of its pavers (`cds`: construction id and the time it last took materials, which is not
+        // used) and the resources roads take (`rids`). Per paver and resource: `n` what the other players put in whose
+        // contributions the policy shares now (the game adds what grew since its last answer), `un` his own; per paver the
+        // other players who put something in, most first, with the likes their contributions earned; `ul` his own.
+        const Value& asked=in.get("cds");const Value& rids=in.get("rids");
+        if(!asked.isArray()||asked.items().size()>MaxHighwayEntries||!rids.isArray()||rids.items().size()>size_t(HighwayResources))
+            return refuse(400,"bad-highway","cds: at most 64 pavers, rids: at most 6 resources");
+        std::set<int64_t> pavers,resources;
+        for(auto& c:asked.items()){const int64_t cid=c.get("cid").integer(-1);if(!c.get("cid").isInt()||cid<1||cid>MaxPaverId)return refuse(400,"bad-highway","a paver id is 1..999999");pavers.insert(cid);}
+        for(auto& r:rids.items()){if(!r.isInt()||r.integer()<0||r.integer()>=HighwayResources)return refuse(400,"bad-highway","a resource is 0..5");resources.insert(r.integer());}
+#ifdef MUTANT_HIGHWAY_ASKED
+        for(auto& d:devoted_)for(auto& k:d.second){pavers.insert(k.first.first);resources.insert(k.first.second);}
+#endif
+        // Whose contributions the asker gets: every other player's that the policy shares now.
+        std::vector<std::pair<std::string,const std::map<std::pair<int64_t,int64_t>,int64_t>*>> others;
+        for(auto& d:devoted_){
+#ifndef MUTANT_HIGHWAY_OWN
+            if(d.first==me.id)continue;
+#endif
+            const Player* p=playerById(d.first);if(!p||!contributes(*p))continue;
+            others.push_back({d.first,&d.second});}
+        auto at=[](const std::map<std::pair<int64_t,int64_t>,int64_t>& m,int64_t cid,int64_t rid){auto f=m.find({cid,rid});return f==m.end()?int64_t(0):f->second;};
+        auto mine=devoted_.find(me.id);
+        Value pr=Value::array(),cs=Value::array();
+        for(int64_t cid:pavers){
+            for(int64_t rid:resources){
+                int64_t n=0,un=mine==devoted_.end()?0:at(mine->second,cid,rid);
+                for(auto& o:others)n+=at(*o.second,cid,rid);
+                if(n==0&&un==0)continue;
+                Value e=Value::object();e.set("id",std::to_string(cid)+"_"+std::to_string(rid));e.set("cid",cid);e.set("rid",rid);e.set("n",n);e.set("un",un);pr.push(e);}
+            std::vector<std::pair<int64_t,std::string>> who;
+            for(auto& o:others){int64_t t=0;for(auto& k:*o.second)if(k.first.first==cid)t+=k.second;if(t>0)who.push_back({-t,o.first});}
+            if(who.empty())continue;
+            std::sort(who.begin(),who.end());
+            Value list=Value::array();
+            for(auto& w:who){Value u=Value::object();u.set("u",w.second);auto l=highwayLikes_.find(w.second);u.set("l",l==highwayLikes_.end()?int64_t(0):l->second);list.push(u);}
+            Value c=Value::object();c.set("cid",cid);c.set("cs",list);cs.push(c);}
+        auto liked=highwayLikes_.find(me.id);
+        Value out=Value::object();out.set("pr",pr);out.set("cs",cs);out.set("ul",liked==highwayLikes_.end()?int64_t(0):liked->second);return ok(out);}
+    if(name=="sendHighwayLikes"){
+        // Likes for the players whose paver contributions the giver got: to anyone else (himself, a player whose
+        // contributions are not shared, an unknown id) they are dropped. The whole body is checked first.
+        const Value& list=in.get("hls");
+        if(!list.isArray()||list.items().size()>MaxHighwayEntries)return refuse(400,"bad-like","hls: a list of at most 64 entries");
+        for(auto& h:list.items())if(!h.get("u").isString()||!h.get("l").isInt()||h.get("l").integer()<0||h.get("l").integer()>MaxHighwayAmount)return refuse(400,"bad-like","like count refused");
+        for(auto& h:list.items()){
+            const std::string to=h.get("u").string();const Player* p=playerById(to);
+#ifndef MUTANT_HIGHWAY_LIKES
+            if(!p||to==me.id||!contributes(*p)||!devoted_.count(to))continue;
+#else
+            if(!p)continue;
+#endif
+            if(h.get("l").integer()==0)continue;
+            auto& l=highwayLikes_[to];l=std::min(MaxHighwayTotal,l+h.get("l").integer());dirty_=true;++changes_;}
+        return ok(Value::object());}
     if(name=="getRankingSchedules"){Value out=Value::object();out.set("rs",Value::array());out.set("ut",now);return ok(out);}
     if(name=="getWastedBaggages"){Value out=Value::object();out.set("ws",Value::array());out.set("ud",now);return ok(out);}
     if(name=="findMissions"||name=="getOrderedMissions"||name=="getMissionsInProgress"){Value out=Value::object();out.set("missions",Value::array());return ok(out);}
@@ -582,7 +663,16 @@ json::Value World::snapshot() const {
     for(auto& p:picks_)for(auto& a:p.second){Value v=Value::object();v.set("player",p.first);v.set("area",a.first);v.set("asked",a.second.asked);
         Value ids=Value::array();for(auto& id:a.second.ids)ids.push(id);v.set("ids",ids);picks.push(v);}
 #endif
-    out.set("picks",picks);return out;
+    out.set("picks",picks);
+    // Roads paved together; a world without any is written as before.
+#ifndef MUTANT_HIGHWAY_SAVE_LOST
+    Value highway=Value::array(),liked=Value::array();
+    for(auto& d:devoted_)for(auto& k:d.second){Value v=Value::object();v.set("player",d.first);v.set("cid",k.first.first);v.set("rid",k.first.second);v.set("n",k.second);highway.push(v);}
+    for(auto& l:highwayLikes_){Value v=Value::object();v.set("player",l.first);v.set("likes",l.second);liked.push(v);}
+    if(!highway.items().empty())out.set("highway",highway);
+    if(!liked.items().empty())out.set("highway_likes",liked);
+#endif
+    return out;
 }
 void World::restore(const json::Value& v){
     std::lock_guard<std::mutex> g(lock_);
@@ -647,6 +737,22 @@ void World::restore(const json::Value& v){
         Picks k;k.asked=p.get("asked").integer();
         for(auto& id:p.get("ids").items()){if(!id.isString()||!objectIdText(id.string()))throw std::runtime_error("world file: bad picks");k.ids.push_back(id.string());}
         mine[p.get("area").integer()]=k;}
+    // Roads paved together: what each player put into each paver, and the likes for it; a world file from before has
+    // neither.
+    devoted_.clear();highwayLikes_.clear();
+    if(v.has("highway")&&!v.get("highway").isArray())throw std::runtime_error("world file: bad highway");
+    for(auto& h:v.get("highway").items()){
+        const std::string player=h.get("player").string();const int64_t cid=h.get("cid").integer(-1),rid=h.get("rid").integer(-1),n=h.get("n").integer(-1);
+        if(!playerById(player)||!h.get("cid").isInt()||!h.get("rid").isInt()||!h.get("n").isInt()
+           ||cid<1||cid>MaxPaverId||rid<0||rid>=HighwayResources||n<1||n>MaxHighwayTotal)throw std::runtime_error("world file: bad highway");
+        auto& mine=devoted_[player];
+        if(mine.count({cid,rid})||mine.size()>=MaxHighwayKeys)throw std::runtime_error("world file: bad highway");
+        mine[{cid,rid}]=n;}
+    if(v.has("highway_likes")&&!v.get("highway_likes").isArray())throw std::runtime_error("world file: bad highway likes");
+    for(auto& l:v.get("highway_likes").items()){
+        const std::string player=l.get("player").string();const int64_t n=l.get("likes").integer(-1);
+        if(!playerById(player)||!l.get("likes").isInt()||n<1||n>MaxHighwayTotal||highwayLikes_.count(player))throw std::runtime_error("world file: bad highway likes");
+        highwayLikes_[player]=n;}
     dirty_=!hadId;
 }
 // ---- Linked servers: filters, the travelling form of an object, export, import, forget.
@@ -1058,6 +1164,21 @@ size_t World::offered(const std::string& player) const {
     for(auto& o:objects_)if(o.second.creator==player&&o.second.originServer.empty()&&!o.second.remnant&&oneOf(o.second.share,{"","ask","review"}))++n;
     return n;
 }
+// Roads paved together: a player's paver contributions reach the others exactly while an upload of his would be shared
+// at once (his standing yes, a server that takes offers without review, and he may build here). Nobody can be asked
+// about a delivery, and there is no review of one; whatever stops them now also stops what he put in before.
+bool World::contributes(const Player& p) const {
+#ifndef MUTANT_HIGHWAY_CHOICE
+    if((p.offerBuilds.empty()?policy_.offerBuilds:p.offerBuilds)!="yes")return false;
+#endif
+#ifndef MUTANT_HIGHWAY_REVIEW
+    if(policy_.acceptOffers!="auto")return false;
+#endif
+#ifndef MUTANT_HIGHWAY_BUILD
+    if(policy_.build=="nobody"||(policy_.build=="members"&&!p.member))return false;
+#endif
+    return true;
+}
 std::string World::shareAfterOffer() const {
 #ifndef MUTANT_POLICY_REVIEW
     if(policy_.acceptOffers=="review")return "review";
@@ -1203,6 +1324,12 @@ World::Withdrawn World::withdraw(const std::string& player,const std::string& ob
         if(stay){o.remnant=true;if(o.name.empty())o.name=p->name;touch(o);++r.remnants;}
         else{objects_.erase(id);++r.removed;}}
     if(!ids.empty()){dirty_=true;++changes_;note("withdrawn for "+player+": "+std::to_string(r.remnants)+" stay as remnants, "+std::to_string(r.removed)+" removed");}
+    // Taking back everything takes back what he put into pavers too, under either setting: nobody else's road loses
+    // what it has (the game never takes materials back), the others only get no more of his. A remnant of it would be
+    // counted as someone else's in his own game, which has it already.
+#ifndef MUTANT_HIGHWAY_WITHDRAW
+    if(object.empty()&&devoted_.erase(player)+highwayLikes_.erase(player)){dirty_=true;++changes_;note("paver materials of "+player+" taken back");}
+#endif
     return r;
 }
 size_t World::removePlayer(const std::string& id){
@@ -1216,6 +1343,10 @@ size_t World::removePlayer(const std::string& id){
     for(auto& k:gone){auto& o=objects_[k];if(!o.originServer.empty())byOrigin_.erase({o.originServer,o.originId});objects_.erase(k);}
     likes_.erase(std::remove_if(likes_.begin(),likes_.end(),[&](const Like& l){return gone.count(l.object)>0;}),likes_.end());
     if(!gone.empty()){dirty_=true;++changes_;note("removed "+std::to_string(gone.size())+" objects of "+id);}
+    // And what he put into pavers, with its likes.
+#ifndef MUTANT_HIGHWAY_REMOVE
+    if(devoted_.erase(id)+highwayLikes_.erase(id)){dirty_=true;++changes_;note("removed the paver materials of "+id);}
+#endif
     return gone.size();
 }
 }

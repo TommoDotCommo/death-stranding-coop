@@ -12,6 +12,9 @@ build/policy-test: policy_test.cpp world.cpp world.h json.h | build
 	$(CXX) $(FLAGS) policy_test.cpp world.cpp -o $@
 build/curate-test: curate_test.cpp world.cpp world.h json.h | build
 	$(CXX) $(FLAGS) curate_test.cpp world.cpp -o $@
+# Roads paved together (README "Roads paved together"): the game's paver materials between players.
+build/highway-test: highway_test.cpp world.cpp world.h json.h | build
+	$(CXX) $(FLAGS) highway_test.cpp world.cpp -o $@
 # Builder names (README "Builder names"): display names, the label lookup gives, the home in exports.
 build/names-test: names_test.cpp world.cpp world.h json.h | build
 	$(CXX) $(FLAGS) names_test.cpp world.cpp -o $@
@@ -54,11 +57,12 @@ build/coop-world.exe: main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.
 ../mod/build/coop-swarm: FORCE
 	$(MAKE) -C ../mod build/coop-swarm
 FORCE:
-test: build/identity-test build/world-test build/policy-test build/curate-test build/names-test build/link-test build/front-test build/api-test build/notices-test build/keys-test build/relay-test build/broadcast-test build/fight-test build/presence-test build/coop-world ../mod/build/coop-swarm
+test: build/identity-test build/world-test build/policy-test build/curate-test build/highway-test build/names-test build/link-test build/front-test build/api-test build/notices-test build/keys-test build/relay-test build/broadcast-test build/fight-test build/presence-test build/coop-world ../mod/build/coop-swarm
 	./build/identity-test
 	./build/world-test
 	./build/policy-test
 	./build/curate-test
+	./build/highway-test
 	./build/names-test
 	./build/link-test
 	./build/front-test
