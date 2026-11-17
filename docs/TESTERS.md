@@ -36,6 +36,11 @@ bugs, crashes and features that do not work yet.
 4. Play as usual. Players you meet near you appear in your world with their nicknames; structures other testers built
    (once the organiser has accepted them) appear in yours.
 
+**Meeting the others.** Everyone plays their own save, and you see only the players near you in the game. For a
+test session the organiser names one test save (for example *Episode 3: Lake Knot distribution centre*): before you
+join, choose it in the launcher's **Saves** tab (**Use this test save**), so everybody starts in the same place. Your
+own co-op saves are kept in a backups folder.
+
 Use only the test server's `DSG-` invite. Do **not** use "Host a game" or a `DS-...` invite with people you do not
 know: a two-player lobby connects your PC directly to the other player's, and each of you can then see the other's
 IP address. Through the test server nobody but the server sees your address.
