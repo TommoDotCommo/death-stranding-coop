@@ -519,6 +519,8 @@ int main(int argc,char** argv) {
         check(r.find("305419896")==npos&&r.find("ABCD1234")==npos&&r.find("\"session\":<hidden>")!=npos&&r.find("DS-<hidden>")!=npos,"session secret and invite hidden");
         check(r.find("203.0.113.7")==npos&&r.find("203.0.x.x:49001")!=npos&&r.find("127.0.0.1")!=npos&&r.find("1.2.3.4.5")!=npos,"other addresses shortened; loopback and version numbers kept");
         check(r.find("Tom Smith")==npos&&r.find("Users\\<user>\\AppData")!=npos&&r.find("/Users/<user>/x")!=npos,"Windows user name hidden");
+        check(launcher::redact("Local\\KojimaProductions\\DeathStrandingDC\\239700001\\profile account 239700002 steam_76561198000000001 76561198000000002 userdata/239700003/1850570")
+              =="Local\\KojimaProductions\\DeathStrandingDC\\<steam-account>\\profile account <steam-account> steam_<steam-account> <steam-id> userdata/<steam-account>/1850570","Steam accounts are hidden in the text report");
         check(launcher::redact("sessions 12 DS-AB 10.1.2.3 300.1.2.3 x\\users\\")=="sessions 12 DS-AB 10.1.x.x 300.1.2.3 x\\users\\","only real secrets, addresses and names change");
         auto big=launcher::diagnostics(d,std::string(400000,'h'));
         check(big.size()<=launcher::DiagnosticsMax&&big.find("(report shortened)")!=npos&&r.size()<launcher::DiagnosticsMax,"report bounded");

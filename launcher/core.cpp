@@ -351,6 +351,19 @@ std::string redact(const std::string& in) {
     std::string out;out.reserve(in.size());
     for(size_t i=0;i<in.size();) {
         [[maybe_unused]] unsigned parts[4];
+#ifndef MUTANT_DIAG_STEAM_ACCOUNT
+        // Steam accounts: the 32-bit number that names save and userdata folders ("account N" in the mod's log too),
+        // steam_<64-bit id> inside saves, and 64-bit ids (7656119...). Each one finds a player's Steam profile.
+        {   bool hit=false;
+            for(const char* lead:{"deathstrandingdc\\","deathstrandingdc/","deathstranding\\","deathstranding/","userdata\\","userdata/","account ","account=","steam_"}) {
+                size_t n=std::char_traits<char>::length(lead);if(!startsNoCase(in,i,lead))continue;
+                size_t d=i+n;while(d<in.size()&&digit(in[d]))++d;
+                if(d-(i+n)>=3){out.append(in,i,n);out+="<steam-account>";i=d;hit=true;break;}
+            }
+            if(hit)continue;
+            if(in.compare(i,7,"7656119")==0&&(i==0||!digit(in[i-1]))){size_t d=i;while(d<in.size()&&digit(in[d]))++d;if(d-i==17){out+="<steam-id>";i=d;continue;}}
+        }
+#endif
 #ifndef MUTANT_DIAG_SECRET
         // "session":123 (config, status lines) and session=123 / session 123 (logs).
         if(startsNoCase(in,i,"session")&&(i==0||!((in[i-1]>='a'&&in[i-1]<='z')||(in[i-1]>='A'&&in[i-1]<='Z')))) {

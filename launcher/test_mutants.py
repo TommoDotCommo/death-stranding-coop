@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
                                       'KEYS_KEEP', 'STRAND_SIGN', 'STRAND_NO_PASSES', 'GROUP_TICKET', 'GROUP_RELAY_TOKEN', 'DIAG_TICKET', 'GROUP_NOTICE_TOKEN', 'GROUP_PAIRS', 'GROUP_BUILD_RECEIVED', 'GROUP_BUILD_SETTING', 'GROUP_OFFER_STRAND', 'STRAND_NOTICE_FATAL', 'DIAG_NOTICE_TOKEN',
                                       'OWNER_UNSIGNED', 'OWNER_CLOCK', 'OWNER_REJECT_ALL', 'OWNER_REFUSAL', 'OWNER_REMOVE_TEXT', 'OWNER_HOST_ONLY', 'OWNER_PARSE',
                                       'BACKUP_RUNNING', 'NESTED_LAB', 'NESTED_RELEASE',
-                                      'DIAG_SECRET', 'DIAG_ADDRESS', 'DIAG_USER', 'DIAG_BOUND', 'FIREWALL_BLOCK_WINS', 'FIREWALL_ANY_PROGRAM']):
+                                      'DIAG_SECRET', 'DIAG_STEAM_ACCOUNT', 'DIAG_ADDRESS', 'DIAG_USER', 'DIAG_BOUND', 'FIREWALL_BLOCK_WINS', 'FIREWALL_ANY_PROGRAM']):
         print('killed', name)
     # The socket test (test_group.py) must fail too when the games' key is not the server's, the server has no relay,
     # a joiner on the host's PC signs in or acts as the host's account, the host's rules do not reach a new world, or
