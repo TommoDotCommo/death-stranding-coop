@@ -110,8 +110,10 @@ a game shows the group invite and **Start group server and play** instead of a l
    after the last player.
 3. It writes the host's `mod.json`: no `peer`, `server` `127.0.0.1`, `relay` `127.0.0.1:P`, `relay_key` `wKEY`,
    `session` KEY, `player_id`, `relay_mode` `broadcast` (since 2026-11-17: each game publishes once and the server
-   copies to everyone near; `../mod/README.md`, "The broadcast mode"), `others` 15, `partner_tag`, `online_server` `http://127.0.0.1:P/wKEY/auth/ds`, and
-   the play setup's `game_thread`, `puppet_probe`, `required`. The proxy's peer list is `127.0.0.1`. On a server that
+   copies to everyone near; `../mod/README.md`, "The broadcast mode"), `others` 15, `partner_tag`, `online_server` `http://127.0.0.1:P/wKEY/auth/ds`,
+   `build_received` (below, "Other players' structures"), and the play setup's `game_thread`, `puppet_probe`,
+   `required`; with a notice token also `strand_notices`, `offer_strand` and `strand_token` (below, "What the game is
+   told"). The proxy's peer list is `127.0.0.1`. On a server that
    takes keys (Public) it first waits for the server to answer (at most ten seconds) and takes the game's sign-in
    ticket and relay token: `online_server` is then `http://127.0.0.1:P/wKEY/t/TICKET/auth/ds`, `relay_key` the token
    and `player_id` the relay id made from the key. The server now starts before the config is written (it used to
@@ -177,6 +179,23 @@ token (its server has no join step), and no partner notice is turned on by this.
 launcher, because the player has just seen the rules and should not be surprised later by what a build of his became;
 off in a `mod.json` written by hand unless it says `strand_notices`, as every feature of the mod.
 
+With the token the launcher also writes `offer_strand` on (since 2026-11-17; `../mod/README.md`, "Offering your
+existing strand"): the game reads the server's word on the player's older strand with the same token every 5 s and
+has the structures his save already holds uploaded to that server, one at a time, only while that word is yes. The
+word is his own choice for that server (`offer_old`, "Let this server take my older strand" below; default no), so
+the option on changes nothing until he says yes there, and stops when he says no again. Without a token (an older
+server) it is not written, as the mod needs the token for it.
+
+**Other players' structures** (since 2026-11-17). Settings has "Build other players' structures when they arrive
+(group servers)", on by default (`build_received` in `launcher.ini`). The host's and every joiner's group config
+write it as `build_received` (`../mod/README.md`, "Received structures built"): the bridges and rain shelters the
+server hands the game are built at once, where the game would otherwise hold another player's bridge back until the
+porter is 1 km away and take received rain shelters down. The trade-off, said beside the box: they skip the game's
+spacing and area checks, so one may overlap something in the player's world or stand where the game keeps other
+players' structures out (the server keeps the objects of one kind in one answer 20 m apart, nothing more). Turned off, the config
+says `"build_received": false` and the game keeps its own rules. It is each player's own setting, not the host's;
+it does not apply to the two-player shared world.
+
 **Before you join: the server's rules.** The rule behind it: before a game connects, its player sees what the server
 will take from him and what it will show him; the server's owner sets the server's rules, the player sets the rules
 of his own contributions. So before the joiner's game starts, the launcher asks the server (its launcher API,
@@ -191,9 +210,12 @@ of his own contributions. So before the joiner's game starts, the launcher asks 
   for his answer or the owner's, held by the rules, kept, remnants, likes), or that he has not played there yet.
 - His two choices for this server: **Share what I build here**: Yes (the other players can be handed it, as the rules
   say), No (kept for him alone, a personal archive on that server) or Ask me (it waits until he offers it, below);
-  **Let this server take my older strand**: Yes or No. The server keeps it and tells his game's mod; a game whose
-  `mod.json` has `offer_strand` on (the launcher does not write it yet) then has the game upload the structures its
-  save already holds (`../mod/README.md`, "Offering your existing strand"; not run live). Ticked: what the
+  **Let this server take my older strand** (the structures already in his save, built before he joined there):
+  **Yes** ("my game uploads them to this server one by one while I play"; then as the rules say for any upload) or
+  **No** ("only what I build while connected goes to this server"). The server keeps it and tells his
+  game's mod, and the launcher's group config has `offer_strand` on (above), so Yes has his game upload them, one at a
+  time, while he plays (`../mod/README.md`, "Offering your existing strand"; live once,
+  not yet started from the launcher). Ticked: what the
   server has for him if he chose there before, else what this launcher remembers for this server, else the server's
   own values for a player who chose nothing (its `offer_builds` and `offer_old`).
 - **Join with these choices**: they are remembered in `launcher.ini` under `[server-ID]` (the world's id, so a server
@@ -276,8 +298,8 @@ choices (also with `--prepare-only`); `--strand-builds yes|no|ask` and `--strand
 with `--prepare-only`) takes the game's ticket and relay token and writes them into the config; `--group-host` with
 `--prepare-only` does so only when its server is already running (it starts none).
 
-**Not seen on a screen.** The join screen, the "My strand on this server" window, its Who I see window, the Server owner window and the
-Settings list of rules were built and cross-compiled, and have not been looked at or clicked. The launcher's side of the API (`strand.cpp`) is
+**Not seen on a screen.** The join screen, the "My strand on this server" window, its Who I see window, the Server owner window,
+the Settings list of rules and the Settings box for other players' structures were built and cross-compiled, and have not been looked at or clicked. The launcher's side of the API (`strand.cpp`) is
 tested on Linux sockets (below); on Windows it ran once without a window, against `coop-world.exe` on loopback: a
 server that did not answer (report `unreachable`, exit 3) and a full solo world (the rules read, the choices refused,
 exit 3, the choices remembered in `launcher.ini`). A join that goes on to start a game, and an older server, were not
@@ -433,6 +455,13 @@ changed on the running server; the joiner's friend list as the Who I see window 
 short form of his key, with `friends`), read back, another key's own list empty and his refused to another key; and the
 relay answering the joiner's token for his id only, never the group's key.
 `GROUP_TICKET`, `GROUP_RELAY_TOKEN`, `STRAND_SIGN` and `KEYS_KEEP` must also fail it.
+
+The strand options in group play: `core_test.cpp` checks that the host's and a joiner's config have `build_received`
+on, and off when the player turned the setting off; and `offer_strand` on with the notice token (the host's game and a
+joiner's), never without one. `test_identity.py` checks both in the host's and the joiner's config made with the
+tokens of the built `coop-world`. Mutants: `GROUP_BUILD_RECEIVED` (the config leaves it out), `GROUP_BUILD_SETTING`
+(on whatever the setting says), `GROUP_OFFER_STRAND` (the config leaves it out); `GROUP_BUILD_RECEIVED` and
+`GROUP_OFFER_STRAND` must also fail `test_identity.py`.
 
 Server owner (`owner.h`): `core_test.cpp` checks who sees the window (the host with the key he gave the server; not
 another key, a joiner, a two-player session or a host without an owner key), and the owner's calls against a stand-in

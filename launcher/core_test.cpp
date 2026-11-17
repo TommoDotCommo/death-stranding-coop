@@ -53,7 +53,7 @@ int main(int argc,char** argv) {
         namespace st=launcher::strand;namespace wid=world::identity;
         const std::string mode=argv[1];auto keys=launcher::playerKeys(argv[argc-1]);
         auto print=[](const launcher::Session& s){auto c=mod::parseConfig(launcher::config(s));
-            std::cout<<"online "<<c.onlineServer<<"\nrelay "<<c.relay<<"\nkey "<<c.relayKey<<"\nplayer "<<c.playerId<<"\nstrand "<<c.strandNotices<<"\ntoken "<<c.strandToken<<'\n';};
+            std::cout<<"online "<<c.onlineServer<<"\nrelay "<<c.relay<<"\nkey "<<c.relayKey<<"\nplayer "<<c.playerId<<"\nstrand "<<c.strandNotices<<"\ntoken "<<c.strandToken<<"\noffer "<<c.offerStrand<<"\nbuild "<<c.buildReceived<<'\n';};
         if(mode=="--keyed-keys"&&argc==3){std::cout<<"pub "<<wid::hex(keys.pub)<<"\naccount "<<wid::account(keys.pub)<<"\nrelay "<<wid::relayId(keys.pub)<<"\nshort "<<wid::shortText(keys.pub)<<'\n';return 0;}
         if((mode=="--keyed-host"||mode=="--keyed-host-config")&&argc==6) {   // PORT SECRET WORLD-FILE KEYFILE: the server's command line, or the host's game
             launcher::Session h;h.name="Host";h.port=unsigned(std::stoul(argv[2]));h.secret=uint32_t(std::stoul(argv[3]));h.group=launcher::Group::Host;h.playerId=77;h.policy="public";
@@ -141,6 +141,9 @@ int main(int argc,char** argv) {
         check(hc.group&&hc.peer.empty()&&hc.role=="none"&&hc.server=="127.0.0.1"&&hc.slot==3,"a group player has no partner");
         check(hc.others==launcher::GroupOthers&&hc.relay=="127.0.0.1:49103"&&hc.relayKey=="w305419896"&&hc.playerId==h.playerId&&hc.partnerTag&&hc.session==h.secret&&hc.gameThread&&hc.puppetProbe&&hc.required,"group host config");
         check(hc.relayMode=="broadcast","group play uses the relay's broadcast mode");
+        // Other players' structures built when they arrive: the player's setting, on unless he turned it off.
+        check(hc.buildReceived,"a group game builds other players' structures when they arrive");
+        {auto off=h;off.buildReceived=false;check(!mod::parseConfig(launcher::config(off)).buildReceived,"unless the player turned it off");}
         check(hc.onlineServer=="http://127.0.0.1:49103/w305419896/auth/ds","the host's game signs in on loopback, as its own account");
         check(hc.partner=="off"&&!hc.shareOrders&&!hc.shareEnemies&&!hc.shareRoads&&!hc.shareSavedStructures&&hc.shareEnvironment=="off"&&!hc.notices,"nothing of the two-player session in group play");
         auto a=launcher::worldArguments(h,"D");
@@ -170,6 +173,8 @@ int main(int argc,char** argv) {
         auto j=launcher::groupJoin(r.invite,1,me);auto jc=mod::parseConfig(launcher::config(j));
         check(jc.group&&jc.server=="100.70.1.2"&&jc.relay=="100.70.1.2:49103"&&jc.relayKey==hc.relayKey&&jc.session==hc.session&&jc.playerId==77&&jc.slot==3&&jc.nickname=="Fragile"&&jc.others==launcher::GroupOthers,"a joiner's config names the server from the invite");
         check(jc.onlineServer=="http://100.70.1.2:49103/w305419896/auth/ds","a joiner on another PC signs in as its own account");
+        check(jc.buildReceived&&jc.relayMode=="broadcast","a joiner builds other players' structures too");
+        {auto off=me;off.buildReceived=false;check(!mod::parseConfig(launcher::config(launcher::groupJoin(r.invite,1,off))).buildReceived,"a joiner's own setting");}
         check(launcher::networkPeers(j)=="100.70.1.2","a joiner's proxy lists the server and nothing else");
         check(launcher::worldArguments(j,"D").empty(),"only the host runs the group's server");
         auto third=me;third.name="Deadman";third.playerId=78;auto t=mod::parseConfig(launcher::config(launcher::groupJoin(r.invite,0,third)));
@@ -258,7 +263,9 @@ int main(int argc,char** argv) {
          check(f.sent[2]=="POST /w305419896/coop/notice-token {\"player\":\"76561197960266962\"}"&&j.passes.noticeToken=="n0t1ce5","a notice token for this account");
          {launcher::Session g=launcher::groupJoin(v,0,me);st::useNoticeToken(g,j.passes);auto gc=mod::parseConfig(launcher::config(g));
           check(gc.strandNotices&&gc.strandToken=="n0t1ce5"&&!gc.notices,"the game's config reads its builds' states with it");
-          auto bare=mod::parseConfig(launcher::config(launcher::groupJoin(v,0,me)));check(!bare.strandNotices&&bare.strandToken.empty(),"without a token: no strand notices");}
+          check(gc.offerStrand,"and offers the save's older strand while the server says yes to it");
+          auto bare=mod::parseConfig(launcher::config(launcher::groupJoin(v,0,me)));check(!bare.strandNotices&&!bare.offerStrand&&bare.strandToken.empty(),"without a token: no strand notices, nothing offered");
+          auto host=h;st::useNoticeToken(host,j.passes);auto hc2=mod::parseConfig(launcher::config(host));check(hc2.offerStrand&&hc2.strandNotices&&hc2.buildReceived,"the host's game the same");}
          // A server that gives none (an older one, or one that refuses): the game starts all the same, without them.
          {Fake o;o.answers=f.answers;o.answers.erase("POST /w305419896/coop/notice-token");auto k=st::join(t,fake(o),"",{});
           check(k.start&&k.passes.noticeToken.empty()&&o.sent.size()==3,"no notice token: joined all the same");

@@ -118,8 +118,23 @@ std::string config(const Session& s) {
             +",\"relay_mode\":\"broadcast\""   // publish once, the server copies to everyone near (../mod/README.md, "The broadcast mode")
 #endif
             +",\"online_server\":\""+worldAddress(s)+"\""
+#ifndef MUTANT_GROUP_BUILD_RECEIVED
+            // Other players' structures built when they arrive (../mod/README.md, "Received structures built"): the
+            // player's setting, on unless he turned it off; they skip the game's spacing and area checks.
+#ifndef MUTANT_GROUP_BUILD_SETTING
+            +",\"build_received\":"+std::string(s.buildReceived?"true":"false")
+#else
+            +",\"build_received\":true"
+#endif
+#endif
 #ifndef MUTANT_GROUP_NOTICE_TOKEN
-            +(s.noticeToken.empty()?std::string():",\"strand_notices\":true,\"strand_token\":\""+s.noticeToken+"\"")
+            // With the token: the notices, and the save's older strand offered while the server says his offer_old is
+            // yes (../mod/README.md, "Offering your existing strand"); the server's word decides, so it is always on.
+            +(s.noticeToken.empty()?std::string():std::string(",\"strand_notices\":true")
+#ifndef MUTANT_GROUP_OFFER_STRAND
+                +",\"offer_strand\":true"
+#endif
+                +",\"strand_token\":\""+s.noticeToken+"\"")
 #endif
             +",\"discovery_sha256\":\""+mod::discovery::PinnedHash+"\"}\n";
         mod::parseConfig(json);

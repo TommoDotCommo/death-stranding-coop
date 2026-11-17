@@ -705,8 +705,8 @@ coop-world offer      --data world.json --player ID (--object ID | --all) [--no]
   for his answer; `offer` is his answer (yes, or `--no`: kept for him).
 - `offer_old`: whether the structures of his old strand (what his save holds from before) may be offered to this
   server, a standing yes or no (default no). The server tells his game's mod what applies ("What the game is told");
-  with its option `offer_strand` the mod then has the game upload them (`../mod/README.md`, "Offering your existing
-  strand"). The server itself cannot tell an old structure from a new one and does not enforce it: what is offered
+  with its option `offer_strand` (on in the launcher's group play) the mod then has the game upload them
+  (`../mod/README.md`, "Offering your existing strand"). The server itself cannot tell an old structure from a new one and does not enforce it: what is offered
   goes through the policy as any upload.
 - `default` goes back to the server's value. A change applies to uploads from then on.
 

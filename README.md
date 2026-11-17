@@ -65,7 +65,6 @@ server above.
 
 - 🖥️ Everything live so far ran as **two copies on one PC**. Two PCs, a router and a firewall between them have not been tried.
 - 🧱 With `build_received`, a received structure **skips the game's own spacing and area checks**, so it may overlap something in your world or stand where the game keeps other players' structures out. The server keeps the objects it hands out 20 m apart.
-- 🧱 With `build_received`, a received structure **skips the game's own spacing and area checks**, so it may overlap something in your world or stand where the game keeps other players' structures out. The server keeps the objects it hands out 20 m apart.
 - 🗑️ A structure **removed from the server** stays in a running game until its area loads again.
 - 🔢 The game takes **only so many objects of each kind per area** (5 cairns at Lake Knot, no ladders there); the server chooses which.
 - 🧟 A dead partner is laid down stiffly: there is no death animation for him yet.

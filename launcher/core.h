@@ -53,6 +53,9 @@ struct Session {
     // group's server, under every identity; with it the game's config turns strand_notices on. Empty: none (the server
     // is older, or did not give one), and the game starts without them.
     std::string noticeToken;
+    // Group play: other players' structures the server hands this game are built at once (`build_received`), skipping
+    // the game's spacing and area checks for them. The player's setting, on unless he turns it off.
+    bool buildReceived=true;
 };
 // This install's key pair: made once and kept in `file` (player.key, beside launcher.ini). Its secret half is never
 // sent anywhere; the public half is the player on servers that take keys. A file that is there but cannot be read is

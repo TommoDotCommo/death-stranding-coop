@@ -19,7 +19,7 @@ std::unique_ptr<Network> net;
 LaunchOptions options;
 fs::path settingsFile,executable;
 int selectedTab=0,choice=0;
-bool lan=true,tailscale=true,privacy=false,sharedWorld=false,groupHost=false,pasteGroup=false,initializing=true,joinAfterScan=false,joinScanStarted=false,remembered=false;
+bool lan=true,tailscale=true,privacy=false,sharedWorld=false,groupHost=false,buildReceived=true,pasteGroup=false,initializing=true,joinAfterScan=false,joinScanStarted=false,remembered=false;
 std::string joinQuery;
 unsigned port=49000;
 std::wstring player=L"Porter",gameFolder;
@@ -30,7 +30,7 @@ std::string groupPolicy="friends";                      // the rules the host's 
 Session strandSession;bool haveStrand=false;            // the group server this launcher last hosted or joined: "My strand on this server"
 world::identity::Keys keys;                             // this install's key pair (player.key beside launcher.ini; core.h playerKeys)
 std::vector<HWND> controls[4];
-enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import,Remove,GroupHost,GroupPolicy,Strand,Owner};
+enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import,Remove,GroupHost,GroupPolicy,Strand,Owner,BuildReceived};
 const char* PolicyNames[]={"friends","solo","public"};
 HWND child(int id){return GetDlgItem(window,id);}
 std::wstring text(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(n+1,0);GetWindowTextW(h,s.data(),n+1);s.resize(n);return s;}
@@ -103,7 +103,7 @@ void writeSettings(){
     std::string name=utf8(player),game=utf8(gameFolder);
     if(name.find_first_of("\r\n")!=std::string::npos||game.find_first_of("\r\n")!=std::string::npos)return;
     atomicWrite(settingsFile,settingsText(readIni(),{{"name",name},{"game",game},{"choice",std::to_string(choice)},{"port",std::to_string(port)},{"lan",std::to_string(lan)},{"tailscale",std::to_string(tailscale)},
-        {"privacy",std::to_string(privacy)},{"world",std::to_string(sharedWorld)},{"group",std::to_string(groupHost)},{"group_secret",std::to_string(groupSecret)},{"player_id",std::to_string(playerNumber)},{"group_policy",groupPolicy}}));
+        {"privacy",std::to_string(privacy)},{"world",std::to_string(sharedWorld)},{"group",std::to_string(groupHost)},{"group_secret",std::to_string(groupSecret)},{"player_id",std::to_string(playerNumber)},{"group_policy",groupPolicy},{"build_received",std::to_string(buildReceived)}}));
 }
 void saveSettings(){if(!initializing)writeSettings();}
 // A headless report (one line of JSON): to standard output for "-", else to that file.
@@ -132,7 +132,7 @@ uint32_t groupKey(){if(!groupSecret){groupSecret=random32();writeSettings();}ret
 // Windows Firewall's verdict for the game's two UDP ports, read when the launcher starts and when a lobby opens.
 Firewall firewall=Firewall::Unknown;
 void readFirewallNow(){if(!gameFolder.empty())firewall=readFirewall(fs::path(gameFolder)/"ds.exe",{port,port+1});}
-Session chosenSession(){Session s;s.name=utf8(player);s.port=port;s.sharedWorld=sharedWorld;s.playerId=playerNumber;s.policy=groupPolicy;return s;}   // a guest's choice is replaced by the host's (net_win.h)
+Session chosenSession(){Session s;s.name=utf8(player);s.port=port;s.sharedWorld=sharedWorld;s.playerId=playerNumber;s.policy=groupPolicy;s.buildReceived=buildReceived;return s;}   // a guest's choice is replaced by the host's (net_win.h)
 void render();
 // ---- A group server's rules (strand.h): the join screen and "My strand on this server", each a window of its own
 // over the launcher, which is disabled while one is open. Built without being seen on a screen (README).
@@ -182,9 +182,10 @@ bool choicesScreen(const strand::Policy& rules,const std::string& mine,strand::C
         popupControl(h,BuildYes,L"BUTTON",L"Yes: the other players can be handed it, as the rules above say",BS_AUTORADIOBUTTON|WS_GROUP,40,362,720,26);
         popupControl(h,BuildNo,L"BUTTON",L"No: keep it for me alone (a personal archive on this server)",BS_AUTORADIOBUTTON,40,390,720,26);
         popupControl(h,BuildAsk,L"BUTTON",L"Ask me: it waits until I offer it (Play, My strand on this server)",BS_AUTORADIOBUTTON,40,418,720,26);
-        popupControl(h,0,L"STATIC",L"Let this server take my older strand (offered only by a game whose mod has offer_strand on):",SS_LEFT,20,458,744,24);
-        popupControl(h,OldYes,L"BUTTON",L"Yes",BS_AUTORADIOBUTTON|WS_GROUP,40,485,120,26);popupControl(h,OldNo,L"BUTTON",L"No",BS_AUTORADIOBUTTON,180,485,120,26);
-        popupControl(h,Go,L"BUTTON",go,BS_DEFPUSHBUTTON|WS_GROUP,20,545,480,40);popupControl(h,Cancel,L"BUTTON",L"Cancel",0,520,545,244,40);
+        popupControl(h,0,L"STATIC",L"Let this server take my older strand (the structures already in my save):",SS_LEFT,20,456,744,24);
+        popupControl(h,OldYes,L"BUTTON",L"Yes: my game uploads them to this server one by one while I play",BS_AUTORADIOBUTTON|WS_GROUP,40,483,720,26);
+        popupControl(h,OldNo,L"BUTTON",L"No: only what I build while connected goes to this server",BS_AUTORADIOBUTTON,40,511,720,26);
+        popupControl(h,Go,L"BUTTON",go,BS_DEFPUSHBUTTON|WS_GROUP,20,555,480,40);popupControl(h,Cancel,L"BUTTON",L"Cancel",0,520,555,244,40);
         SendMessageW(GetDlgItem(h,c.offerBuilds=="no"?BuildNo:c.offerBuilds=="ask"?BuildAsk:BuildYes),BM_SETCHECK,BST_CHECKED,0);
         SendMessageW(GetDlgItem(h,c.offerOld=="yes"?OldYes:OldNo),BM_SETCHECK,BST_CHECKED,0);SetFocus(GetDlgItem(h,Go));})==1;
 }
@@ -485,8 +486,8 @@ void render(){
         set(Status,wtext(net->status));refreshRows();
     }
     if(selectedTab==1){place(210,30,120,w-60,65);place(211,30,200,w-60,180);place(OpenSaves,30,400,(w-75)/2,40);place(BackUp,45+(w-75)/2,400,(w-75)/2,40);place(Import,30,455,w-60,40);}
-    if(selectedTab==2){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(Lan,30,270,w-60,30);place(Tailscale,30,310,w-60,30);place(Privacy,30,350,w-60,30);place(World,30,390,w-60,30);place(GroupHost,30,430,w-60,30);place(223,30,472,330,25);place(GroupPolicy,370,468,w-400,120);place(Protocol,30,515,w-60,40);place(222,30,565,w-60,60);
-        bool edit=!net->lobby;for(int id:{GamePath,Port,Lan,Tailscale,Privacy,World,GroupHost,GroupPolicy})EnableWindow(child(id),edit);}
+    if(selectedTab==2){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(Lan,30,265,w-60,30);place(Tailscale,30,300,w-60,30);place(Privacy,30,335,w-60,30);place(World,30,370,w-60,30);place(GroupHost,30,405,w-60,30);place(BuildReceived,30,440,w-60,46);place(223,30,497,330,25);place(GroupPolicy,370,493,w-400,120);place(224,30,535,w-60,40);place(Protocol,30,580,w-60,36);place(222,30,622,w-60,50);
+        bool edit=!net->lobby;for(int id:{GamePath,Port,Lan,Tailscale,Privacy,World,GroupHost,BuildReceived,GroupPolicy})EnableWindow(child(id),edit);}
     if(selectedTab==3){place(230,30,120,w-60,240);place(Guide,30,390,w-60,40);place(Home,30,445,w-60,40);place(Diagnose,30,500,w-60,40);place(Remove,30,555,w-60,40);}
 }
 void copyInvite(){
@@ -552,7 +553,7 @@ void timer(){
 LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
     try {
         if(msg==WM_SIZE){render();return 0;}
-        if(msg==WM_GETMINMAXINFO){auto p=reinterpret_cast<MINMAXINFO*>(lp);p->ptMinTrackSize={800,680};return 0;}
+        if(msg==WM_GETMINMAXINFO){auto p=reinterpret_cast<MINMAXINFO*>(lp);p->ptMinTrackSize={800,730};return 0;}
         if(msg==WM_ACTIVATE&&LOWORD(wp)!=WA_INACTIVE&&!initializing){PostMessageW(h,WM_APP+2,0,0);}
         if(msg==WM_APP+2){offerClipboard();return 0;}
         if(msg==WM_TIMER){timer();return 0;}
@@ -577,7 +578,7 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
                 if(id==HostSave){net->wantSave=SendMessageW(child(id),BM_GETCHECK,0,0)==BST_CHECKED;}
                 if(id==Import)importSaves(h);
                 if(id==Remove)removeSetup(h);
-                if(id==Lan||id==Tailscale||id==Privacy||id==World||id==GroupHost){auto checked=SendMessageW(child(id),BM_GETCHECK,0,0)==BST_CHECKED;if(id==Lan)lan=checked;if(id==Tailscale)tailscale=checked;if(id==Privacy)privacy=checked;if(id==World)sharedWorld=checked;if(id==GroupHost)groupHost=checked;saveSettings();}
+                if(id==Lan||id==Tailscale||id==Privacy||id==World||id==GroupHost||id==BuildReceived){auto checked=SendMessageW(child(id),BM_GETCHECK,0,0)==BST_CHECKED;if(id==Lan)lan=checked;if(id==Tailscale)tailscale=checked;if(id==Privacy)privacy=checked;if(id==World)sharedWorld=checked;if(id==GroupHost)groupHost=checked;if(id==BuildReceived)buildReceived=checked;saveSettings();}
                 if(id==Protocol){registerHandler(executable);MessageBoxW(h,L"Invite links now open this launcher for your Windows account.",L"Invite links",MB_OK);}
                 if(id==OpenSaves){fs::create_directories(options.data/"redirect-data");ShellExecuteW(h,L"open",(options.data/"redirect-data").c_str(),nullptr,nullptr,SW_SHOWNORMAL);}
                 if(id==BackUp){if(!backupAllowed(net->lobby,gameRunning(gameFolder)))throw std::runtime_error("Leave the lobby and close the game before backing up.");auto dest=options.data/"backups"/std::to_string(std::time(nullptr));backup(options.data,dest);MessageBoxW(h,(L"Co-op saves backed up to:\n"+dest.wstring()).c_str(),L"Backup complete",MB_OK);}
@@ -609,6 +610,8 @@ void buildControls(){
     control(2,Lan,L"BUTTON",L"Find games on my network",BS_AUTOCHECKBOX);control(2,Tailscale,L"BUTTON",L"Find friends on Tailscale",BS_AUTOCHECKBOX);control(2,Privacy,L"BUTTON",L"Invite only (host decides)",BS_AUTOCHECKBOX);control(2,World,L"BUTTON",L"Shared world (experimental; the host decides): each other's ladders and cairns through the game's own online layer",BS_AUTOCHECKBOX);
     SendMessageW(child(Lan),BM_SETCHECK,lan?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Tailscale),BM_SETCHECK,tailscale?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Privacy),BM_SETCHECK,privacy?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(World),BM_SETCHECK,sharedWorld?BST_CHECKED:BST_UNCHECKED,0);
     control(2,GroupHost,L"BUTTON",L"Group server (experimental): Host a game starts a server for many players, each in their own save, instead of a two-player lobby",BS_AUTOCHECKBOX);SendMessageW(child(GroupHost),BM_SETCHECK,groupHost?BST_CHECKED:BST_UNCHECKED,0);
+    control(2,BuildReceived,L"BUTTON",L"Build other players' structures when they arrive (group servers). They skip the game's spacing and area checks, so one may overlap something in your world",BS_AUTOCHECKBOX|BS_MULTILINE|BS_TOP);
+    SendMessageW(child(BuildReceived),BM_SETCHECK,buildReceived?BST_CHECKED:BST_UNCHECKED,0);
     label(2,223,L"Rules of a new group world:");control(2,GroupPolicy,L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL);
     for(auto name:{L"Friends: everything shared",L"Solo archive: one player",L"Public: members, review, limits"})SendMessageW(child(GroupPolicy),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
     for(int i=0;i<3;++i)if(groupPolicy==PolicyNames[i])SendMessageW(child(GroupPolicy),CB_SETCURSEL,i,0);
@@ -627,6 +630,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         choice=int(GetPrivateProfileIntW(L"launcher",L"choice",0,settingsFile.c_str()));if(choice<0||choice>2)choice=0;
         port=GetPrivateProfileIntW(L"launcher",L"port",49000,settingsFile.c_str());if(port<49000||port>49014)port=49000;
         lan=GetPrivateProfileIntW(L"launcher",L"lan",1,settingsFile.c_str());tailscale=GetPrivateProfileIntW(L"launcher",L"tailscale",1,settingsFile.c_str());privacy=GetPrivateProfileIntW(L"launcher",L"privacy",0,settingsFile.c_str());sharedWorld=GetPrivateProfileIntW(L"launcher",L"world",0,settingsFile.c_str())!=0;groupHost=GetPrivateProfileIntW(L"launcher",L"group",0,settingsFile.c_str())!=0;
+        buildReceived=GetPrivateProfileIntW(L"launcher",L"build_received",1,settingsFile.c_str())!=0;   // on unless turned off
         {auto kept=utf8(read(L"group_policy",L"friends"));for(auto name:PolicyNames)if(kept==name)groupPolicy=name;}
         bool registerOnly=false,devStart=false,diagnosticsOnly=false,firewallOnly=false,forceWorld=false,devSessionGiven=false;std::string devPeer="127.0.0.1",groupTarget;uint32_t devSession=1;fs::path takeSave;
         int groupMode=0;   // --group-host (1), --group-join INVITE-OR-ADDRESS (2)

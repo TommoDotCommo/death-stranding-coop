@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
     for name in mutants.parallel(one, ['CONFIG_ROLE', 'CONFIG_PLAY', 'WORLD_GUEST_ADDRESS', 'WORLD_ONE_ACCOUNT', 'WORLD_BIND', 'WORLD_SOLO', 'WORLD_GUEST_DECIDES', 'LOBBY_WORLD_BIT', 'LOBBY_SECRET', 'GROUP_PEER', 'GROUP_PEERS', 'GROUP_NO_RELAY', 'GROUP_KEY', 'GROUP_ID', 'GROUP_ROUTE', 'GROUP_INVITE_KIND', 'GROUP_SAME_PC', 'DIAG_GROUP_KEY',
                                       'GROUP_POLICY', 'STRAND_ACCOUNT', 'STRAND_PARSE', 'STRAND_WRONG_KEY', 'STRAND_OLD_SERVER', 'STRAND_SEND_FAIL', 'STRAND_FRIENDS_READ', 'STRAND_DEFAULTS', 'STRAND_PER_SERVER', 'STRAND_SETTINGS_KEEP', 'BACKUP_LINKS', 'OUTPUT_LINKS',
                                       'MISSING_CONFIG_CLOSES', 'TICKET_TARGET', 'TICKET_EXPIRY', 'TICKET_NETWORK',
-                                      'KEYS_KEEP', 'STRAND_SIGN', 'STRAND_NO_PASSES', 'GROUP_TICKET', 'GROUP_RELAY_TOKEN', 'DIAG_TICKET', 'GROUP_NOTICE_TOKEN', 'GROUP_PAIRS', 'STRAND_NOTICE_FATAL', 'DIAG_NOTICE_TOKEN',
+                                      'KEYS_KEEP', 'STRAND_SIGN', 'STRAND_NO_PASSES', 'GROUP_TICKET', 'GROUP_RELAY_TOKEN', 'DIAG_TICKET', 'GROUP_NOTICE_TOKEN', 'GROUP_PAIRS', 'GROUP_BUILD_RECEIVED', 'GROUP_BUILD_SETTING', 'GROUP_OFFER_STRAND', 'STRAND_NOTICE_FATAL', 'DIAG_NOTICE_TOKEN',
                                       'OWNER_UNSIGNED', 'OWNER_CLOCK', 'OWNER_REJECT_ALL', 'OWNER_REFUSAL', 'OWNER_REMOVE_TEXT', 'OWNER_HOST_ONLY', 'OWNER_PARSE',
                                       'BACKUP_RUNNING', 'NESTED_LAB', 'NESTED_RELEASE',
                                       'DIAG_SECRET', 'DIAG_ADDRESS', 'DIAG_USER', 'DIAG_BOUND', 'FIREWALL_BLOCK_WINS', 'FIREWALL_ANY_PROGRAM', 'SETUP_OVERWRITE', 'SETUP_REMOVE_ANY']):
@@ -51,7 +51,7 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-mutants-') as directory:
         if result.returncode != 1 or 'identity oracle:' not in result.stderr:
             raise SystemExit(f'SURVIVED or crashed {name} (identity socket test): {result.returncode}\n{result.stdout}\n{result.stderr}')
         return name
-    for name in map(keyed, ['GROUP_TICKET', 'GROUP_RELAY_TOKEN', 'STRAND_SIGN', 'KEYS_KEEP']):
+    for name in map(keyed, ['GROUP_TICKET', 'GROUP_RELAY_TOKEN', 'STRAND_SIGN', 'KEYS_KEEP', 'GROUP_BUILD_RECEIVED', 'GROUP_OFFER_STRAND']):
         print('killed', name, '(identity socket test)')
     # The owner's calls on the real server (test_owner.py): signed with the owner key, one player's objects only, refusals.
     def owned(name):
