@@ -79,6 +79,9 @@ python3 -B "$here/tools/package.py" sha256 "$out/DeathStrandingCoop-Setup.exe"
 rm -rf "$work"
 
 python3 -B "$here/tools/package.py" zip "$out" "$name"
+# The test save pack (a separate download; the saves stay outside the repository): only when TEST_SAVES_DIR is set.
+rm -f "$out"/deathstranding-coop-test-saves-*.zip "$out"/deathstranding-coop-test-saves-*.zip.sha256
+if [ -n "${TEST_SAVES_DIR:-}" ]; then VERSION="$ver" sh "$here/tools/build_test_saves.sh" "$out"; fi
 python3 -B "$here/tools/package.py" notes "$out" "$ver"
 python3 -B "$here/tools/check_release_package.py" "$out/$name.zip"
 echo "$out/DeathStrandingCoop-Setup.exe ($(du -h "$out/DeathStrandingCoop-Setup.exe" | cut -f1))"

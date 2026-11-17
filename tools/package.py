@@ -78,6 +78,8 @@ def notes(out, version):
     name = 'deathstranding-coop-%s' % version
     (out / ('NEXUS-%s.txt' % version)).write_text(mod_manifest.nexus_note(out / (name + '.zip')))
     assets = [SETUP, SETUP + '.sha256', name + '.zip', name + '.zip.sha256']
+    for pack in sorted(out.glob('deathstranding-coop-test-saves-*.zip')):   # tools/build_test_saves.sh, when built
+        assets += [pack.name, pack.name + '.sha256']
     notes_file = 'docs/RELEASE-NOTES-%s.md' % version
     command = ('gh release create %s --repo TommoDotCommo/death-stranding-coop --prerelease --verify-tag \\\n'
                '    --title "Death Stranding Co-op %s (alpha)" --notes-file %s \\\n    %s\n'
