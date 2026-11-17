@@ -4,6 +4,7 @@ You are working on a co-op mod for DEATH STRANDING DIRECTOR'S CUT (PC). Read [RE
 [STATUS.md](STATUS.md) and the README of the folder you touch. Follow the
 [coop-anything](https://github.com/cranebeaker/coop-anything) playbook (`AGENTS.md` there) for how co-op mods are
 built and tested.
+Use the terms in [docs/GLOSSARY.md](docs/GLOSSARY.md) (partner, body, stand-in, relay, strand server, ...).
 
 Rules:
 

@@ -83,6 +83,7 @@ server above.
 - [ ] A one-click installer and a manual for players
 
 The full, dated record of what ran and how is in [STATUS.md](STATUS.md).
+The words used for the mod's parts, the game and testing are in the [glossary](docs/GLOSSARY.md).
 
 ## 🧭 Where this is going
 
