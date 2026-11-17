@@ -58,6 +58,12 @@ inline bool release_redirect_enabled() {
         auto k=release_startup::wide(key),v=release_startup::wide(ticket.at(key));
         if(!SetEnvironmentVariableW(k.c_str(),v.c_str()))return release_passthrough();
     }
+    // The launcher's mod config always runs the mod on the game thread (game_thread), which needs the thread observer;
+    // a valid ticket already guarantees enforced networking. Without this an ordinary player's game refused to start
+    // ("game_thread requires observer hooks", first live run of the Steam path, 2026-11-17).
+#ifndef MUTANT_TICKET_NO_OBSERVER
+    if(!SetEnvironmentVariableW(L"COOP_THREAD_TRACE",L"1"))return release_passthrough();
+#endif
     release_ticket_selected=true;
     return true;
 #endif
