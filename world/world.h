@@ -33,6 +33,13 @@ constexpr size_t PassBytes=32;                      // a ticket or relay token: 
 // Who a player sees (README, "How many players one player sees"): at most MaxFriends on his friend list, and a cap of
 // at most MaxNearCap players near him shown at once (the relay's own limit of players).
 constexpr size_t MaxFriends=256;constexpr int64_t MaxNearCap=1024;
+// Roads paved together (README, "Roads paved together"): what each player put into the game's auto-pavers, by the
+// paver's construction id (the same in every game, 1..MaxPaverId) and resource (0..HighwayResources-1). One call holds
+// at most MaxHighwayEntries entries, one entry 1..MaxHighwayAmount; a player keeps at most MaxHighwayKeys pairs of
+// paver and resource, each total at most MaxHighwayTotal (more is not counted). Likes for them: at most MaxHighwayAmount
+// in one entry.
+constexpr size_t MaxHighwayEntries=64,MaxHighwayKeys=1024;
+constexpr int64_t MaxPaverId=999999,HighwayResources=6,MaxHighwayAmount=100000,MaxHighwayTotal=1000000000;
 struct Reply { int status=200;std::string body="{}"; };
 // What may travel between two servers. Text form: "all", "none", or terms separated by ';':
 //   types=l,rope,e   owners=NAME,zygo_...   areas=226,227   max-age=30d (s, m, h, d)   likes=no   imported=yes
@@ -251,6 +258,11 @@ private:
     // What each player's game was handed per area (curate): kept so the same structures come back, saved with the world.
     struct Picks { int64_t asked=0;std::vector<std::string> ids; };
     std::map<std::string,std::map<int64_t,Picks>> picks_;   // player id -> area -> picks
+    // Roads paved together: player id -> (paver, resource) -> what he put in; and the likes the players' paver
+    // contributions earned (player id -> likes). Saved with the world.
+    std::map<std::string,std::map<std::pair<int64_t,int64_t>,int64_t>> devoted_;
+    std::map<std::string,int64_t> highwayLikes_;
+    bool contributes(const Player&) const;          // do the other players get what he puts into pavers, now
     Candidate candidateOf(const Object&) const;
     void remember(const std::string& player,int64_t area,const std::vector<std::string>& ids,int64_t now);
     std::set<std::string> friendsOf(const std::string& player) const;   // the player ids of a player's friends (curate)

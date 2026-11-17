@@ -9,6 +9,8 @@ families=[('world_test.cpp',['world.cpp'],['WORLD_NO_TOKEN','WORLD_OWNER','WORLD
                                              'POLICY_EXPORT_PENDING','POLICY_SAVE_LOST','POLICY_HELD_SERVED','POLICY_HELD_RELEASE']),
           ('curate_test.cpp',['world.cpp'],['CURATE_OWN','CURATE_UNSHARED','CURATE_ORDER','CURATE_COUNTS','CURATE_UNSTABLE','CURATE_BUILDER_CAP','CURATE_SPREAD',
                                             'CURATE_SAVE_LOST','CURATE_UNBOUNDED']),
+          ('highway_test.cpp',['world.cpp'],['HIGHWAY_OWN','HIGHWAY_ASKED','HIGHWAY_RANGE','HIGHWAY_WHOLE','HIGHWAY_KEYS','HIGHWAY_CHOICE','HIGHWAY_REVIEW','HIGHWAY_BUILD',
+                                             'HIGHWAY_LIKES','HIGHWAY_WITHDRAW','HIGHWAY_REMOVE','HIGHWAY_SAVE_LOST']),
           ('names_test.cpp',['world.cpp'],['LOOKUP_HOME_MISSING','LOOKUP_LOCAL_SUFFIX','LOOKUP_CUT']),
           ('link_test.cpp',['link.cpp','world.cpp'],['LINK_KEEP_ID','LINK_DUPLICATE','LINK_PASS_IMPORTED','LINK_ECHO','LINK_IMPORT_OWN','LINK_IMPORT_OWNER','LINK_FILTER_TYPE','LINK_FILTER_OWNER',
                                                       'LINK_FILTER_AREA','LINK_FILTER_AGE','LINK_NO_PRUNE','LINK_FORGET_ANY','LINK_CAP','LINK_SIZE','LINK_STRICT','LINK_LIKES','LINK_VERSION']),

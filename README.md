@@ -41,7 +41,8 @@ the game, and it never will. You need your own copy of the game.
 | 🔑 | **Player keys** made by the launcher, no accounts; signed calls | 🧪 |
 | 🔗 | **Linked servers**: import and export with filters by kind, builder, area and age | 🧪 |
 | 👋 | **Seeing players on a linked server** when you meet | ✅ |
-| 🛣️ | **Roads, signs and lost cargo** through the server | ❌ |
+| 🛣️ | **Roads paved together through the server**: what each player puts into the auto-pavers adds up for the others | 🧪 |
+| 🪧 | **Signs and lost cargo** through the server | ❌ |
 
 ## 🤝 Two players on one link (opt-in, no longer developed)
 
@@ -77,7 +78,7 @@ server above.
 - [ ] A real two-PC session
 - [ ] See the launcher's windows on a screen: group server, join screen, My strand, server owner, who I see
 - [ ] More than one visitor in a fight, and story bosses
-- [ ] Roads, signs and lost cargo through the server
+- [ ] Roads paved together through the server, in a game; then signs and lost cargo
 - [ ] Encryption, before any public server
 - [ ] A one-click installer and a manual for players
 
