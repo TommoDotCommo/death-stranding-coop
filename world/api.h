@@ -31,6 +31,9 @@ Reply launcherApi(World&,const std::string& method,const std::string& call,const
 // What the relay holds for a broadcast player (relay.h RelayViewer), from what the world holds (World::relayViewer):
 // the relay's `viewer`. `capGiven`: the relay was given its cap (--broadcast-near), else the policy's near_cap is it.
 RelayViewer relayViewer(const World&,uint64_t relayId,bool capGiven);
+// The relay ids of the players the owner kicked or banned since the last call (World::takeEvictions, made from their
+// keys): RelayConfig::evicted (README, "Kick and ban").
+std::vector<uint64_t> relayEvictions(World&);
 // One setting's value in words, for a player deciding whether to join (`players`: how many the world has now).
 std::string settingText(const std::string& key,const std::string& value,size_t players);
 }

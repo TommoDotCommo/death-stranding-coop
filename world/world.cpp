@@ -158,6 +158,9 @@ Reply World::signInTicket(const std::string& ticket,const std::string& displayNa
 }
 World::Player& World::playerFor(const std::string& account,const char* why){
     auto found=players_.find(account);
+#ifndef MUTANT_BAN_PASS
+    if(found!=players_.end()&&found->second.banned){note(std::string(why)+" refused: "+found->second.id+" is banned");bad("this player is banned from this server");}
+#endif
     if(found!=players_.end())return found->second;
     size_t room=std::min(MaxPlayers,size_t(policy_.players));
     if(players_.size()>=room){note(std::string(why)+" refused: world is full ("+std::to_string(room)+" players)");bad("this world has all its players");}
@@ -295,6 +298,9 @@ Reply World::signInLocked(const std::string& key,const std::string& displayName,
         found=players_.emplace(key,p).first;note("new player "+p.id+" "+p.name);
     }else if(!displayName.empty()&&found->second.name!=displayName){found->second.name=displayName;++changes_;}
     auto& p=found->second;
+#ifndef MUTANT_BAN_SIGN_IN
+    if(p.banned){note("sign-in refused: "+p.id+" is banned");return refuse(403,"banned","this player is banned from this server");}
+#endif
     // One session per player: a new sign-in ends the old one.
     for(auto it=tokens_.begin();it!=tokens_.end();)if(it->second==p.id)it=tokens_.erase(it);else ++it;
     std::string token=random_();tokens_[token]=p.id;dirty_=true;
@@ -625,6 +631,9 @@ json::Value World::snapshot() const {
         if(!p.second.offerBuilds.empty())v.set("offer_builds",p.second.offerBuilds);
         if(!p.second.offerOld.empty())v.set("offer_old",p.second.offerOld);
         if(p.second.member)v.set("member",true);
+#ifndef MUTANT_BAN_SAVE_LOST
+        if(p.second.banned)v.set("banned",true);
+#endif
 #ifndef MUTANT_FRIENDS_SAVE_LOST
         if(!p.second.showOthers.empty())v.set("show_others",p.second.showOthers);
         if(!p.second.friends.empty()){Value f=Value::array();for(auto& x:p.second.friends)f.push(x);v.set("friends",f);}
@@ -699,6 +708,8 @@ void World::restore(const json::Value& v){
     nextObject_=uint64_t(std::max<int64_t>(1,v.get("next_object").integer()));
     for(auto& p:v.get("players").items()){Player pl;pl.key=p.get("key").string();pl.id=p.get("id").string();pl.name=p.get("name").string();
         pl.offerBuilds=p.get("offer_builds").string();pl.offerOld=p.get("offer_old").string();pl.member=p.get("member").boolean();
+        if(p.has("banned")&&p.get("banned").kind()!=Value::Bool)throw std::runtime_error("world file: bad player");
+        pl.banned=p.get("banned").boolean();
         pl.showOthers=p.get("show_others").string();
         for(auto& f:p.get("friends").items()){if(!f.isString()||!keyText(f.string())||f.string()==pl.key)throw std::runtime_error("world file: bad friend");pl.friends.insert(f.string());}
         if(pl.key.empty()||pl.id!=playerId(pl.key)||!oneOf(pl.offerBuilds,{"","yes","no","ask"})||!oneOf(pl.offerOld,{"","yes","no"})||!oneOf(pl.showOthers,{"","everyone","friends","nobody"})
@@ -1196,12 +1207,36 @@ void World::setPlayer(const std::string& id,const std::string& keyValue){
     if(key=="offer_builds"&&oneOf(value,{"yes","no","ask","default"}))p->offerBuilds=value=="default"?"":value;
     else if(key=="offer_old"&&oneOf(value,{"yes","no","default"}))p->offerOld=value=="default"?"":value;
     else if(key=="member"&&oneOf(value,{"yes","no"}))p->member=value=="yes";
-    else bad("'"+keyValue+"': offer_builds=yes|no|ask|default, offer_old=yes|no|default or member=yes|no");
+    else if(key=="banned"&&oneOf(value,{"yes","no"})){p->banned=value=="yes";if(p->banned)kickLocked(*p);note(p->id+(p->banned?" banned":" no longer banned"));}
+    else bad("'"+keyValue+"': offer_builds=yes|no|ask|default, offer_old=yes|no|default, member=yes|no or banned=yes|no");
     dirty_=true;++changes_;
 }
+// Kick and ban (README, "Kick and ban"): every session and pass of the player ends at once.
+size_t World::kickLocked(Player& p){
+    size_t n=0;
+#ifndef MUTANT_BAN_KEEP_SESSION
+    for(auto it=tokens_.begin();it!=tokens_.end();)if(it->second==p.id){it=tokens_.erase(it);++n;}else ++it;
+#endif
+#ifndef MUTANT_BAN_RELAY_KEEP
+    if(identity::accountIsKey(p.key))evictions_.push_back(p.key);
+#endif
+#ifndef MUTANT_BAN_KEEP_PASSES
+    for(auto* passes:{&tickets_,&relayTokens_,&noticeTokens_})
+        for(auto it=passes->begin();it!=passes->end();)if(it->second.account==p.key){it=passes->erase(it);++n;}else ++it;
+#endif
+    dirty_=true;return n;
+}
+size_t World::kick(const std::string& id){
+    std::lock_guard<std::mutex> g(lock_);
+    for(auto& q:players_)if(q.second.id==id){size_t n=kickLocked(q.second);note(id+" kicked: "+std::to_string(n)+" sessions and passes ended");return n;}
+    bad("no player "+id+" on this server (coop-world players lists them)");return 0;
+}
+void World::ban(const std::string& id,bool yes){setPlayer(id,std::string("banned=")+(yes?"yes":"no"));}
+bool World::banned(const std::string& account) const {
+    std::lock_guard<std::mutex> g(lock_);auto it=players_.find(account);return it!=players_.end()&&it->second.banned;}
 std::vector<World::PlayerInfo> World::playerList() const {
     std::lock_guard<std::mutex> g(lock_);std::vector<PlayerInfo> out;std::map<std::string,size_t> at;
-    for(auto& p:players_){PlayerInfo i;i.id=p.second.id;i.name=p.second.name;i.key=p.second.key;i.offerBuilds=p.second.offerBuilds;i.offerOld=p.second.offerOld;i.member=p.second.member;
+    for(auto& p:players_){PlayerInfo i;i.id=p.second.id;i.name=p.second.name;i.key=p.second.key;i.offerBuilds=p.second.offerBuilds;i.offerOld=p.second.offerOld;i.member=p.second.member;i.banned=p.second.banned;
         at[i.id]=out.size();out.push_back(i);}
     for(auto& o:objects_){
         const Object& ob=o.second;auto found=at.find(ob.creator);

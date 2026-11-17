@@ -15,9 +15,12 @@ other (see "Not done" for what is missing).
 ```
 coop-world --port 8089 [--bind 127.0.0.1] [--data world.json] [--prefix SECRET] [--log events.log] [--trace calls.log] [--idle-exit SECONDS]
            [--owner KEY] [--name TEXT]
+           [--max-connections 32] [--ip-connections 8] [--ip-rate 20] [--ip-burst 200] [--ip-strikes 30] [--ip-block 900]
+           [--request-seconds 30] [--limit-loopback | --no-ip-limits]
 ```
 
-(The relay's options are under "The relay", the ones for other servers under "Linked servers".)
+(The relay's options are under "The relay", the ones for other servers under "Linked servers", the limits under
+"Limits per address". A server on a rented machine: `../deploy/vps/README.md`.)
 
 - `--bind`: the address to listen on (default loopback). For a partner on another PC, the address he reaches you at.
 - `--data`: the world file, written after every change (temporary file, then rename). Without it nothing is kept.
@@ -70,7 +73,36 @@ loopback, a LAN or a VPN.
 | `GET …/coop/notices` with `X-Coop-Token` | not the game's: the mod's read of its player's own objects ("What the game is told") |
 
 Limits: 16 players, 4000 objects built here per player, 20000 objects held from each other server, 4 MiB per body,
-32 connections.
+32 connections (`--max-connections`), and the limits per address below.
+
+### Limits per address
+
+A server beyond loopback is reached by anyone who finds its port: the prefix keeps strangers out of the world, not off
+the port (`limits.h`). Per IPv4 address:
+
+| Option | Default | What |
+|---|---|---|
+| `--ip-connections N` | 8 | connections at once; one more is closed unanswered (0: no cap) |
+| `--ip-rate N`, `--ip-burst N` | 20, 200 | requests a second, and how many can be saved up; one more is answered 429 and its connection closed (rate 0: no cap) |
+| `--ip-strikes N`, `--ip-block SECONDS` | 30, 900 | that many answers 404 (a path or prefix that is no one's) within a minute block the address that long: its connections are closed unanswered; the log says so once (0: never) |
+| `--request-seconds N` | 30 | a request must arrive whole within this time from its first byte (every connection, not per address) |
+
+Loopback (127.0.0.0/8) is exempt unless `--limit-loopback` (the host's own games, the launcher, and an administrator's
+`call` over SSH); `--no-ip-limits` turns the limits per address off. At most 4096 addresses are remembered: an idle one
+is forgotten for a new one (never a blocked one), and when every one is busy a new address is turned away. The relay's
+UDP port is not limited per address (it answers nothing without a key or token, "The relay").
+
+| Rule | Why |
+|---|---|
+| One address holds at most `--ip-connections` of the `--max-connections` | one address cannot take every connection from the players |
+| Over the rate: 429 and the connection ends, the request is not handled | a flood costs one answer per connection |
+| Unknown paths in a minute block the address | the prefix (one of 2^32 for a launcher's group) cannot be guessed from one address |
+| A request whose bytes drip in is cut off | a slow sender keeps no connection |
+| The table of addresses is bounded and never forgets a block early | memory stays bounded and a block holds |
+
+Tests: `limits_test.cpp` (five mutants: `GATE_BLOCK`, `GATE_CONNECTIONS`, `GATE_RATE`, `GATE_STRIKES`,
+`GATE_UNBOUNDED`) and `test_limits.py` over sockets (the cap, 429, the block and its end, the drip, and `keygen` and
+`call`; the mutant `GATE_DRIP` must fail it).
 
 ### An object's own id
 
@@ -919,8 +951,8 @@ good, the states of that player's objects.
   API, and the host's launcher has a Server owner window for the owner's signed calls (`../launcher/README.md`,
   "Server owner"); both built game-free and not seen on a screen. The game itself cannot ask (it does not know of
   them); the mod tells the player in the game what became of his uploads ("What the game is told").
-- `join` is recorded only. `offer_old` is acted on by the player's mod, not by the server (above). There is no ban:
-  `remove-player` does not stop anyone building again.
+- `join` is recorded only. `offer_old` is acted on by the player's mod, not by the server (above). `remove-player`
+  does not stop anyone building again: the owner's ban does ("Kick and ban", under "Identity").
 - What a game does when its upload is refused (403) after it built the structure is not known in full: live, once,
   it did not ask again and stayed up; whether it took the structure out of the player's world was not checked. The
   policy no longer refuses uploads for that reason; the hard cap still does. Unknown too: what a game does when an
@@ -997,7 +1029,42 @@ with the token after its player stopped saying HELLO (while he plays, his id is 
 calls carry. Signed calls cannot be replayed or changed, but their contents are not secret. So use a LAN or a VPN, as
 for the group's key; encryption is a later step. Not protected either: a player's key file on his PC (whoever copies
 it is him), a flood of signed calls from many new keys (it fills the nonce memory and the world's players; there is no
-rate limit per key), and the owner trusting a linked server ("Linked servers").
+rate limit per key, only per address: "Limits per address"), and the owner trusting a linked server ("Linked servers").
+
+### Kick and ban
+
+The owner ends a player's play on the running server (signed calls of the owner's key, as the other owner calls):
+
+| Call | Answer |
+|---|---|
+| `POST …/coop/owner/kick` `{"player":PLAYER}` | his game's session, sign-in ticket, relay token and notice token end at once (`ended`: how many); under identity keys the relay takes him off at its next tick (a LEAVE for everyone near) |
+| `POST …/coop/owner/ban` `{"player":PLAYER,"ban":"yes\|no"}` | yes: a kick, and while it holds he gets no sign-in (403, by ticket or by name), no ticket, relay token or notice token, and no launcher call but reading the rules (403); no: lifted. Answers the players, each with `banned` |
+
+On a stopped server: `coop-world player-set --data world.json --player ID banned=yes|no`. A ban is kept in the world
+file (`banned` on the player); a `coop-world` from before ignores it and drops it at its next save. It follows the
+account: under identity keys a key (someone banned can make a new key and join again while he has the group's key:
+change the key, `../deploy/vps/README.md`); under identity none the account name or Steam id, and the relay, which
+takes the group's key from anyone, does not know him there.
+
+Tests: `ban_test.cpp` (only the owner kicks or bans; a kick ends all four and nobody else's, and he can come back; a
+ban refuses every pass, sign-in and launcher call but the rules, is saved, and is lifted; identity none by name) and
+`keys_test.cpp` (the relay takes a kicked player off at once). Mutants: `BAN_PASS`, `BAN_SIGN_IN`, `BAN_SAVE_LOST`,
+`BAN_KEEP_SESSION`, `BAN_KEEP_PASSES`, `BAN_API`, `BAN_RELAY_KEEP`, `RELAY_EVICT`.
+
+### Administration over SSH
+
+A server whose owner is not at a launcher on the same PC (a rented machine) is administered on the machine itself:
+
+```
+coop-world keygen --out owner.key                     a key pair; prints its public half (for --owner); never overwrites
+coop-world pubkey --key owner.key                     the public half again
+coop-world call --key owner.key --port 8089 [--prefix SECRET] GET|POST CALL [BODY]
+```
+
+`call` makes one signed call, as a launcher signs it, to the server on 127.0.0.1 only: it reads the rules for the
+server's id and clock, signs `CALL` (`owner/players`, `owner/ban`, `ticket`, …) and prints the answer; exit 0 for
+200, 3 for anything else. The key file is the secret half in 64 hex digits, written with mode 0600.
+`../deploy/vps/coop-admin.sh` wraps it.
 
 Not done: tickets are taken for a game that may sign in again later in a session; whether the game ever does is
 unknown (the mod asks it to sign in at most five times until it is signed in, 30 s apart), and one that does after

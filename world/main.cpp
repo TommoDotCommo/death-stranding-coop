@@ -14,13 +14,20 @@
 //   coop-world origins --data world.json
 //   coop-world policy|players|player-set|offer|withdraw|remove-player|review --data world.json ...   (README, "Server policy")
 //   coop-world policy --data world.json --name TEXT                    this world's display name (README, "Builder names")
+//   coop-world keygen --out FILE                                       a key pair for signed calls (README, "Administration over SSH")
+//   coop-world call --key FILE --port N [--prefix SECRET] METHOD CALL [BODY]   one signed call to this PC's server
+// Limits per address (README, "Limits per address", limits.h): --max-connections N --ip-connections N --ip-rate N
+// --ip-burst N --ip-strikes N --ip-block SECONDS --request-seconds N [--limit-loopback | --no-ip-limits].
+//   coop-world pubkey --key FILE                                       the public half of a key file
 // Plain HTTP/1.1 with keep-alive, one thread per connection, bounded sizes. It only answers, except for the linked
 // servers it was given an address for (--link-url): those it asks for objects, and nothing else is ever connected to.
 // With --relay-port it is also the relay of the real-time layer (relay.h): one UDP socket on the same address, one thread.
 #include "api.h"
 #include "front.h"
+#include "limits.h"
 #include "relay.h"
 #include <algorithm>
+#include <memory>
 #include <random>
 #include <atomic>
 #include <chrono>
@@ -36,6 +43,7 @@ using sock_t=SOCKET;
 static void closeSocket(sock_t s){closesocket(s);}
 #else
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/select.h>
@@ -47,9 +55,11 @@ static void closeSocket(sock_t s){close(s);}
 #endif
 #include "../common/crash_handler.h"
 namespace {
-constexpr size_t MaxHeader=16*1024,MaxBody=4*1024*1024;constexpr int MaxConnections=32,IdleSeconds=60;
+constexpr size_t MaxHeader=16*1024,MaxBody=4*1024*1024;constexpr int IdleSeconds=60;
+int maxConnections=32,requestSeconds=30;
 std::mutex outLock;std::atomic<int> connections{0};std::atomic<int64_t> lastRequest{0};
 diag::Session* diagnostic=new diag::Session; // worker threads may still run at process exit
+std::unique_ptr<world::Gate> gate;   // limits per address (limits.h)
 std::string dataPath,logPath,tracePath;
 void line(const std::string& text){
     std::lock_guard<std::mutex> g(outLock);diagnostic->Line(text);std::cout<<text<<std::endl;
@@ -65,14 +75,25 @@ void save(world::World& w){
     w.saved();}
 bool sendAll(sock_t s,const std::string& data){
     size_t at=0;while(at<data.size()){auto n=send(s,data.data()+at,int(data.size()-at),0);if(n<=0)return false;at+=size_t(n);}return true;}
-const char* reason(int status){return status==200?"OK":status==400?"Bad Request":status==401?"Unauthorized":status==403?"Forbidden":status==404?"Not Found":"Error";}
-void serve(sock_t s,world::Front& front,world::World& w){
+const char* reason(int status){return status==200?"OK":status==400?"Bad Request":status==401?"Unauthorized":status==403?"Forbidden":status==404?"Not Found":status==429?"Too Many Requests":"Error";}
+uint64_t steadyMs(){return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());}
+std::string ipText(uint32_t ip){return std::to_string(ip>>24)+"."+std::to_string((ip>>16)&255)+"."+std::to_string((ip>>8)&255)+"."+std::to_string(ip&255);}
+void serve(sock_t s,uint32_t ip,world::Front& front,world::World& w){
     std::string buffer;char chunk[8192];
     while(true){
         size_t headEnd;
+        // A request has requestSeconds from its first byte to its last (a sender who drips bytes keeps no connection).
+        uint64_t started=0;
         while((headEnd=buffer.find("\r\n\r\n"))==std::string::npos){
             if(buffer.size()>MaxHeader)return;
-            auto n=recv(s,chunk,sizeof chunk,0);if(n<=0)return;buffer.append(chunk,size_t(n));}
+            if(!buffer.empty()&&!started)started=steadyMs();
+            auto n=recv(s,chunk,sizeof chunk,0);if(n<=0)return;buffer.append(chunk,size_t(n));
+            if(!started)started=steadyMs();
+#ifndef MUTANT_GATE_DRIP
+            if(steadyMs()-started>uint64_t(requestSeconds)*1000)return;
+#endif
+        }
+        if(!started)started=steadyMs();
         world::Request r;std::istringstream head(buffer.substr(0,headEnd));std::string version,row;
         head>>r.method>>r.target>>version;std::getline(head,row);
         size_t length=0;bool close=false;
@@ -87,14 +108,18 @@ void serve(sock_t s,world::Front& front,world::World& w){
             if(name=="connection"&&(value=="close"||value=="Close"))close=true;}
         if(r.method.empty()||r.target.empty()||length>MaxBody||r.headers.count("transfer-encoding"))return;
         buffer.erase(0,headEnd+4);
-        while(buffer.size()<length){auto n=recv(s,chunk,sizeof chunk,0);if(n<=0)return;buffer.append(chunk,size_t(n));}
+        while(buffer.size()<length){auto n=recv(s,chunk,sizeof chunk,0);if(n<=0)return;buffer.append(chunk,size_t(n));
+            if(steadyMs()-started>uint64_t(requestSeconds)*1000)return;}
         r.body=buffer.substr(0,length);buffer.erase(0,length);
+        // Over its rate (or blocked meanwhile): 429 and the connection ends; nothing is handled.
+        if(gate&&!gate->request(ip,steadyMs())){sendAll(s,"HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");return;}
         world::Reply reply;
         // A linked server asking is not a game asking: two servers that ask each other would never be idle.
         if(r.target.find("/link/pull")==std::string::npos)lastRequest=nowSeconds();
         try{reply=front.handle(r,nowSeconds());}
         catch(const std::exception& e){reply.status=500;reply.body="{}";line(std::string("error: ")+e.what());}
         save(w);
+        if(gate&&gate->answered(ip,reply.status,steadyMs()))line("address "+ipText(ip)+" blocked: too many requests for paths that are no one's");
         if(!tracePath.empty()){
             // Research aid: every call with its body. The Steam ticket, a launcher's sign-in ticket and the answers that hand
             // out tickets and tokens are left out; bodies can name other accounts.
@@ -188,7 +213,7 @@ const char* OfflineUsage="usage: coop-world export  --data FILE --out FILE [--fi
                          "       coop-world origins --data FILE\n"
                          "       coop-world policy        --data FILE [--preset friends|solo|public] [--set KEY=VALUE]... [--name TEXT]\n"
                          "       coop-world players       --data FILE\n"
-                         "       coop-world player-set    --data FILE --player ID KEY=VALUE...   (offer_builds=yes|no|ask|default offer_old=yes|no|default member=yes|no)\n"
+                         "       coop-world player-set    --data FILE --player ID KEY=VALUE...   (offer_builds=yes|no|ask|default offer_old=yes|no|default member=yes|no banned=yes|no)\n"
                          "       coop-world offer         --data FILE --player ID (--object ID | --all) [--no]\n"
                          "       coop-world withdraw      --data FILE --player ID (--object ID | --all)\n"
                          "       coop-world remove-player --data FILE --player ID\n"
@@ -240,7 +265,7 @@ int policyCommand(int argc,char** argv){
             for(auto& i:w.playerList()){
                 if(!i.known){std::cout<<i.id<<"  "<<i.name<<"  from linked servers: "<<i.imported<<" objects\n";continue;}
                 std::cout<<i.id<<"  "<<i.name<<"  shared "<<i.shared<<", waiting "<<i.pending<<", kept "<<i.kept<<", held "<<i.held<<", remnants "<<i.remnants
-                         <<(i.imported?", from linked servers "+std::to_string(i.imported):std::string())<<(i.member?"  member":"")
+                         <<(i.imported?", from linked servers "+std::to_string(i.imported):std::string())<<(i.member?"  member":"")<<(i.banned?"  BANNED":"")
                          <<"  offer_builds "<<(i.offerBuilds.empty()?p.offerBuilds+" (server)":i.offerBuilds)<<"  offer_old "<<(i.offerOld.empty()?p.offerOld+" (server)":i.offerOld)<<"\n";}
             return 0;}
         if(command=="player-set"){for(auto& s:sets)w.setPlayer(player,s);save(w);std::cout<<"set for "<<player<<"\n";return 0;}
@@ -266,8 +291,81 @@ int startPolicy(world::World& w,const std::string& preset,const std::vector<std:
     if(newWorld||world::policyItems(p)!=world::policyItems(w.policy())){w.setPolicy(p);save(w);}
     return 0;
 }
+// One request to the server on this PC (127.0.0.1 only): the status, or 0 when there was no answer.
+int localRequest(int port,const std::string& method,const std::string& target,const std::vector<std::pair<std::string,std::string>>& headers,const std::string& body,std::string& out){
+    sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(uint16_t(port));a.sin_addr.s_addr=htonl(0x7f000001);
+    sock_t s=socket(AF_INET,SOCK_STREAM,0);
+#ifdef _WIN32
+    if(s==INVALID_SOCKET)return 0;
+#else
+    if(s<0)return 0;
+#endif
+    setTimeouts(s,10);
+    std::string request=method+" "+target+" HTTP/1.1\r\nHost: 127.0.0.1:"+std::to_string(port)+"\r\n";
+    for(auto& h:headers)request+=h.first+": "+h.second+"\r\n";
+    request+="Content-Type: application/json\r\nContent-Length: "+std::to_string(body.size())+"\r\nConnection: close\r\n\r\n"+body;
+    std::string in;
+    if(connect(s,reinterpret_cast<sockaddr*>(&a),sizeof a)==0&&sendAll(s,request)){
+        char chunk[8192];
+        while(in.size()<=MaxHeader+MaxBody){auto n=recv(s,chunk,sizeof chunk,0);if(n<=0)break;in.append(chunk,size_t(n));}}
+    closeSocket(s);
+    size_t headEnd=in.find("\r\n\r\n");
+    if(headEnd==std::string::npos||in.compare(0,9,"HTTP/1.1 ")!=0)return 0;
+    out=in.substr(headEnd+4);return std::atoi(in.c_str()+9);
+}
+// A key file: the secret half (the seed) in 64 hex digits, alone on its line. Never printed.
+bool readKey(const std::string& path,world::identity::Keys& keys){
+    std::ifstream f(path,std::ios::binary);std::string text;if(!f||!std::getline(f,text))return false;
+    while(!text.empty()&&(text.back()=='\r'||text.back()==' '))text.pop_back();
+    world::identity::Seed seed{};if(!world::identity::unhex(text,seed.data(),seed.size()))return false;
+    keys=world::identity::keysFromSeed(seed);return true;}
+// keygen and call (README, "Administration over SSH"): a key pair for signed calls, and one signed call to the server
+// on this PC, as a launcher makes them. With the owner's key (--owner) its calls are the owner's.
+int keyCommand(int argc,char** argv){
+    const std::string command=argv[1];
+    std::string out,keyPath,prefix;int port=0;std::vector<std::string> rest;
+    for(int i=2;i<argc;++i){
+        std::string a=argv[i];auto next=[&]{if(i+1>=argc){std::cerr<<"missing value for "<<a<<"\n";std::exit(2);}return std::string(argv[++i]);};
+        if(a=="--out"&&command=="keygen")out=next();else if(a=="--key"&&command!="keygen")keyPath=next();
+        else if(a=="--port"&&command=="call")port=std::atoi(next().c_str());else if(a=="--prefix"&&command=="call")prefix=next();
+        else if(command=="call"&&a.compare(0,2,"--")!=0)rest.push_back(a);
+        else{std::cerr<<"usage: coop-world keygen --out FILE\n       coop-world pubkey --key FILE\n       coop-world call --key FILE --port N [--prefix SECRET] GET|POST CALL [BODY]   (CALL: policy, owner/players, owner/ban, ...)\n";return 2;}}
+    namespace id=world::identity;
+    if(command=="keygen"){
+        if(out.empty()){std::cerr<<"usage: coop-world keygen --out FILE\n";return 2;}
+        if(std::ifstream(out).good()){std::cerr<<out<<" exists: it is left as it is (a new key would be a new owner)\n";return 1;}
+        id::Keys k;try{k=id::makeKeys();}catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}
+#ifndef _WIN32
+        int fd=::open(out.c_str(),O_WRONLY|O_CREAT|O_EXCL,0600);if(fd<0){std::cerr<<"cannot write "<<out<<"\n";return 1;}
+        std::string text=id::hex(k.seed)+"\n";bool good=::write(fd,text.data(),text.size())==ssize_t(text.size());good=::close(fd)==0&&good;
+        if(!good){std::cerr<<"cannot write "<<out<<"\n";return 1;}
+#else
+        {std::ofstream f(out,std::ios::binary);f<<id::hex(k.seed)<<"\n";if(!f){std::cerr<<"cannot write "<<out<<"\n";return 1;}}
+#endif
+        std::cout<<id::hex(k.pub)<<"\n";return 0;}
+    id::Keys k;
+    if(keyPath.empty()||!readKey(keyPath,k)){std::cerr<<"--key FILE: a key file made by coop-world keygen\n";return 2;}
+    if(command=="pubkey"){std::cout<<id::hex(k.pub)<<"\n";return 0;}
+    if(port<1||port>65535||rest.size()<2||rest.size()>3||(rest[0]!="GET"&&rest[0]!="POST")){std::cerr<<"usage: coop-world call --key FILE --port N [--prefix SECRET] GET|POST CALL [BODY]\n";return 2;}
+    for(char c:prefix)if(!std::isalnum(static_cast<unsigned char>(c))&&c!='-'&&c!='_'){std::cerr<<"--prefix: letters, digits, - and _ only\n";return 2;}
+    const std::string base=prefix.empty()?"/coop/":"/"+prefix+"/coop/",target=base+rest[1],body=rest.size()>2?rest[2]:"";
+#ifdef _WIN32
+    WSADATA wsa;if(WSAStartup(MAKEWORD(2,2),&wsa)!=0){std::cerr<<"winsock unavailable\n";return 1;}
+#endif
+    // The server's id and clock come from its rules, as the launcher takes them, so this PC's clock may be off.
+    std::string text;int status=localRequest(port,"GET",base+"policy",{},"",text);
+    if(status!=200){std::cerr<<"the server on 127.0.0.1:"<<port<<" did not answer its rules ("<<(status?std::to_string(status):std::string("no answer"))<<"): is it running, with this prefix?\n";return 3;}
+    std::string server;int64_t time=0;
+    try{auto p=json::parse(text);server=p.get("server").string();time=p.get("time").integer();}catch(const std::exception&){}
+    if(server.empty()||!time){std::cerr<<"the server's rules could not be read\n";return 3;}
+    status=localRequest(port,rest[0],target,id::signRequest(k,rest[0],target,server,body,time,id::newNonce()),body,text);
+    std::cout<<text<<"\n";
+    if(status!=200){std::cerr<<"refused: "<<(status?std::to_string(status):std::string("no answer"))<<"\n";return 3;}
+    return 0;
+}
 // The commands that work on a world file while no server has it open (README, "Linked servers").
 int offline(int argc,char** argv){
+    if(std::string c=argv[1];c=="keygen"||c=="pubkey"||c=="call")return keyCommand(argc,argv);
     if(int r=policyCommand(argc,argv);r>=0)return r;
     std::string command=argv[1],in,out,filterText="all",server;bool prune=false;
     for(int i=2;i<argc;++i){
@@ -358,6 +456,7 @@ int main(int argc,char** argv){
     std::vector<world::LinkConfig> links;
     struct Presence {std::string on,relay;long budget=250000,players=64;};std::vector<Presence> presence;   // per link: --link-presence and its options
     std::string policyPreset,owner,name;bool naming=false;std::vector<std::string> policySets;
+    world::GateConfig gateConfig;bool limits=true;
     auto link=[&](const std::string& option)->world::LinkConfig&{if(links.empty()){std::cerr<<option<<" comes after --link NAME\n";std::exit(2);}return links.back();};
     auto filter=[](const std::string& option,const std::string& text){
         try{return world::parseFilter(text);}catch(const std::exception& e){std::cerr<<option<<": "<<e.what()<<"\n";std::exit(2);}};
@@ -388,10 +487,19 @@ int main(int argc,char** argv){
         else if(a=="--link-presence-budget"){link(a);presence.back().budget=std::min(std::max(std::atol(next().c_str()),0L),1000000000L);}
         else if(a=="--link-presence-players"){link(a);presence.back().players=std::min(std::max(std::atol(next().c_str()),0L),100000L);}
         else if(a=="--policy")policyPreset=next();else if(a=="--policy-set")policySets.push_back(next());
+        else if(a=="--max-connections")maxConnections=int(std::min(std::max(std::atol(next().c_str()),1L),4096L));
+        else if(a=="--ip-connections")gateConfig.connections=int(std::min(std::max(std::atol(next().c_str()),0L),4096L));
+        else if(a=="--ip-rate")gateConfig.rate=std::min(std::max(std::atof(next().c_str()),0.0),100000.0);
+        else if(a=="--ip-burst")gateConfig.burst=std::min(std::max(std::atof(next().c_str()),1.0),1000000.0);
+        else if(a=="--ip-strikes")gateConfig.strikes=int(std::min(std::max(std::atol(next().c_str()),0L),1000000L));
+        else if(a=="--ip-block")gateConfig.blockMs=uint64_t(std::min(std::max(std::atol(next().c_str()),1L),604800L))*1000;
+        else if(a=="--request-seconds")requestSeconds=int(std::min(std::max(std::atol(next().c_str()),1L),300L));
+        else if(a=="--limit-loopback")gateConfig.loopback=true;else if(a=="--no-ip-limits")limits=false;
         else if(a=="--owner"){owner=world::identity::AccountPrefix+next();if(!world::identity::accountIsKey(owner)){std::cerr<<"--owner: the owner's public key, 64 hex digits\n";return 2;}}
         else if(a=="--name"){name=next();naming=true;if(!world::serverNameText(name)){std::cerr<<"--name: 1 to "<<world::MaxHomeChars<<" characters (at most "<<world::MaxHomeBytes<<" bytes of UTF-8), no control characters, no space at either end\n";return 2;}}
         else{std::cerr<<"usage: coop-world --port N [--bind ADDRESS] [--data FILE] [--prefix SECRET] [--log FILE] [--trace FILE] [--idle-exit SECONDS] [--owner KEY] [--name TEXT]\n"
                         "                  [--policy friends|solo|public] [--policy-set KEY=VALUE]...\n"
+                        "                  [--max-connections N] [--ip-connections N] [--ip-rate N] [--ip-burst N] [--ip-strikes N] [--ip-block SECONDS] [--request-seconds N] [--limit-loopback | --no-ip-limits]\n"
                         "                  [--relay-port N [--relay-key TEXT] [--relay-enter METRES] [--relay-leave METRES] [--relay-timeout SECONDS] [--relay-players N] [--relay-rate N]]\n"
                         "                   [--broadcast-full METRES] [--broadcast-interval MS] [--broadcast-animation METRES] [--broadcast-budget BYTES]\n"
                         "                   [--broadcast-flush MS] [--broadcast-rate N] [--broadcast-build GAME:HEX] [--broadcast-near N]\n"
@@ -441,6 +549,7 @@ int main(int argc,char** argv){
     // This world's display name, saved with it (README, "Builder names").
     if(naming&&name!=w.name()){w.setName(name);save(w);}
     world::Front front(w,prefix,links);
+    if(limits)gate=std::make_unique<world::Gate>(gateConfig);
     sockaddr_in address{};address.sin_family=AF_INET;address.sin_port=htons(uint16_t(port));
     if(inet_pton(AF_INET,bind.c_str(),&address.sin_addr)!=1){std::cerr<<"--bind needs a numeric IPv4 address\n";return 2;}
     if(relayPort){
@@ -452,6 +561,7 @@ int main(int argc,char** argv){
         relayConfig.seed=std::random_device{}();relayConfig.serverId=w.serverId();
         // Who may say HELLO for a player id: the group's key, or under identity keys a relay token of that player.
         relayConfig.admit=[&w,key=relayConfig.token](uint64_t id,const std::string& token){return w.relayAdmit(id,token,key,nowSeconds());};
+        relayConfig.evicted=[&w]{return world::relayEvictions(w);};   // the owner's kick and ban (README, "Kick and ban")
         // Who a broadcast player is shown (README, "How many players one player sees"): his choice and friends as the
         // world holds them (under identity keys), and the policy's near_cap unless --broadcast-near gives the cap.
         relayConfig.viewer=[&w,nearGiven](uint64_t id){return world::relayViewer(w,id,nearGiven);};
@@ -492,8 +602,11 @@ int main(int argc,char** argv){
     line(policyText(w.policy(),false)+policyNote);
     if(!w.owner().empty())line("owner key "+w.owner().substr(8,16)+"... (signed calls of this key are the owner's)");
     if(!w.name().empty())line("server name "+w.name()+" (the home of its builders on linked servers)");
+    line("limits: "+std::to_string(maxConnections)+" connections"+(gate?", per address "+std::to_string(gateConfig.connections)+" at once, "+std::to_string(int(gateConfig.rate))+" requests a second (burst "
+         +std::to_string(int(gateConfig.burst))+"), blocked "+std::to_string(gateConfig.blockMs/1000)+" s after "+std::to_string(gateConfig.strikes)+" unknown paths in a minute"+(gateConfig.loopback?", loopback too":", loopback exempt"):std::string(", none per address")));
     while(true){
-        sock_t s=accept(listener,nullptr,nullptr);
+        sockaddr_in from{};socklen_t fromSize=sizeof from;
+        sock_t s=accept(listener,reinterpret_cast<sockaddr*>(&from),&fromSize);
 #ifdef _WIN32
         if(s==INVALID_SOCKET)continue;
         DWORD timeout=IdleSeconds*1000;setsockopt(s,SOL_SOCKET,SO_RCVTIMEO,reinterpret_cast<const char*>(&timeout),sizeof timeout);
@@ -502,7 +615,10 @@ int main(int argc,char** argv){
         timeval timeout{IdleSeconds,0};setsockopt(s,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof timeout);
 #endif
         setsockopt(s,IPPROTO_TCP,TCP_NODELAY,reinterpret_cast<const char*>(&yes),sizeof yes);
-        if(connections.load()>=MaxConnections){closeSocket(s);continue;}
+        if(connections.load()>=maxConnections){closeSocket(s);continue;}
+        const uint32_t ip=from.sin_family==AF_INET?ntohl(from.sin_addr.s_addr):0;
+        // Limits per address: one address cannot hold every connection, nor come back while it is blocked.
+        if(gate&&gate->open(ip,steadyMs())!=world::Gate::Open::Ok){closeSocket(s);continue;}
         ++connections;
-        std::thread([s,&front,&w]{serve(s,front,w);closeSocket(s);--connections;}).detach();}
+        std::thread([s,ip,&front,&w]{serve(s,ip,front,w);closeSocket(s);if(gate)gate->close(ip);--connections;}).detach();}
 }

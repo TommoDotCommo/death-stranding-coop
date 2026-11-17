@@ -34,6 +34,12 @@ build/api-test: api_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h 
 # What the game is told (README "What the game is told"): the notice token and the mod's read.
 build/notices-test: notices_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h | build
 	$(CXX) $(FLAGS) notices_test.cpp front.cpp api.cpp link.cpp world.cpp identity.cpp signatures.cpp $(MONO) -o $@
+# Kick and ban (README "Kick and ban"): the owner's calls end a player's sessions and passes; a ban refuses new ones.
+build/ban-test: ban_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h | build
+	$(CXX) $(FLAGS) ban_test.cpp front.cpp api.cpp link.cpp world.cpp identity.cpp signatures.cpp $(MONO) -o $@
+# Limits per address (README "Limits per address"): connections, request rate, blocks after wrong guesses.
+build/limits-test: limits_test.cpp limits.h | build
+	$(CXX) $(FLAGS) limits_test.cpp -o $@
 build/keys-test: keys_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
 	$(CXX) $(FLAGS) keys_test.cpp front.cpp api.cpp link.cpp world.cpp identity.cpp signatures.cpp relay.cpp $(MONO) -o $@
 RELAY := relay.cpp relay.h presence.h ../core/relay.h ../core/broadcast.h
@@ -49,16 +55,23 @@ build/fight-test: fight_test.cpp $(RELAY) $(PLAYER) | build
 # Linked servers' presence: two and three relays in memory with real players' sides.
 build/presence-test: presence_test.cpp $(RELAY) $(PLAYER) | build
 	$(CXX) $(FLAGS) presence_test.cpp relay.cpp ../core/broadcast_client.cpp ../core/core.cpp -o $@
-build/coop-world: ../common/diag_log.h ../common/crash_handler.h main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
-	$(CXX) $(FLAGS) main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp identity.cpp signatures.cpp $(MONO) -o $@
+SERVER := ../common/diag_log.h ../common/crash_handler.h main.cpp front.cpp front.h limits.h $(API) $(LINK) world.cpp world.h json.h $(RELAY)
+SERVER_SOURCES := main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp identity.cpp signatures.cpp $(MONO)
+build/coop-world: $(SERVER) | build
+	$(CXX) $(FLAGS) $(SERVER_SOURCES) -o $@
+# The server for a rented Linux machine (../deploy/vps/README.md): x86_64, linked statically so it needs nothing of
+# the machine's libraries and runs on any recent Debian or Ubuntu. Built on the development PC, copied by deploy.sh.
+build/coop-world-linux: $(SERVER) | build
+	$(CXX) $(FLAGS) -static -static-libgcc -static-libstdc++ $(SERVER_SOURCES) -o $@
+linux: build/coop-world-linux
 # WORLD_VERSION_RES: the release's VERSIONINFO resource object (tools/release.sh), empty otherwise.
-build/coop-world.exe: ../common/diag_log.h ../common/crash_handler.h main.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) | build
-	$(MINGW) $(WINFLAGS) main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp identity.cpp signatures.cpp $(MONO) $(WORLD_VERSION_RES) -o $@ -lws2_32 -lbcrypt
+build/coop-world.exe: $(SERVER) | build
+	$(MINGW) $(WINFLAGS) $(SERVER_SOURCES) $(WORLD_VERSION_RES) -o $@ -lws2_32 -lbcrypt
 # The swarm of stand-in players (mod/swarm.cpp) talks to the built server over real sockets.
 ../mod/build/coop-swarm: FORCE
 	$(MAKE) -C ../mod build/coop-swarm
 FORCE:
-test: build/identity-test build/world-test build/policy-test build/curate-test build/highway-test build/names-test build/link-test build/front-test build/api-test build/notices-test build/keys-test build/relay-test build/broadcast-test build/fight-test build/presence-test build/coop-world ../mod/build/coop-swarm
+test: build/identity-test build/world-test build/policy-test build/curate-test build/highway-test build/names-test build/link-test build/front-test build/api-test build/notices-test build/ban-test build/limits-test build/keys-test build/relay-test build/broadcast-test build/fight-test build/presence-test build/coop-world ../mod/build/coop-swarm
 	./build/identity-test
 	./build/world-test
 	./build/policy-test
@@ -69,6 +82,8 @@ test: build/identity-test build/world-test build/policy-test build/curate-test b
 	./build/front-test
 	./build/api-test
 	./build/notices-test
+	./build/ban-test
+	./build/limits-test
 	./build/keys-test
 	./build/relay-test
 	./build/broadcast-test
@@ -80,8 +95,9 @@ test: build/identity-test build/world-test build/policy-test build/curate-test b
 	python3 -B test_relay.py build/coop-world ../mod/build/coop-swarm
 	python3 -B test_broadcast.py build/coop-world ../mod/build/coop-swarm
 	python3 -B test_presence.py build/coop-world ../mod/build/coop-swarm
+	python3 -B test_limits.py build/coop-world
 	python3 -B test_mutants.py
 all: build/coop-world.exe
 clean:
 	rm -rf build
-.PHONY: test all clean FORCE
+.PHONY: test all clean linux FORCE

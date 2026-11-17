@@ -92,7 +92,7 @@ json::Value World::apiMine(const std::string& key) const {
 }
 json::Value World::apiPlayers() const {
     auto list=playerList();Value players=Value::array();
-    for(auto& i:list){Value v=Value::object();v.set("id",i.id);v.set("name",i.name);v.set("known",i.known);v.set("member",i.member);
+    for(auto& i:list){Value v=Value::object();v.set("id",i.id);v.set("name",i.name);v.set("known",i.known);v.set("member",i.member);v.set("banned",i.banned);
         identity::PublicKey k{};v.set("key",identity::keyOf(i.key,k)?identity::shortText(k):std::string());   // a player's key, short; no other account is shown
         v.set("likes",i.likes);
         v.set("offer_builds",i.offerBuilds);v.set("offer_old",i.offerOld);v.set("shared",int64_t(i.shared));v.set("waiting",int64_t(i.pending));
@@ -190,6 +190,10 @@ World::Viewer World::relayViewer(uint64_t relayId) const {
         break;}
     return v;
 }
+std::vector<uint64_t> relayEvictions(World& w){
+    std::vector<uint64_t> out;
+    for(auto& account:w.takeEvictions()){identity::PublicKey k{};if(identity::keyOf(account,k))out.push_back(identity::relayId(k));}
+    return out;}
 RelayViewer relayViewer(const World& w,uint64_t relayId,bool capGiven){
     auto v=w.relayViewer(relayId);RelayViewer r;r.chosen=!v.show.empty();
     r.show=v.show=="nobody"?ds::broadcast::Show::Nobody:v.show=="friends"?ds::broadcast::Show::Friends:ds::broadcast::Show::Everyone;
@@ -210,7 +214,7 @@ Value body(const std::string& text,const std::vector<std::string>& fields,std::s
 }
 // The owner's calls (api.h): only with the owner's key.
 Reply ownerApi(World& w,const std::string& method,const std::string& call,const std::string& text,const std::string& signer){
-    const bool read=method=="GET"&&(call=="players"||call=="review"),change=method=="POST"&&(call=="review"||call=="remove-player"||call=="member"||call=="policy");
+    const bool read=method=="GET"&&(call=="players"||call=="review"),change=method=="POST"&&(call=="review"||call=="remove-player"||call=="member"||call=="policy"||call=="ban"||call=="kick");
     if(!read&&!change)return answer(404,"not found");
     if(signer.empty())return answer(401,"the owner's calls are signed with the owner's key");
 #ifndef MUTANT_API_OWNER
@@ -231,6 +235,16 @@ Reply ownerApi(World& w,const std::string& method,const std::string& call,const 
             Value in=body(text,{"player"},why);if(!why.empty())return answer(400,why);
             if(in.get("player").string().empty())return answer(400,"player: a player id");
             out.set("removed",int64_t(w.removePlayer(in.get("player").string())));return ok(out);}
+        // Kick and ban (README, "Kick and ban"): {"player":ID} ends his sessions and passes; {"player":ID,"ban":"yes|no"}.
+        if(call=="kick"){
+            Value in=body(text,{"player"},why);if(!why.empty())return answer(400,why);
+            if(in.get("player").string().empty())return answer(400,"player: a player id");
+            out.set("ended",int64_t(w.kick(in.get("player").string())));return ok(out);}
+        if(call=="ban"){
+            Value in=body(text,{"player","ban"},why);if(!why.empty())return answer(400,why);
+            const std::string ban=in.get("ban").string();
+            if(in.get("player").string().empty()||(ban!="yes"&&ban!="no"))return answer(400,"player and ban (yes or no)");
+            w.ban(in.get("player").string(),ban=="yes");out.set("players",w.apiPlayers().get("players"));return ok(out);}
         if(call=="member"){
             Value in=body(text,{"player","member"},why);if(!why.empty())return answer(400,why);
             const std::string member=in.get("member").string();
@@ -273,6 +287,14 @@ Reply launcherApi(World& w,const std::string& method,const std::string& call,con
 #endif
         return 0;};
     auto refusal=[&](int status){return answer(status,status==401?"this server takes signed calls from the launcher (identity keys)":"a call acts only for the player whose key signed it");};
+    // Kick and ban (README): a banned player's launcher is refused every call but reading the rules.
+    auto barred=[&](const std::string& key)->bool{
+#ifndef MUTANT_BAN_API
+        return w.banned(key);
+#else
+        (void)key;return false;
+#endif
+        };
     if(read){
 #ifndef MUTANT_API_KEY
         if(!accountKeyText(player))return answer(400,"player: the account key his game signs in with");
@@ -281,6 +303,7 @@ Reply launcherApi(World& w,const std::string& method,const std::string& call,con
         if(friends)return ok(w.apiFriends(player));
 #endif
         if(int r=actor(player))return refusal(r);
+        if(barred(player))return answer(403,"this player is banned from this server");
         return ok(call=="me"?w.apiMe(player):friends?w.apiFriends(player):w.apiMine(player));}
     if(friends){
         // {"player":KEY,"add":[...],"remove":[...],"show_others":"everyone|friends|nobody|default"}, one or more of the last three.
@@ -290,6 +313,7 @@ Reply launcherApi(World& w,const std::string& method,const std::string& call,con
 #ifndef MUTANT_API_FRIENDS_ANY
         if(int r=actor(key))return refusal(r);
 #endif
+        if(barred(key))return answer(403,"this player is banned from this server");
         std::vector<std::string> add,remove;for(auto& i:in.get("add").items())add.push_back(i.string());for(auto& i:in.get("remove").items())remove.push_back(i.string());
         try{w.apiSetFriends(key,add,remove,in.get("show_others").string());}
         catch(const std::exception& e){std::string m=e.what();return answer(m.find("all its players")!=std::string::npos||m.find("no player of this world")!=std::string::npos||m.find("two players")!=std::string::npos?403:400,m);}
@@ -311,6 +335,7 @@ Reply launcherApi(World& w,const std::string& method,const std::string& call,con
     if(!accountKeyText(key))return answer(400,"player: the account key his game signs in with");
 #endif
     if(int r=actor(key))return refusal(r);
+    if(barred(key))return answer(403,"this player is banned from this server");
     try{
         if(pass){
             if(call=="ticket")return ok(w.apiTicket(key,now));

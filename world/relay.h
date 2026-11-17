@@ -94,6 +94,9 @@ struct RelayConfig {
     // Set: it decides instead of `token` whether a HELLO's (or BYE's) token may speak for that player id (the server's
     // identity: World::relayAdmit, a relay token of the player under identity keys).
     std::function<bool(uint64_t id,const std::string& token)> admit;
+    // Set: asked at every tick for the relay ids the owner kicked or banned (World::takeEvictions); each is taken off
+    // at once, with a LEAVE for everyone near him.
+    std::function<std::vector<uint64_t>()> evicted;
     double enterMetres=150,leaveMetres=200;  // 1..65535, leave >= enter
     uint32_t timeoutMs=10000;
     size_t maxPlayers=64;                    // 1..RelayPlayersMax

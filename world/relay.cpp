@@ -367,6 +367,9 @@ void Relay::remove(uint64_t id,const char* why){
 }
 void Relay::tick(uint64_t now){
     now_=std::max(now_,now);
+#ifndef MUTANT_RELAY_EVICT
+    if(config_.evicted)for(auto id:config_.evicted()){auto it=players_.find(id);if(it!=players_.end()&&!it->second.link)remove(id,"removed by the owner");}
+#endif
 #ifndef MUTANT_RELAY_NO_TIMEOUT
     std::vector<uint64_t> silent;
     for(auto& entry:players_)if(!entry.second.link&&now>entry.second.lastSeen&&now-entry.second.lastSeen>config_.timeoutMs)silent.push_back(entry.first);

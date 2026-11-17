@@ -311,7 +311,8 @@ words, exit 3), and two refused flag combinations (exit 3, no dialog).
 Limits today: 15 other players shown per game and 16 players in the shared world (`../world/README.md`); the
 two-player features (cargo, structures made in the session, vehicles, enemies, orders, rain) are not part of group
 play; no list of who is in the group, no way to leave except closing the game, no check of the host's firewall; the
-owner's window does not refresh by itself (Refresh), and there is no ban.
+owner's window does not refresh by itself (Refresh), and it has no kick or ban (the server has them as owner calls:
+`../world/README.md`, "Kick and ban"; `../deploy/vps/` uses them over SSH).
 
 ## Diagnostics for a bug report
 

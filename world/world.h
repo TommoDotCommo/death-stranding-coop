@@ -173,7 +173,7 @@ public:
     void setPlayer(const std::string& id,const std::string& keyValue);
     // One line per player of this world, then one per builder known here only from imports (known=false).
     // `key`: his account key; `likes`: on his objects built here that are still his (a remnant's are nobody's).
-    struct PlayerInfo { std::string id,name,key,offerBuilds,offerOld;bool known=true,member=false;size_t shared=0,pending=0,kept=0,held=0,remnants=0,imported=0;int64_t likes=0; };
+    struct PlayerInfo { std::string id,name,key,offerBuilds,offerOld;bool known=true,member=false,banned=false;size_t shared=0,pending=0,kept=0,held=0,remnants=0,imported=0;int64_t likes=0; };
     std::vector<PlayerInfo> playerList() const;
     // The objects that wait: for their builder's answer (offer_builds ask), or for the owner (accept_offers review),
     // and the ones held because the policy does not let them be shared (`held`: build, member or limit).
@@ -194,6 +194,16 @@ public:
     // The owner removes everything one builder has here (built, waiting, kept, remnants, and what came from him
     // through linked servers). Returns how many objects went.
     size_t removePlayer(const std::string& id);
+    // The owner ends a player's sessions and passes (README, "Kick and ban"): his game's session, its sign-in
+    // ticket, relay token and notice token. Under identity keys he is back only after a new start from his launcher.
+    // Returns how many ended. `ban` does the same and, while it holds, refuses him everything that makes a session or a
+    // pass and every launcher call (403); `ban(id,false)` lifts it. Saved with the world. Both throw for an unknown id.
+    size_t kick(const std::string& id);
+    void ban(const std::string& id,bool yes);
+    bool banned(const std::string& account) const;     // by account key
+    // The accounts of keys kicked or banned since the last call (under identity keys a relay id is someone's: made from
+    // his key): the relay takes them off at once (relayEvictions in api.h, RelayConfig::evicted), not after its timeout.
+    std::vector<std::string> takeEvictions(){std::lock_guard<std::mutex> g(lock_);auto out=std::move(evictions_);evictions_.clear();return out;}
     // The launcher's API (api.h): one account, by the key it signs in with. The documents are the API's answers;
     // apiChoices throws std::runtime_error with the reason when it is refused, and then changed nothing. It makes the
     // player when the key is new (as a sign-in would: the `players` setting applies), so his choices are in place
@@ -221,7 +231,7 @@ public:
 private:
     // offerBuilds, offerOld: "" when the player chose nothing (the policy's value applies).
     // friends: account keys; showOthers: everyone|friends|nobody, "" when he chose nothing here.
-    struct Player { std::string id,name,key,offerBuilds,offerOld,showOthers;bool member=false;std::set<std::string> friends; };
+    struct Player { std::string id,name,key,offerBuilds,offerOld,showOthers;bool member=false,banned=false;std::set<std::string> friends; };
     // An imported object keeps where it was first built (originServer, originId), which server handed it over (via),
     // its builder's name there and the like count it arrived with; `likes` is that count plus what was given here.
     // `name` is the builder's name when it was built (kept for a remnant); `share` is "" for an object every player
@@ -254,6 +264,8 @@ private:
     uint64_t stamps_=0;void touch(Object& o){o.stamp=++stamps_;}   // an object's state changed (what notices reads)
     std::string pass(std::map<std::string,Pass>& passes,const std::string& account,uint64_t relayId,int64_t now);
     Player& playerFor(const std::string& account,const char* why);   // made when new, within `players`
+    size_t kickLocked(Player&);
+    std::vector<std::string> evictions_;
     Reply signInLocked(const std::string& key,const std::string& displayName,const std::string& gateway);
     // What each player's game was handed per area (curate): kept so the same structures come back, saved with the world.
     struct Picks { int64_t asked=0;std::vector<std::string> ids; };

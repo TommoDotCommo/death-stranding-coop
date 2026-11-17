@@ -124,6 +124,7 @@ struct Net {
     std::vector<std::unique_ptr<Peer>> peers;uint64_t ms=1000;
     Net(World& world,int64_t& clock):w(world),now(&clock){
         config.token="group";config.admit=[this](uint64_t id,const std::string& t){return w.relayAdmit(id,t,"group",*now);};
+        config.evicted=[this]{return relayEvictions(w);};
         relay=std::make_unique<Relay>(config,[this](const RelayAddress& a,const uint8_t* d,size_t n){down.push_back({a,ds::relay::Buffer(d,d+n)});});}
     ds::relay::Client& add(uint64_t id,const std::string& token){
         auto p=std::make_unique<Peer>();p->address={0x0a000001u+uint32_t(peers.size()),uint16_t(40000+peers.size())};auto address=p->address;
@@ -142,7 +143,11 @@ static void relay(){
     CHECK(!s.w.relayAdmit(ida,"",       "group",Now)&&!s.w.relayAdmit(ida,ta+"x","group",Now));
     {   // Real players' sides: the token of his id is answered; the token of another id, or the group's key, is not.
         Net n(s.w,s.now);auto& good=n.add(ida,ta);auto& wrongId=n.add(ida+1,tb);auto& group=n.add(idb+7,"group");n.run(10);
-        CHECK(good.online()&&!wrongId.online()&&!group.online()&&n.relay->players()==1);}
+        CHECK(good.online()&&!wrongId.online()&&!group.online()&&n.relay->players()==1);
+        // The owner's kick takes him off the relay at the next tick, long before its timeout (README, "Kick and ban").
+        auto tb2=s.token(b);auto& other=n.add(idb,tb2);n.run(5);CHECK(n.relay->players()==2&&n.relay->areNear(idb,ida));
+        s.w.kick(playerId(id::account(a.pub)));n.run(2);
+        CHECK(n.relay->players()==1&&!n.relay->areNear(idb,ida)&&other.online());}
     // An unused token ends after RelayTokenUnusedSeconds; a used one while HELLOs keep coming, and RelayTokenIdleSeconds after.
     s.now=Now+RelayTokenUnusedSeconds+1;CHECK(!s.w.relayAdmit(idb,tb,"group",s.now));
     s.now=Now;auto t=s.token(a);CHECK(s.w.relayAdmit(ida,t,"group",Now+100)&&!s.w.relayAdmit(ida,ta,"group",Now+100));   // the new one ended the old one
