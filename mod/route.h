@@ -21,7 +21,9 @@ constexpr double JumpMetres=25;constexpr uint64_t JumpMs=500;   // a jump this f
 constexpr double TeleportSpeed=60;                      // m/s on the ground, measured over at least SpeedWindowMs
 constexpr double FootSpeed=15;constexpr uint64_t FootWindowMs=2000;   // "no vehicles": faster over 2 s is not on foot
 constexpr uint64_t SpeedWindowMs=1000;
-constexpr uint64_t ClaimSlackMs=1000;                   // verify: the claimed time against the track's own
+// verify: the claimed time against the track's own. Its points are 2 s apart and quantised to 0.5 m, so the replay may
+// see the start or the finish one point late (a point a few centimetres outside a zone lands on its edge).
+constexpr uint64_t ClaimSlackMs=1000+TrackEveryMs;
 
 struct Point { double x=0,y=0,z=0; };                   // y up
 struct Rules {

@@ -1124,7 +1124,7 @@ Policy presetPolicy(const std::string& name){
     Policy p;p.preset=name;
     if(name=="friends")return p;
     if(name=="solo"){p.players=1;return p;}
-    if(name=="public"){p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";p.nearCap=16;return p;}
+    if(name=="public"){p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";p.nearCap=16;p.challenges="members";return p;}
     bad("policy: unknown preset '"+name+"' (friends, solo or public)");
 }
 void setPolicy(Policy& p,const std::string& keyValue){
@@ -1148,12 +1148,13 @@ void setPolicy(Policy& p,const std::string& keyValue){
     else if(key=="spread")number(p.spread,0,1000);
     else if(key=="identity")pick(p.identity,{"none","keys"});
     else if(key=="near_cap")number(p.nearCap,0,MaxNearCap);
-    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap)");
+    else if(key=="challenges")pick(p.challenges,{"everyone","members","owner","nobody"});
+    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges)");
 }
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy& p){
     return {{"join",p.join},{"build",p.build},{"accept_offers",p.acceptOffers},{"limit",std::to_string(p.limit)},{"withdrawal",p.withdrawal},
             {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld},
-            {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity},{"near_cap",std::to_string(p.nearCap)}};
+            {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity},{"near_cap",std::to_string(p.nearCap)},{"challenges",p.challenges}};
 }
 void World::setPolicy(const Policy& p){std::lock_guard<std::mutex> g(lock_);policy_=p;dirty_=true;++changes_;}
 bool World::servedTo(const Object& o,const std::string& player) const {

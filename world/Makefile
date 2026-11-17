@@ -37,6 +37,16 @@ build/notices-test: notices_test.cpp front.cpp front.h $(API) $(LINK) world.cpp 
 # Kick and ban (README "Kick and ban"): the owner's calls end a player's sessions and passes; a ban refuses new ones.
 build/ban-test: ban_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h | build
 	$(CXX) $(FLAGS) ban_test.cpp front.cpp api.cpp link.cpp world.cpp identity.cpp signatures.cpp $(MONO) -o $@
+# Route challenges (challenges.h, ../docs/ROUTES.md "On the server"): the store, the API through the Front's hook, and
+# the mod's own route core (../mod/route.*) that replays a run before it counts; a mutant for every check.
+CHALLENGES := challenges.cpp challenges.h ../mod/route.cpp ../mod/route.h
+CHALLENGE_SOURCES := challenges_test.cpp challenges.cpp ../mod/route.cpp front.cpp api.cpp link.cpp world.cpp identity.cpp signatures.cpp $(MONO)
+build/challenges-test: challenges_test.cpp $(CHALLENGES) front.cpp front.h $(API) $(LINK) world.cpp world.h json.h | build
+	$(CXX) $(FLAGS) $(CHALLENGE_SOURCES) -o $@
+challenges-test: build/challenges-test
+	./build/challenges-test
+	python3 -B ../mod/mutants.py --sources "$(CHALLENGE_SOURCES)" --prefix build/mutant-challenge- CHALLENGE_LIMITS CHALLENGE_SAME CHALLENGE_VERIFY CHALLENGE_BEST CHALLENGE_UNSIGNED CHALLENGE_POLICY && echo KILLED 6 challenge mutants
+.PHONY: challenges-test
 # Limits per address (README "Limits per address"): connections, request rate, blocks after wrong guesses.
 build/limits-test: limits_test.cpp limits.h | build
 	$(CXX) $(FLAGS) limits_test.cpp -o $@
@@ -55,8 +65,8 @@ build/fight-test: fight_test.cpp $(RELAY) $(PLAYER) | build
 # Linked servers' presence: two and three relays in memory with real players' sides.
 build/presence-test: presence_test.cpp $(RELAY) $(PLAYER) | build
 	$(CXX) $(FLAGS) presence_test.cpp relay.cpp ../core/broadcast_client.cpp ../core/core.cpp -o $@
-SERVER := ../common/diag_log.h ../common/crash_handler.h main.cpp front.cpp front.h limits.h $(API) $(LINK) world.cpp world.h json.h $(RELAY)
-SERVER_SOURCES := main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp identity.cpp signatures.cpp $(MONO)
+SERVER := ../common/diag_log.h ../common/crash_handler.h main.cpp front.cpp front.h limits.h $(API) $(LINK) world.cpp world.h json.h $(RELAY) $(CHALLENGES)
+SERVER_SOURCES := main.cpp front.cpp api.cpp link.cpp world.cpp relay.cpp identity.cpp signatures.cpp challenges.cpp ../mod/route.cpp $(MONO)
 build/coop-world: $(SERVER) | build
 	$(CXX) $(FLAGS) $(SERVER_SOURCES) -o $@
 # The server for a rented Linux machine (../deploy/vps/README.md): x86_64, linked statically so it needs nothing of
@@ -71,7 +81,7 @@ build/coop-world.exe: $(SERVER) | build
 ../mod/build/coop-swarm: FORCE
 	$(MAKE) -C ../mod build/coop-swarm
 FORCE:
-test: build/identity-test build/world-test build/policy-test build/curate-test build/highway-test build/names-test build/link-test build/front-test build/api-test build/notices-test build/ban-test build/limits-test build/keys-test build/relay-test build/broadcast-test build/fight-test build/presence-test build/coop-world ../mod/build/coop-swarm
+test: build/identity-test build/world-test build/policy-test build/curate-test build/highway-test build/names-test build/link-test build/front-test build/api-test build/notices-test build/ban-test build/challenges-test build/limits-test build/keys-test build/relay-test build/broadcast-test build/fight-test build/presence-test build/coop-world ../mod/build/coop-swarm
 	./build/identity-test
 	./build/world-test
 	./build/policy-test
@@ -83,6 +93,7 @@ test: build/identity-test build/world-test build/policy-test build/curate-test b
 	./build/api-test
 	./build/notices-test
 	./build/ban-test
+	$(MAKE) challenges-test
 	./build/limits-test
 	./build/keys-test
 	./build/relay-test
@@ -96,6 +107,7 @@ test: build/identity-test build/world-test build/policy-test build/curate-test b
 	python3 -B test_broadcast.py build/coop-world ../mod/build/coop-swarm
 	python3 -B test_presence.py build/coop-world ../mod/build/coop-swarm
 	python3 -B test_limits.py build/coop-world
+	python3 -B test_challenges.py build/coop-world
 	python3 -B test_mutants.py
 all: build/coop-world.exe
 clean:
