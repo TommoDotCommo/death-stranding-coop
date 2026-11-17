@@ -100,8 +100,8 @@ The mod config caps a config at 8192 bytes (4096 before this feature) so that a 
 
 ## What the mod checks
 
-`mod/route.h` `Checker`, fed one sample per game tick (position, the time, the vehicle flags, the carried cases or
-"unreadable", whether the provider marked a teleport). It reports:
+`mod/route.h` `Checker`, fed one sample per game tick while the porter is in the world (position, the time, the
+vehicle flags, the carried cases or "unreadable"). It reports:
 
 | State | When |
 |---|---|
@@ -116,10 +116,12 @@ The mod config caps a config at 8192 bytes (4096 before this feature) so that a 
   come (the arc length of the nearest point, searched no more than 60 m ahead of what was reached), and the finish
   zone counts only when the rest of the route is shorter than the finish radius plus those 60 m. A route that ends
   near its start cannot be finished by stepping back into the start.
-- **Teleports:** a jump of more than 25 m between two samples less than 0.5 s apart, a horizontal speed over 60 m/s
-  measured over at least a second, or the provider's own teleport flag, fails the run as "teleported" (fast travel,
-  a respawn, a cheat). With "no vehicles", more than 15 m/s on the ground over at least two seconds fails it as "too
-  fast on foot".
+- **Teleports:** a jump of more than 25 m between two samples less than 0.5 s apart, or a horizontal speed over
+  60 m/s measured over at least a second, fails the run as "teleported" (fast travel, a respawn, a cheat). The
+  checker also takes a teleport flag, but the mod does not pass the provider's: that one is set for any 5 m between
+  two samples (`providers.h`), which a truck covers in one long frame. With "no vehicles", more than 15 m/s on the
+  ground over at least two seconds fails it as "too fast on foot". A loading screen or cutscene feeds no samples;
+  the clock runs on.
 - **Grace:** each time the porter leaves the corridor the grace starts again; back inside in time, the run goes on.
 - **Cases:** with a carrying rule the start waits until the porter carries enough; during the run fewer than the
   rule for longer than the grace fails it. An unreadable carrier counts as neither (the result says
@@ -133,7 +135,7 @@ Key **K** (config `route_record_key`, a virtual-key code; 0 turns it off; F2 is 
 default bindings (`game_offsets.md`, "Keys": free are B H J K L M N O P U X Y; the mod already uses B for pings, J to
 ride along, L for likes) and is no shared co-op key (STANDARD.md H: T V B H Tab [ ] F1 F2), so H2 holds. A press acts
 once (H7). Press K: "Recording a route." in the info log; walk the route; press K again: the route is simplified and
-written:
+written (or "Route too short: nothing recorded." for less than two points):
 
 - a line `ROUTE recorded <points> points, <length> m: DSR1-...` in the game's log, and
 - a file `routes\recorded-<UTC yyyymmdd-hhmmss>.txt` in the co-op data folder (`%LOCALAPPDATA%\DeathStrandingCoop`;
@@ -142,13 +144,16 @@ written:
   them.
 
 Recording needs the game provider (positions); it does not need a partner, a server or `notices` (without `notices`
-the log lines are all there is). A recording longer than 20000 samples keeps every second sample from then on.
+the log lines are all there is). A recording that reaches 20000 samples is halved (every second sample kept) and goes
+on. The simplification is flat, like the corridor: a hill on a straight path keeps no point on its top, so the
+heights shown are those of the corners.
 
 ## Running a challenge
 
 The launcher writes the challenge into the mod config as `"route":"DSR1-..."` (the string's own characters are
-ASCII, so the config stays plain). The mod decodes it at start; a bad string refuses the config with the reason, as
-any bad key does. Then, while the game runs:
+ASCII, so the config stays plain). The config parser checks its form (`DSR1-`, the base32 alphabet and dashes, at most
+4000 characters; it needs the game provider); the mod decodes it whole when it starts and refuses to start with the
+reason ("route: This challenge is incomplete. ...") when it is not a good challenge. Then, while the game runs:
 
 - in the info log (with `notices`; always in the game's log as `ROUTE ...` lines): "Challenge <name>: go to the
   start (340 m).", "At the start of <name>. Go when ready.", "<name> started.", "Leaving the corridor: 5 s.
@@ -168,15 +173,17 @@ the mod's marker code keeps two groups for the partner and pings ([Later](#later
 `DST1-` and base32 like the challenge. Bytes: version 1; the claimed time in ms (u32); the number of points (u16,
 1..1024); the route's CRC-32 (u32, the challenge it belongs to); then per point a varint of `dt` in 100 ms units
 shifted left by one with bit 0 the vehicle flag, and `dx`, `dz` (0.5 m), `dy` (1 m) zigzag varints from the previous
-point (the first from the route's start point); a CRC-32 at the end; at most 8192 bytes. The mod keeps a point every
-2 s while the run is going, the start and the finish; above 1024 points every second point is dropped.
+point (the first from the route's start point); a CRC-32 at the end; at most 8192 bytes. The mod keeps the last point
+in the start zone, the start, a point every 2 s while the run is going, and the end; above 1024 points every second
+point is dropped (the first two and the last stay).
 
-`route::verify(route, track)` replays the track through the same `Checker` with the server's view: the first point
-must be in the start zone, every later point in the corridor or a zone (no grace: a 2 s point outside is refused),
-no step faster than 60 m/s (15 m/s on foot with "no vehicles", where no point may have the vehicle flag), the last
-point in the finish zone after the progress rule, and the claimed time within 2.5 s of the track's own duration and
-within the time limit. This catches **obvious** cheats (a teleport, a car where it is forbidden, an edited time);
-a modified mod can still make up a plausible track. Nothing more is claimed.
+`route::verify(route, track)` replays the track through the same `Checker`: the first point must be in the start zone,
+the points outside the corridor may not span more than the grace, no step faster than 60 m/s (15 m/s on foot with
+"no vehicles", where no point may have the vehicle flag), the last point in the finish zone after the progress rule,
+within the time limit, and the claimed time within 3 s of the track's own (its points are 2 s apart and quantised to
+0.5 m, so the replay may see the start or the finish one point late). This catches **obvious** cheats (a teleport, a
+car where it is forbidden, a time edited by more than 3 s); a modified mod can still make up a plausible track.
+Nothing more is claimed.
 
 ## On the server
 
@@ -187,14 +194,18 @@ a modified mod can still make up a plausible track. Nothing more is claimed.
 |---|---|
 | `GET /coop/challenges` | every challenge: id, name, author name, author key (short), the string, the rules, the length, runs, and the ten best times (`board`: name, key short, ms, when) |
 | `POST /coop/challenge-publish` `{"player":KEY,"route":"DSR1-...","name":"Ann"}` | publishes it under that player (signed under identity keys); `name` is how the board shows him |
-| `POST /coop/challenge-result` `{"player":KEY,"challenge":ID,"track":"DST1-...","name":"Ann"}` | a finished run: verified with `route::verify` first; refused with the reason |
-| `POST /coop/owner/challenge-remove` `{"challenge":ID}` | the owner removes one |
+| `POST /coop/challenge-result` `{"player":KEY,"challenge":ID,"track":"DST1-...","name":"Ann"}` | a finished run: verified with `route::verify` first; its place on the board, or refused (403) with the reason |
+| `POST /coop/challenge-remove` `{"player":KEY,"challenge":ID}` | its author removes it; the owner's signed call `{"challenge":ID}` removes any |
 
-- **Who may publish:** the policy setting `challenges` = `everyone` (friends and public presets), `members`,
-  `owner` (solo) or `nobody`. Under `identity none` the publisher is whoever the call names (friends only, as
-  everywhere there).
-- **Limits:** 200 challenges in a world, 20 per player, the same route (by its CRC) once; a board keeps each
-  player's best time only and at most 100 players per challenge; a result body up to 16 KB.
+- **Who may publish:** the policy setting `challenges` = `everyone` (the friends and solo presets), `members` (the
+  public preset), `owner` or `nobody`. Under `identity none` the publisher is whoever the call names (friends only,
+  as everywhere there); under `identity keys` every call but the list is signed.
+- **Limits:** 200 challenges in a world, 20 per player, the same route (by its CRC: a lower-case copy is the same)
+  once; a board keeps each player's best time only and at most 100 players per challenge, ten shown; a body up to
+  16 KB. A refusal is 403 with the reason, a malformed body 400.
+- The calls reach the store through a hook the Front calls after the signature check (`front.h` `challenges`);
+  `coop-world` sets it, saves the store in the world file (`"challenges"`) whenever it changes, and logs
+  `challenge c1 published by ...` and each counted run.
 - Results can only be sent for a challenge on that server; a string pasted from elsewhere is run and kept locally.
 
 ## The launcher
@@ -209,20 +220,24 @@ Randomizers in the same place):
 - **Run:** a paste box for a string (it says what it read: name, author, width, rules, length, or why not) or the
   server's list with author and best times; **Run this challenge** writes it into the config for the next start
   (`route`), **Clear** takes it out.
-- **Results:** the `routes\result-*.json` files; **Send to server** for a finished run of a server's challenge.
+- **Results:** the `routes\result-*.json` files; **Send to server** for a finished run of a server's challenge (found
+  by the route's CRC in the server's list).
 
-The tab's code is `launcher/challenges.*` (game-free, tested in `challenges_test.cpp`) and the window in
-`main.cpp`.
+The server is the group server this launcher last hosted or joined (as for "My strand on this server"), read and
+signed as every launcher call (`strand.h`). The tab's code is `launcher/challenges.*` (game-free, tested in
+`challenges_test.cpp`) and the window in `main.cpp`; the window has been built (MinGW) but not seen on a screen. The
+rules are typed numbers (width, zones, grace, minutes, cases): STANDARD.md E3's choosers are for Settings rows.
 
 ## Tests
 
 | Test | What |
 |---|---|
-| `mod/route_test.cpp` (`make -C mod route-test`) | geometry (slopes, corners, zones, doubling back), the checker's states and notices, grace, time limit, vehicles, cases, teleports and speed, simplification, the format both ways, the parser fuzzed, the track and `verify`; 27 mutants (`MUTANT_ROUTE_*`) |
-| `mod/test_route_world.py` | the real mod (`fake.so`) in the fake world: K records a scripted walk and writes the string and the file; a walk inside the corridor gives `ROUTE started` and `ROUTE finished` with the result file; one that leaves it gives `failed: left the corridor`; a jump gives `failed: teleported`; the mutant build `fake-route-corridor.so` (the corridor never checked) must fail it |
-| `mod/unit.cpp` | the config keys `route` and `route_record_key` (a bad string, F2, the 8192-byte cap), with the mutant `CONFIG_ROUTE` |
-| `world/challenges_test.cpp` | publish, list, the policy, signatures, limits, a verified result, a teleporting or slow-claimed result refused, the board keeping best times, save and restore; mutants `CHALLENGE_*` |
-| `launcher/challenges_test.cpp` | listing recordings and results, editing a route's rules, the config key written and cleared |
+| `mod/route_test.cpp` (`make -C mod route-test`) | geometry (slopes, corners, zones), the checker's states and notices (left and right), grace, time limit, vehicles, cases, teleports and speed, progress on a loop and a hairpin, simplification and recording, the format both ways, the parser fuzzed (random strings, every truncation, every one-character change, random byte changes with a right CRC) and crafted bytes for every check the CRC cannot make, the track and `verify`; 29 mutants (`MUTANT_ROUTE_*`) |
+| `mod/test_route_world.py` | the real mod (`fake.so`) in the fake world, one game at a time: K (through the pad script) records a 60 m walk over a hill and writes the string to the log and `routes/recorded-*.txt`; that string run as `route`: a walk 300 m above the recorded heights and 2 m aside finishes (`ROUTE started`, `ROUTE finished`, the result line and file, the info-log notice), a step 15 m aside fails as "left the corridor" after the leaving notice, a 35 m jump fails as "teleported"; a damaged string refuses the start; the mutant build `fake-route-axes.so` (positions in the game's axes, z up) must fail it |
+| `mod/unit.cpp` | the config keys `route` and `route_record_key` (the string's form, the game provider, F2 and the other co-op keys refused, the 8192-byte cap with the longest route), with the mutant `CONFIG_ROUTE` |
+| `world/challenges_test.cpp` | through the Front with the hook: publish and the list, a damaged or repeated string, wrong bodies, a run replayed and counted, the best time kept, a teleport, an edited time and another challenge's track refused, the policy (`nobody`, `owner`, `members`), identity keys and signatures, a ban, the limits, removal by the author and the owner, save and restore; 6 mutants (`CHALLENGE_*`) |
+| `world/test_challenges.py` | the real `coop-world` over HTTP with a DSR1 and DST1 encoder written in Python (a second reading of the formats): published, listed, a run counted, a teleport refused, all of it kept across a restart on the same world file |
+| `launcher/challenges_test.cpp` | recordings and results read from the routes folder, a pasted string read and made canonical, a route's rules edited, the chosen challenge in launcher.ini and in both kinds of game config, the server's list, publish and submit over a stand-in transport; 3 mutants |
 
 ## Later
 

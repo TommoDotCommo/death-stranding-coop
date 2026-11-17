@@ -71,7 +71,7 @@ The client swaps role and slots and uses the same freshly generated nonzero
 session. A cryptographic OS nonce is generated independently per process. The
 nickname is local configuration only; protocol 1 has no nickname field. The strict
 flat JSON schema rejects duplicate/unknown keys, invalid numbers/types, trailing
-content, escapes/non-ASCII strings and configs over 4096 bytes. Config strings
+content, escapes/non-ASCII strings and configs over 8192 bytes (4096 until route challenges). Config strings
 have no path authority. Logging exclusively creates `mod-<pid>.log` beside config;
 that directory must already exist, be private, and under redirect-data when
 loaded by the proxy. Config/log ancestors reject symlinks/reparse points and files
@@ -2218,3 +2218,27 @@ at most every 8 s). The log says `CALL the porter calls out` / `CALL over`.
 Game-free: `vitals_test.cpp` (five mutants), the notices in `notice_test.cpp` (three more mutants), the flags in the
 core's tests.
 
+
+## Route challenges (`route`, key K; built 2026-11-18, not run in a game)
+
+A player records a delivery route, sets a corridor and rules in the launcher, and others run it; the mod checks they
+stay inside the corridor. The whole design, the formats and the server side: [../docs/ROUTES.md](../docs/ROUTES.md).
+
+- **Recording:** K (config `route_record_key`, a virtual-key code; 0 off; F2, `passenger_key` and `story_key` are
+  refused) starts and stops it. K is free in the game's default bindings ("Keys" in `game_offsets.md`) and is no shared
+  co-op key. The mod samples the porter's position (the presence axes, `cache.local`), simplifies it to at most 300
+  points and writes `ROUTE recorded <n> points, <m> m: DSR1-...` to the log and `routes\recorded-<UTC>.txt` in the
+  co-op data folder (the parent of `diag::DefaultLogsDir()`). With `notices` the info log says "Recording a route." and
+  "Route recorded: 412 m. ...".
+- **Running:** `"route":"DSR1-..."` (the launcher writes it; the config checks its form, the mod decodes it at start
+  and refuses to start with the reason). Every tick in the world the checker (`route.h` `Checker`) gets the porter's
+  position, facing, the presence flags `Vehicle` and `Passenger`, and, with a carrying rule, the carried cases
+  (`carry_visual.h` `readCarried`, twice a second). What it says goes to the log as `ROUTE <kind>: <sentence>` and, with
+  `notices`, to the info log (`notice.h` kind Route); at the end `ROUTE result finished|failed <ms> ms ... track=DST1-...`
+  and `routes\result-<UTC>-<id>.json`. The status JSON has `route` (state, elapsed_ms, progress_m, outside_m, reason,
+  recording, recorded_samples).
+- Not used: the provider's own Teleport flag (5 m between samples is a truck in a long frame), the map pins (the
+  game's user markers are saved; see ROUTES.md "Later").
+
+Tests: `route_test.cpp` (29 mutants), `test_route_world.py` (the fake world through the pad script, with the mutant
+build `fake-route-axes.so`), the config in `unit.cpp` (mutant CONFIG_ROUTE).
