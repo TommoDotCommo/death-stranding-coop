@@ -1,33 +1,96 @@
-# Death Stranding co-op (Director's Cut, PC)
+# 🚚 Death Stranding co-op (Director's Cut, PC)
 
-Work in progress: real-time co-op for DEATH STRANDING DIRECTOR'S CUT on PC (Steam, build 13300582), built from zero.
-**Not playable yet; there is no release.** What works today, on one PC with two copies of the game: each copy is
-isolated and kept offline, each player sees the other as a second Sam moving exactly as the other's Sam does (his
-own animation controls are mirrored: walking, running, resting, dozing, balancing, falling, picking things up),
-wearing the other's gear and outfit, carrying the other's cargo as the game's own cases, with his name over his
-head, seated on his bike or truck (in his paint, its wheels and steering turning as his do) when he rides one,
-and pinned on the map. Cargo one player puts down or picks up is put down or taken away in the other's world, and
-a structure one player builds or dismantles (with the game's own construction device and structure menu, or
-ladders) is built or removed in the other's. Downed, caught by BTs or resting, the partner is shown in the game's
-own poses. Shared enemies, BT kills and voidout craters, roads, structure upgrades and order progress are synced. Timefall falls where the host stands, and the
-game's own message feed says when the partner joins, leaves or steps into a cutscene or private room. A guest
-starts from the host's save and can catch up with the host's story during a session (the host's game writes a
-checkpoint, the guest's game loads it). Opt-in and newer: one load per shared order, connection points and levels
-that rise together, MULEs standing where the host has them, and the partner's shout, scan and vitals. A two-PC
-session tried for real, a story that moves on for both by itself, and cutscenes are still to do. See
+Work in progress: co-op for DEATH STRANDING DIRECTOR'S CUT on PC (Steam, build 13300582), built from zero. Each
+player keeps their own save and story; players who meet see each other and play together, and a strand server the
+players run themselves shares what everyone builds. **Not playable yet; there is no release.** Everything marked
+as working below ran in the real game as two copies on one PC; two PCs have not been tried. The details are in
 [STATUS.md](STATUS.md).
 
 This repository contains only original mod code. It contains no game files, assets, saves or anything copied from
 the game, and it never will. You need your own copy of the game.
 
-## Where this is going
+## ✨ When you meet another player
+
+|  | Feature | Status |
+|---|---|:---:|
+| 🧍 | **Another Sam** moving exactly as the other player's does: walking, running, resting, dozing, balancing, falling, picking things up | ✅ |
+| 🎒 | **Their gear, outfit and carried cargo**, drawn as the game's own cases on back, hips and arms | ✅ |
+| 🏷️ | **Their name** over their head; across linked servers with their home server ("Host Sam · north") | ✅ |
+| 🏍️ | **Their bike or truck** in their paint, wheels and steering turning; **ride along** on it (key J) | ✅ |
+| 🗺️ | **On the map**, with pings | ✅ |
+| 💀 | **Down, caught by BTs or resting**: shown in the game's own poses | ✅ |
+| 👥 | **Many players at once** through the server's relay (one game showed 16 others) | ✅ |
+| ⚔️ | **Boss fights with visitors**: one game owns a BT catcher fight, the others join it, everyone's hits count, and it ends cleared for all | ✅ |
+| 🎭 | **Story bosses** (scripted fights) with visitors | ❌ |
+| 🎬 | **Cutscenes** together | ❌ |
+
+## 🌐 Your strand on a private server
+
+|  | Feature | Status |
+|---|---|:---:|
+| 🖥️ | **A strand server you run yourselves** (`coop-world`): the game signs in to it instead of the publisher's service | ✅ |
+| 🪜 | **Ladders and cairns** one player builds appear in the others' worlds | ✅ |
+| 🌉 | **Other players' bridges** built as soon as they arrive (option `build_received`) | ✅ |
+| ⛺ | **Other players' rain shelters**: the receiving game takes them down | ❌ |
+| 📤 | **Offering what you built before** (option `offer_strand`): the structures already in your save go to the server, one at a time, when you and the server say so | ✅ |
+| 🙋 | **The builder's name and likes** over a structure, as the server names them | ✅ |
+| 👥 | **Players' own choices** per server: share new builds or not, offer older ones or not, show everyone, friends or nobody | 🧪 |
+| 💬 | **Told in the game** when your build isn't shared there ("Your ladder is not shared on North: …") | ✅ |
+| 🎯 | **Fair picks** when an area is full: newest or most liked first, a cap per builder, spread out, the same picks every time | 🧪 |
+| 📜 | **Server rules**: friends, solo and public presets, limits, review, withdrawal (stay or go), the owner removing a player's builds | 🧪 |
+| 🔑 | **Player keys** made by the launcher, no accounts; signed calls | 🧪 |
+| 🔗 | **Linked servers**: import and export with filters by kind, builder, area and age | 🧪 |
+| 👋 | **Seeing players on a linked server** when you meet | ✅ |
+| 🛣️ | **Roads, signs and lost cargo** through the server | ❌ |
+
+## 🤝 Two players on one link (opt-in, no longer developed)
+
+The first version shared one playthrough between two players. It stays as settings, but new work goes to the
+server above.
+
+|  | Feature | Status |
+|---|---|:---:|
+| 📦 | **Cargo** put down or picked up by one is gone or there for the other | ✅ |
+| 🏗️ | **Structures** built, upgraded or dismantled by one, the same in the other's world | ✅ |
+| 🌧️ | **Rain and timefall** where the host stands | ✅ |
+| 👻 | **MULEs and BTs**: who is down, BT kills, the catcher fight, cleared areas and voidout craters | ✅ |
+| 🛤️ | **Roads** paved together | ✅ |
+| 📋 | **Orders**: one load per order, units handed in, connection levels rising together | ✅ |
+| 📖 | **Story catch-up**: the guest loads the host's checkpoint | ✅ |
+| 📣 | **Shout, scan and vitals**, and the game's message feed when the partner joins or leaves | ✅ |
+
+✅ works in the real game (two copies on one PC) · 🧪 built and tested without the game · ⚠️ works with issues · ❌ not yet
+
+## 🐞 Known issues
+
+- 🖥️ Everything live so far ran as **two copies on one PC**. Two PCs, a router and a firewall between them have not been tried.
+- ⛺ **Rain shelters** from other players are taken down by the receiving game, even with the game's range and placement checks skipped; the cause is being researched.
+- 🧱 With `build_received`, a received structure **skips the game's own spacing check**, so it may overlap something in your world. The server keeps the objects it hands out 20 m apart.
+- 🗑️ A structure **removed from the server** stays in a running game until its area loads again.
+- 🔢 The game takes **only so many objects of each kind per area** (5 cairns at Lake Knot, no ladders there); the server chooses which.
+- 🧟 A dead partner is laid down stiffly: there is no death animation for him yet.
+- 🔓 Keys and objects travel **unencrypted**: play on a LAN or a VPN such as Tailscale.
+- 🔄 **Only build 13300582** is supported. Other builds are refused rather than risk a crash.
+
+## 🗺️ Next steps
+
+- [ ] Keep other players' rain shelters
+- [ ] See your offered strand arrive in a friend's game
+- [ ] A real two-PC session
+- [ ] See the launcher's windows on a screen: group server, join screen, My strand, server owner, who I see
+- [ ] More than one visitor in a fight, and story bosses
+- [ ] Roads, signs and lost cargo through the server
+- [ ] Encryption, before any public server
+- [ ] A one-click installer and a manual for players
+
+The full, dated record of what ran and how is in [STATUS.md](STATUS.md).
+
+## 🧭 Where this is going
 
 The target changed on 2026-11-16. It is no longer "two players share one playthrough":
 
 - **Your own save, your own story.** Each player plays their own game and completes their own orders. Story and
-  order progress are not shared. How large story events such as boss fights work with visitors is undecided; the
-  wish is that players can take part in each other's games without sharing progression. A first step is built
-  without a game: one game owns a BT area's catcher fight and other players join it as visitors
+  order progress are not shared. In a boss fight one game owns the fight and the others join it as visitors
   ([mod/README.md](mod/README.md), "Fights with visitors").
 - **A private strand server.** At least one player runs the server (`world/`), a stand-in for the game's online
   service that is run by the players themselves. Everyone connected to it sees everything the game's social strand
@@ -35,13 +98,11 @@ The target changed on 2026-11-16. It is no longer "two players share one playthr
 - **Co-op when you meet.** When players are near each other the real-time layer switches on: they see each other
   and interact. For many players, not two.
 - **Linked servers.** Private servers can be connected: export and import strand objects with a choice of what goes
-  each way, and, while both are online, real-time co-op across them.
+  each way, and, while both are online, seeing each other across them.
 
-The dream is Sams everywhere as you play, and ten of them helping in a boss fight. Today's code is a two-player
-real-time layer and a shared-world server that two copies sign in to; the story, order and reward sharing listed
-below stays as opt-in settings but is no longer where the work goes. See [STATUS.md](STATUS.md).
+The dream is Sams everywhere as you play, and ten of them helping in a boss fight.
 
-## Layout
+## 📁 Layout
 
 | Folder | What it is |
 |---|---|
@@ -52,7 +113,7 @@ below stays as opt-in settings but is no longer where the work goes. See [STATUS
 | [`redirect/`](redirect/README.md) | The loader proxy that isolates each test copy: saves, loaded modules, the single-instance guard and network access. |
 | [`vendor/`](vendor/monocypher/README.md) | Monocypher (CC0 or BSD-2-Clause), unchanged: Ed25519 and SHA-512 for the players' keys (`world/identity.h`). |
 
-## Build and test
+## 🛠️ Build and test
 
 Needs `g++`, the MinGW-w64 cross-compiler, Python 3 and a checkout of
 [coop-anything](https://github.com/cranebeaker/coop-anything) for its fuzzer (`HUB=<path-to-playbook-checkout>`); no game:
@@ -68,7 +129,7 @@ MSYS2 has, and link statically. `make test` in full needs Linux (the core's host
 Windows run the suites one directory at a time (`make -C redirect portable-test` needs `rg`, ripgrep, on `PATH`). A
 compiler or resource compiler with another name can be given as `MINGW=...` or `WINDRES=...`.
 
-## Two PCs (built, not yet tried live)
+## 🖧 Two PCs (built, not yet tried live)
 
 Each player's `mod.json` names the other PC as `peer` (a numeric IPv4 address: a LAN address, or a VPN address
 such as Tailscale's 100.x.y.z; host names are refused), and the proxy's network policy must list the same address
@@ -78,7 +139,7 @@ Ports: UDP `49000 + slot`, so give the two players different slots (host 0, clie
 firewall. Windows asks once whether `ds.exe` may use the network; the launcher's lobby says whether Windows
 Firewall lets the game receive your partner's data.
 
-### A group on one server (built, not yet tried live)
+### 👥 A group on one server (live on one PC, not yet across PCs)
 
 For more than two players nobody names a partner. One player hosts the group's server (`coop-world`: the shared
 world over HTTP and the relay for players who are near each other over UDP, [world/README.md](world/README.md)), and
@@ -101,18 +162,18 @@ When a session goes wrong, the launcher's About tab has **Save diagnostics for a
 `deathstranding-coop.exe --diagnostics`): one text file with the versions, the config and the ends of the logs,
 without the session code, invites or your Windows user name ([launcher/README.md](launcher/README.md)).
 
-## Rules this project keeps
+## 📜 Rules this project keeps
 
 - Your own legitimately owned copy only; nothing that bypasses Steam ownership or any protection.
 - Modded copies never talk to the publisher's online service (see `redirect/network_policy.h`). A private server
-  that the players run themselves, reached over loopback or a listed partner address, is allowed (since 2026-11-11);
-  none is integrated yet, see `mod/game_offsets.md`.
+  that the players run themselves, reached over loopback or a listed partner address, is allowed (since 2026-11-11):
+  `world/` is that server.
 - Test copies only: never install the proxy into your real game folder, never touch your real saves.
 - No game files in this repository. Reverse-engineering notes describe addresses and layouts, not game content.
 
 Made with the [coop-anything](https://github.com/cranebeaker/coop-anything) playbook.
 
-## License
+## ⚖️ License
 
 [MIT](LICENSE). Death Stranding is a trademark of its owners; this project is not affiliated with or endorsed by
 them.
