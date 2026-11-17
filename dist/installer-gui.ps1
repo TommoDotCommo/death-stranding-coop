@@ -107,7 +107,8 @@ function Update-Screen {
         'not-a-game-folder' { 'This folder has no ds.exe. Choose the DEATH STRANDING DIRECTOR''S CUT folder.' }
         default { 'Setup cannot install here without changing a file that is not the co-op mod''s, so it changes nothing. What to do:' }
     }
-    $problems = @($card.problems | Where-Object { $_ })
+    # A fresh install lists every file as missing: that reads like an error to a new player, so only other states list them.
+    $problems = @(if ($card.state -ne 'not-installed') { $card.problems | Where-Object { $_ } })
     $details.Text = $text + $(if ($problems.Count) { "`r`n`r`n" + ($problems -join "`r`n") } else { '' }) + "`r`n`r`nFolder: $($card.game)"
     if ($card.state -in 'up-to-date', 'installed-by-mod-manager' -or $script:played) { $primary.Text = 'Play'; $primary.Enabled = (Test-Path -LiteralPath $script:DsInstalled) }
     else { $primary.Text = "$($card.button)"; $primary.Enabled = $card.button -in 'Install', 'Update', 'Repair' }

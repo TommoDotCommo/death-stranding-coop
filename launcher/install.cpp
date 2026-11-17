@@ -435,7 +435,7 @@ std::vector<fs::path> findGames(const std::vector<fs::path>& steamRoots,const st
     auto library=[&](const fs::path& p){if(!p.empty()&&libSeen.insert(same(p)).second)libraries.push_back(p);};
     for(auto& r:steamRoots) {
         if(r.empty())continue;
-        library(r);
+        library(native(r.generic_u8string()));   // Steam's registry root has forward slashes: shown as the player's own path
         for(auto vdf:{r/"steamapps"/"libraryfolders.vdf",r/"config"/"libraryfolders.vdf"}) {
             try{if(regular(vdf))for(auto& p:libraryFolders(slurp(vdf)))library(native(p));}catch(const Error&){}
         }
