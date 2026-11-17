@@ -6154,7 +6154,7 @@ getter returns its descriptor, and the senders below are the only callers outsid
 | `setMissionProgress` | `0x32b46c0` | `0x347f8e0` | `{"cr","id","pr","bgs","did","ddi","csi","qid"}` | |
 | `deleteMissions` | `0x32aab30` | `0x347ec10` | `{"missions":[{"cr","id"}]}` | |
 | `getMissionsInProgress`, `addMissionOrder`, `refreshRoad` | `0x32ae920`, `0x32a9ff0`, `0x32b4300` | none | | |
-| `getRoadData`, `deleteRoads` | `0x32af170`, `0x32aad90` | `0x34a3852`, `0x34a3ca3` | `{"id"}` / | `{"data"}` |
+| `getRoadData`, `deleteRoads` | `0x32af170`, `0x32aad90` | `0x34a3852`, `0x34a3ca3` | `getRoadData` `{"id"}`; `deleteRoads` not read | `getRoadData` `{"data"}` |
 
 The answer of `getHighwayResources` (`OTGCHighwayGetResourcesResponse`, descriptor `0x4d96220`) has no key block under
 its own name: its keys `pr`, `cs`, `ul` are in the block named `OTGCHighwayGetResources` (`0x4d91ae0`, keys at
