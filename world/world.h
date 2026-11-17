@@ -118,7 +118,7 @@ public:
     // For a signed call of the player whose account (identity::account) this is, under identity keys: a sign-in ticket,
     // or a relay token for his relay id. Makes the player when the account is new (the `players` setting applies).
     // Throws std::runtime_error with the reason when refused, and then changed nothing.
-    json::Value apiTicket(const std::string& account,int64_t now);
+    json::Value apiTicket(const std::string& account,int64_t now,const std::string& name={});   // name: the launcher's name for him
     json::Value apiRelayToken(const std::string& account,uint64_t relayId,int64_t now);
     // May this HELLO's (or BYE's) token speak for relay id `id`? identity none: the token is the group's key
     // (`groupKey`); keys: a good relay token of that id (a HELLO it admits keeps it good).

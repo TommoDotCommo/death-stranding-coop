@@ -323,7 +323,7 @@ Reply launcherApi(World& w,const std::string& method,const std::string& call,con
     try{if(text.size()>MaxApiBody)bad("too long");in=json::parse(text);if(!in.isObject())bad("not an object");}
     catch(const std::exception&){return answer(400,"the body is a JSON object");}
     const std::vector<std::string> fields=call=="choices"?std::vector<std::string>{"player","offer_builds","offer_old"}:
-                                          call=="offer"?std::vector<std::string>{"player","object","all","answer"}:pass||call=="notice-token"?std::vector<std::string>{"player"}:std::vector<std::string>{"player","object","all"};
+                                          call=="offer"?std::vector<std::string>{"player","object","all","answer"}:call=="ticket"?std::vector<std::string>{"player","name"}:pass||call=="notice-token"?std::vector<std::string>{"player"}:std::vector<std::string>{"player","object","all"};
     for(auto& m:in.members()){
 #ifdef MUTANT_API_CHOICES_MEMBER
         if(m.first=="member")continue;
@@ -338,7 +338,7 @@ Reply launcherApi(World& w,const std::string& method,const std::string& call,con
     if(barred(key))return answer(403,"this player is banned from this server");
     try{
         if(pass){
-            if(call=="ticket")return ok(w.apiTicket(key,now));
+            if(call=="ticket")return ok(w.apiTicket(key,now,in.get("name").string()));
             identity::PublicKey k{};if(!identity::keyOf(key,k))return answer(403,"a relay token is for a player's key");
             return ok(w.apiRelayToken(key,identity::relayId(k),now));}
         if(call=="notice-token")return ok(w.apiNoticeToken(key,now));

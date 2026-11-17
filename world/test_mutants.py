@@ -23,7 +23,7 @@ families=[('world_test.cpp',['world.cpp'],['WORLD_NO_TOKEN','WORLD_OWNER','WORLD
            ['SIGN_NO_VERIFY','SIGN_REPLAY','SIGN_WINDOW','SIGN_BODY','SIGN_TARGET','SIGN_SERVER','SIGN_NONCE_CAP']),
           ('keys_test.cpp',['front.cpp','api.cpp','link.cpp','world.cpp','relay.cpp','identity.cpp','signatures.cpp','../vendor/monocypher/monocypher.c','../vendor/monocypher/monocypher-ed25519.c'],
            ['IDENTITY_NAME_SIGN_IN','IDENTITY_KEY_NAME','IDENTITY_OLD_SESSION','TICKET_EXPIRY','TICKET_REUSE','TICKET_REPLACE','RELAY_TOKEN_ID',
-            'RELAY_TOKEN_GROUP_KEY','RELAY_TOKEN_EXPIRY','RELAY_ADMIT','RELAY_EVICT','BAN_RELAY_KEEP','API_UNSIGNED','API_SIGNER_PLAYER','API_OWNER','API_FRIENDS_ANY']),
+            'RELAY_TOKEN_GROUP_KEY','RELAY_TOKEN_EXPIRY','RELAY_ADMIT','RELAY_EVICT','BAN_RELAY_KEEP','API_UNSIGNED','API_SIGNER_PLAYER','API_OWNER','API_FRIENDS_ANY','TICKET_NAME','TICKET_STEAM_NAME']),
           ('ban_test.cpp',['front.cpp','api.cpp','link.cpp','world.cpp','identity.cpp','signatures.cpp','../vendor/monocypher/monocypher.c','../vendor/monocypher/monocypher-ed25519.c'],
            ['BAN_PASS','BAN_SIGN_IN','BAN_SAVE_LOST','BAN_KEEP_SESSION','BAN_KEEP_PASSES','BAN_API','BAN_RELAY_KEEP','API_OWNER']),
           ('limits_test.cpp',[],['GATE_BLOCK','GATE_CONNECTIONS','GATE_RATE','GATE_STRIKES','GATE_UNBOUNDED']),

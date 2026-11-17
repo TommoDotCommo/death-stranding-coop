@@ -48,7 +48,7 @@ std::string account(const Session& s,uint32_t steamAccount){
 }
 Target target(const Session& s,uint32_t steamAccount){
     Target t;t.address=s.group==Group::Host?"127.0.0.1":s.group==Group::Join?s.server:s.host?"127.0.0.1":s.peer;
-    t.port=worldPort(s);t.prefix=worldPrefix(s);t.account=account(s,steamAccount);return t;
+    t.port=worldPort(s);t.prefix=worldPrefix(s);t.account=account(s,steamAccount);t.name=s.name;return t;
 }
 std::string Policy::value(const std::string& key) const {for(auto& s:settings)if(s.key==key)return s.value;return {};}
 std::string Policy::text() const {
@@ -174,8 +174,10 @@ bool identify(Target& t,const Policy& p,int64_t localNow,std::string& why){
 bool takePasses(const Target& t,const Transport& send,Passes& out,std::string& why){
     if(!t.sign||!t.keys){why="this launcher has no key for the server.";return false;}
     json::Value body=json::Value::object();body.set("player",t.account);
+    // The ticket names the player as the launcher shows him: other players see this name, not his Steam name.
+    json::Value named=body;if(!t.name.empty())named.set("name",t.name);
     Http a,b;
-    if(!call(t,send,"POST",base(t)+"/coop/ticket",body.dump(),a)||!call(t,send,"POST",base(t)+"/coop/relay-token",body.dump(),b)){why="the server did not answer.";return false;}
+    if(!call(t,send,"POST",base(t)+"/coop/ticket",named.dump(),a)||!call(t,send,"POST",base(t)+"/coop/relay-token",body.dump(),b)){why="the server did not answer.";return false;}
     if(a.status!=200){why=message(a)+".";return false;}
     if(b.status!=200){why=message(b)+".";return false;}
     try{

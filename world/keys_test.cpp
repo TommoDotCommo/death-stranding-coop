@@ -31,7 +31,7 @@ struct Server {
     Reply api(const id::Keys* k,const char* method,const std::string& call,const std::string& body=""){
         std::string target="/s3cret/coop/"+call;return raw(method,target,body,k?sign(*k,method,target,body):std::map<std::string,std::string>{});}
     Reply post(const id::Keys* k,const std::string& call,const std::string& body){return api(k,"POST",call,body);}
-    std::string ticket(const id::Keys& k){auto r=post(&k,"ticket","{\"player\":\""+id::account(k.pub)+"\"}");CHECK(r.status==200);return r.status==200?json::parse(r.body).get("ticket").string():"";}
+    std::string ticket(const id::Keys& k,const std::string& name="Ann"){auto r=post(&k,"ticket","{\"player\":\""+id::account(k.pub)+"\""+(name.empty()?std::string():",\"name\":\""+name+"\"")+"}");CHECK(r.status==200);return r.status==200?json::parse(r.body).get("ticket").string():"";}
     std::string token(const id::Keys& k){auto r=post(&k,"relay-token","{\"player\":\""+id::account(k.pub)+"\"}");CHECK(r.status==200);return r.status==200?json::parse(r.body).get("token").string():"";}
     Reply signIn(const std::string& ticket,const char* name="Ann"){return raw("GET","/s3cret/t/"+ticket+"/auth/ds?provider=steam&display_name="+name+"&code=00");}
     std::string session(const std::string& ticket,const char* name="Ann"){auto r=signIn(ticket,name);CHECK(r.status==200);return r.status==200?json::parse(r.body).get("session").get("token").string():"";}
@@ -53,6 +53,12 @@ static void signIns(){
     auto r=s.signIn(t);auto user=json::parse(r.body).get("user");
     CHECK(r.status==200&&user.get("providerId").string()==id::account(a.pub)&&user.get("id").string()==playerId(id::account(a.pub))&&user.get("displayName").string()=="Ann");
     auto token=json::parse(r.body).get("session").get("token").string();
+    {   // The name is the launcher's: a sign-in naming a Steam account by its Steam name does not show that name.
+        Server n;auto b=id::makeKeys();auto tb=n.ticket(b,"Bea");auto rb=n.signIn(tb,"SteamPersonaName");
+        CHECK(rb.status==200&&json::parse(rb.body).get("user").get("displayName").string()=="Bea");
+        auto c=id::makeKeys();auto tc=n.ticket(c,"");auto rc=n.signIn(tc,"SteamPersonaName");   // an older launcher: no name
+        CHECK(rc.status==200&&json::parse(rc.body).get("user").get("displayName").string()!="SteamPersonaName");
+        CHECK(n.post(&b,"ticket","{\"player\":\""+id::account(b.pub)+"\",\"name\":7}").status==400);}
     CHECK(s.w.call(token,"getVersion","",Now).status==200&&s.w.playerOf(token)==playerId(id::account(a.pub)));
     CHECK(s.raw("GET","/s3cret/t/"+t+"/gate/e/getVersion","",{{"authorization","Bearer "+token}}).status==404);   // a ticket is for the sign-in only
     // The game asking again soon after is the same sign-in; later the ticket is spent.

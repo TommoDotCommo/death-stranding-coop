@@ -154,7 +154,13 @@ Reply World::signInTicket(const std::string& ticket,const std::string& displayNa
 #endif
     if(!good){note("sign-in refused: unknown or expired ticket");return refuse(403,"ticket","the sign-in ticket is unknown or expired: start the game from the launcher again");}
     if(!t->second.used){t->second.used=now;dirty_=true;}
+    // Under player keys the name comes from the player's launcher (apiTicket), never from the game: the game names
+    // the player by his Steam name, which strangers on this server must not see.
+#ifndef MUTANT_TICKET_STEAM_NAME
+    (void)displayName;return signInLocked(t->second.account,"",gateway);
+#else
     return signInLocked(t->second.account,displayName,gateway);
+#endif
 }
 World::Player& World::playerFor(const std::string& account,const char* why){
     auto found=players_.find(account);
@@ -183,11 +189,18 @@ std::string World::pass(std::map<std::string,Pass>& passes,const std::string& ac
     if(!passText(text)||passes.count(text))bad("no fresh ticket could be made");
     passes[text]=Pass{account,relayId,now,0};dirty_=true;return text;
 }
-json::Value World::apiTicket(const std::string& account,int64_t now){
+json::Value World::apiTicket(const std::string& account,int64_t now,const std::string& name){
     std::lock_guard<std::mutex> g(lock_);
     if(policy_.identity!="keys")bad("this server has no player keys (identity none): its game sign-in needs no ticket");
     if(!identity::accountIsKey(account))bad("a ticket is for a player's key");
-    playerFor(account,"ticket");
+    auto& player=playerFor(account,"ticket");
+    // The launcher's name for its player (printable, short): what the others see, instead of a placeholder or Steam name.
+    bool printable=!name.empty()&&name.size()<=MaxNameBytes;for(unsigned char c:name)printable=printable&&c>=32&&c<127;
+#ifndef MUTANT_TICKET_NAME
+    if(printable&&player.name!=name){player.name=name;++changes_;}
+#else
+    (void)printable;
+#endif
     Value out=Value::object();out.set("format",1);out.set("ticket",pass(tickets_,account,0,now));out.set("expires",now+TicketUnusedSeconds);
     note("sign-in ticket for "+playerId(account));return out;
 }

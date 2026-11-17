@@ -961,6 +961,8 @@ good, the states of that player's objects.
 
 ## Identity
 
+**Names under player keys (2026-11-18).** The launcher's ticket call carries the name the player chose in the launcher (`name`, printable, at most 64 bytes); the server keeps that as the player's name. The game's sign-in with the ticket brings the Steam name as `display_name`: under player keys the server ignores it, so strangers on a public server never see each other's Steam names. A launcher that sends no name leaves the player as `Porter`. Tests: `keys_test.cpp` (mutants `TICKET_NAME`, `TICKET_STEAM_NAME`).
+
 A server whose policy says `identity keys` (the public preset) knows its players by a key of their own instead of by
 the group's key, so nobody can sign in, build or withdraw in someone else's name. There are no accounts and no
 passwords: every launcher makes an Ed25519 key pair (RFC 8032) once (`player.key` beside `launcher.ini`), its public

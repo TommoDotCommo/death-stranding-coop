@@ -16,6 +16,7 @@ struct Target {
     std::string address,prefix,account;unsigned port=0;
     const world::identity::Keys* keys=nullptr;   // this install's key pair (player.key); its secret half is never sent
     bool sign=false;std::string server;int64_t clockOffset=0;   // signing: the world's id, the server's clock minus ours
+    std::string name;   // the player's name in the launcher: the server shows it, never the Steam name
 };
 std::string account(const Session&,uint32_t steamAccount);
 Target target(const Session&,uint32_t steamAccount);
