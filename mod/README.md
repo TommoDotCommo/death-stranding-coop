@@ -71,7 +71,7 @@ config names the server instead:
 | `relay_key` | the group's key, the one the server was started with; on a server that takes player keys, this player's relay token, which the launcher takes from the server just before the game starts (the same field, at most 32 letters and digits) |
 | `online_server` (group) | `http://SERVER:PORT/KEY/auth/ds`; on a server that takes player keys `http://SERVER:PORT/KEY/t/TICKET/auth/ds`, with the sign-in ticket the launcher took (good for 30 minutes until the game signs in). The mod passes the address on as it is |
 | `strand_notices`, `strand_token` | with `online_server`: lines in the game's info log about this player's builds on the server, read with the notice token the launcher took ("Strand notices", below); the launcher writes both |
-| `build_received` | with `online_server`: other players' structures that server hands the game are built at once, without the game's range and placement checks ("Received structures built", below); off by default; live: served bridges are built straight from the answer; received rain shelters are still removed |
+| `build_received` | with `online_server`: other players' structures that server hands the game are built at once, without the game's range, placement and area checks ("Received structures built", below); off by default; live: served bridges are built straight from the answer; received rain shelters were still removed before the area check was skipped (2026-11-17, not run since) |
 | `offer_strand` | with `online_server` and `strand_token`: the structures this player's save already holds are offered to that server through the game's own upload, one at a time, while the server says his older strand may be ("Offering your existing strand", below); off by default; live: all 26 own structures of an Episode 3 save offered in about 3 minutes |
 | `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
 | `show_others` | `"everyone"` (default), `"friends"` or `"nobody"`: who of the players near this player the server shows him (broadcast only, sent in every HELLO; `world/README.md`, "How many players one player sees"). The server's own record of his choice, set from the launcher, comes first; `friends` needs a server with player keys. Requires `relay_mode` `"broadcast"`. A server from before this refuses a HELLO with anything but everyone |
@@ -1988,7 +1988,11 @@ end. Game-free tests: the address rules and the asking logic, five mutants (`onl
 built at once. With the change to the answer's requests ("RECEIVED answer requests changed"), a served bridge was
 built straight from the answer with no scan write, unloaded at 1.3 km and built again on return. A served rain
 shelter was removed in both runs with no record left: the range and placement checks are not what takes received
-shelters down. No fault, saves unchanged.
+shelters down. No fault, saves unchanged. Why (static, `game_offsets.md`, "Why received rain shelters are removed"): a
+received shelter is told to recheck its floor about a second after it is made (bridges never are), and then meets the
+area check the game runs on other players' structures (not inside an unconstructable or a construction-offline area)
+and its floor check. The request change now also marks the area check done, as the save's received structures have
+it. Not run in a game yet: whether a served shelter now stands.
 
 The game makes another player's structure from the server's answer as a pending Net record and then holds it back:
 a bridge, safe house or jump stand is built only while the porter is at least 1 km from it, and every received
@@ -2002,9 +2006,10 @@ With `"build_received": true` (needs `online_server`) the mod does two things:
   frame"). Right after it points the game's sign-in address at the server, before it asks the game to sign in, the
   mod changes two bytes of the game's code that builds a request for each object of a server's answer: the request
   then keeps the defaults that make the record skip the range test (object `+0xaa` 0x10) and the placement check (no
-  0x20). The record is made with those flags and built in the frame it is made, like the save's received
-  structures. Needed because the game makes, walks and refuses a received rain shelter inside one frame, before any
-  tick of the mod. The mod checks the code is this build's before it writes (the builder's first bytes and the 0x28
+  0x20), and says the area check is done (object `+0xaf` 0x20). The record is made with those flags and built in the
+  frame it is made, like the save's received structures, and when the game later rechecks its floor only the floor
+  check runs. Needed because the game makes, walks and refuses a received rain shelter inside one frame, before any
+  tick of the mod; the area check is what most likely took received shelters down after that (medium, static). The mod checks the code is this build's before it writes (the builder's first bytes and the 0x28
   bytes around the two), reads it back, puts it back if a write fails, and leaves it so for the run (answers only come
   from the server the config names). Only requests built from an answer are affected: the porter's builds, the save,
   the mod's copies of a partner's structures and roads come from other code.
@@ -2017,7 +2022,10 @@ With `"build_received": true` (needs `online_server`) the mod does two things:
   never saw a served rain shelter.
 
 **The trade-off.** The game's own placement check is skipped for received structures, so one may overlap a structure
-in your world: one of yours, one of the game's, or one another player built that your save already has. The server
+in your world: one of yours, one of the game's, or one another player built that your save already has. The area check
+is skipped too, so one may stand where the game keeps other players' structures out (an unconstructable or
+construction-offline area, such as around a facility); the save's received structures already may. The floor check is
+kept: a structure served where there is no floor is still taken down, or moved onto the floor. The server
 already spreads what it hands a game: two objects of one kind in one answer are at least `spread` metres apart (20
 by default; `../world/README.md`, "Which objects a game is handed"). It cannot know what stands in your world.
 
@@ -2041,14 +2049,16 @@ measured in a game; the tick profiler logs the stage `received` when it takes ov
 nothing per frame.
 
 Not known yet: whether a served rain shelter stands with the request change (the live check: a bridge and a shelter
-served with the option, both records in state 2, no `RECEIVED building` line); whether a structure built this way
+served with the option, both records in state 2, the shelter's `+0xaf` 0x24, both still there after several minutes,
+no `RECEIVED building` line; if the shelter still goes, the floor check is next); whether a structure built this way
 stays after a load; what the game does with one that overlaps.
 
 Tests: `received_test.cpp` over a fake process memory (the scan, what is changed and left alone, the one byte, once
 per record, a slot reused for another object, the bytes changed between the scan and the write, a failed write; the
 request change: the two bytes and nothing else, what the builder's stores then do to a request, run from the bytes
-themselves, already changed, code that differs, a failed or silent write put back), mutants OPTION, SERVER, BUILT,
-PLAYER, SAVED, REMOVAL, ONLINE, ONCE, RECHECK and EARLY_OPTION, PLACEMENT, RANGE, HOLD, IDENTITY, AGAIN, READBACK,
+themselves, the area check marked done, already changed, code that differs, a failed or silent write put back),
+mutants OPTION, SERVER, BUILT, PLAYER, SAVED, REMOVAL, ONLINE, ONCE, RECHECK and EARLY_OPTION, PLACEMENT, AREA (the
+earlier change, which left the area check to run), RANGE, HOLD, IDENTITY, AGAIN, READBACK,
 ROLLBACK (`test_game_thread_mutants.py received`); the config in `unit.cpp` (mutant CONFIG_RECEIVED).
 
 ### The player's own strand (`own_strand.h`; a reader, not wired into the mod)
