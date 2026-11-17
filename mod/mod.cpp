@@ -392,7 +392,7 @@ struct Runtime final:ds::Transport {
         if(now-relayNotedAt>=10000){relayNotedAt=now;auto& k=client.counters();std::ostringstream o;
             o<<"RELAY broadcast "<<(relayOnline?"online":"offline")<<" near "<<client.nearby().size()<<" taken "<<crowd->size()<<" in "<<k.received<<" ("<<k.receivedBytes<<" bytes) out "<<k.sent<<" ("<<k.sentBytes
              <<" bytes) frames "<<k.frames<<" accepted "<<k.accepted<<" refused "<<k.refused<<" unknown "<<k.unknown<<" malformed "<<crowd->counters().malformed<<" fetches "<<k.fetches
-             <<" clock offset "<<std::lround(client.offsetMs())<<" ms rtt "<<std::lround(client.rttMs())<<" ms";
+             <<" clock offset "<<std::llround(client.offsetMs())<<" ms rtt "<<std::llround(client.rttMs())<<" ms";   // llround: a 32-bit long (Windows) overflowed to its minimum
             if(client.welcome().otherBuild)o<<" near with another build "<<client.welcome().otherBuild;
             o<<"\n";note(o.str().c_str());}
     }
