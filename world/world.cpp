@@ -544,6 +544,8 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
         std::set<int64_t> pavers,resources;
         for(auto& c:asked.items()){const int64_t cid=c.get("cid").integer(-1);if(!c.get("cid").isInt()||cid<1||cid>MaxPaverId)return refuse(400,"bad-highway","a paver id is 1..999999");pavers.insert(cid);}
         for(auto& r:rids.items()){if(!r.isInt()||r.integer()<0||r.integer()>=HighwayResources)return refuse(400,"bad-highway","a resource is 0..5");resources.insert(r.integer());}
+        {std::string ids;size_t k=0;for(int64_t cid:pavers){if(k++==6){ids+=" ...";break;}ids+=" "+std::to_string(cid);}
+         note("paver ask from "+me.name+": "+std::to_string(pavers.size())+" pavers"+ids);}
 #ifdef MUTANT_HIGHWAY_ASKED
         for(auto& d:devoted_)for(auto& k:d.second){pavers.insert(k.first.first);resources.insert(k.first.second);}
 #endif
