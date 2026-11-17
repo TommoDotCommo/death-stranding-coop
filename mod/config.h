@@ -79,12 +79,17 @@ struct Config {
     // one at a time, through the game's own upload, while the server says his older strand may be (offer_strand.h).
     // Off by default; not run live with the mod.
     bool offerStrand=false;
+    // Route challenges (route.h, docs/ROUTES.md): the challenge this game runs ("DSR1-...", checked when the config is
+    // read; empty: none), and the key that starts and stops recording a route (a virtual-key code; 0: off; K by default).
+    std::string route;unsigned routeRecordKey=0x4b;
     unsigned presenceLogMaxMiB=8;
     unsigned maxLogMb=200;
     std::string shareEnvironment="off"; // "host": the host's time and rain; "rain": its rain only (weather.h)
     discovery::Options discoveryOptions;
 };
-// Deliberately small strict flat JSON schema. No paths from JSON are used for writes.
+// Deliberately small strict flat JSON schema, at most ConfigMax bytes. No paths from JSON are used for writes.
+constexpr size_t ConfigMax=8192;   // 4096 until a route challenge (up to about 4000 characters) had to fit
+constexpr size_t RouteMax=4000;    // the longest `route` string (route.h BytesMax in base32 with its dashes)
 Config parseConfig(const std::string&);
 // A numeric IPv4 address a co-op peer may have: loopback 127.0.0.0/8, or any unicast address (LAN, a VPN such as
 // Tailscale, or public). Refuses names, 0.0.0.0/8, broadcast, multicast and reserved 240/4. Host byte order.

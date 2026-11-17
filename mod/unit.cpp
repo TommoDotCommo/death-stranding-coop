@@ -231,9 +231,26 @@ int main() {
     assert(refused(withKeys(discovery,"\"presence_log_max_mib\":8")));
     assert(!mod::parseConfig(discovery).selfTick);
     assert(refused(withKeys(game,"\"nickname2\":1")));                           // unknown key
-    assert(refused(withKeys(good,"\"pad\":\""+std::string(4100,'a')+"\"")));      // 4096-byte cap
-    {   auto big=withKeys(game,"\"pad\":\"");big.pop_back();big+=std::string(4096-big.size()-2,'a')+"\"}";   // exactly at the cap still parses structurally
-        assert(big.size()==4096);assert(refused(big));                           // ...but "pad" is an unknown key
+    assert(refused(withKeys(good,"\"pad\":\""+std::string(8200,'a')+"\"")));      // 8192-byte cap
+    {   auto big=withKeys(game,"\"pad\":\"");big.pop_back();big+=std::string(mod::ConfigMax-big.size()-2,'a')+"\"}";   // exactly at the cap still parses structurally
+        assert(big.size()==mod::ConfigMax);assert(refused(big));                 // ...but "pad" is an unknown key
+    }
+    // Route challenges (docs/ROUTES.md): "route" in the string's own form (the mod decodes it whole when it starts) with
+    // the game provider; the recording key K by default, 0 off, never F2 or another co-op key.
+    {   auto c=mod::parseConfig(withKeys(game,"\"route\":\"DSR1-ABCDE-12345\""));assert(c.route=="DSR1-ABCDE-12345"&&c.routeRecordKey==0x4b);
+        assert(mod::parseConfig(game).route.empty());
+        for(auto bad:{"\"dsr1-abcde\"","\"DSG-ABCDE-12345\"","\"DSR1-ABCDU-12345\"","\"DSR1-ABCDE 12345\"","\"DSR1-\"","\"DSR1-ABCD\"","1","true"})
+            assert(refused(withKeys(game,std::string("\"route\":")+bad)));
+        std::string longest="DSR1-";while(longest.size()<mod::RouteMax)longest+=longest.size()%6==4?'-':'Z';
+        auto full=withKeys(game,"\"route\":\""+longest+"\"");
+        assert(full.size()<mod::ConfigMax&&mod::parseConfig(full).route==longest);
+        assert(refused(withKeys(game,"\"route\":\""+longest+"Z\"")));
+        assert(refused(withKeys(good,"\"route\":\"DSR1-ABCDE-12345\"")));       // synthetic positions are no run
+        assert(mod::parseConfig(withKeys(game,"\"route_record_key\":0")).routeRecordKey==0);
+        assert(mod::parseConfig(withKeys(game,"\"route_record_key\":85")).routeRecordKey==85);
+        for(auto bad:{"113","255","74","\"75\""})assert(refused(withKeys(game,std::string("\"route_record_key\":")+bad)));
+        assert(refused(withKeys(game,"\"story_key\":75")));                     // K is taken by the recording key
+        assert(mod::parseConfig(withKeys(game,"\"story_key\":75,\"route_record_key\":0")).storyKey==75);
     }
     // Synthetic provider behaviour is unchanged, including its explicit stub-free trajectory.
     auto a=mod::trajectory(1000,0),b=mod::trajectory(1001,0);assert(ds::sanitise(a));assert(std::abs((b.position[0]-a.position[0])*1000-a.velocity[0])<.02);
