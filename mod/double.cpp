@@ -528,7 +528,7 @@ std::function<void(uint32_t,const Transform&)> nativeCargoCreate(discovery::Samp
     const std::vector<uint8_t> sig={0x4c,0x8b,0xdc,0x48,0x81,0xec,0xc8,0,0,0,0x48,0x8b,0x05,0xff,0xa4,0x28};
     unsigned count=0;
     for(auto section:s.sections)if(section.executable){
-        std::vector<uint8_t> code(section.size);require(s.read(section.address,code.data(),code.size()),"cargo code unreadable");
+        std::vector<uint8_t> code(section.size);require(s.readOnce(section.address,code.data(),code.size()),"cargo code unreadable");
         for(auto at=code.begin();(at=std::search(at,code.end(),sig.begin(),sig.end()))!=code.end();++at){
             ++count;require(section.address+size_t(at-code.begin())==s.base+0x2cd6b20,"cargo function signature moved/duplicated");}
     }
@@ -544,7 +544,7 @@ std::function<void(uint32_t)> nativeCargoGive(discovery::Sampler& s){
     const std::vector<uint8_t> sig={0x4c,0x8b,0xdc,0x48,0x81,0xec,0xe8,0,0,0,0x48,0x8b,0x05,0xbf,0xa5,0x28};
     unsigned count=0;
     for(auto section:s.sections)if(section.executable){
-        std::vector<uint8_t> code(section.size);require(s.read(section.address,code.data(),code.size()),"cargo code unreadable");
+        std::vector<uint8_t> code(section.size);require(s.readOnce(section.address,code.data(),code.size()),"cargo code unreadable");
         for(auto at=code.begin();(at=std::search(at,code.end(),sig.begin(),sig.end()))!=code.end();++at){
             ++count;require(section.address+size_t(at-code.begin())==s.base+0x2cd6a60,"cargo give signature moved/duplicated");}
     }
@@ -560,7 +560,7 @@ std::function<void(uint32_t)> nativeCargoDelete(discovery::Sampler& s){
     const std::vector<uint8_t> sig={0x4c,0x8b,0xdc,0x48,0x81,0xec,0xe8,0,0,0,0x48,0x8b,0x05,0xdf,0xa2,0x28};
     unsigned count=0;
     for(auto section:s.sections)if(section.executable){
-        std::vector<uint8_t> code(section.size);require(s.read(section.address,code.data(),code.size()),"cargo code unreadable");
+        std::vector<uint8_t> code(section.size);require(s.readOnce(section.address,code.data(),code.size()),"cargo code unreadable");
         for(auto at=code.begin();(at=std::search(at,code.end(),sig.begin(),sig.end()))!=code.end();++at){
             ++count;require(section.address+size_t(at-code.begin())==s.base+0x2cd6d40,"cargo delete signature moved/duplicated");}
     }
@@ -576,7 +576,7 @@ std::function<void(uint8_t,const Transform&,bool)> nativeConstruct(discovery::Sa
     const std::vector<uint8_t> sig={0x40,0x53,0x56,0x57,0x48,0x81,0xec,0x00,0x07,0x00,0x00,0x48,0x8b,0x05,0x1e,0xa4,0x28,0x02,0x48,0x33};
     unsigned count=0;
     for(auto section:s.sections)if(section.executable){
-        std::vector<uint8_t> code(section.size);require(s.read(section.address,code.data(),code.size()),"construction code unreadable");
+        std::vector<uint8_t> code(section.size);require(s.readOnce(section.address,code.data(),code.size()),"construction code unreadable");
         for(auto at=code.begin();(at=std::search(at,code.end(),sig.begin(),sig.end()))!=code.end();++at){
             ++count;require(section.address+size_t(at-code.begin())==s.base+0x2cd6c00,"construction signature moved/duplicated");}
     }
@@ -624,7 +624,7 @@ std::function<void(const std::array<float,4>&,const std::array<float,4>&,const T
     const std::vector<uint8_t> sig={0x4c,0x8b,0xdc,0x56,0x48,0x81,0xec,0xa0,0x00,0x00,0x00,0x48,0x8b,0x05,0xbe,0x78,0x28,0x02,0x48,0x33};
     unsigned count=0;
     for(auto section:s.sections)if(section.executable){
-        std::vector<uint8_t> code(section.size);require(s.read(section.address,code.data(),code.size()),"construction code unreadable");
+        std::vector<uint8_t> code(section.size);require(s.readOnce(section.address,code.data(),code.size()),"construction code unreadable");
         for(auto at=code.begin();(at=std::search(at,code.end(),sig.begin(),sig.end()))!=code.end();++at){
             ++count;require(section.address+size_t(at-code.begin())==s.base+0x2cd9760,"construction removal signature moved/duplicated");}
     }
@@ -751,7 +751,7 @@ std::function<void()> nativeContinueLastSave(discovery::Sampler& s){
     const std::vector<uint8_t> sig={0x48,0x83,0x3d,0x10,0x39,0x5a,0x05,0x00,0x75,0x11,0x41,0xb0,0xff,0x48,0x8d,0x0d,0x1c,0x39,0x5a,0x05,0xb2,0x0f,0xe9,0x55,0x20,0xfe,0xff};
     unsigned count=0;
     for(auto section:s.sections)if(section.executable){
-        std::vector<uint8_t> code(section.size);require(s.read(section.address,code.data(),code.size()),"continue code unreadable");
+        std::vector<uint8_t> code(section.size);require(s.readOnce(section.address,code.data(),code.size()),"continue code unreadable");
         for(auto at=code.begin();(at=std::search(at,code.end(),sig.begin(),sig.end()))!=code.end();++at){
             ++count;require(section.address+size_t(at-code.begin())==s.base+0x2642a00,"continue function signature moved/duplicated");}
     }
@@ -767,7 +767,7 @@ std::function<bool()> nativeGameEvent(discovery::Sampler& s){
     const std::vector<uint8_t> sig={0x48,0x83,0xec,0x28,0x48,0x8b,0x05,0x1d,0x37,0xe2,0x04,0x48,0x85,0xc0,0x74,0x2d};
     unsigned count=0;
     for(auto section:s.sections)if(section.executable){
-        std::vector<uint8_t> code(section.size);require(s.read(section.address,code.data(),code.size()),"event code unreadable");
+        std::vector<uint8_t> code(section.size);require(s.readOnce(section.address,code.data(),code.size()),"event code unreadable");
         for(auto at=code.begin();(at=std::search(at,code.end(),sig.begin(),sig.end()))!=code.end();++at){
             ++count;require(section.address+size_t(at-code.begin())==s.base+0x2dd3760,"event function signature moved/duplicated");}
     }
@@ -812,7 +812,7 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
     std::array<unsigned,9> counts{};
     for(auto section:s.sections)if(section.executable){
         require(section.size<=128*1024*1024,"double code size cap");std::vector<uint8_t> code(section.size);
-        require(s.read(section.address,code.data(),code.size()),"double code unreadable");
+        require(s.readOnce(section.address,code.data(),code.size()),"double code unreadable");
         for(unsigned k=0;k<entries.size();++k){auto& e=entries[k];auto at=code.begin();while((at=std::search(at,code.end(),e.bytes.begin(),e.bytes.end()))!=code.end()){
             ++counts[k];require(section.address+size_t(at-code.begin())==s.base+e.rva,"double function signature moved/duplicated");++at;}}
     }

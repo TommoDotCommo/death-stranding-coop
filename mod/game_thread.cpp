@@ -16,7 +16,7 @@ void validateSites(const discovery::Sampler& s,const Sites& sites) {
     unsigned matches=0;
     for(auto section:s.sections)if(section.executable) {
         require(section.size<=128*1024*1024,"dispatch code size cap");
-        std::vector<uint8_t> code(section.size);require(s.read(section.address,code.data(),code.size()),"dispatch code unreadable");
+        std::vector<uint8_t> code(section.size);require(s.readOnce(section.address,code.data(),code.size()),"dispatch code unreadable");
         size_t count=0,match=0;
         for(size_t at=0;at+pattern.size()<=code.size();++at){bool same=true;for(size_t i=0;i<pattern.size();++i)if(pattern[i]>=0&&code[at+i]!=pattern[i]){same=false;break;}if(same){if(!count)match=at;++count;}}
 #ifndef MUTANT_DISPATCH_SIGNATURE

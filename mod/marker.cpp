@@ -182,7 +182,7 @@ Api nativeApi(discovery::Sampler& s){
     auto unique=[&](const std::vector<uint8_t>& sig,uint64_t rva,const char* what){
         unsigned count=0;
         for(auto section:s.sections)if(section.executable){
-            std::vector<uint8_t> code(section.size);require(s.read(section.address,code.data(),code.size()),"marker code unreadable");
+            std::vector<uint8_t> code(section.size);require(s.readOnce(section.address,code.data(),code.size()),"marker code unreadable");
             for(auto at=code.begin();(at=std::search(at,code.end(),sig.begin(),sig.end()))!=code.end();++at){
                 ++count;require(section.address+size_t(at-code.begin())==s.base+rva,what);}
         }

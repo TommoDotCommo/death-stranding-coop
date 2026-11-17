@@ -26,7 +26,10 @@ public:
     bool read(uint64_t,void*,size_t) const;
     mutable uint64_t reads=0;   // read and readOnce calls (profiling; not synchronised)
     // One guarded copy, without the second read that rejects tearing: for bulk tables whose readers tolerate a record
-    // changing mid-copy (cargo records; each consumer checks over time). Fails like read on unreadable memory.
+    // changing mid-copy (cargo records; each consumer checks over time), and for scans of the game's code sections, which
+    // others patch while the game runs (the Steam overlay's hooks, the mod's own request-builder change): a second copy
+    // then differs and a whole-section read failed ("marker code unreadable", 2026-11-18); a signature is checked for
+    // uniqueness anyway. Fails like read on unreadable memory.
     bool readOnce(uint64_t,void*,size_t) const;
     // Always two copies compared, whatever the size: for readers whose guarantees are that a value seen once
     // changed between the two copies is refused (the environment and progress readers; at most once a second).

@@ -176,7 +176,7 @@ Api nativeApi(discovery::Sampler& s){
     std::array<unsigned,5> counts{};
     for(auto section:s.sections)if(section.executable){
         if(section.size>128*1024*1024)throw std::runtime_error("tag code size cap");
-        std::vector<uint8_t> code(section.size);if(!s.read(section.address,code.data(),code.size()))throw std::runtime_error("tag code unreadable");
+        std::vector<uint8_t> code(section.size);if(!s.readOnce(section.address,code.data(),code.size()))throw std::runtime_error("tag code unreadable");
         for(unsigned k=0;k<entries.size();++k){auto& e=entries[k];auto at=code.begin();
             while((at=std::search(at,code.end(),e.bytes.begin(),e.bytes.end()))!=code.end()){
                 ++counts[k];if(section.address+size_t(at-code.begin())!=s.base+e.rva)throw std::runtime_error("tag function signature moved/duplicated");++at;}}

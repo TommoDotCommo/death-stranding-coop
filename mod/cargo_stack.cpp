@@ -158,7 +158,7 @@ Api nativeApi(discovery::Sampler& s){
     std::array<unsigned,6> counts{};
     for(auto section:s.sections)if(section.executable){
         require(section.size<=128*1024*1024,"stack code size cap");std::vector<uint8_t> code(section.size);
-        require(s.read(section.address,code.data(),code.size()),"stack code unreadable");
+        require(s.readOnce(section.address,code.data(),code.size()),"stack code unreadable");
         for(unsigned k=0;k<entries.size();++k){auto& e=entries[k];auto at=code.begin();
             while((at=std::search(at,code.end(),e.bytes.begin(),e.bytes.end()))!=code.end()){
                 ++counts[k];require(section.address+size_t(at-code.begin())==s.base+e.rva,"stack function signature moved/duplicated");++at;}}

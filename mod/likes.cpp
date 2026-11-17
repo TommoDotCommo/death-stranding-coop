@@ -36,7 +36,7 @@ Api nativeApi(discovery::Sampler& s){
     unsigned count=0;
     for(auto section:s.sections)if(section.executable){
         if(section.size>128*1024*1024)throw std::runtime_error("likes code size cap");
-        std::vector<uint8_t> code(section.size);if(!s.read(section.address,code.data(),code.size()))throw std::runtime_error("likes code unreadable");
+        std::vector<uint8_t> code(section.size);if(!s.readOnce(section.address,code.data(),code.size()))throw std::runtime_error("likes code unreadable");
         auto at=code.begin();
         while((at=std::search(at,code.end(),bytes.begin(),bytes.end()))!=code.end()){
             ++count;if(section.address+size_t(at-code.begin())!=s.base+rva)throw std::runtime_error("likes function signature moved/duplicated");++at;}

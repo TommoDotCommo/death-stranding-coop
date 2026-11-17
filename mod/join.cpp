@@ -134,7 +134,7 @@ std::string verifyMoveCode(const discovery::Sampler& s,const MoveSites& m) {
     unsigned counts[3]={};
     for(auto& section:s.sections)if(section.executable){
         if(section.size>128ull*1024*1024)return "code section too large";
-        std::vector<unsigned char> code(section.size);if(!s.readStrict(section.address,code.data(),code.size()))return "code unreadable";
+        std::vector<unsigned char> code(section.size);if(!s.readOnce(section.address,code.data(),code.size()))return "code unreadable";
         for(unsigned k=0;k<3;++k)for(auto at=code.begin();(at=std::search(at,code.end(),wants[k].bytes,wants[k].bytes+40))!=code.end();++at){
             ++counts[k];
 #ifndef MUTANT_MOVE_SIGNATURE
