@@ -31,7 +31,7 @@ the game, and it never will. You need your own copy of the game.
 | 🖥️ | **A strand server you run yourselves** (`coop-world`): the game signs in to it instead of the publisher's service | ✅ |
 | 🪜 | **Ladders and cairns** one player builds appear in the others' worlds | ✅ |
 | 🌉 | **Other players' bridges** built as soon as they arrive (option `build_received`) | ✅ |
-| ⛺ | **Other players' rain shelters**: the receiving game takes them down; a fix (skip its area check for them, as for the save's) is built, not yet tried in the game | 🧪 |
+| ⛺ | **Other players' rain shelters** built and kept (option `build_received`) | ✅ |
 | 📤 | **Offering what you built before** (option `offer_strand`): the structures already in your save go to the server, one at a time, when you and the server say so | ✅ |
 | 🙋 | **The builder's name and likes** over a structure, as the server names them | ✅ |
 | 👥 | **Players' own choices** per server: share new builds or not, offer older ones or not, show everyone, friends or nobody | 🧪 |
@@ -64,7 +64,7 @@ server above.
 ## 🐞 Known issues
 
 - 🖥️ Everything live so far ran as **two copies on one PC**. Two PCs, a router and a firewall between them have not been tried.
-- ⛺ **Rain shelters** from other players are taken down by the receiving game, even with the game's range and placement checks skipped. Read from the game's code: a received shelter is told to recheck its floor, and then the game checks that another player's structure is not in an area where it keeps them out. `build_received` now skips that area check too; not yet tried in the game.
+- 🧱 With `build_received`, a received structure **skips the game's own spacing and area checks**, so it may overlap something in your world or stand where the game keeps other players' structures out. The server keeps the objects it hands out 20 m apart.
 - 🧱 With `build_received`, a received structure **skips the game's own spacing and area checks**, so it may overlap something in your world or stand where the game keeps other players' structures out. The server keeps the objects it hands out 20 m apart.
 - 🗑️ A structure **removed from the server** stays in a running game until its area loads again.
 - 🔢 The game takes **only so many objects of each kind per area** (5 cairns at Lake Knot, no ladders there); the server chooses which.
@@ -74,7 +74,6 @@ server above.
 
 ## 🗺️ Next steps
 
-- [ ] Keep other players' rain shelters
 - [ ] See your offered strand arrive in a friend's game
 - [ ] A real two-PC session
 - [ ] See the launcher's windows on a screen: group server, join screen, My strand, server owner, who I see

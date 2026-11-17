@@ -1982,7 +1982,15 @@ The mod then does three things in the game (`online.h`; addresses in `game_offse
 The log says `ONLINE server …`, `ONLINE sign-in asked` and each change of the login task, with `(signed in)` at the
 end. Game-free tests: the address rules and the asking logic, five mutants (`online_test.cpp`).
 
-### Received structures built (`build_received`, off by default; live for bridges, 2026-11-17)
+### Received structures built (`build_received`, off by default; live for bridges and rain shelters, 2026-11-17)
+
+**Rain shelters live (2026-11-17).** With the change to the answer's requests that also marks the area check done
+("RECEIVED answer requests changed: served structures are made without the range, placement and area checks"), a
+served rain shelter at a place on the ground was Activated, its record built (state 2) and still standing about three
+minutes later, unloaded at 1.2 km and built again on return, the porter standing 12 m from it; no fault, saves
+unchanged. Every shelter served in the earlier runs had been placed about 40 m under the ground (a height taken from
+cairns, not from the ground there), and the game's floor check removes such a structure: those runs say nothing about
+the area check alone. A real build is uploaded at its real height.
 
 **Live (2026-11-17).** With the scan alone, a served 30 m bridge was found in state 0 on the first scan (0.28 ms) and
 built at once. With the change to the answer's requests ("RECEIVED answer requests changed"), a served bridge was

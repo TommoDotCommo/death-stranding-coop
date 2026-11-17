@@ -5864,6 +5864,13 @@ next section.)
 
 ### Why received rain shelters are removed (2026-11-17, static)
 
+Live (2026-11-17, after this section was written): with the change below, a served 30 m bridge's record had `+0xaf`
+0x24 like the save's received structures, and a served rain shelter placed on the ground (height read from the
+porter's position there) was Activated, built (state 2) and still standing minutes later. The shelters served before
+had all been about 40 m under the ground at their places (heights taken from cairns elsewhere), so the floor check
+alone accounts for their removal; whether the area check would also have removed a shelter on the ground was not
+tried.
+
 Read from the pinned executable only, instruction by instruction; nothing here was run. Confidence: **high** for the
 loads, stores and branches named, **medium** where marked. All addresses are RVAs. The question: with the request
 change above, a served 30 m bridge was built straight from the answer, and a served rain shelter (more than 200 m from
