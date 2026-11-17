@@ -67,9 +67,12 @@ int main(int argc,char** argv) {
         if(mode=="--keyed-join"&&(argc==7||argc==9)) {   // ADDRESS PORT SECRET INI [BUILDS OLD] KEYFILE: the join, then the game's config
             ci_invite v{};v.secret=uint32_t(std::stoul(argv[4]));v.port=uint16_t(std::stoul(argv[3]));v.n=1;v.route[0].kind=CI_LAN;
             auto ip=mod::peerAddress(argv[2]);check(ip.has_value(),"address");for(int i=0;i<4;++i)v.route[0].ip[i]=uint8_t(*ip>>(24-8*i));
-            launcher::Session me;me.name="Joiner";me.playerId=78;auto s=launcher::groupJoin(v,0,me);
-            auto t=st::target(s,0);t.keys=&keys;
             std::ifstream f(argv[5],std::ios::binary);std::string ini((std::istreambuf_iterator<char>(f)),{});f.close();
+            // The player's name as the launcher keeps it (launcher.ini name=), as the real launcher's Session has it.
+            launcher::Session me;me.name="Joiner";me.playerId=78;
+            if(auto at=ini.find("\nname=");at!=std::string::npos){auto e=ini.find_first_of("\r\n",at+6);me.name=ini.substr(at+6,e==std::string::npos?std::string::npos:e-at-6);}
+            auto s=launcher::groupJoin(v,0,me);
+            auto t=st::target(s,0);t.keys=&keys;
             st::Choices given;if(argc==9){given.offerBuilds=argv[6];given.offerOld=argv[7];}
             auto j=st::join(t,st::transport(t,2000),ini,given);std::ofstream(argv[5],std::ios::binary|std::ios::trunc)<<j.ini;
             std::cout<<"fetched "<<int(j.fetched)<<"\nstart "<<j.start<<"\nkeyed "<<j.keyed<<"\naccount "<<j.target.account<<"\nmessage "<<j.message<<'\n';
