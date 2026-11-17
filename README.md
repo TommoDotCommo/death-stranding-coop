@@ -41,7 +41,7 @@ the game, and it never will. You need your own copy of the game.
 | 🔑 | **Player keys** made by the launcher, no accounts; signed calls | 🧪 |
 | 🔗 | **Linked servers**: import and export with filters by kind, builder, area and age | 🧪 |
 | 👋 | **Seeing players on a linked server** when you meet | ✅ |
-| 🛣️ | **Roads paved together through the server**: what each player puts into the auto-pavers adds up for the others | 🧪 |
+| 🛣️ | **Roads paved together through the server**: what each player puts into the auto-pavers adds up for the others; the game asks and gets the answer, but has not taken materials from it yet | 🧪 |
 | 🪧 | **Signs and lost cargo** through the server | ❌ |
 
 ## 🤝 Two players on one link (opt-in, no longer developed)
