@@ -5859,6 +5859,93 @@ address at the server and before it asks the game to sign in, so no answer is pr
 state 2 within a second of the answer, `+0xaa` 0x10 without 0x20, `+0xaf` bit 7 clear, the elements Activated (state 2)
 in the area's first list, the log line `RECEIVED answer requests changed`, no `RECEIVED building` lines (the scan finds
 nothing to do), and the bytes at `0x2c601d4`/`0x2c601e4` read `00`/`b9`. Then out of range and back, and after a load.
+(Live later that day: the bridge as expected, the shelter still removed. The first of the two bytes changed since; the
+next section.)
+
+### Why received rain shelters are removed (2026-11-17, static)
+
+Read from the pinned executable only, instruction by instruction; nothing here was run. Confidence: **high** for the
+loads, stores and branches named, **medium** where marked. All addresses are RVAs. The question: with the request
+change above, a served 30 m bridge was built straight from the answer, and a served rain shelter (more than 200 m from
+any other shelter) was still removed, its element in state 6 (Removed) and no record left.
+
+**Ruled out.**
+
+- Durability (high). The queue processor calls the new record's slot `0x10` (`0x2c612e0`, at `0x2c863fd`) before it
+  asks `0x2c35fb0(object, 1, 0)` (`0x2c8653b`). With no early return, that function sets durability `+0xd8` to the
+  config's `RainDurabilitySec` for the level (`DSConstructionPointConfig +0xa0 + 4*(level-1)`, `0x2c6196c..0x2c619b4`)
+  whenever `+0xd8` is zero. A received record starts at zero (request `+0x7c`: the request constructor `0x277fde0` zeroes
+  it, and the answer builder never writes it; `ut` and `mt` are not read for it), so by the check its durability is the
+  config's and the condition "durability at or below 0 while the config's is above 0" cannot hold. This is where the
+  received Net bridge's 360000 came from (2026-11-12). Nothing a server sends changes it.
+- The byte `[[base+0x7be6a48]+0x300]+0x39` (high): in the construction code only the walker's placement branch reads it,
+  and that branch no longer runs on a received record; live it was 0.
+- Per-kind counts (high). The answer check (`0x3481f00..0x3482809`) settles counts, the block list, the area and the
+  kind's availability before any record is made, and an object it refuses goes to Fail (4) or AlwaysFail (5) with no
+  record. Received shelters got a record (2026-11-11/12) and ended in Removed (6). In the construction code state 6
+  comes only from a record's teardown: slot `0x20` (`0x2c45760`, the same in every construction class) calls the
+  uploader's slot `0x30` (`0x3487d70`, at `0x2c4585c`) for a Player or Net record, which sets the element to 6 (3 when
+  object `+0xad` bit 7 is set) through `0x349a040`. (The other setters of 6, `0x349c1a0` for the save's timed list and
+  `0x349f9c0`, are not construction.)
+- The range test and the placement check: skipped by the request change, live.
+
+**What removes it: a floor recheck, then two checks the bridges never get.**
+
+1. A record made from an answer starts with object `+0xaf` 0x04 (live: every received record read so far, `... 04 ..`
+   at `+0xaf`): bit 2 is request `+0x63b` (constructor 1, record init `0x2c32c8c`), "floor checked"; 0x20 is request
+   `+0x63e` (constructor 0, `0x2c32ca5`), "area checked", clear.
+2. The record handles the message `MsgRecheckFloor` (descriptor `0x4c6ab10`, vtable `0x3d7cc18`; its handler table
+   entry `0x4c39ff0` gives `0x2cdf170`, which jumps to `0x2c716a0`). For a message whose `+0x10` is 0x13 and whose
+   `+0x90` is not 2, it clears `+0xaf` bit 2 (`0x2c7184a`) unless the record is the game's own (owner 0), of category 1
+   (safe house), 9, 12 or 13 (the two bridges; mask `0x3202`) or of type 25, 28 or 37 (mask `0x2012000000`). The other
+   place that clears the bit is the walker when a Net record passes the placement check (`0x2c8812c`), the game's normal
+   path for other players' structures. Live 2026-11-12: the served shelter's `+0xaf` went from 4 to 0 about a second
+   after it was made, after its failed placement check, so it is this message. Which sender sends 0x13: not read.
+3. The next update of the record (the base update `0x2cb8790`, at `0x2cba416`; the same block is in `0x2c73db0`, at
+   `0x2c7400b`) runs, while bit 2 is clear (or `+0xb0` bit 7 set), the config's unrealize box is valid, the porter is
+   within `DistanceToRealize` plus a margin (or the record is built) and `0x2c64a60` agrees: it sets bit 2 and calls
+   - the record's slot `0x60`, the floor check (`0x2c346d0` for the rain shelter and most kinds; the bridge class
+     overrides it with `0x2d1f5a0`): shape queries built from the config's `HeightShouldBeGround` (`+0x400`) and
+     `HeightShouldBeNothing` (`+0x410`); when none finds a floor, or one finds something where nothing should be, it sets
+     `+0xaa |= 0x40`, `+0xab |= 1` (`0x2c34d60`); a floor at another height makes the structure again there;
+   - then `0x2c43590`, the area check, for a Net record (owner 2) only and only while `+0xaf` 0x20 is clear (it sets the
+     bit after its one query), when the config has an `UnrealizeCollisionResource` (`+0x40`): `0x2c65200` overlaps the
+     structure's box with the physics world, and a hit on a `DSUnconstructableArea` (`0x4c59590`) or a
+     `DSConstructionOfflineArea` (`0x4c59710`) fails it (safe houses and bridges also go through a
+     `DSConstructableWhitelistArea`, `0x4c59650`); a failure sets `+0xaa |= 0x40`, `+0xab |= 1` (`0x2c436d9`).
+4. The per-record update `0x2c98620` lists a marked record, `0x2c94350` (first in the manager's update) sets it to
+   state 3 (`0x2c6acf0`), and its teardown sets the element to Removed (6).
+
+Why the bridge stands: bridges are never sent to step 3 (excluded in step 2, and with the request change they skip the
+placement check whose pass would send them), and they have their own floor check. Why the save's received shelters
+stand: their `+0xaf` is 0x24 (live), the area check done (the save keeps the bit; the save loader reads it at
+`0x2c9a176`, and an older save version counts it as done), and the publisher's players built them on the ground.
+
+Which of the two checks takes the served shelter down is not settled without the world's data. Inferred (medium): the
+area check. A `DSConstructionOfflineArea` is by its name where other players' structures are not shown, the check runs
+for Net records only (the builder's own shelter, a Player record, never meets it, which fits genuine upload data being
+removed in the receiver's same world), and the places served in area 226 were near Lake Knot City. The floor check
+(low): genuine upload data is the builder's own place on the same ground.
+
+**What would keep them.** Request `+0x63e` = 1, so the record is made with `+0xaf` 0x24 like the save's received
+structures and the area check never runs. Nothing in a server's answer reaches it: the answer builder takes request
+`+0x620` from the answer's byte `+0x111`, `+0x648` from `+0x112` and `+0x629`/`+0x63d` from `+0x110`, and those bytes lie
+past the reflected members of `OTGCObjectResponse` (size 0x118, `tags` at `+0x100`), so no JSON field sets them. So it is
+the mod's: the request change's first byte becomes `0x2c601d0` `bd` -> `ce`, which sends the builder's store of 1 at
+`0x2c601ce` to `[rbp+0x5ce]` (request `+0x63e`) instead of `[rbp+0x5bd]` (`+0x62d`); `+0x62d` keeps the constructor's
+0 (no placement check) as before, and nothing after the builder writes `+0x63e` (the queue copy `0x28abf70` copies it).
+It replaces `0x2c601d4` `01` -> `00`; the second byte (`0x2c601e4` `cd` -> `b9`) is unchanged (`mod/received.h`). The
+floor check is not skipped: a shelter served where there is no floor is still taken down, or moved onto the floor
+found. What else it affects: every record made from an answer gets `+0xaf` 0x20; the bridges never reached the area
+check anyway. Risk: another player's structure may now stand in a place the game keeps free of them (an offline or
+unconstructable area), as the save's received structures already may.
+
+**Live probe still needed:** with the option, serve a rain shelter (and a 30 m bridge) near the porter: the log line
+`RECEIVED answer requests changed: ... range, placement and area checks`, the code bytes at `0x2c601d0`/`0x2c601e4`
+reading `ce`/`b9`, the shelter's record in state 1 or 2 within a second with `+0xaf` 0x24 (flags from `+0xa8` like
+`2? c0 10 04 2c .. .. 24`), its element Activated, and both still there after several minutes. If the shelter is still
+removed: watch `+0xaf` (0x24 to 0x20 is the floor recheck) and the record's height against the ground there, which
+would make it the floor check.
 
 ### How an area's per-kind counts (`ct`) are made (2026-11-17, static)
 
