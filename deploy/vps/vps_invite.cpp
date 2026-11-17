@@ -38,10 +38,19 @@ int main(int argc,char** argv){
         std::printf("key %u port %u",unsigned(v.secret),unsigned(v.port));
         for(int i=0;i<v.n;++i)std::printf(" route %u:%u.%u.%u.%u",unsigned(v.route[i].kind),v.route[i].ip[0],v.route[i].ip[1],v.route[i].ip[2],v.route[i].ip[3]);
         std::printf("\n");return 0;}
+    // --private: a rehearsal server on the owner's own LAN or VPN (Tailscale): the address must be private or CGNAT
+    // and the route says VPN (2), so such an invite is never mistaken for one to send to testers elsewhere.
+    bool priv=argc==5&&std::strcmp(argv[1],"--private")==0;if(priv){++argv;--argc;}
     unsigned long long key=0,port=0;uint8_t ip[4];
+    if(priv&&argc==4){uint8_t probe[4];unsigned w[4];char e;
+        if(std::sscanf(argv[3],"%u.%u.%u.%u%c",&w[0],&w[1],&w[2],&w[3],&e)!=4||w[0]>255||w[1]>255||w[2]>255||w[3]>255||publicAddress(argv[3],probe)){
+            std::fprintf(stderr,"--private takes a LAN or Tailscale address\n");return 2;}
+        for(int i=0;i<4;++i)ip[i]=uint8_t(w[i]);
+        if(!number(argv[1],4294967295ull,key)||!key||!number(argv[2],49114,port)||port<49100){std::fprintf(stderr,"bad key or port\n");return 2;}
+    } else
     if(argc!=4||!number(argv[1],4294967295ull,key)||!key||!number(argv[2],49114,port)||port<49100||!publicAddress(argv[3],ip)){
-        std::fprintf(stderr,"usage: vps-invite KEY(1..4294967295) PORT(49100..49114) PUBLIC-IPv4\n       vps-invite --read CODE\n");return 2;}
-    ci_invite v{};v.secret=uint32_t(key);v.port=uint16_t(port);v.n=1;v.route[0].kind=CI_INTERNET;std::memcpy(v.route[0].ip,ip,4);
+        std::fprintf(stderr,"usage: vps-invite KEY(1..4294967295) PORT(49100..49114) PUBLIC-IPv4\n       vps-invite --private KEY PORT LAN-OR-TAILSCALE-IPv4   (a rehearsal on your own network)\n       vps-invite --read CODE\n");return 2;}
+    ci_invite v{};v.secret=uint32_t(key);v.port=uint16_t(port);v.n=1;v.route[0].kind=priv?CI_VPN:CI_INTERNET;std::memcpy(v.route[0].ip,ip,4);
     char code[CI_CODE_MAX];
     if(!ci_encode(&v,"DSG",code,sizeof code)){std::fprintf(stderr,"the invite could not be made\n");return 2;}
     ci_invite back{};
