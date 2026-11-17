@@ -486,7 +486,7 @@ void render(){
         set(Status,wtext(net->status));refreshRows();
     }
     if(selectedTab==1){place(210,30,120,w-60,65);place(211,30,200,w-60,180);place(OpenSaves,30,400,(w-75)/2,40);place(BackUp,45+(w-75)/2,400,(w-75)/2,40);place(Import,30,455,w-60,40);}
-    if(selectedTab==2){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(Lan,30,265,w-60,30);place(Tailscale,30,300,w-60,30);place(Privacy,30,335,w-60,30);place(World,30,370,w-60,30);place(GroupHost,30,405,w-60,30);place(BuildReceived,30,440,w-60,46);place(223,30,497,330,25);place(GroupPolicy,370,493,w-400,120);place(Protocol,30,535,w-60,40);place(222,30,582,w-60,60);
+    if(selectedTab==2){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(Lan,30,265,w-60,30);place(Tailscale,30,300,w-60,30);place(Privacy,30,335,w-60,30);place(World,30,370,w-60,30);place(GroupHost,30,405,w-60,30);place(BuildReceived,30,440,w-60,46);place(223,30,497,330,25);place(GroupPolicy,370,493,w-400,120);place(224,30,535,w-60,40);place(Protocol,30,580,w-60,36);place(222,30,622,w-60,50);
         bool edit=!net->lobby;for(int id:{GamePath,Port,Lan,Tailscale,Privacy,World,GroupHost,BuildReceived,GroupPolicy})EnableWindow(child(id),edit);}
     if(selectedTab==3){place(230,30,120,w-60,240);place(Guide,30,390,w-60,40);place(Home,30,445,w-60,40);place(Diagnose,30,500,w-60,40);place(Remove,30,555,w-60,40);}
 }
@@ -553,7 +553,7 @@ void timer(){
 LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
     try {
         if(msg==WM_SIZE){render();return 0;}
-        if(msg==WM_GETMINMAXINFO){auto p=reinterpret_cast<MINMAXINFO*>(lp);p->ptMinTrackSize={800,680};return 0;}
+        if(msg==WM_GETMINMAXINFO){auto p=reinterpret_cast<MINMAXINFO*>(lp);p->ptMinTrackSize={800,730};return 0;}
         if(msg==WM_ACTIVATE&&LOWORD(wp)!=WA_INACTIVE&&!initializing){PostMessageW(h,WM_APP+2,0,0);}
         if(msg==WM_APP+2){offerClipboard();return 0;}
         if(msg==WM_TIMER){timer();return 0;}
