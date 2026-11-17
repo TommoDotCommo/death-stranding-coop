@@ -14,17 +14,21 @@ bugs, crashes and features that do not work yet.
 
 ## Install
 
-1. Run the installer (or extract the zip and start `deathstranding-coop.exe`). It finds the game through Steam and
-   adds two files: a small `avrt.dll` in the game's folder and the mod in
-   `%LOCALAPPDATA%\DeathStrandingCoop\`. It asks before it changes anything.
+1. Run `DeathStrandingCoop-Setup.exe` (Windows may warn that it is not signed: More info, Run anyway) and choose
+   **Install**. It finds the game through Steam, adds one small file (`avrt.dll`) to the game's folder and puts the
+   launcher and the mod in `%LOCALAPPDATA%\DeathStrandingCoop\`, with a desktop shortcut **Death Stranding Co-op**.
+   (Or extract the zip and start `deathstranding-coop.exe`: it offers the same install.)
 2. The co-op game keeps its own saves in that folder; your normal saves are not changed. The launcher's **Saves** tab
    lets you start from one of the test saves.
-3. To remove it: the launcher's About page, **Remove co-op from the game** (or the installer's uninstall). Starting the
-   game from Steam as usual then plays without the mod.
+3. To remove it: run the Setup again and choose **Uninstall** (or the launcher's About page, **Remove co-op from the
+   game**). Starting the game from Steam as usual then plays without the mod.
+4. The first start of the game asks about the publisher's telemetry (Cancel is fine) and shows two notices, and the
+   first load shows a few "New additional content found" notices: press OK through them. On a slow PC, lower the
+   graphics once in the game (Options, Graphics Settings): the co-op game keeps its own settings.
 
 ## Join the test server
 
-1. Start `deathstranding-coop.exe`. In **Play**, set **your name**: use a nickname, not your real name (see "Stay
+1. Start **Death Stranding Co-op** (the desktop shortcut). In **Play**, set **your name**: use a nickname, not your real name (see "Stay
    safe"). It is shown over your character to the players near you.
 2. Choose **Join a friend**, paste the `DSG-...` invite and choose **Join group**.
 3. The launcher shows the server's rules and asks two things: whether to share what you build there, and whether the
@@ -63,11 +67,11 @@ On the test server, which the organiser runs:
 
 ## Report a problem
 
-1. If something goes wrong while playing, press **F2** in the game (where your version has the bug key; the release
-   notes say): it marks the moment in the logs.
+1. If something goes wrong while playing, press **F2** in the game: it marks the moment in the logs (and in the logs
+   of the players near you), so the organiser can find it.
 2. In the launcher: About → **Send diagnostics**. This saves a zip on your Desktop (`DeathStrandingCoop-diagnostics-...zip`)
    and shows it in Explorer. Before it is saved, it is cleaned: your Windows user name and computer name, network
-   addresses, Steam ids and e-mail addresses are replaced. Nothing is sent by the launcher: you send the zip yourself.
+   addresses, Steam ids and account numbers, and e-mail addresses are replaced; open the zip and look if you like. Nothing is sent by the launcher: you send the zip yourself.
 3. Send it to the organiser the way you were told, with a few lines: what you did, what you expected, what happened,
    and roughly when.
 
