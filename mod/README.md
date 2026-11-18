@@ -769,7 +769,13 @@ nothing. The HUD object is found through the UI owner global and checked by its 
 the config. In group play (no `peer`) nobody is expected, so "No partner yet" is never said. Tests: `notice_test.cpp` (mutants BOUND, GROUP_ALONE, LEFT, ALONE_ONCE, NAME_WAIT, WORLD, GAP, AWAY_SETTLE, BACK_PAIRED, LIKE_ICON, JOIN_HOLD). The launcher's play
 setup turns it on.
 
-## Test mode (`test_mode`, off by default; built game-free 2026-11-18, not run live)
+## Test mode (`test_mode`, off by default; built 2026-11-18, live once the same day)
+
+Live (2026-11-18, one real game, Episode 1 save, `"test_mode":{}`): U dropped six crates beside the porter, read back from
+the game's cargo records: Chiral Crystals (32), Metals (1000), Ceramics (800), Chemicals (600), Special Alloys (1200),
+Resins (800) (the hashes in `testmode.cpp`, taken from the item list with the kit's `listitems.py`); 12 and 18 s into a
+25 s sprint both status pairs read 1.000 (stamina and blood kept full). The battery switch writes nothing yet (the
+vehicle's charge is not found).
 
 A sandbox for alpha testers: material crates on a key, and blood and stamina kept full. The config's one nested object:
 

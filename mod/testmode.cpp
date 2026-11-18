@@ -8,12 +8,12 @@ namespace mod::testmode {
 const Material Materials[MaterialCount]={
     // The largest crate of each, from the item list of a live copy (kit listitems.py, 2026-11-18: name text "X ({0})",
     // item hash at +34, weight at +50; each size exists twice with two hashes, the first of each is used here).
-    {"chiral crystals",0x3325515bu,false},   // Chiral Crystals, weight 32
-    {"metals",0x485b9f46u,false},            // Metals ({0}), weight 100
-    {"ceramics",0x09e6bb84u,false},          // Ceramics ({0}), weight 80
-    {"chemicals",0x2b555a36u,false},         // Chemicals ({0}), weight 60
-    {"special alloys",0x0f0cdc02u,false},    // Special Alloys ({0}), weight 120
-    {"resins",0x0ae5c9acu,false},            // Resins ({0}), weight 80 (0x0782598d, weight 4, was made live 2026-11-03)
+    {"chiral crystals",0x3325515bu,true},    // Chiral Crystals, weight 32
+    {"metals",0x485b9f46u,true},             // Metals ({0}), weight 100
+    {"ceramics",0x09e6bb84u,true},           // Ceramics ({0}), weight 80
+    {"chemicals",0x2b555a36u,true},          // Chemicals ({0}), weight 60
+    {"special alloys",0x0f0cdc02u,true},     // Special Alloys ({0}), weight 120
+    {"resins",0x0ae5c9acu,true},             // Resins ({0}), weight 80 (0x0782598d, weight 4, was made live 2026-11-03)
 };
 std::vector<uint32_t> knownHashes(){std::vector<uint32_t> h;for(auto& m:Materials)if(m.hash)h.push_back(m.hash);return h;}
 std::string missingNames(){std::string s;for(auto& m:Materials)if(!m.hash)s+=(s.empty()?"":", ")+std::string(m.name);return s;}
