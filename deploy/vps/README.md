@@ -4,8 +4,10 @@ Outside testers play together through one `coop-world` (`../../world/README.md`)
 nobody's game connects to anybody's home address. This folder builds it, installs it with one command, administers
 it over SSH and checks all of that without a server.
 
-Built and checked without a server or a game (2026-11-17, `make -C deploy/vps check`): never run on a rented
-machine yet, and no launcher has joined it (see "Not verified").
+Built and checked without a server or a game (2026-11-17, `make -C deploy/vps check`). First real deployment
+(2026-11-18): a rented Ubuntu 24.04 server (1 GB), `deploy.sh` with `--fail2ban yes` in one run; two PCs joined with
+the printed invite through the launcher, their games met through the relay over the internet (24 ms round trip) and an
+F2 mark reached the server's log. Not yet: players from other homes and routers.
 
 ## What you need
 

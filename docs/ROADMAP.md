@@ -6,11 +6,13 @@ Status of what exists: [STATUS.md](../STATUS.md). Words: [GLOSSARY.md](GLOSSARY.
 
 ## Closed alpha (now)
 
-- [ ] **(owner)** Rent the test server (a small Linux VPS near the testers: Ubuntu 24.04, 1 GB, public IPv4) and
+- [x] **(owner)** Rent the test server (a small Linux VPS near the testers: Ubuntu 24.04, 1 GB, public IPv4) and
       give the deploy SSH access; then `deploy/vps/deploy.sh` and send testers the `DSG-` invite privately.
 - [ ] **(owner)** Decide how testers get the files: a GitHub pre-release (public) or a private link; then tag and
       publish `v0.1.0-alpha.1` (`local/release/PUBLISH-v0.1.0-alpha.1.txt` has the commands).
-- [ ] First run of `deploy/vps` on a real server, and players joining from ordinary home routers.
+- [x] First run of `deploy/vps` on a real server (2026-11-18): two PCs on one home network joined over the internet,
+      met through the relay (24 ms round trip), F2 marks reached the server's log.
+- [ ] Players joining from other homes, behind ordinary routers.
 - [ ] A real game crash caught by the crash recorder (dump and marker) and read with `tools/diag_report.py`.
 - [ ] Setup on a PC that downloaded it from GitHub: SmartScreen's wording, the firewall option's administrator prompt.
 - [ ] `tools/diag_report.py --align` with marks shared by more than two logs (group play).
