@@ -49,7 +49,7 @@ struct Reply { int status=200;std::string body="{}"; };
 struct Refused : std::runtime_error { int status;Refused(int s,const std::string& why):std::runtime_error(why),status(s){} };
 // Collections (../docs/COLLECTIONS.md): where a player's game last was, as the relay heard it (World::noteSpot). Game
 // axes in metres (x, y on the ground, z up); `yaw` the porter's facing in radians (0: +y, pi/2: +x), when known.
-struct Spot { double x=0,y=0,z=0;bool haveYaw=false;double yaw=0;int64_t at=0;std::string name; };
+struct Spot { double x=0,y=0,z=0;bool haveYaw=false;double yaw=0;int64_t at=0;std::string name;uint32_t area=0; };
 constexpr size_t MaxSpots=1024;
 constexpr int64_t MapFreshSeconds=5;constexpr size_t MapPlayersMax=64;   // who counts as there for the map, and how many it lists
 constexpr int64_t SpotFreshSeconds=600,MaxNearMetres=2000,AreaSearchMetres=1500;
@@ -166,7 +166,7 @@ public:
     Reply chatRead(const std::string& token,const std::string& since,int64_t now);
     Reply chatSay(const std::string& token,const std::string& body,int64_t now);
     // The other players for this player's map (README, "Players on the map"): with a notice token, `on` and, while the policy
-    // says on, each player the relay placed in the last MapFreshSeconds: `id`, `name`, x, y, z (game axes), `yaw` when known.
+    // says on, each player the relay placed in the last MapFreshSeconds: `id`, `name`, x, y, z (game axes), `yaw` and `area` when known.
     // Under identity keys his own entry is left out and his choice of who he is shown holds; elsewhere the game knows its id.
     Reply mapRead(const std::string& token,int64_t now);
     // The owner's account key (identity::account of the host's launcher key; "" none): his signed calls are the

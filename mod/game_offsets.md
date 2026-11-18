@@ -6550,6 +6550,17 @@ field name for a vehicle's charge (the strings `VehicleBatteryGaugeCoefficient` 
 settings). Not known: where the riding vehicle keeps its charge. Next step: with a truck, read the vehicle entity's
 floats before and after a drive (the charge falls) and after a charger.
 
+## Icons on the device map (static 2026-11-19; to be confirmed live)
+
+The map menu's update `0x31baa60(map = widget+0xaf0, ...)` empties its icon list and calls `0x31bda70(map, xmm1)` from the only
+call site `0x31bac63`; that function gathers the markers, adds each with `bool 0x31a8780(map, item*)`, then sorts and gives
+out slots, so an item added before it is drawn like the game's own. Items are `0x60` bytes: `+0` and `+0x10` x, y, z, 0
+(game axes), `+0x20` u8 icon kind, `+0x22` u8 marker type (0: no marker behind it), `+0x28` u64 id, `+0x3c` f32 alpha 1, the
+rest 0 (`+0x50` is the filter mask: 0 cannot be filtered). `0x31a8780` changes the item and returns 0 for one it does not take.
+The area on show is the u16 at `[[map+0x1d10]+0x20]` (100, 200, 400 in its code), the mode the byte `map+0x1d1a`. The
+porter's own area is `0x262a860(*(image+0x7be6318))`. Kinds tried first: `0xb5` NPC, `0xb6` NPC tower, `0x9e` friendly mule.
+`mapicons.cpp` retargets the call through a stub in the padding at `0x31ba24b`. No marker is made, so none of this is saved.
+
 ## Common telop: a caption of any text (live, 2026-11-19)
 
 `DSUINodeGraphBindings_sShowCommonTelop` `0x3055f40(int pivot, float x, float y, const char16_t* title, const char16_t* text,

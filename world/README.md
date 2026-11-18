@@ -898,7 +898,7 @@ each other across the world). A game asks with its notice token, in the header `
 
 | Call | Answer |
 |---|---|
-| `GET …/coop/map` | `format` 1, `on`, `players`: at most 64 players the relay placed in the last 5 s, each `id` (the relay id, as text), `name`, `x`, `y`, `z` (game axes, metres, z up) and `yaw` (radians) when known. While `on` is false, none. 403 for a bad token |
+| `GET …/coop/map` | `format` 1, `on`, `players`: at most 64 players the relay placed in the last 5 s, each `id` (the relay id, as text), `name`, `x`, `y`, `z` (game axes, metres, z up), and `yaw` (radians) and `area` (the map the player is in) when known. While `on` is false, none. 403 for a bad token |
 
 The relay reports each player's place about once a second, so a player who has left drops off within seconds; players of
 linked servers are not listed. Under identity keys the asker's own entry is left out and his choice of who he is shown

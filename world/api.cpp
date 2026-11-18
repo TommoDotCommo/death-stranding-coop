@@ -226,7 +226,7 @@ Reply World::mapRead(const std::string& token,int64_t now){
 #ifndef MUTANT_MAP_CHOICE
             if(choice.show=="friends"&&!choice.friends.count(e.first))continue;
 #endif
-            Value v=Value::object();v.set("id",std::to_string(e.first));v.set("name",s.name);v.set("x",s.x);v.set("y",s.y);v.set("z",s.z);if(s.haveYaw)v.set("yaw",s.yaw);
+            Value v=Value::object();v.set("id",std::to_string(e.first));v.set("name",s.name);v.set("x",s.x);v.set("y",s.y);v.set("z",s.z);if(s.haveYaw)v.set("yaw",s.yaw);if(s.area)v.set("area",int64_t(s.area));
             list.push(v);++listed;}
     }
     out.set("players",list);Reply r;r.body=out.dump();return r;

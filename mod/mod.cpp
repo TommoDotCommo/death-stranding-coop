@@ -62,6 +62,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "debugmenu.h"
 #include "serverinfo.h"
 #include "chat.h"
+#include "mapicons.h"
 #include "strand_notices.h"
 #include "received.h"
 #include "offer_strand.h"
@@ -413,7 +414,7 @@ struct Runtime final:ds::Transport {
 #ifndef MOD_FAKE_NETWORK
         if(!relayClient)return;
         // Where this porter is: the relay decides from it who is near. No place while there is no pose (loading, cutscene).
-        if(cache.available&&!cache.gated)relayClient->setPosition({{cache.local.position[0],cache.local.position[1],cache.local.position[2]}});
+        if(cache.available&&!cache.gated)relayClient->setPosition({{cache.local.position[0],cache.local.position[1],cache.local.position[2]}},gameArea);
         else relayClient->clearPosition();
         relayClient->tick(now);
         for(unsigned budget=0;budget<256;++budget){
@@ -1297,6 +1298,7 @@ struct Runtime final:ds::Transport {
     std::unique_ptr<mod::chat::Link> chatLink;std::unique_ptr<mod::chat::Box> chatBox;Background<mod::help::Api> chatHudJob;bool chatHudTried=false;std::optional<mod::help::Api> chatHud;
     mod::marker::KeyEdge chatEdge;std::vector<std::u16string> chatLines;std::filesystem::path chatCommand;std::vector<mod::chat::Press> chatScripted;bool chatOpenCommand=false;
     // P: the server page (serverinfo.h, tickServerInfo).
+    std::unique_ptr<mod::mapicons::Link> mapLink;const mod::mapicons::Board* mapBoard=nullptr;bool mapHooked=false,areaTried=false;uint32_t gameArea=0;std::function<uint32_t()> areaOf;std::filesystem::path mapCommand;
     std::unique_ptr<mod::serverinfo::Screen> infoScreen;mod::marker::KeyEdge infoEdge;std::future<mod::strand::Fetched> infoRead;
     // Hold F1: the co-op keys on the game's common telop (help.h). puppet.help (lab): "at <pivot> <x> <y> <stamp>" moves
     // it, "show <stamp>" / "hide <stamp>" hold and release the key for an unattended test.
@@ -1509,6 +1511,44 @@ struct Runtime final:ds::Transport {
         const bool allowed=active&&inWorldNow()&&(chatBox->typing()||!dialogApi||!config.testMode.on&&!config.serverInfo||dialogApi->free());
         chatBox->tick(pressed,mod::marker::keyDown(mod::chat::Key),allowed,scripted);
         chatTyping.store(chatBox->typing(),std::memory_order_relaxed);
+    }
+    // Which of the game's maps this porter is in: the relay keeps players of different maps apart (they reuse coordinates), and
+    // the map page shows each player on his own. The last known value stands while the game is between maps.
+    void tickArea(){
+#ifndef MOD_FAKE_NETWORK
+        if(!sampler||config.provider!="game")return;
+        if(!areaTried){areaTried=true;try{areaOf=mod::mapicons::nativeArea(*sampler);}catch(const std::exception& e){note((std::string("MAP area unknown: ")+e.what()+"\n").c_str());}}
+        if(!areaOf)return;const uint32_t a=areaOf();if(a&&a!=gameArea){gameArea=a;note(("MAP area "+std::to_string(a)+"\n").c_str());}
+#endif
+    }
+    // The other players on the game's map (mapicons.h). puppet.map (lab): "kind N", "ring METRES COUNT" (test icons around this
+    // porter, at that moment), "clear", each with the run's stamp.
+    void tickPlayerMap(){
+        if(!config.playerMap||!sampler)return;
+        static mod::mapicons::Board board;   // the map's update reads it for as long as the game runs
+        mapBoard=&board;
+        if(!mapHooked&&inWorldNow()){mapHooked=true;
+#ifndef MOD_FAKE_NETWORK
+            try{mod::mapicons::install(*sampler,board);note("MAP on\n");}catch(const std::exception& e){note((std::string("MAP unavailable: ")+e.what()+"\n").c_str());config.playerMap=false;return;}
+#else
+            note("MAP on\n");
+#endif
+        }
+        if(!mapLink){
+            auto at=serverAt();if(!at){note("MAP unavailable: no server address\n");config.playerMap=false;return;}
+            const std::string target=at->base+"/coop/map",token=config.strandToken;const uint32_t address=at->address;const uint16_t port=at->port;
+            mapLink=std::make_unique<mod::mapicons::Link>([=]{auto r=mod::strand::get(address,port,target,token,mod::strand::ConnectMs);return mod::mapicons::Result{r.status,r.body};},board,std::to_string(config.playerId));
+        }
+        if(!mapCommand.empty()&&std::filesystem::exists(mapCommand)){
+            auto text=readConfig(mapCommand);std::filesystem::remove(mapCommand);std::istringstream in(text);std::vector<std::string> w;std::string one;while(in>>one)w.push_back(one);
+            if(w.size()<2||w.back()!=mod::runStamp())note("MAP ignored command for another process\n");
+            else if(w[0]=="kind"&&w.size()==3){mod::mapicons::setKind(uint8_t(std::strtoul(w[1].c_str(),nullptr,0)));note(("MAP kind "+w[1]+"\n").c_str());}
+            else if(w[0]=="clear")mapLink->setExtra({});
+            else if(w[0]=="ring"&&w.size()==4&&cache.available){
+                const double r=std::atof(w[1].c_str());const int n=std::min(std::atoi(w[2].c_str()),int(mod::mapicons::MaxIcons));std::vector<mod::mapicons::Icon> v;
+                for(int i=0;i<n;++i){const double a=6.283185307*i/std::max(n,1);mod::mapicons::Icon k;k.x=float(cache.local.position[0]+r*std::cos(a));k.y=float(cache.local.position[2]+r*std::sin(a));k.z=float(cache.local.position[1]);k.area=gameArea;k.id=0x4d51000000000000ull+uint64_t(i);v.push_back(k);}
+                mapLink->setExtra(std::move(v));note(("MAP test ring of "+w[2]+"\n").c_str());}
+        }
     }
     void tickServerInfo(uint64_t now){
         if(!config.serverInfo||!sampler||!dialogReady())return;
@@ -2858,7 +2898,7 @@ struct Runtime final:ds::Transport {
 #endif
                 puppet=std::make_unique<mod::puppet::Probe>(std::move(api),[this](const std::string& row){note(row.c_str());});
                 twinCommand=path.parent_path()/"puppet.double";cargoCommand=path.parent_path()/"puppet.cargo";bodyCommand=path.parent_path()/"puppet.body";gearCommand=path.parent_path()/"puppet.gear";
-                markerCommand=path.parent_path()/"puppet.marker";rideCommand=path.parent_path()/"puppet.ride";helpCommand=path.parent_path()/"puppet.help";chatCommand=path.parent_path()/"puppet.chat";
+                markerCommand=path.parent_path()/"puppet.marker";rideCommand=path.parent_path()/"puppet.ride";helpCommand=path.parent_path()/"puppet.help";mapCommand=path.parent_path()/"puppet.map";chatCommand=path.parent_path()/"puppet.chat";
 #ifdef MOD_FAKE_NETWORK
                 // Fake tree: player entity 0x6000 -> CameraEntity 0xa000 -> parked double 0xa800.
                 fake->mutate([&]{auto B=fake->base;fake->put<uint64_t>(0x6078,B+0xa000);
@@ -3528,7 +3568,7 @@ struct Runtime final:ds::Transport {
                 if(cache.local.flags&ds::Teleport)cache.stickyTeleport=true;else if(cache.stickyTeleport)cache.local.flags|=ds::Teleport;
             }
             // The other players' sessions read this porter from here (each keeps the jump until it has sent it).
-            if(others){mod::others::Local l;l.state=cache.local;l.available=cache.available;l.gated=cache.gated;l.jumped=jumped;l.sampledAt=cache.sampledAt;others->local(l);}
+            if(others){mod::others::Local l;l.state=cache.local;l.available=cache.available;l.gated=cache.gated;l.jumped=jumped;l.sampledAt=cache.sampledAt;l.area=gameArea;others->local(l);}
             if(game){poseAvailable=cache.available;poseReason=game->reason();}
             // Read-only, explicit per-process command; also usable with the ordinary self-tick provider.
             if(vehicleMonitor) {
@@ -3662,6 +3702,8 @@ struct Runtime final:ds::Transport {
             if(gameContext)tickDebugMenu(now);
             stage="server page";stages.enter("server page",mod::nowUs());
             if(gameContext)tickServerInfo(now);
+            stage="map";stages.enter("map",mod::nowUs());
+            if(gameContext){tickArea();tickPlayerMap();}
             stage="chat";stages.enter("chat",mod::nowUs());
             if(gameContext)tickChat(now);
             stage="notices";stages.enter("notices",mod::nowUs());
@@ -4255,6 +4297,9 @@ MOD_API void mod_test_gauges(float* four) {
 // The fake dialogue's body, as UTF-8 for ASCII text (other characters as '?'); returns its length.
 MOD_API unsigned mod_test_dialog_body(char* out,unsigned cap){std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return 0;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
     unsigned n=0;for(char16_t c:r.fakeDialogBody){if(n+1<cap)out[n]=c<0x80?char(c):'?';++n;}if(cap)out[std::min(n,cap-1)]=0;return n;}
+MOD_API unsigned mod_test_map(char* out,unsigned cap){std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return 0;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
+    std::ostringstream o;if(r.mapBoard){mod::mapicons::Board::Picture p;r.mapBoard->read(p);for(uint32_t i=0;i<p.count;++i)o<<p.icons[i].x<<","<<p.icons[i].y<<","<<p.icons[i].z<<","<<p.icons[i].area<<";";}
+    auto s=o.str();unsigned n=unsigned(s.size());if(cap){std::memcpy(out,s.data(),std::min(n,cap-1));out[std::min(n,cap-1)]=0;}return n;}
 MOD_API unsigned mod_test_telop(char* out,unsigned cap){std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return 0;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
     unsigned n=0;for(char16_t c:r.fakeTelop){if(n+1<cap)out[n]=c<0x80?char(c):'?';++n;}if(cap)out[std::min(n,cap-1)]=0;return n;}
 MOD_API void mod_test_dialog_answer(unsigned row) {std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);r.fakeDialogAnswer=row;}
@@ -4443,6 +4488,8 @@ unsigned mod_status(char* out,unsigned cap) {
          <<",\"menu\":{\"ready\":"<<(r.debugMenu?"true":"false")<<",\"open\":"<<(r.debugMenu&&r.debugMenu->open()?"true":"false")<<",\"opens\":"<<(r.debugMenu?r.debugMenu->opens():0)<<",\"switches\":"<<(r.debugMenu?r.debugMenu->switches():0)<<",\"selected\":"<<(r.debugMenu?r.debugMenu->selected():0)<<"}}";
         {mod::chat::Link::Counters k;if(r.chatLink)k=r.chatLink->counters();
          o<<",\"chat\":{\"ready\":"<<(r.chatBox?"true":"false")<<",\"on\":"<<(k.on?"true":"false")<<",\"typing\":"<<(r.chatBox&&r.chatBox->typing()?"true":"false")<<",\"reads\":"<<k.reads<<",\"sent\":"<<k.sent<<",\"refused\":"<<k.refused<<",\"received\":"<<k.received<<"}";}
+        {mod::mapicons::Link::Counters k;if(r.mapLink)k=r.mapLink->counters();auto s=mod::mapicons::stats();
+         o<<",\"player_map\":{\"ready\":"<<(r.mapLink?"true":"false")<<",\"on\":"<<(k.on?"true":"false")<<",\"reads\":"<<k.reads<<",\"shown\":"<<k.shown<<",\"area\":"<<r.gameArea<<",\"updates\":"<<s.updates<<",\"taken\":"<<s.taken<<",\"refused\":"<<s.refused<<",\"shown_area\":"<<s.shownArea<<",\"mode\":"<<s.mode<<"}";}
         o<<",\"server_info\":{\"ready\":"<<(r.infoScreen?"true":"false")<<",\"open\":"<<(r.infoScreen&&r.infoScreen->open()?"true":"false")<<",\"opens\":"<<(r.infoScreen?r.infoScreen->opens():0)
          <<",\"page\":"<<(r.infoScreen?r.infoScreen->page():0)<<",\"pages\":"<<(r.infoScreen?r.infoScreen->pageCount():0)<<",\"answered\":"<<(r.infoScreen&&r.infoScreen->answered()?"true":"false")<<"}";
         o<<",\"received_structures\":{\"on\":"<<(r.receivedOn?"true":"false")<<",\"answers\":\""<<mod::received::label(r.receivedEarly)<<"\",\"built\":"<<r.receivedBuilder.changed()<<",\"skipped\":"<<r.receivedBuilder.skipped()<<"}";

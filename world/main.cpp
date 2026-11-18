@@ -571,7 +571,7 @@ int main(int argc,char** argv){
         // world holds them (under identity keys), and the policy's near_cap unless --broadcast-near gives the cap.
         relayConfig.viewer=[&w,nearGiven](uint64_t id){return world::relayViewer(w,id,nearGiven);};
         // Where each player's game is, for collections made "near me" and imported "here" (../docs/COLLECTIONS.md).
-        relayConfig.spotted=[&w](uint64_t id,uint32_t,const std::array<double,3>& at,bool haveYaw,double yaw,const std::string& name){auto s=world::relaySpot(at,haveYaw,yaw,nowSeconds());s.name=name;w.noteSpot(id,s);};
+        relayConfig.spotted=[&w](uint64_t id,uint32_t area,const std::array<double,3>& at,bool haveYaw,double yaw,const std::string& name){auto s=world::relaySpot(at,haveYaw,yaw,nowSeconds());s.name=name;s.area=area;w.noteSpot(id,s);};
         relayConfig.online=[&w](std::vector<std::string> names){w.setOnline(std::move(names));};   // who is on, for the policy
         try{world::Relay check(relayConfig,[](const world::RelayAddress&,const uint8_t*,size_t){});}
         catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 2;}

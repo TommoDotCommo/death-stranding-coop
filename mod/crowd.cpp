@@ -36,7 +36,7 @@ void Crowd::local(const others::Local& l){
     local_=l;local_.state.flags&=uint16_t(~ds::Teleport);
     client_.setLocal(l.state,l.available,l.gated,l.sampledAt,l.jumped);
     // Where this porter is: the server decides from it who is near. No place while there is no pose (loading, cutscene).
-    if(l.available&&!l.gated)client_.setPosition(l.state.position);else client_.clearPosition();
+    if(l.available&&!l.gated)client_.setPosition(l.state.position,l.area);else client_.clearPosition();
 }
 void Crowd::admit(uint64_t id){
     if(!settings_.cap||!id||id==settings_.self||members_.count(id))return;

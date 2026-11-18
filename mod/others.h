@@ -91,7 +91,7 @@ private:
 struct Link {std::function<void(uint64_t to,const uint8_t* data,size_t size)> send;};
 // This porter, once per game-thread tick. jumped: this sample is a jump (the provider's teleport flag on the tick it
 // rose); each session keeps it until a presence packet carrying it has gone to that player.
-struct Local {ds::State state;bool available=false,gated=true,jumped=false;uint64_t sampledAt=0;};
+struct Local {ds::State state;bool available=false,gated=true,jumped=false;uint64_t sampledAt=0;uint32_t area=0;};   // area: the map he is in (0: not known)
 struct Settings {
     uint64_t self=0;                     // this player's id on the link; nonzero
     uint64_t session=0;                  // the group's shared number (config `session`); nonzero

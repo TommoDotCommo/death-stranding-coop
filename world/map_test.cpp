@@ -21,16 +21,16 @@ struct Server {
         return raw("POST",target,body,h);}
     std::string token(const std::string& key,const std::string& name){json::parse(w.signIn(key,name,"g").body);return json::parse(raw("POST","/s3cret/coop/notice-token","{\"player\":\""+key+"\"}").body).get("token").string();}
     std::string keyToken(const id::Keys& k){auto r=signedPost(k,"notice-token","{\"player\":\""+id::account(k.pub)+"\"}");CHECK(r.status==200);return r.status==200?json::parse(r.body).get("token").string():"";}
-    void spot(uint64_t relay,const char* name,double x=1,bool yaw=false){Spot s;s.x=x;s.y=2;s.z=3;s.haveYaw=yaw;s.yaw=.5;s.at=now;s.name=name;w.noteSpot(relay,s);}
+    void spot(uint64_t relay,const char* name,double x=1,bool yaw=false,uint32_t area=0){Spot s;s.x=x;s.y=2;s.z=3;s.haveYaw=yaw;s.yaw=.5;s.at=now;s.name=name;s.area=area;w.noteSpot(relay,s);}
     json::Value read(const std::string& t){auto r=raw("GET","/s3cret/coop/map","",{{"x-coop-token",t}});CHECK(r.status==200);return json::parse(r.status==200?r.body:"{\"format\":0,\"on\":false,\"players\":[]}");}
     std::string names(const std::string& t){std::string out;for(auto& p:read(t).get("players").items())out+=p.get("name").string()+",";return out;}
 };
 int main(){
     {   // Every player placed just now, with what the map needs; the id as text, since a key's relay id does not fit a double.
-        Server s;auto ann=s.token("ann","Ann");s.spot(7,"Bob",12.5,true);s.spot(uint64_t(1)<<60,"Cy");
+        Server s;auto ann=s.token("ann","Ann");s.spot(7,"Bob",12.5,true,200);s.spot(uint64_t(1)<<60,"Cy");
         auto d=s.read(ann);CHECK(d.get("format").integer()==1&&d.get("on").boolean());auto& l=d.get("players").items();CHECK(l.size()==2);
-        if(l.size()==2){CHECK(l[0].get("id").string()=="7"&&l[0].get("name").string()=="Bob"&&l[0].get("x").real()==12.5&&l[0].get("y").real()==2&&l[0].get("z").real()==3&&l[0].get("yaw").real()==.5);
-            CHECK(l[1].get("id").string()=="1152921504606846976"&&!l[1].has("yaw"));}
+        if(l.size()==2){CHECK(l[0].get("id").string()=="7"&&l[0].get("name").string()=="Bob"&&l[0].get("x").real()==12.5&&l[0].get("y").real()==2&&l[0].get("z").real()==3&&l[0].get("yaw").real()==.5&&l[0].get("area").integer()==200);
+            CHECK(l[1].get("id").string()=="1152921504606846976"&&!l[1].has("yaw")&&!l[1].has("area"));}
         // Gone quiet: off the map after MapFreshSeconds, not before; back when placed again.
         s.now+=MapFreshSeconds;CHECK(s.names(ann)=="Bob,Cy,");s.now+=1;CHECK(s.names(ann).empty());s.spot(7,"Bob");CHECK(s.names(ann)=="Bob,");}
     {   // Only a good token, only GET, only under the prefix.
