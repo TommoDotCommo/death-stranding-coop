@@ -69,8 +69,9 @@ In the game's own UI wherever it can carry them, rather than a display of our ow
 
 - [ ] **Server info in the game**: which server this is, its rules and settings, and who is online.
 - [ ] **Text chat in the game** between the players on a server (with the moderation it needs before going public).
-- [ ] **Debug menu in the game**: open it and switch infinite stamina, blood, battery and the like on and off.
-- [ ] **Hold F1 for a help page**: the mod's keys and useful information.
+- [x] **Debug menu in the game**: F3, in the game's own dialogue: stamina, blood and the porter's battery, where test mode is
+      on. A vehicle's battery is still to come.
+- [x] **Hold F1 for a help page**: the co-op keys of this session, in the game's own caption.
 
 ## Later features
 

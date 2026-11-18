@@ -11,7 +11,7 @@ constexpr unsigned OthersCarryMax=8;   // others.h MaxCarriers
 // switch at its default. materials: the virtual-key code of the key that drops a set of material crates (0: none).
 constexpr unsigned TestMaterialsKey=0x55;   // U: free in the game's default bindings and not one of the mod's keys
 struct TestMode { bool on=false;unsigned materialsKey=0;bool stamina=false,blood=false,battery=false; };
-// Keys test mode may not take: the mod's own (F1 guide, F2 bug mark, Tab, B ping, L like) and the mouse buttons,
+// Keys test mode may not take: the mod's own (F1 guide, F2 bug mark, F3 switches, Tab, B ping, L like) and the mouse buttons,
 // Escape, Enter and modifiers; the partner's passenger and catch-up keys are checked against the config's own values.
 bool testKeyRefused(unsigned vk);
 struct Config {

@@ -7,10 +7,12 @@
 // behind the porter. At most one set every GapMs, and at most MaxOnGround of this player's crates on the ground: what
 // is already there is never removed to make room (the oldest are left alone), the press is refused instead.
 //
-// Gauges: the porter's status block (game_offsets.md, "Blood and stamina"): B = player + 0x2b0, the first value/maximum
-// pair B+0x28 / B+0x2c is blood, the second B+0x30 / B+0x38 stamina (confirmed live 2026-11-15 by a sprint and a fall).
-// The value is set to its maximum, only when it is below it, only when both read as sane floats, only through the gate
-// (the game thread, the porter readable, no game event, not dead and not caught).
+// Gauges: the porter's status component S = *(entity + 0x54e0): blood S+0xc0 of S+0xc4, stamina S+0x110 of S+0x104 with its
+// ceiling S+0x108, as the game's own full recovery (0x2738940) sets them; his battery is in the component at entity +
+// 0x54c8 (game_offsets.md, "Blood, stamina and battery"). The block at player + 0x2b0 only holds copies the game rewrites
+// every frame: writing it changes nothing (seen live 2026-11-19). A value is set to its maximum only when below it, only
+// when both read as sane floats, only through the gate (the game thread, the porter readable, no game event, not dead
+// and not caught).
 #include "cargo.h"
 #include "discovery.h"
 #include "vitals.h"
@@ -57,10 +59,11 @@ private:
 
 // Blood and stamina.
 constexpr uint64_t PlayerManagerSlot=0x7bc7568,PlayerInfo=0x2b0;   // as signals.h readInfo
-constexpr uint64_t BloodValue=0x28,BloodMax=0x2c,StaminaValue=0x30,StaminaMax=0x38;
-// The porter's own battery (not a vehicle's): component E+0x54e0 of his entity; the charge is +0x110 and the full charge
-// +0x104, as the game's own refill (DSPlayerSystem_sExportedRecoverBattery, 0x2738940) brings it there.
-constexpr uint64_t EntityBattery=0x54e0,BatteryValue=0x110,BatteryMax=0x104;
+constexpr uint64_t EntityStatus=0x54e0,BloodValue=0xc0,BloodMax=0xc4,StaminaValue=0x110,StaminaMax=0x104,StaminaCeiling=0x108;
+// The porter's own battery (not a vehicle's): component E+0x54c8 of his entity; the charge is the float +0x4810, the full
+// charge +0x4814 (read live: 1000 of 1000). The game's own refill (DSPlayerSystem_sExportedRecoverBattery, 0x27e1010)
+// copies the second to the first and clears +0x47f8.
+constexpr uint64_t EntityBattery=0x54c8,BatteryValue=0x4810,BatteryMax=0x4814,BatteryClear=0x47f8;
 constexpr float GaugeCeiling=1e6f;   // a maximum above this is not a gauge
 // The value to write, or nothing: the maximum when value < maximum and both are finite, 0 <= value and 0 < maximum <=
 // GaugeCeiling.
@@ -71,11 +74,13 @@ struct Gate { bool gameThread=false,porterReadable=false,inEvent=true;vitals::St
 const char* refusal(const Gate&);
 // The porter's status block B (player + PlayerInfo), accepted only when the player's entity is this porter; 0 = none.
 uint64_t infoBlock(const discovery::Sampler&,uint64_t imageBase,uint64_t porterEntity);
+// His status component, on the same condition; 0 = none.
+uint64_t statusComponent(const discovery::Sampler&,uint64_t imageBase,uint64_t porterEntity);
 using Writable=std::function<bool(uint64_t at,size_t n)>;          // committed read-write memory, all of it
 using Poke=std::function<void(uint64_t at,const void* from,size_t n)>;
 struct Kept { const char* refused="";unsigned blood=0,stamina=0; };   // writes made by one call
-// One tick: through the gate, each switched-on gauge of block B set to its maximum when it is below it.
-Kept keepFull(const Gate&,const discovery::Sampler&,uint64_t block,bool blood,bool stamina,const Writable&,const Poke&);
-// The same for the porter's battery. block: as above, nonzero only for this porter, whose entity is `entity`. The writes made (0 or 1).
-unsigned keepBattery(const Gate&,const discovery::Sampler&,uint64_t block,uint64_t entity,const Writable&,const Poke&);
+// One tick: through the gate, each switched-on gauge of status component `status` set to its maximum when it is below it.
+Kept keepFull(const Gate&,const discovery::Sampler&,uint64_t status,bool blood,bool stamina,const Writable&,const Poke&);
+// The same for the porter's battery. status: as above, nonzero only for this porter, whose entity is `entity`. The writes made (0 or 1).
+unsigned keepBattery(const Gate&,const discovery::Sampler&,uint64_t status,uint64_t entity,const Writable&,const Poke&);
 }

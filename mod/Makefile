@@ -331,7 +331,7 @@ game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderlo
 	./build/online-test
 	./build/vitals-test
 	./build/testmode-test
-	python3 -B mutants.py --sources "$(TESTMODE_SRC)" --prefix build/mutant-testmode- TESTMODE_SHARED_RECORD TESTMODE_FORGET TESTMODE_RATE TESTMODE_CAP TESTMODE_ABOVE TESTMODE_THREAD TESTMODE_EVENT TESTMODE_DEAD TESTMODE_OWNER TESTMODE_BATTERY_GATE TESTMODE_BATTERY_OWNER && echo KILLED 11 test mode mutants
+	python3 -B mutants.py --sources "$(TESTMODE_SRC)" --prefix build/mutant-testmode- TESTMODE_SHARED_RECORD TESTMODE_FORGET TESTMODE_RATE TESTMODE_CAP TESTMODE_ABOVE TESTMODE_THREAD TESTMODE_EVENT TESTMODE_DEAD TESTMODE_OWNER TESTMODE_BATTERY_GATE TESTMODE_BATTERY_OWNER TESTMODE_BATTERY_CLEAR TESTMODE_CEILING && echo KILLED 13 test mode mutants
 	./build/wheels-test
 	./build/controls-test
 	./build/voidout-test

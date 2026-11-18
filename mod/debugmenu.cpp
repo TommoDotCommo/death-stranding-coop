@@ -48,10 +48,12 @@ void Menu::tick(bool pressed,bool allowed,uint64_t now){
         return;
     }
 #ifndef MUTANT_DEBUGMENU_EVENT
-    if(pressed&&allowed&&api_.free()){
+    const bool ok=allowed;
 #else
-    if(pressed&&api_.free()){
+    const bool ok=true;
 #endif
-        if(show(RowSwitch))log_("DEBUGMENU opened\n");else log_("DEBUGMENU could not open\n");}
+    if(!pressed)return;
+    if(!ok||!api_.free()){log_(ok?"DEBUGMENU not now: a menu or dialogue of the game is up\n":"DEBUGMENU not now: not in the world, or a game event runs\n");return;}
+    if(show(RowSwitch))log_("DEBUGMENU opened\n");else log_("DEBUGMENU could not open\n");
 }
 }

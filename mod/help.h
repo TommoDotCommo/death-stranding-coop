@@ -11,8 +11,8 @@ constexpr unsigned Key=0x70;            // F1: free in the supported build's rec
 constexpr uint64_t RetryMs=500;         // the HUD was not ready: asked again this much later, while the key is held
 constexpr float ShowSeconds=600;        // long enough for any hold; the release ends it
 inline const char16_t* const Title=u"Co-op keys";
-// Where the game draws it. Its units are not known yet (game_offsets.md): the lab's `at` command tries others.
-struct Place {int pivot=4;float x=0,y=0;};
+// Where the game draws it: pivot 0 is the text's top left, x and y are in a 1920 x 1080 screen (seen live, 2560 x 1440).
+struct Place {int pivot=0;float x=140,y=180;};
 struct Api {
     std::function<bool(const std::u16string& title,const std::u16string& body,const Place&)> show;   // false: no HUD now
     std::function<void()> hide;

@@ -110,7 +110,7 @@ a game shows the group invite and **Start group server and play** instead of a l
    after the last player.
 3. It writes the host's `mod.json`: no `peer`, `server` `127.0.0.1`, `relay` `127.0.0.1:P`, `relay_key` `wKEY`,
    `session` KEY, `player_id`, `relay_mode` `broadcast` (since 2026-11-17: each game publishes once and the server
-   copies to everyone near; `../mod/README.md`, "The broadcast mode"), `others` 15, `others_gear`, `others_carry` 4, `partner_tag`, `online_server` `http://127.0.0.1:P/wKEY/auth/ds`,
+   copies to everyone near; `../mod/README.md`, "The broadcast mode"), `others` 15, `others_gear`, `others_carry` 4, `partner_tag`, `help_page`, `online_server` `http://127.0.0.1:P/wKEY/auth/ds`,
    `build_received` (below, "Other players' structures"), and the play setup's `game_thread`, `puppet_probe`,
    `required`; with a notice token also `strand_notices`, `offer_strand` and `strand_token` (below, "What the game is
    told"). The proxy's peer list is `127.0.0.1`. On a server that
@@ -636,7 +636,7 @@ Look for proxy `READY` and `MOD_STARTED` (network only), then mod `POSE availabl
 after continuing a co-op save, and `handshake:true` / `connected:true` in the
 partner/mod state. Inspect `<instance>/redirect-data/mod/mod.json`: role host,
 slots 0/1, peer 127.0.0.1, session 123, game provider, game_thread, puppet_probe,
-partner own, partner_gear, partner_marker, partner_vehicle, carry_visual, partner_tag, notices, share_environment rain, required. Repeat
+partner own, partner_gear, partner_marker, partner_vehicle, carry_visual, partner_tag, help_page, notices, share_environment rain, required. Repeat
 with `--dev-client` and a host stand-in to check opposite slots. This launcher
 setup shows the partner without any command; no `puppet.double`, `pad.script` or
 `puppet.body` command is armed. If a later test sends them independently, use

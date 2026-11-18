@@ -2951,7 +2951,7 @@ struct Runtime final:ds::Transport {
             testCreate=cargoCreate;
             testRecords=[this](unsigned limit){uint64_t manager=0;if(!cargoManagerSlot||!sampler->read(cargoManagerSlot,&manager,8))return std::vector<mod::cargo::Record>{};
                 return mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,limit);};
-            testBlock=[this](uint64_t entity){return mod::testmode::infoBlock(*sampler,sampler->base,entity);};
+            testBlock=[this](uint64_t entity){return mod::testmode::statusComponent(*sampler,sampler->base,entity);};
             porterVitals=[this](uint64_t entity){return mod::vitals::read(*sampler,entity);};
             testWritable=mod::mulegoal::nativeWritable();testPoke=mod::mulegoal::nativePoke();}
 #else
@@ -2962,7 +2962,7 @@ struct Runtime final:ds::Transport {
                 return out;};
             testBlock=[this](uint64_t entity){return entity?fake->base+0xf800:0;};
             porterVitals=[this](uint64_t){return fakeVitals;};
-            testWritable=[this](uint64_t at,size_t n){return at>=fake->base+0xf800&&at+n<=fake->base+0xf900;};
+            testWritable=[this](uint64_t at,size_t n){return at>=fake->base+0xf800&&at+n<=fake->base+0xfa00;};
             testPoke=[this](uint64_t at,const void* from,size_t n){fake->mutate([&]{std::memcpy(fake->data.data()+(at-fake->base),from,n);});};}
 #endif
         cache.sampledAt=mod::nowMs();

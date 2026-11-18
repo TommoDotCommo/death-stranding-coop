@@ -97,17 +97,26 @@ uint64_t infoBlock(const discovery::Sampler& s,uint64_t base,uint64_t entity){
 #endif
     return player+PlayerInfo;
 }
+uint64_t statusComponent(const discovery::Sampler& s,uint64_t base,uint64_t entity){
+    uint64_t status=0;
+    return infoBlock(s,base,entity)&&s.read(entity+EntityStatus,&status,8)?status:0;
+}
 Kept keepFull(const Gate& g,const discovery::Sampler& s,uint64_t block,bool blood,bool stamina,const Writable& writable,const Poke& poke){
     Kept k;k.refused=refusal(g);
     if(*k.refused)return k;
-    if(!block){k.refused="no status block for this porter";return k;}
+    if(!block){k.refused="no status component for this porter";return k;}
     if(!poke||!writable){k.refused="no writer";return k;}
     auto one=[&](uint64_t value,uint64_t maximum)->unsigned{
         float v=0,m=0;if(!s.read(block+value,&v,4)||!s.read(block+maximum,&m,4))return 0;
         auto to=refill(v,m);if(!to||!writable(block+value,4))return 0;
         float w=*to;poke(block+value,&w,4);return 1;};
     if(blood)k.blood=one(BloodValue,BloodMax);
-    if(stamina)k.stamina=one(StaminaValue,StaminaMax);
+    if(stamina){k.stamina=one(StaminaValue,StaminaMax);
+#ifndef MUTANT_TESTMODE_CEILING
+        float ceiling=0,m=0;   // a lowered ceiling would hold the value down: raised with it, as the game's recovery does
+        if(k.stamina&&s.read(block+StaminaCeiling,&ceiling,4)&&s.read(block+StaminaMax,&m,4)&&refill(ceiling,m)&&writable(block+StaminaCeiling,4))poke(block+StaminaCeiling,&m,4);
+#endif
+    }
     return k;
 }
 unsigned keepBattery(const Gate& g,const discovery::Sampler& s,uint64_t block,uint64_t entity,const Writable& writable,const Poke& poke){
@@ -121,6 +130,10 @@ unsigned keepBattery(const Gate& g,const discovery::Sampler& s,uint64_t block,ui
     uint64_t c=0;float v=0,m=0;
     if(!s.read(entity+EntityBattery,&c,8)||!c||!s.read(c+BatteryValue,&v,4)||!s.read(c+BatteryMax,&m,4))return 0;
     auto to=refill(v,m);if(!to||!writable(c+BatteryValue,4))return 0;
-    float w=*to;poke(c+BatteryValue,&w,4);return 1;
+    float w=*to;poke(c+BatteryValue,&w,4);
+#ifndef MUTANT_TESTMODE_BATTERY_CLEAR
+    if(writable(c+BatteryClear,4)){const uint32_t zero=0;poke(c+BatteryClear,&zero,4);}
+#endif
+    return 1;
 }
 }

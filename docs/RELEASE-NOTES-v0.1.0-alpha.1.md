@@ -81,7 +81,8 @@ the player path (Setup or the launcher's install, the game started by Steam), no
 ### Features new in this alpha, each live once in one real game (2026-11-18)
 
 - **Test mode**: U dropped all six material crates (chiral crystals, metals, ceramics, chemicals, special alloys,
-  resins), read back from the game's cargo records; stamina and blood read full during a 25 s sprint.
+  resins), read back from the game's cargo records. ("Stamina and blood read full during a 25 s sprint" proved nothing: see
+  Known limits.)
 - **Route challenges**: a route recorded with K, a run finished, and a run that left the corridor failed on the right side.
 - **Collections**: a 30 m bridge and a rain shelter made on one server and imported on another were built by the
   importer's own game and still there a minute later.
@@ -94,7 +95,8 @@ the player path (Setup or the launcher's install, the game started by Steam), no
   GitHub. Uninstall from the window ran (the game folder back as it was).
 - **The internet**: the two PCs that met through the rented server were at one place; players at different homes,
   further away and behind other routers have not been tried together.
-- **Test mode**: the vehicle's battery is not kept full yet (accepted, does nothing); cargo damage, equipment wear and
+- **Test mode**: blood and stamina are **not** actually kept full in this alpha (found 2026-11-19: it writes copies the game
+  overwrites; fixed on `main`). The vehicle's battery is not kept full either (accepted, does nothing); cargo damage, equipment wear and
   timefall work as in the normal game.
 - **Route challenges**: the launcher's Challenges tab has not been seen on a screen; a run sent to a server and its board.
 - **Collections**: importing "here" (turned to your heading), turned ropes and bridges, another player's game seeing

@@ -20,13 +20,13 @@ struct Memory {
     Writable writable(){return [this](uint64_t at,size_t n){for(size_t i=0;i<n;++i)if(!bytes.count(at+i))return false;return true;};}
     Poke poke(){return [this](uint64_t at,const void* from,size_t n){++pokes;for(size_t i=0;i<n;++i)bytes[at+i]=static_cast<const uint8_t*>(from)[i];};}
 };
-constexpr uint64_t Image=0x140000000,Manager=0x200000,List=0x210000,Player=0x220000,Other=0x230000,Porter=0x300000;
+constexpr uint64_t Image=0x140000000,Manager=0x200000,List=0x210000,Player=0x220000,Other=0x230000,Porter=0x300000,Status=0x500000;
 static void world(Memory& m,uint64_t owner=Porter){
     m.put<uint64_t>(Image+PlayerManagerSlot,Manager);m.put<int32_t>(Manager+0x38,2);m.put<uint64_t>(Manager+0x40,List);
     m.put<uint64_t>(List,Other);m.put<uint32_t>(Other+0x88,1);m.put<uint64_t>(Other+0x70,0x999000);   // not number zero
     m.put<uint64_t>(List+8,Player);m.put<uint32_t>(Player+0x88,0);m.put<uint64_t>(Player+0x70,owner);
-    const uint64_t B=Player+PlayerInfo;
-    m.put<float>(B+BloodValue,40);m.put<float>(B+BloodMax,100);m.put<float>(B+0x34,90);m.put<float>(B+StaminaValue,30);m.put<float>(B+StaminaMax,90);
+    m.put<uint64_t>(Porter+EntityStatus,Status);const uint64_t B=Status;
+    m.put<float>(B+BloodValue,40);m.put<float>(B+BloodMax,100);m.put<float>(B+StaminaCeiling,70);m.put<float>(B+StaminaValue,30);m.put<float>(B+StaminaMax,90);
 }
 static Gate open(){Gate g;g.gameThread=true;g.porterReadable=true;g.inEvent=false;g.vitals.known=true;return g;}
 static cargo::Record crate(uint32_t hash,std::array<double,3> at,uint8_t where=cargo::InWorld){cargo::Record r;r.hash=hash;r.position=at;r.state=uint32_t(where)<<8|7u;return r;}
@@ -88,12 +88,12 @@ static void gauges(){
         Gate e=g;e.vitals.caught=true;CHECK(shut(e));
         Gate f=g;f.vitals.known=false;CHECK(shut(f));
     }
-    {   Memory m;world(m);auto s=m.sampler(Image);const uint64_t B=Player+PlayerInfo;
-        CHECK(infoBlock(s,Image,Porter)==B);
-        CHECK(infoBlock(s,Image,Porter+8)==0&&infoBlock(s,Image,0)==0);   // another porter's entity: not his block
+    {   Memory m;world(m);auto s=m.sampler(Image);const uint64_t B=Status;
+        CHECK(infoBlock(s,Image,Porter)==Player+PlayerInfo&&statusComponent(s,Image,Porter)==Status);
+        CHECK(infoBlock(s,Image,Porter+8)==0&&infoBlock(s,Image,0)==0&&statusComponent(s,Image,Porter+8)==0);   // another porter's entity: not his block
         auto k=keepFull(open(),s,B,true,true,m.writable(),m.poke());
         CHECK(*k.refused==0&&k.blood==1&&k.stamina==1&&m.get<float>(B+BloodValue)==100.f&&m.get<float>(B+StaminaValue)==90.f);
-        CHECK(m.get<float>(B+0x34)==90.f&&m.get<float>(B+BloodMax)==100.f&&m.get<float>(B+StaminaMax)==90.f);   // nothing else
+        CHECK(m.get<float>(B+StaminaCeiling)==90.f&&m.get<float>(B+BloodMax)==100.f&&m.get<float>(B+StaminaMax)==90.f);   // the ceiling comes up with it, the maxima stay
         unsigned before=m.pokes;auto full=keepFull(open(),s,B,true,true,m.writable(),m.poke());CHECK(full.blood==0&&full.stamina==0&&m.pokes==before);
         // Each closed gate: nothing written.
         for(int which=0;which<5;++which){Memory n;world(n);auto t=n.sampler(Image);Gate g=open();
@@ -105,13 +105,13 @@ static void gauges(){
         {Memory n;world(n);auto t=n.sampler(Image);auto r=keepFull(open(),t,0,true,true,n.writable(),n.poke());CHECK(*r.refused!=0&&n.pokes==0);
          auto none=[](uint64_t,size_t){return false;};auto q=keepFull(open(),t,B,true,true,none,n.poke());CHECK(q.blood==0&&q.stamina==0&&n.pokes==0);}
         // The porter's battery: raised to its full charge once, only through the gate, only for his own block.
-        {Memory n;world(n);auto t=n.sampler(Image);const uint64_t C=0x400000;n.put<uint64_t>(Porter+EntityBattery,C);n.put<float>(C+BatteryValue,5);n.put<float>(C+BatteryMax,20);n.put<float>(C+0x108,20);
+        {Memory n;world(n);auto t=n.sampler(Image);const uint64_t C=0x400000;n.put<uint64_t>(Porter+EntityBattery,C);n.put<float>(C+BatteryValue,5);n.put<float>(C+BatteryMax,20);n.put<uint32_t>(C+BatteryClear,7);
          Gate shut=open();shut.inEvent=true;CHECK(keepBattery(shut,t,B,Porter,n.writable(),n.poke())==0&&n.get<float>(C+BatteryValue)==5.f);
          CHECK(keepBattery(open(),t,0,Porter,n.writable(),n.poke())==0&&n.get<float>(C+BatteryValue)==5.f);
-         CHECK(keepBattery(open(),t,B,Porter,n.writable(),n.poke())==1&&n.get<float>(C+BatteryValue)==20.f&&n.get<float>(C+BatteryMax)==20.f&&n.get<float>(C+0x108)==20.f);
+         CHECK(keepBattery(open(),t,B,Porter,n.writable(),n.poke())==1&&n.get<float>(C+BatteryValue)==20.f&&n.get<float>(C+BatteryMax)==20.f&&n.get<uint32_t>(C+BatteryClear)==0);
          CHECK(keepBattery(open(),t,B,Porter,n.writable(),n.poke())==0);}
         // Another player's block (his entity is not this porter's): the search refuses it.
-        {Memory n;world(n,0x777000);auto t=n.sampler(Image);CHECK(infoBlock(t,Image,Porter)==0);}
+        {Memory n;world(n,0x777000);auto t=n.sampler(Image);CHECK(infoBlock(t,Image,Porter)==0&&statusComponent(t,Image,Porter)==0);}
     }
 }
 int main(){

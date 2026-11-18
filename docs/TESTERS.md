@@ -49,6 +49,10 @@ Your launcher makes a **player key** the first time (`player.key` in the co-op f
 server: nobody else can play or build in your name. Do not share that file; if you lose it, you start as a new
 player.
 
+## Keys in the game
+
+Hold **F1** in the world for a list of the co-op keys that work in your session.
+
 ## Test mode
 
 The test server may run in **test mode**, so you can try everything without gathering materials or resting. The
@@ -59,7 +63,9 @@ the game tells you once in its message feed at the side of the screen ("Test mod
   cargo (stand next to them, E). One set every 5 seconds; at most 20 of your crates lie on the ground at once, so pick
   some up before you ask for more (the game tells you when you have 20 out). Crates are never taken away. A set is one
   crate of each material: chiral crystals, metals, ceramics, chemicals, special alloys and resins.
-- **Blood and stamina stay full**, except while a cutscene runs, while you are down or while BTs hold you.
+- **Blood, stamina and your own battery stay full**, except while a cutscene runs, while you are down or while BTs hold
+  you. Press **F3** to switch each of them on or off: **Switch** changes the marked line, **Next** moves the mark, **Close** or
+  Esc leaves.
 - Not in test mode (yet): your vehicle's battery, cargo damage, your equipment wearing out and timefall still work as
   in the normal game.
 

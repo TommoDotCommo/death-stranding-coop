@@ -65,7 +65,9 @@ Api nativeApi(discovery::Sampler& s){
     a.free=[sp,menuSlot,box]{
         uint64_t dlg=box(),menu=0,stack=0,page=0;uint8_t up=1;int waiting=1;
         if(!dlg||!sp->read(dlg+0x20,&up,1)||up||!sp->read(dlg+0x78,&waiting,4)||waiting)return false;
-        if(!sp->read(menuSlot,&menu,8)||!menu||!sp->read(menu+0xb0,&stack,8))return false;
+        if(!sp->read(menuSlot,&menu,8))return false;
+        if(!menu)return true;                           // in the world the game has no menu layer at all (seen live)
+        if(!sp->read(menu+0xb0,&stack,8))return false;
         return !stack||(sp->read(stack+0x10,&page,8)&&!page);};
     a.showing=[sp,box]{uint64_t dlg=box();uint8_t up=0;return dlg&&sp->read(dlg+0x20,&up,1)&&up;};
     a.open=[=](const Request& r){

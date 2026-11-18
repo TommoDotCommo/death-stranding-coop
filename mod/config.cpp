@@ -319,7 +319,7 @@ bool testKeyRefused(unsigned vk){
     for(unsigned k:{0x01u,0x02u,0x04u,0x05u,0x06u,   // mouse buttons
                     0x09u,0x0du,0x1bu,                // Tab (the player list), Enter, Escape
                     0x10u,0x11u,0x12u,0xa0u,0xa1u,0xa2u,0xa3u,0xa4u,0xa5u,   // Shift, Ctrl, Alt
-                    0x70u,0x71u,                      // F1 the guide, F2 the bug mark
+                    0x70u,0x71u,0x72u,                // F1 the guide, F2 the bug mark, F3 the test-mode switches
                     0x42u,0x4cu})                     // B the ping, L the like
         if(vk==k)return true;
     return false;

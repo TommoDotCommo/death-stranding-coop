@@ -6473,6 +6473,23 @@ object's `+0x2ac`), then `OdradekSensorLastIndex = n` and `OdradekSensorLastInde
 drives the wave's sweep over time (no time value is among these variables), so whether writing a slot draws a new wave
 at that place or only moves a running one. The mod's `partner_scan: "pulse"` is that experiment.
 
+### Blood, stamina and battery: the real values (live, 2026-11-19)
+
+With `E` the porter's entity (`player + 0x70`):
+
+| Value | Where | Maximum | Evidence |
+|---|---|---|---|
+| blood | `S+0xc0`, `S = *(E+0x54e0)` | `S+0xc4` | written from outside: `B+0x28` below followed it at once; the full recovery sets it through `0x27400f0` |
+| stamina | `S+0x110` | `S+0x104` (ceiling `S+0x108`) | the same; falls with a sprint and creeps back at rest |
+| battery | float `D+0x4810`, `D = *(E+0x54c8)` | `D+0x4814` | 1000 of 1000 in Episode 1; written lower it recharges slowly |
+
+`DSPlayerSystem_sExportedRecoverBattery` is `0x26e6f30` (-> `0x27e1010`: `D+0x4810 = D+0x4814`, `D+0x47f8 = 0`).
+`DSPlayerSystem_sExportedRecoverFull` is `0x26e6f50` (-> `0x2738940`, all of the above). The registrar loads the function
+into `rax` **before** the two strings of its entry, so the function above a name pair is that pair's. An earlier note here
+took the next entry's function for the battery's.
+
+The block below is what the game reports, rewritten every frame: reading it is right, writing it does nothing.
+
 ### Blood and stamina
 
 **Established - the status block:** `DSPlayerSystem_sExportedGetPlayerInfo` (`0x26e6b20` -> `0x26e9240`, about twenty out
@@ -6527,13 +6544,41 @@ To settle them (README "Test mode", live checklist): a crate of each material on
 lab command `list 3 <stamp>` in `puppet.cargo`, the record's `item=` per material; then `CreateBaggage` with each.
 
 **Vehicle battery.** `VehicleEntityResource +0x130` ("Vehicles", "Entity and resource identities") is the resource's
-battery setting, shared by every vehicle of the kind, not a vehicle's charge. The script export
-`DSPlayerSystem_sExportedRecoverBattery` (name referenced at RVA `0x266c905`; thunk `0x26e6f50`, which takes an
-object from `0x283ec30`, presumably the player entity, and jumps to `0x2738940`) refills the **porter's** battery:
-`0x2738940` works on the component at that object's `+0x54e0` (floats `+0x104`, `+0x108`, `+0x110`, `+0x118`). The executable has no class or
+battery setting, shared by every vehicle of the kind, not a vehicle's charge. The porter's own battery is another value
+("Blood, stamina and battery: the real values"). The executable has no class or
 field name for a vehicle's charge (the strings `VehicleBatteryGaugeCoefficient` and `VehicleBatteryGaugeHeight` are HUD
 settings). Not known: where the riding vehicle keeps its charge. Next step: with a truck, read the vehicle entity's
 floats before and after a drive (the charge falls) and after a charger.
+
+## Common telop: a caption of any text (live, 2026-11-19)
+
+`DSUINodeGraphBindings_sShowCommonTelop` `0x3055f40(int pivot, float x, float y, const char16_t* title, const char16_t* text,
+float seconds)`, game thread. Both strings must be non-null. `0x3054b10(0, 1)` hides it at once. It needs the UI owner
+`*(image+0x7c00128)` and that object's `+0xa0`. Live at 2560 x 1440: `x`, `y` are in a 1920 x 1080 screen, pivot 0 puts the
+text's top left there; `\n` breaks lines; the title is drawn small above the text; six lines of about 30 characters fit
+easily. No menu page opens and input stays with the game. One telop at a time: showing it ends the game's.
+
+## Common dialogue: text and up to three buttons (live, 2026-11-19)
+
+Menu page 6. `dlg = *(owner+0x2c0)`, `owner = *(image+0x7c00128)`. The game's simple call is `0x30f3760(dlg, setting, const
+Text* body, callback*)`; the mod builds the same record so it can set the labels. Record of 0x48 bytes:
+
+| Offset | Field |
+|---|---|
+| `+0` / `+4` | rows (at most 3) / the row first selected |
+| `+8` | setting: 0 OK, 1 OK/Cancel, 2 Yes, 3 Yes/No, 4 Yes/No/Cancel, 5 no button, 6 timer |
+| `+9..+0xb` | each row's button type: 1 OK, 2 Yes, 3 No, 4 Cancel, 5 custom |
+| `+0x10, +0x18, +0x20` | each row's label; `+0x28` the body (`Text`: a counted string pointer) |
+| `+0x30`, `+0x34`, `+0x38`, `+0x39` | style, timer seconds, timer on, accept enabled |
+| `+0x3a`, `+0x3b` | the back button answers, may wait behind another dialogue |
+| `+0x40` | callback: an object whose first virtual function is called with `(object, type)` on the game thread |
+
+Strings: `0x191caa0` makes the empty one, `0x191ca20` one from UTF-16, `0x191caf0` assigns, `0x191cad0` releases. Build: empty
+strings at the four string fields, `0x30e7c10(dlg, record, setting)`, then replace labels and body, set the callback, and
+`0x30f3540(dlg, record)` shows it (it copies the record), then release the four. Replacing only the labels of setting 4
+keeps the types, so the three rows answer 2, 3 and 4; Esc answers 4. `dlg+0x20` is non-zero while it is up, `dlg+0x78`
+counts those waiting. `*(image+0x57965f8)` (the menu layers) is null in the world; when set, its `+0xb0` then `+0x10` is the
+open page. The world is not paused. After an answer the next dialogue takes input about two seconds later.
 
 ## Saving and loading on request (2026-11-14, static only, nothing called)
 
