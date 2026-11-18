@@ -2,9 +2,11 @@
 
 Work in progress: co-op for DEATH STRANDING DIRECTOR'S CUT on PC (Steam, build 13300582), built from zero. Each
 player keeps their own save and story; players who meet see each other and play together, and a strand server the
-players run themselves shares what everyone builds. **Not playable yet; there is no release.** Everything marked
-as working below ran in the real game as two copies on one PC; two PCs have not been tried. The details are in
-[STATUS.md](STATUS.md).
+players run themselves shares what everyone builds. **Closed alpha:
+[`v0.1.0-alpha.1`](https://github.com/TommoDotCommo/death-stranding-coop/releases/tag/v0.1.0-alpha.1) is out for
+testers.** Most features marked as working below ran as two copies of the game on one PC. The main paths also ran on
+two PCs with their own Steam accounts, through a rented server over the internet; players in different homes have
+not been tried together. The details are in [STATUS.md](STATUS.md).
 
 This repository contains only original mod code. It contains no game files, assets, saves or anything copied from
 the game, and it never will. You need your own copy of the game.
@@ -14,7 +16,7 @@ the game, and it never will. You need your own copy of the game.
 |  | Feature | Status |
 |---|---|:---:|
 | 🧍 | **Another Sam** moving exactly as the other player's does: walking, running, resting, dozing, balancing, falling, picking things up | ✅ |
-| 🎒 | **Their gear, outfit and carried cargo**, drawn as the game's own cases on back, hips and arms | ✅ |
+| 🎒 | **Their gear, outfit and carried cargo**, drawn as the game's own cases on back, hips and arms. Works in a two-player lobby; `v0.1.0-alpha.1` does not turn it on for group play on a server | ⚠️ |
 | 🏷️ | **Their name** over their head; across linked servers with their home server ("Host Sam · north") | ✅ |
 | 🏍️ | **Their bike or truck** in their paint, wheels and steering turning; **ride along** on it (key J) | ✅ |
 | 🗺️ | **On the map**, with pings | ✅ |
@@ -66,10 +68,9 @@ server above.
 
 ## 📥 Install (alpha)
 
-The first alpha for testers (`v0.1.0-alpha.1`) is being prepared; until it is on the
-[Releases page](https://github.com/TommoDotCommo/death-stranding-coop/releases) these steps describe the package that
-`tools/release.sh` builds. You need DEATH STRANDING DIRECTOR'S CUT on Steam, **build 13300582** (betas: None),
-64-bit Windows 10 or 11, and Steam running.
+The first alpha for testers, `v0.1.0-alpha.1`, is on the
+[Releases page](https://github.com/TommoDotCommo/death-stranding-coop/releases). You need DEATH STRANDING DIRECTOR'S
+CUT on Steam, **build 13300582** (betas: None), 64-bit Windows 10 or 11, and Steam running.
 
 1. Download **`DeathStrandingCoop-Setup.exe`**. To check it, compare
    `Get-FileHash .\DeathStrandingCoop-Setup.exe` (PowerShell) with `DeathStrandingCoop-Setup.exe.sha256`.
@@ -120,16 +121,15 @@ What is left before a public release, and the features planned: [docs/ROADMAP.md
 
 ## 🐞 Known issues
 
-- 🖥️ Everything live so far ran as **two copies on one PC**. Two PCs, a router and a firewall between them have not been tried.
+- 🎒 In `v0.1.0-alpha.1`, **group play on a server shows other players without their gear or carried cargo**. A two-player lobby shows both.
+- 🖥️ Most features have only run as **two copies on one PC**. Two PCs in one home have met through a rented server; players in different homes, behind other routers, have not been tried together.
 - 🧱 With `build_received`, a received structure **skips the game's own spacing and area checks**, so it may overlap something in your world or stand where the game keeps other players' structures out. The server keeps the objects it hands out 20 m apart.
 - 🗑️ A structure **removed from the server** stays in a running game until its area loads again.
 - 🔢 The game takes **only so many objects of each kind per area** (5 cairns at Lake Knot, no ladders there); the server chooses which.
 - 🧟 A dead partner is laid down stiffly: there is no death animation for him yet.
 - 🔓 Keys and objects travel **unencrypted**: play on a LAN or a VPN such as Tailscale.
 - 🔄 **Only build 13300582** is supported. Other builds are refused rather than risk a crash.
-- 🛡️ **Alpha:** the Setup and the binaries are not code-signed, so SmartScreen and some antivirus programs warn. Setup,
-  its window and its firewall step have only been checked game-free (Linux tests and a Windows script parse); the
-  first testers' installs are the first real ones.
+- 🛡️ **Alpha:** the Setup and the binaries are not code-signed, so SmartScreen and some antivirus programs warn.
 - 🧩 Another mod's `avrt.dll` in the game folder blocks the install (no chain-loading yet).
 
 ## 🐛 Reporting a bug
@@ -150,12 +150,13 @@ Setup makes no network connection. Diagnostics leave your PC only when you send 
 ## 🗺️ Next steps
 
 - [ ] See your offered strand arrive in a friend's game
-- [ ] A real two-PC session
+- [x] A real two-PC session
+- [x] A one-click installer and a guide for testers ([docs/TESTERS.md](docs/TESTERS.md))
+- [ ] Three or more real players, from different homes, on one server
 - [ ] See the launcher's windows on a screen: group server, join screen, My strand, server owner, who I see
 - [ ] More than one visitor in a fight, and story bosses
 - [ ] Roads paved together through the server, in a game; then signs and lost cargo
 - [ ] Encryption, before any public server
-- [ ] A one-click installer and a manual for players
 
 The full, dated record of what ran and how is in [STATUS.md](STATUS.md).
 The words used for the mod's parts, the game and testing are in the [glossary](docs/GLOSSARY.md).

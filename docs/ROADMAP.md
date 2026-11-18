@@ -8,8 +8,8 @@ Status of what exists: [STATUS.md](../STATUS.md). Words: [GLOSSARY.md](GLOSSARY.
 
 - [x] **(owner)** Rent the test server (a small Linux VPS near the testers: Ubuntu 24.04, 1 GB, public IPv4) and
       give the deploy SSH access; then `deploy/vps/deploy.sh` and send testers the `DSG-` invite privately.
-- [ ] **(owner)** Decide how testers get the files: a GitHub pre-release (public) or a private link; then tag and
-      publish `v0.1.0-alpha.1` (`local/release/PUBLISH-v0.1.0-alpha.1.txt` has the commands).
+- [x] **(owner)** Publish `v0.1.0-alpha.1` for testers: a GitHub pre-release (2026-11-18).
+- [ ] Group play shows other players' gear and carried cargo (off in the `v0.1.0-alpha.1` group config).
 - [x] First run of `deploy/vps` on a real server (2026-11-18): two PCs on one home network joined over the internet,
       met through the relay (24 ms round trip), F2 marks reached the server's log.
 - [ ] Players joining from other homes, behind ordinary routers.
@@ -31,8 +31,8 @@ Security and safety:
       the project's servers, an owner's view of reports.
 - [ ] Hosting that withstands attacks on a public UDP port (providers with DDoS mitigation); server addresses served
       by the directory API, not printed on the website.
-- [ ] **(owner)** A privacy policy (server logs keep addresses 14 days; testers can be minors; Australian privacy
-      law and the GDPR once players come from the EU) and a data-removal path.
+- [ ] **(owner)** A privacy policy (server logs keep addresses 14 days; Australian privacy law and the GDPR once
+      players come from the EU) and a data-removal path.
 - [ ] Code signing for Setup and the binaries (the release script has `SIGN_CMD`; a certificate is needed).
 - [ ] **(owner)** Think about how the game's publisher may see a public service for its game: free, no game
       files or assets, never on the publisher's servers.
