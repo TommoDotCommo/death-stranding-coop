@@ -72,6 +72,20 @@ int main(int argc,char** argv) {
     check(!is_api_set_name(L"c:\\x\\api-ms-win-evil.dll") && !is_api_set_name(L"api-ms-win-x/..\\y.dll") && !is_api_set_name(L"apix.dll"));
     check(classify_request(c,L"ext-ms-win-core-resourcepolicy-l1-1-0.dll",false,false)==RequestAction::api_set_forward);
     check(classify_request(c,L"hkCompatFormats.dll",false,false)==RequestAction::not_found);
+    {   // Discord's overlay and clips hook, injected into the running game: its own files in its own folders, nothing else there.
+        auto d=c;d.local_app_data=L"C:\\Users\\Ann\\AppData\\Local";const std::wstring hook=L"C:\\Users\\Ann\\AppData\\Local\\Discord\\app-1.0.9268\\modules\\discord_hook-1\\discord_hook\\2fa3c2c144e226\\";
+        check(module_allowed(d,hook+L"DiscordHook64.dll",true)&&module_allowed(d,hook+L"discord_overlay_sdk_x64.dll",true));
+        check(!module_allowed(d,hook+L"DiscordHook64.dll",false)&&!module_allowed(c,hook+L"DiscordHook64.dll",true));
+        check(module_allowed(d,L"c:\\users\\ann\\appdata\\local\\discordptb\\app-1.0.1\\modules\\discord_hook-2\\discord_hook\\ab\\discordhook64.dll",true));
+        check(module_allowed(d,L"c:\\users\\ann\\appdata\\local\\discordcanary\\app-1\\modules\\discord_hook-1\\discord_hook\\ab\\discordhook64.dll",true));
+        for(auto bad:{L"DiscordHook.dll",L"other.dll",L"DiscordHookHelper64.exe",L"x\\DiscordHook64.dll"})check(!module_allowed(d,hook+bad,true));
+        for(auto bad:{L"C:\\Users\\Ann\\AppData\\Local\\Evil\\app-1\\modules\\discord_hook-1\\discord_hook\\ab\\DiscordHook64.dll",
+                      L"C:\\Users\\Ann\\AppData\\Local\\Discord\\app-x\\modules\\discord_hook-1\\discord_hook\\ab\\DiscordHook64.dll",
+                      L"C:\\Users\\Ann\\AppData\\Local\\Discord\\app-1\\modules\\discord_voice-1\\discord_hook\\ab\\DiscordHook64.dll",
+                      L"C:\\Users\\Ann\\AppData\\Local\\Discord\\app-1\\modules\\discord_hook-1\\discord_hook\\zz\\DiscordHook64.dll",
+                      L"C:\\Users\\Bob\\AppData\\Local\\Discord\\app-1\\modules\\discord_hook-1\\discord_hook\\ab\\DiscordHook64.dll",
+                      L"C:\\Users\\Ann\\AppData\\Local\\evil.dll"})check(!module_allowed(d,bad,true));
+        auto strict=d;strict.mode=ModuleMode::strict;check(!module_allowed(strict,hook+L"DiscordHook64.dll",true));}
     {   // The player's extra modules for this copy: the exact file only, with evidence like any other module.
         std::vector<std::wstring> extra;
         check(parse_module_extra("# my input method\r\n\r\n  C:\\Program Files\\Vendor\\IME\\x64\\Ime.DLL  \r\nD:/tools/overlay/hook64.dll\n",extra));

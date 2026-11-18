@@ -11,6 +11,9 @@ struct ModulePolicy {
     // The executable's own directory (data and game files can live in different trees: a release ticket, or the
     // launcher's direct path with a separate data folder). The proxy fills it on every path; empty admits nothing.
     std::wstring release_game=L"";
+    // The player's %LOCALAPPDATA%: Discord's in-game overlay and clips put their hook there, and Discord injects it into a
+    // running game, so it is only seen once it is loaded. Empty admits nothing.
+    std::wstring local_app_data=L"";
     // Exact module paths the player has added for this copy (`extra-modules.txt` in the copy's data folder): software
     // Windows loads into every process, such as a third-party input method. Canonical; matched whole, never as a folder.
     std::vector<std::wstring> extra={};

@@ -6,6 +6,9 @@ enum class Action { deny, allow, redirect, device };
 struct Mapping { std::wstring real, target; };
 struct Policy {
     std::wstring instance, steam; std::vector<Mapping> roots;
+    // Single files outside the roots that the game writes, each moved to its own place in the instance: the graphics
+    // settings the game keeps beside ds.exe (settings.cfg). Matched whole, also inside the Steam folder.
+    std::vector<Mapping> files={};
     // Release tickets may place the co-op data tree in LocalAppData. The instance
     // exclusion is checked before any real-root mapping; lab environments keep false.
     bool allowNestedInstance=false;

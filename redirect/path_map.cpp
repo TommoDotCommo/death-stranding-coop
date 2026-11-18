@@ -158,6 +158,18 @@ Result map(const Policy& c,const std::wstring& raw,bool write,bool unsafe) {
 #endif
         p}; };
     if(p.empty() || instance.empty() || steam.empty() || unsafe) return deny();
+#ifndef MUTANT_GAMEFILE_OFF
+    for(auto& f:c.files) {
+        auto real=canonical(f.real), target=canonical(f.target);
+#ifdef MUTANT_GAMEFILE_FOLDER
+        if(within(p,real.substr(0,real.find_last_of(L'\\')))) return {Action::redirect,target};
+#endif
+        if(!real.empty() && p==real) {
+            if(!within(target,instance)) return deny();
+            return {Action::redirect,target};
+        }
+    }
+#endif
     if(write && within(p,steam)) return deny();
     if(within(p,instance)) return {Action::allow,p};
     for(auto& r:c.roots) {
@@ -227,6 +239,9 @@ Result map_query(const Policy& c,const std::wstring& raw,bool wildcard) {
     if(!p.empty()) {
         if(instance.empty()) return {Action::deny,p};
         if(within(p,instance)) return {Action::allow,raw};
+#ifndef MUTANT_GAMEFILE_QUERY
+        for(auto& f:c.files) {auto real=canonical(f.real),target=canonical(f.target);if(!real.empty()&&p==real&&within(target,instance))return {Action::redirect,target};}
+#endif
         for(auto& r:c.roots) {
             auto real=canonical(r.real), target=canonical(r.target);
             if(!within(target,instance) || (within(instance,real)&&!nested_allowed(c))) return {Action::deny,p};

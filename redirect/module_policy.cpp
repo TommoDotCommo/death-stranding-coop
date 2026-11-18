@@ -1,5 +1,24 @@
 #include "module_policy.h"
 namespace redirect {
+namespace {
+bool digits_or_dots(const std::wstring& s,bool dots) {
+    if(s.empty()) return false;
+    for(auto ch:s) if(!((ch>=L'0'&&ch<=L'9')||(dots&&ch==L'.'))) return false;
+    return true;
+}
+// <local>\Discord[PTB|Canary|Development]\app-<version>\modules\discord_hook-<n>\discord_hook\<hex>\<the 64-bit hook or its SDK>
+bool discord_hook(const std::wstring& p,const std::wstring& local) {
+    if(local.empty()||p.size()<=local.size()+1||p.compare(0,local.size(),local)||p[local.size()]!=L'\\') return false;
+    std::vector<std::wstring> part;size_t at=local.size()+1;
+    while(true){auto end=p.find(L'\\',at);part.push_back(p.substr(at,end==std::wstring::npos?end:end-at));if(end==std::wstring::npos)break;at=end+1;}
+    if(part.size()!=7) return false;
+    if(part[0]!=L"discord"&&part[0]!=L"discordptb"&&part[0]!=L"discordcanary"&&part[0]!=L"discorddevelopment") return false;
+    if(part[1].compare(0,4,L"app-")||!digits_or_dots(part[1].substr(4),true)||part[2]!=L"modules") return false;
+    if(part[3].compare(0,13,L"discord_hook-")||!digits_or_dots(part[3].substr(13),false)||part[4]!=L"discord_hook"||part[5].empty()) return false;
+    for(auto ch:part[5]) if(!((ch>=L'0'&&ch<=L'9')||(ch>=L'a'&&ch<=L'f'))) return false;
+    return part[6]==L"discordhook64.dll"||part[6]==L"discord_overlay_sdk_x64.dll";
+}
+}
 bool module_allowed(const ModulePolicy& c,const std::wstring& raw,bool evidence) {
 #ifdef MUTANT_MODULE_ALL
     (void)c;(void)raw;(void)evidence;return true;
@@ -44,6 +63,11 @@ bool module_allowed(const ModulePolicy& c,const std::wstring& raw,bool evidence)
     if((dir==s || dir==s+L"\\bin" || dir==s+L"\\bin\\win64") &&
         (base==L"steamclient64.dll" || base==L"tier0_s64.dll" || base==L"vstdlib_s64.dll" ||
          base==L"gameoverlayrenderer64.dll")) return true;
+#ifndef MUTANT_MODULE_DISCORD
+    if(discord_hook(p,canonical(c.local_app_data))) return true;
+#else
+    {auto local=canonical(c.local_app_data);if(!local.empty()&&within(p,local)) return true;}
+#endif
     // The player's own additions for this copy: the exact file, with the same evidence as every other module.
 #ifdef MUTANT_MODULE_EXTRA_ANY
     if(!c.extra.empty()) return true;

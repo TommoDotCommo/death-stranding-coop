@@ -1051,7 +1051,16 @@ void install_redirect(void* self,bool releaseSession) {
         }
     }
     if(!safe_tree(policy.instance,true)) fatal("redirect: unsafe instance\n");
-    modules.instance=env(L"COOP_MODULE_INSTANCE");modules.windows=env(L"SystemRoot");modules.steam=policy.steam;
+    modules.instance=env(L"COOP_MODULE_INSTANCE");modules.windows=env(L"SystemRoot");modules.steam=policy.steam;modules.local_app_data=env(L"LOCALAPPDATA");
+    {   // The graphics settings: the game writes settings.cfg beside ds.exe, where nothing may be written, so they were lost at
+        // every exit. They live in this copy's data; what the player had set without the mod is the starting point.
+        wchar_t exe[32768];auto count=GetModuleFileNameW(nullptr,exe,32768);
+        auto path=count&&count<32768?redirect::canonical(exe):std::wstring();auto slash=path.find_last_of(L'\\');
+        if(!path.empty()&&slash!=std::wstring::npos){
+            auto real=path.substr(0,slash)+L"\\settings.cfg",target=policy.instance+L"\\settings.cfg";policy.files.push_back({real,target});
+            if(safe_tree(real,false)&&safe_tree(target,true))::CopyFileW(real.c_str(),target.c_str(),TRUE);   // only when this copy has none yet
+        }
+    }
     {   // The game's own folder is admitted on every path, not only for a release ticket: with the data folder
         // outside the game folder (the launcher's direct path) the game's own steam_api64.dll was refused.
         // A release needs it and stops without it; elsewhere a path that cannot be taken in canonical form admits

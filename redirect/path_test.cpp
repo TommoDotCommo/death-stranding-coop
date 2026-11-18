@@ -18,6 +18,16 @@ int main() {
     check(L"c:\\lab\\s0\\redirect-data\\alias",Action::deny,L"",true,true);
     for(auto s:{L"c:save",L"x",L"c:\\x:ads",L"c:\\x.\\a",L"c:\\con",L"c:\\progra~1\\x"}) check(s,Action::deny);
     check(L"c:\\windows\\system32\\kernel32.dll",Action::allow,L"",false);
+    {   // The game's graphics settings beside ds.exe: that one file goes to the instance, read and written, in the Steam folder too.
+        Policy g=p;g.steam=L"c:\\steam";g.files={{L"c:\\steam\\steamapps\\common\\ds\\settings.cfg",L"c:\\lab\\s0\\redirect-data\\settings.cfg"}};
+        auto is=[&](const wchar_t* path,bool write,Action a,const wchar_t* to=L""){auto r=map(g,path,write,false);if(r.action!=a||(*to&&r.path!=to)){++bad;std::wcerr<<L"failed (game file): "<<path<<L"\n";}};
+        is(L"C:\\Steam\\steamapps\\common\\DS\\settings.cfg",true,Action::redirect,L"c:\\lab\\s0\\redirect-data\\settings.cfg");
+        is(L"c:\\steam\\steamapps\\common\\ds\\settings.cfg",false,Action::redirect,L"c:\\lab\\s0\\redirect-data\\settings.cfg");
+        for(auto other:{L"c:\\steam\\steamapps\\common\\ds\\settings.cfg.bak",L"c:\\steam\\steamapps\\common\\ds\\other.cfg",L"c:\\steam\\steamapps\\common\\settings.cfg",L"c:\\steam\\steamapps\\common\\ds\\sub\\settings.cfg"})is(other,true,Action::deny);
+        is(L"c:\\steam\\steamapps\\common\\ds\\ds.exe",false,Action::allow);
+        if(map(g,L"c:\\steam\\steamapps\\common\\ds\\settings.cfg",true,true).action!=Action::deny){++bad;std::wcerr<<L"failed: unsafe evidence must still deny\n";}
+        auto q=map_query(g,L"c:\\steam\\steamapps\\common\\ds\\settings.cfg",false);if(q.action!=Action::redirect||q.path!=L"c:\\lab\\s0\\redirect-data\\settings.cfg"){++bad;std::wcerr<<L"failed: query of the game file\n";}
+        auto outside=g;outside.files[0].target=L"c:\\elsewhere\\settings.cfg";if(map(outside,L"c:\\steam\\steamapps\\common\\ds\\settings.cfg",true,false).action!=Action::deny){++bad;std::wcerr<<L"failed: a target outside the instance\n";}}
     // (1) Device namespaces: HID interface paths pass through untouched, in either prefix form.
     const wchar_t* hid=L"\\\\?\\hid#vid_1532&pid_02a7&mi_03#9&2fcb1b56&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}";
     check(hid,Action::device,hid,true);check(hid,Action::device,hid,false);
