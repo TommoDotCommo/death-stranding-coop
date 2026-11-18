@@ -8,8 +8,8 @@ unsigned failures=0;
 #define CHECK(...) do{if(!(__VA_ARGS__)){std::fprintf(stderr,"chat oracle: %s (line %d)\n",#__VA_ARGS__,__LINE__);++failures;}}while(0)
 static Press ch(char16_t c){return {Press::Char,c};}
 struct Game {
-    std::vector<std::u16string> drawn;unsigned hides=0,takes=0,gives=0;bool refuse=false;std::vector<Press> queue;std::vector<std::string> sent;
-    Hud hud(){Hud h;h.show=[this](const std::u16string& t,const std::u16string& b){CHECK(t==Title);drawn.push_back(b);return true;};h.hide=[this]{++hides;};return h;}
+    std::vector<std::u16string> drawn;std::string order;unsigned hides=0,takes=0,gives=0;bool refuse=false;std::vector<Press> queue;std::vector<std::string> sent;
+    Hud hud(){Hud h;h.show=[this](const std::u16string& t,const std::u16string& b){CHECK(t==Title);drawn.push_back(b);order+='S';return true;};h.hide=[this]{++hides;order+='H';};return h;}
     Keyboard keys(){Keyboard k;k.take=[this]{if(refuse)return false;++takes;return true;};k.give=[this]{++gives;};k.presses=[this]{auto v=queue;queue.clear();return v;};return k;}
     Box box(){return Box(hud(),keys(),[this](const std::string& s){sent.push_back(s);},[](const std::string&){});}
 };
@@ -28,9 +28,9 @@ int main(){
         Game g;auto b=g.box();b.tick(false,false,true);CHECK(!b.typing()&&!g.takes);b.tick(true,true,false);CHECK(!b.typing());
         b.tick(true,true,true);CHECK(b.typing()&&g.takes==1&&g.drawn.back()==u"_");
         g.queue={ch(u'y')};b.tick(false,true,true);CHECK(g.drawn.size()==1);b.tick(false,false,true);
-        g.queue={ch(u'h'),ch(u'y'),ch(u'x'),{Press::Back,0}};b.tick(false,false,true);CHECK(g.drawn.back()==u"hy_"&&g.drawn.size()==2);
+        g.queue={ch(u'h'),ch(u'y'),ch(u'x'),{Press::Back,0}};b.tick(false,false,true);CHECK(g.drawn.back()==u"hy_"&&g.drawn.size()==2&&g.order=="SHS");   // the old line goes at once, or the game fades it out first
         unsigned n=g.drawn.size();b.tick(false,false,true);CHECK(g.drawn.size()==n);      // nothing new, nothing drawn
-        g.queue={{Press::Enter,0}};b.tick(false,false,true);CHECK(!b.typing()&&g.sent==(std::vector<std::string>{"hy"})&&g.gives==1&&g.hides==1);}
+        g.queue={{Press::Enter,0}};b.tick(false,false,true);CHECK(!b.typing()&&g.sent==(std::vector<std::string>{"hy"})&&g.gives==1&&g.order=="SHSH");}
     {   // Esc drops it; Enter on nothing sends nothing; a game event ends it; the keyboard not to be had.
         Game g;auto b=g.box();b.tick(true,false,true);g.queue={ch(u'a'),{Press::Escape,0}};b.tick(false,false,true);CHECK(!b.typing()&&g.sent.empty()&&g.gives==1);
         b.tick(true,false,true);g.queue={{Press::Enter,0}};b.tick(false,false,true);CHECK(g.sent.empty()&&!b.typing());

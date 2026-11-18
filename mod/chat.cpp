@@ -125,7 +125,14 @@ void Box::tick(bool pressed,bool held,bool allowed,const std::vector<Press>& ext
         if(p.kind==Press::Back){text_.back();changed=true;}
         else changed=text_.type(p.ch)||changed;
     }
-    if(changed)draw();
+    if(changed){
+        // Showing over a caption makes the game fade the old one out and only then fade the new one in; every key would
+        // leave the line blank for a moment. Hidden at once first, the new text is there at once (game_offsets.md).
+#ifndef MUTANT_CHAT_REDRAW
+        hud_.hide();
+#endif
+        draw();
+    }
 }
 #ifdef _WIN32
 namespace {

@@ -6558,6 +6558,12 @@ float seconds)`, game thread. Both strings must be non-null. `0x3054b10(0, 1)` h
 text's top left there; `\n` breaks lines; the title is drawn small above the text; six lines of about 30 characters fit
 easily. No menu page opens and input stays with the game. One telop at a time: showing it ends the game's.
 
+The telops are a queue at `*(owner+0xa0)+0x38` (count, then the array at `+0x40`), 0x140 bytes each: title `+0x10`, lines
+count `+0x18` and array `+0x20`, seconds `+0x64`, pivot `+0x70`, ending `+0x130`, ending at once `+0x131`. Showing marks the
+last one ending and queues the new one, so the old caption fades out and only then the new one fades in (seen live: over a
+second with nothing readable). The hide call marks the first one ending at once and drops the rest. Hide and then show, in
+one tick, replaces the text with no visible gap. Writing a new string into a telop already up changes nothing on screen.
+
 ## Common dialogue: text and up to three buttons (live, 2026-11-19)
 
 Menu page 6. `dlg = *(owner+0x2c0)`, `owner = *(image+0x7c00128)`. The game's simple call is `0x30f3760(dlg, setting, const
