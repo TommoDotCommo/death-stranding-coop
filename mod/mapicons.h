@@ -15,11 +15,12 @@
 #include <vector>
 namespace mod::mapicons {
 constexpr uint64_t PollMs=2000,BackoffMs=15000;
-constexpr size_t MaxIcons=32,ItemSize=0x60;
+constexpr size_t MaxIcons=128,ItemSize=0x60;
+constexpr uint64_t MaxWaitMs=30000;
 constexpr size_t NameChars=24;
 constexpr uint8_t DefaultKind=0x9e;     // the map's "Porter" icon (seen live), in the class of icons shared with structures
 struct Player {std::string id,name;double x=0,y=0,z=0;uint32_t area=0;};
-struct Answer {bool read=false,on=false;std::vector<Player> players;};
+struct Answer {bool read=false,on=false;uint64_t waitMs=0;std::vector<Player> players;};   // waitMs: the server asks for this long between reads
 Answer parse(const std::string& body);  // never throws
 struct Icon {float x=0,y=0,z=0;uint32_t area=0;uint64_t id=0;char16_t name[NameChars+1]={};};
 void setName(Icon&,const std::string& utf8);   // control characters dropped, cut to NameChars, a surrogate pair kept whole
@@ -66,6 +67,7 @@ private:
     std::vector<Icon> extra_;Counters counters_;std::thread thread_;
 };
 uint64_t delayAfter(bool good,unsigned& failures);
+uint64_t pollAfter(uint64_t own,uint64_t server);   // the longer of the two, the server's at most MaxWaitMs
 struct Stats {uint64_t updates=0,taken=0,refused=0;uint32_t shownArea=0,mode=0;};
 // Windows: puts the map's update and its icon label through the mod (two retargeted calls; every byte checked first, nothing changed on a mismatch).
 // Throws when it cannot. board lives as long as the process. Game thread.

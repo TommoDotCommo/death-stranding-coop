@@ -42,10 +42,10 @@ static void presets(){
      for(const char* wrong:{"order=best","order=","per_builder=-1","per_builder=1001","spread=-1","spread=1001","spread=8m"}){Policy before=c;CHECK(throws([&]{setPolicy(c,wrong);}));CHECK(policyItems(c)==policyItems(before));}}
     CHECK(throws([]{presetPolicy("open");})&&throws([]{presetPolicy("");}));
     Policy q=f;
-    for(const char* good:{"join=open","build=nobody","accept_offers=never","limit=0","limit=4000","withdrawal=stay","players=1","players=16","offer_builds=ask","offer_old=yes"," build = members "})
+    for(const char* good:{"join=open","build=nobody","accept_offers=never","limit=0","limit=4000","withdrawal=stay","players=1","players=1024","offer_builds=ask","offer_old=yes"," build = members "})
         CHECK(!throws([&]{setPolicy(q,good);}));
-    CHECK(q.build=="members"&&q.join=="open"&&q.acceptOffers=="never"&&q.limit==4000&&q.players==16&&q.offerBuilds=="ask"&&q.offerOld=="yes");
-    for(const char* wrong:{"","build","build=","build=all","limit=-1","limit=4001","limit=x","players=0","players=17","offer_builds=maybe","offer_old=ask","withdraw=go","colour=red","accept_offers=Auto"}){
+    CHECK(q.build=="members"&&q.join=="open"&&q.acceptOffers=="never"&&q.limit==4000&&q.players==1024&&q.offerBuilds=="ask"&&q.offerOld=="yes");
+    for(const char* wrong:{"","build","build=","build=all","limit=-1","limit=4001","limit=x","players=0","players=1025","offer_builds=maybe","offer_old=ask","withdraw=go","colour=red","accept_offers=Auto"}){
         Policy before=q;CHECK(throws([&]{setPolicy(q,wrong);}));CHECK(policyItems(q)==policyItems(before));}
     // Test mode (README "Server policy"): off in every preset, on only when the owner sets it; nothing else accepted.
     CHECK(f.testMode=="off"&&s.testMode=="off"&&p.testMode=="off");

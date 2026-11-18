@@ -1298,6 +1298,7 @@ struct Runtime final:ds::Transport {
     std::unique_ptr<mod::chat::Link> chatLink;std::unique_ptr<mod::chat::Box> chatBox;Background<mod::help::Api> chatHudJob;bool chatHudTried=false;std::optional<mod::help::Api> chatHud;
     mod::marker::KeyEdge chatEdge;std::vector<std::u16string> chatLines;std::filesystem::path chatCommand;std::vector<mod::chat::Press> chatScripted;bool chatOpenCommand=false;
     // P: the server page (serverinfo.h, tickServerInfo).
+    struct MapWhere {std::atomic<float> x{0},y{0};std::atomic<uint32_t> area{0};std::atomic<bool> known{false};};std::shared_ptr<MapWhere> mapWhere=std::make_shared<MapWhere>();
     std::unique_ptr<mod::mapicons::Link> mapLink;const mod::mapicons::Board* mapBoard=nullptr;bool mapHooked=false,areaTried=false;uint32_t gameArea=0;uint64_t mapNotedUpdates=0,mapNotedAt=0;std::function<uint32_t()> areaOf;std::filesystem::path mapCommand;
     std::unique_ptr<mod::serverinfo::Screen> infoScreen;mod::marker::KeyEdge infoEdge;std::future<mod::strand::Fetched> infoRead;
     // Hold F1: the co-op keys on the game's common telop (help.h). puppet.help (lab): "at <pivot> <x> <y> <stamp>" moves
@@ -1537,8 +1538,12 @@ struct Runtime final:ds::Transport {
         if(!mapLink){
             auto at=serverAt();if(!at){note("MAP unavailable: no server address\n");config.playerMap=false;return;}
             const std::string target=at->base+"/coop/map",token=config.strandToken;const uint32_t address=at->address;const uint16_t port=at->port;
-            mapLink=std::make_unique<mod::mapicons::Link>([=]{auto r=mod::strand::get(address,port,target,token,mod::strand::ConnectMs);return mod::mapicons::Result{r.status,r.body};},board,std::to_string(config.playerId));
+            auto where=mapWhere;
+            mapLink=std::make_unique<mod::mapicons::Link>([=]{std::string q;
+                if(where->known.load(std::memory_order_relaxed)){std::ostringstream o;o<<"?x="<<where->x.load(std::memory_order_relaxed)<<"&y="<<where->y.load(std::memory_order_relaxed);if(auto a=where->area.load(std::memory_order_relaxed))o<<"&area="<<a;q=o.str();}
+                auto r=mod::strand::get(address,port,target+q,token,mod::strand::ConnectMs);return mod::mapicons::Result{r.status,r.body};},board,std::to_string(config.playerId));
         }
+        if(cache.available){mapWhere->x.store(float(cache.local.position[0]),std::memory_order_relaxed);mapWhere->y.store(float(cache.local.position[2]),std::memory_order_relaxed);mapWhere->area.store(gameArea,std::memory_order_relaxed);mapWhere->known.store(true,std::memory_order_relaxed);}
         const auto seen=mod::mapicons::stats();
         if(seen.updates!=mapNotedUpdates&&now>=mapNotedAt+5000){mapNotedUpdates=seen.updates;mapNotedAt=now;auto k=mapLink->counters();std::ostringstream o;
             o<<"MAP open: updates "<<seen.updates<<" taken "<<seen.taken<<" refused "<<seen.refused<<" map area "<<seen.shownArea<<" mode "<<seen.mode<<" porter area "<<gameArea<<" server on "<<k.on<<" players "<<k.shown<<"\n";note(o.str().c_str());}

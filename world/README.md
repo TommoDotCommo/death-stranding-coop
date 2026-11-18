@@ -72,7 +72,7 @@ loopback, a LAN or a VPN.
 | `GET`/`POST …/coop/NAME` | not the game's: the launcher's API ("The launcher's API"), and the owner's calls ("Identity") |
 | `GET …/coop/notices` with `X-Coop-Token` | not the game's: the mod's read of its player's own objects ("What the game is told") |
 
-Limits: 16 players, 4000 objects built here per player, 20000 objects held from each other server, 4 MiB per body,
+Limits: 1024 players, 4000 objects built here per player, 20000 objects held from each other server, 4 MiB per body,
 32 connections (`--max-connections`), and the limits per address below.
 
 ### Limits per address
@@ -183,7 +183,7 @@ each other and nobody else. It is off unless `--relay-port` is given. The game m
 
 ```
 coop-world --port 8089 --relay-port 8090 [--relay-key TEXT] [--relay-enter 150] [--relay-leave 200]
-           [--relay-timeout 10] [--relay-players 64] [--relay-rate 200]
+           [--relay-timeout 10] [--relay-players 1024] [--relay-rate 200]
 ```
 
 - `--relay-port`: the UDP port, on the same `--bind` address as the rest (loopback by default). With `--bind 0.0.0.0`
@@ -898,7 +898,7 @@ each other across the world). A game asks with its notice token, in the header `
 
 | Call | Answer |
 |---|---|
-| `GET …/coop/map` | `format` 1, `on`, `players`: at most 64 players the relay placed in the last 5 s, each `id` (the relay id, as text), `name`, `x`, `y`, `z` (game axes, metres, z up), and `yaw` (radians) and `area` (the map the player is in) when known. While `on` is false, none. 403 for a bad token |
+| `GET …/coop/map` | `format` 1, `on`, `wait_ms` (how long to wait before asking again: 2 s, up to 30 s for a crowd), `players`: at most 128 players the relay placed in the last 5 s (with `?x=&y=` the nearest, with `&area=` only that map), each `id` (the relay id, as text), `name`, `x`, `y`, `z` (game axes, metres, z up), and `yaw` (radians) and `area` (the map the player is in) when known. While `on` is false, none. 403 for a bad token |
 
 The relay reports each player's place about once a second, so a player who has left drops off within seconds; players of
 linked servers are not listed. Under identity keys the asker's own entry is left out and his choice of who he is shown

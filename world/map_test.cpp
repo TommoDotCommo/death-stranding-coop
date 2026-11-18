@@ -4,6 +4,8 @@
 #include "front.h"
 #include "api.h"
 #include "identity.h"
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 using namespace world;namespace id=world::identity;
 unsigned failures=0;
@@ -44,8 +46,17 @@ int main(){
         CHECK(presetPolicy("friends").map=="on"&&presetPolicy("solo").map=="off"&&presetPolicy("public").map=="off");
         bool refused=false;try{setPolicy(p,"map=maybe");}catch(const std::exception&){refused=true;}CHECK(refused);
         World back([]{return std::string("x");});Policy q=presetPolicy("public");setPolicy(q,"map=on");s.w.setPolicy(q);back.restore(s.w.snapshot());CHECK(back.policy().map=="on");}
-    {   // A long list stops at the bound.
-        Server s;auto ann=s.token("ann","Ann");for(uint64_t i=1;i<=MapPlayersMax+5;++i)s.spot(i,"P");CHECK(s.read(ann).get("players").items().size()==MapPlayersMax);}
+    {   // A crowd: the nearest to the game that says where it is, of its area, within the bound; it is told to ask less often.
+        Server s;auto ann=s.token("ann","Ann");for(uint64_t i=1;i<=MapPlayersMax+5;++i)s.spot(i,"P",double(i)*10,false,200);s.spot(5000,"Far",1,false,100);
+        auto near=[&](const std::string& q){auto r=s.raw("GET","/s3cret/coop/map"+q,"",{{"x-coop-token",ann}});CHECK(r.status==200);return json::parse(r.body);};
+        CHECK(s.read(ann).get("players").items().size()==MapPlayersMax);
+        auto d=near("?x=1000&y=2&area=200");auto& l=d.get("players").items();CHECK(l.size()==MapPlayersMax&&l[0].get("x").real()==1000&&l[1].get("x").real()!=1000);
+        double most=0;for(auto& p:l){most=std::max(most,std::fabs(p.get("x").real()-1000));CHECK(p.get("area").integer()==200);}CHECK(most<=650);
+        CHECK(near("?x=0&y=0&area=100").get("players").items().size()==1);
+        CHECK(near("?x=nan&y=0").get("players").items().size()==MapPlayersMax&&near("?x=1e999&y=0").get("players").items().size()==MapPlayersMax);
+        CHECK(d.get("wait_ms").integer()==std::min<int64_t>(MapWaitMaxMs,int64_t(MapPlayersMax+6)*20));
+        Server few;auto bob=few.token("bob","Bob");few.spot(1,"A");CHECK(few.read(bob).get("wait_ms").integer()==MapWaitMinMs);
+        Server many;auto cy=many.token("cy","Cy");for(uint64_t i=1;i<=1000;++i)many.spot(i,"P");CHECK(many.read(cy).get("wait_ms").integer()==20000);}
     {   // Under keys: never himself; his choice of who he is shown.
         Server s("public",{"map=on"});auto a=id::makeKeys(),b=id::makeKeys(),c=id::makeKeys();const std::string A=id::account(a.pub),B=id::account(b.pub);
         auto body=[&](const std::string& more){return "{\"player\":\""+A+"\""+more+"}";};auto t=s.keyToken(a);s.keyToken(b);

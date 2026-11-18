@@ -14,7 +14,7 @@ Answer parse(const std::string& body){
     Answer a;
     try{
         auto d=json::parse(body);if(d.get("format").integer()!=1)return a;
-        a.on=d.get("on").boolean();
+        a.on=d.get("on").boolean();{const auto w=d.get("wait_ms").integer();a.waitMs=w>0?uint64_t(w):0;}
         for(auto& p:d.get("players").items()){Player n;n.id=p.get("id").string();n.name=p.get("name").string();n.x=p.get("x").real(NAN);n.y=p.get("y").real(NAN);n.z=p.get("z").real(NAN);n.area=uint32_t(p.get("area").integer());a.players.push_back(std::move(n));}
         a.read=true;
     }catch(const std::exception&){a=Answer{};}
@@ -68,6 +68,13 @@ void fillItem(uint8_t (&item)[ItemSize],const Icon& n,uint8_t kind){
     std::memset(item,0,ItemSize);const float place[4]={n.x,n.y,n.z,0};const float alpha=1;
     std::memcpy(item,place,16);std::memcpy(item+0x10,place,16);item[0x20]=kind;std::memcpy(item+0x28,&n.id,8);std::memcpy(item+0x3c,&alpha,4);
 }
+uint64_t pollAfter(uint64_t own,uint64_t server){
+#ifndef MUTANT_MAPICONS_WAIT
+    return std::max(own,std::min(server,MaxWaitMs));
+#else
+    return own;
+#endif
+}
 uint64_t delayAfter(bool good,unsigned& failures){if(good){failures=0;return PollMs;}return ++failures<3?PollMs:BackoffMs;}
 Link::Link(Get get,Board& board,std::string self,Schedule schedule):get_(std::move(get)),board_(board),self_(std::move(self)),schedule_(std::move(schedule)){
     if(!schedule_)schedule_=delayAfter;
@@ -87,7 +94,7 @@ void Link::run(){
         if(a.read&&a.on){
 #endif
             counters_.on=a.read&&a.on;v.insert(v.end(),extra_.begin(),extra_.end());counters_.shown=unsigned(std::min(v.size(),MaxIcons));board_.publish(v);}
-        const uint64_t wait=schedule_(a.read,failures);
+        const uint64_t wait=pollAfter(schedule_(a.read,failures),a.waitMs);
         auto seen=extra_.size();wake_.wait_for(g,std::chrono::milliseconds(wait),[&]{return stop_||extra_.size()!=seen;});
     }
 }
