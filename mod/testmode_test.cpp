@@ -32,8 +32,9 @@ static Gate open(){Gate g;g.gameThread=true;g.porterReadable=true;g.inEvent=fals
 static cargo::Record crate(uint32_t hash,std::array<double,3> at,uint8_t where=cargo::InWorld){cargo::Record r;r.hash=hash;r.position=at;r.state=uint32_t(where)<<8|7u;return r;}
 
 static void table(){
-    CHECK(MaterialCount==6&&std::strcmp(Materials[5].name,"resins")==0&&Materials[5].hash==0x0782598du&&Materials[5].verified);
-    auto h=knownHashes();CHECK(!h.empty()&&h.back()==0x0782598du);
+    CHECK(MaterialCount==6&&std::strcmp(Materials[5].name,"resins")==0&&Materials[5].hash==0x0ae5c9acu);
+    for(auto& m:Materials)CHECK(m.hash!=0);   // every material has its largest crate (listitems.py)
+    auto h=knownHashes();CHECK(h.size()==6&&h.back()==0x0ae5c9acu);
     for(auto& m:Materials)CHECK(m.hash||!m.verified);   // nothing verified without a hash
     CHECK(missingNames().find("metals")!=std::string::npos||Materials[1].hash);
 }
