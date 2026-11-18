@@ -59,6 +59,14 @@ static void runs(){
         CHECK(std::llabs(int64_t(w.c.result())-55900)<=100);
         CHECK(!w.events.empty()&&w.events.back().text=="Straight finished in 0:55.9.");   // out at x=10.5, in at x=290
     }
+    {   // A short route whose zones nearly meet (live 2026-11-18: 26 m with a corner): leaving the start zone and walking
+        // into the finish zone off the route is no finish; following it is.
+        Route r;r.name="Corner";r.author="Ann";r.rules.width=10;r.points={{0,0,0},{13,0,0},{13,0,13}};
+        Walk w(r);w.wait(0,0,300);w.go(0,0,10.5,0,3);w.go(10.5,0,10.5,-6,3);w.go(10.5,-6,8,4,3);
+        CHECK(!w.has(Kind::Finished));
+        Walk v(r);v.wait(0,0,300);v.go(0,0,13,0,3);v.go(13,0,13,13,3);
+        CHECK(v.has(Kind::Finished));
+    }
     {   // Before the start: told where it is; a sample outside the zone does not start it.
         Walk w(straight());w.at(-200,0);
         CHECK(w.c.phase()==Phase::Away&&w.has(Kind::Away)&&w.events[0].text=="Challenge Straight: go to the start (200 m).");

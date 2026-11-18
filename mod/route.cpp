@@ -382,7 +382,10 @@ std::vector<Event> Checker::feed(const Sample& s){
     if(ahead.distance<=u.width/2.0&&ahead.along>progress_)progress_=ahead.along;
     const bool inFinish=ground(s.at,route_.points.back())<=u.finishRadius;
 #ifndef MUTANT_ROUTE_PROGRESS
-    const bool followed=progress_>=total_-u.finishRadius-Lookahead;
+    // Followed: progress (along the route, inside the corridor) reached the finish zone's edge, give or take the samples'
+    // spacing. Not minus the search window: with that, any route under ~70 m counted as followed from its start (live,
+    // 2026-11-18: a 26 m route 'finished' 1.4 s after leaving its start zone, going the wrong way).
+    const bool followed=progress_>=total_-u.finishRadius-FinishSlack;
 #else
     const bool followed=true;
 #endif

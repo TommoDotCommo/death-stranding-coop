@@ -16,6 +16,7 @@ constexpr size_t BytesMax=2048;                         // a challenge before ba
 constexpr double ReachMax=100000;                       // metres from the start point
 constexpr size_t TrackPointsMax=1024,TrackBytesMax=8192;
 constexpr uint64_t TrackEveryMs=2000;                   // a track point while running
+constexpr double FinishSlack=2;                        // metres: how far short of the finish zone's edge progress may be
 constexpr double Lookahead=60;                          // metres of the route searched beyond what was reached
 constexpr double JumpMetres=25;constexpr uint64_t JumpMs=500;   // a jump this far this fast is a teleport
 constexpr double TeleportSpeed=60;                      // m/s on the ground, measured over at least SpeedWindowMs
