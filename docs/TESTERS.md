@@ -52,8 +52,8 @@ player.
 ## Keys in the game
 
 Hold **F1** in the world for a list of the co-op keys that work in your session. Press **P** to see which server you are on,
-who is online and the server's rules. Press **Y** to chat: type, **Enter** sends to everyone on the server, **Esc** cancels.
-The server's owner can read what is said.
+who is online and the server's rules. Where the server's rules allow text chat, press **Y**: type, **Enter** sends to
+everyone on the server, **Esc** cancels. The server's owner can read what is said.
 
 ## Test mode
 
@@ -113,8 +113,10 @@ On the test server, which the organiser runs:
   social media or your Steam profile. Your nickname is all the game shows; keep it that way.
 - The server shows other players only your **nickname**, your character and what you build. It never shows them your
   IP address, your Steam name or your Steam id.
-- **There is no chat in the mod.** If someone asks you to talk somewhere else (Discord, Steam, social media) because of
-  the game, you do not have to, and you can tell the organiser.
+- **Text chat is off on the organiser's test server** unless the organiser turns it on (P shows the rules). Where it is on,
+  everyone on that server reads what you type, the server's owner can read it too and keeps it in the server's log, and
+  there are no private messages. Keep personal information out of it. If someone asks you to talk somewhere else (Discord,
+  Steam, social media) because of the game, you do not have to, and you can tell the organiser.
 - Tell the organiser about anyone who makes you uncomfortable (an offensive nickname, following you around). The
   organiser can remove a player from the server and ban them.
 - Do not pass the invite on. Whoever has it can join the server.
@@ -123,8 +125,10 @@ On the test server, which the organiser runs:
 
 ### For parents and guardians of testers under 18
 
-- The mod adds no chat, voice or messages. Other testers see your child's chosen nickname and character in the game,
-  and the structures your child builds; they do not see any contact details, real name or IP address.
+- The mod has no voice and no private messages. It has text chat, which is off on the organiser's test server unless the
+  organiser turns it on; where it is on, every player on that server can read what is typed, and the organiser can read
+  it in the server's log. Other testers see your child's chosen nickname and character in the game, and the structures
+  your child builds; they do not see any contact details, real name or IP address.
 - The test server is run by the organiser on a rented server, not on anyone's home connection; your child's PC
   connects only to that server, never directly to another tester's PC (as long as only the `DSG-` invite is used, see
   above).

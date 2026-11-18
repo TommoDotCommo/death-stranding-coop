@@ -154,7 +154,8 @@ With the invite (a tester, or whoever a tester passed it to):
 - **can** join under a key of his own (up to the world's 16 players), choose any nickname, walk up to other players
   and be seen by them, build (shared after the owner's review), like structures;
 - **cannot** act or appear as another player, read another player's address, reach a player who is not near him,
-  message anyone (the mod has no chat), or stay once the owner bans his key.
+  message anyone while the rules keep text chat off (the public preset does; with `policy-set chat=on` everyone on the
+  server reads what anyone types, and the log keeps it), or stay once the owner bans his key.
 
 The owner (whoever holds SSH to the server) sees every player's address and nickname in the log. That is said in
 `../../docs/TESTERS.md`.

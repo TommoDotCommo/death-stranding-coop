@@ -904,7 +904,8 @@ game, so a key held when typing began does not stay down. The mod's own keys do 
 The lines travel over HTTP on a thread of their own: `GET`/`POST .../coop/chat` with the `strand_token`
 (`../world/README.md`, "Text chat"), read every 2 s. A line refused is told in the info log (too many lines, chat off). On a
 server whose rules say `chat` off, Y only says so. Requires `online_server` and `strand_token`. `chat.h`; `mod_status` has `chat`
-(`ready`, `on`, `typing`, `reads`, `sent`, `refused`, `received`). The lab's `puppet.chat` takes `open`, `type WORD` (`_` for a
+(`ready`, `on`, `typing`, `reads`, `sent`, `refused`, `received`). Each change of the line hides the caption and shows it
+again in one tick; shown over itself the game would fade the old one out first. The lab's `puppet.chat` takes `open`, `type WORD` (`_` for a
 space), `enter` and `esc`, each with the run stamp.
 
 ## Strand notices (`strand_notices`, off by default; live once, 2026-11-17)
