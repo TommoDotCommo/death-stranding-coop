@@ -41,7 +41,7 @@ families=[('world_test.cpp',['world.cpp','collections.cpp','collection.cpp'],['W
                                            'RELAY_MARK_FAR','RELAY_MARK_HIDDEN','RELAY_MARK_RATE','RELAY_MARK_ANY_SOURCE','RELAY_SPOT_YAW']),
           ('fight_test.cpp',['relay.cpp','../core/broadcast_client.cpp','../core/core.cpp'],['RELAY_FIGHT_REACH','RELAY_FIGHT_OWNER_GONE','RELAY_FIGHT_ONE_ROLE','RELAY_FIGHT_CAP',
                                            'RELAY_FIGHT_STATE_ANY','RELAY_FIGHT_UNJOINED','RELAY_FIGHT_SOURCE','RELAY_FIGHT_VISITOR_STATE','RELAY_FIGHT_SILENT','RELAY_BCAST_SPOOF']),
-          ('presence_test.cpp',['relay.cpp','../core/broadcast_client.cpp','../core/core.cpp'],['LINK_PRESENCE_MAC','LINK_PRESENCE_REPLAY','LINK_PRESENCE_REMAP','LINK_PRESENCE_LOCAL_FIRST',
+          ('presence_test.cpp',['relay.cpp','../core/broadcast_client.cpp','../core/core.cpp'],['RELAY_ONLINE_LINKS','LINK_PRESENCE_MAC','LINK_PRESENCE_REPLAY','LINK_PRESENCE_REMAP','LINK_PRESENCE_LOCAL_FIRST',
                                            'LINK_PRESENCE_STATE_ANY','LINK_PRESENCE_BUILD','LINK_PRESENCE_NAME','LINK_PRESENCE_INTEREST','LINK_PRESENCE_BUDGET','LINK_PRESENCE_TIMEOUT',
                                            'LINK_PRESENCE_GONE','LINK_PRESENCE_REEXPORT','LINK_PRESENCE_CLOCK','RELAY_NEAR_LINKED'])]
 with tempfile.TemporaryDirectory() as d:

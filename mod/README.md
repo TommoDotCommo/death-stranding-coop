@@ -86,7 +86,7 @@ config names the server instead:
 
 ```json
 {"server":"100.90.1.2","slot":0,"nickname":"Porter","provider":"game","session":305419896,
- "required":true,"logging":true,"game_thread":true,"puppet_probe":true,"partner_tag":true,"help_page":true,
+ "required":true,"logging":true,"game_thread":true,"puppet_probe":true,"partner_tag":true,"help_page":true,"server_info":true,
  "others":15,"relay":"100.90.1.2:49100","relay_key":"w305419896","player_id":281474976710657,
  "online_server":"http://100.90.1.2:49100/w305419896/auth/ds","discovery_sha256":"<the pinned hash>"}
 ```
@@ -104,6 +104,7 @@ config names the server instead:
 | `build_received` | with `online_server`: other players' structures that server hands the game are built at once, without the game's range, placement and area checks ("Received structures built", below); off by default; the launcher writes it in group play from its setting (on unless the player turns it off); live: served bridges are built straight from the answer; received rain shelters were still removed before the area check was skipped (2026-11-17, not run since) |
 | `offer_strand` | with `online_server` and `strand_token`: the structures this player's save already holds are offered to that server through the game's own upload, one at a time, while the server says his older strand may be ("Offering your existing strand", below); off by default; the launcher writes it on in group play with `strand_token`, so the player's `offer_old` on that server decides; live: all 26 own structures of an Episode 3 save offered in about 3 minutes |
 | `help_page` | hold F1: the co-op keys on the game's common telop ("The F1 page", below). The launcher turns it on |
+| `server_info` | P: the server, who is online and its rules on the game's common dialogue ("The server page", below). The launcher turns it on |
 | `test_mode` | the launcher writes `{}` when the server's rules say `test_mode` on ("Test mode", below): material crates on U; blood, stamina and battery kept full, switched with F3 |
 | `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
 | `show_others` | `"everyone"` (default), `"friends"` or `"nobody"`: who of the players near this player the server shows him (broadcast only, sent in every HELLO; `world/README.md`, "How many players one player sees"). The server's own record of his choice, set from the launcher, comes first; `friends` needs a server with player keys. Requires `relay_mode` `"broadcast"`. A server from before this refuses a HELLO with anything but everyone |
@@ -877,6 +878,17 @@ While F1 is held in the world the game's common telop (the caption its HUD draws
 in this session; it goes on release, or when a game event starts, and comes back if the key is still held after it. No
 menu page opens and no input is taken from the game. `help.h`, `game_offsets.md`, "Common telop". The lab's `puppet.help`
 takes `at <pivot> <x> <y> <stamp>`, `show <stamp>` and `hide <stamp>`. Showing it ends any caption of the game's on the screen.
+
+## The server page (`server_info`, off by default; the launcher turns it on; live 2026-11-19)
+
+P in the world opens the game's common dialogue: the server's display name and preset, how many players are connected
+now and their names (at most 12, then "and N more"), who is near this porter, then the server's rules in plain words, five
+to a page (**Next page**, **Close**, Esc). The page is read when the key is pressed, from `GET .../coop/policy` under the
+prefix of `online_server`, on a thread of its own, waiting at most 3 s; if nothing comes it opens and says the server did not
+answer. A server older than this page does not report who is connected: the page then gives the number of players it knows.
+Without `online_server` it names the partner. Text from the server is stripped of control characters. The key is not taken
+when the config gives P to another feature. `serverinfo.h`; `mod_status` has `server_info` (`ready`, `open`, `opens`, `page`,
+`pages`, `answered`).
 
 ## Strand notices (`strand_notices`, off by default; live once, 2026-11-17)
 

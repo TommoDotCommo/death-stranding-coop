@@ -22,9 +22,9 @@ int main(){
         for(auto bad:{"","nonsense","[1]","{\"format\":2}","{\"format\":\"1\"}"})CHECK(!parse(bad).read);
         auto old=parse(R"({"format":1,"name":"","preset":"p","players":{"count":1,"limit":2},"settings":[]})");CHECK(old.read&&!old.onlineKnown);
         auto v=pages(net,p);CHECK(v.size()==3);
-        CHECK(has(v[0],u"Bridges é (friends rules)")&&has(v[0],u"\nOnline now: 2\nAnn, Bob\n")&&has(v[0],u"known here: 5 of 16")&&has(v[0],u"Near you: Cid"));
+        CHECK(has(v[0],u"Bridges é (friends rules)")&&has(v[0],u"\nOnline now: 2\nAnn, Bob\n")&&!has(v[0],u"known here")&&has(v[0],u"Near you: Cid"));
         CHECK(has(v[1],u"Rules 1 of 2\nr1\nr2\nr3\nr4\nr5")&&!has(v[1],u"r6")&&has(v[2],u"Rules 2 of 2\nr6"));
-        auto w=pages(net,old);CHECK(w.size()==1&&has(w[0],u"This server")&&!has(w[0],u"Online now"));
+        auto w=pages(net,old);CHECK(w.size()==1&&has(w[0],u"This server")&&!has(w[0],u"Online now")&&has(w[0],u"known here: 1 of 2"));
         auto x=pages(net,Policy{});CHECK(x.size()==1&&has(x[0],u"did not answer")&&has(x[0],u"Near you: Cid"));
         Facts duo;duo.partner="Ann";duo.partnerHere=true;auto y=pages(duo,Policy{});CHECK(y.size()==1&&has(y[0],u"Two-player game\nAnn: connected\nNear you: nobody"));
         duo.partner.clear();duo.partnerHere=false;CHECK(has(pages(duo,Policy{})[0],u"Partner: not connected"));

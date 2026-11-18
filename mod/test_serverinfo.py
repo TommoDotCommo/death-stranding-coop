@@ -38,7 +38,7 @@ def run(library):
             oracle(game.pump(3,lambda:info()['ready']),('no page',info()))
             press(game);oracle(game.pump(5,lambda:info()['open']),('P did not open it',info(),Answer.seen))
             oracle(info()['answered'] and info()['pages']==3,('not read',info(),Answer.seen))
-            t=body(game);oracle('Bridges (friends rules)' in t and 'Online now: 2\nAnn, Bob' in t and 'known here: 5 of 16' in t,t)
+            t=body(game);oracle('Bridges (friends rules)' in t and 'Online now: 2\nAnn, Bob' in t,t)
             game.lib.mod_test_dialog_answer(0);oracle(game.pump(3,lambda:info()['open'] and info()['page']==1),('no next page',info()))
             t=body(game);oracle('Rules 1 of 2' in t and 'Rule 0.' in t,t)
             game.lib.mod_test_dialog_answer(1);oracle(game.pump(3,lambda:not info()['open']),('not closed',info()))

@@ -67,7 +67,8 @@ Service:
 
 In the game's own UI wherever it can carry them, rather than a display of our own.
 
-- [ ] **Server info in the game**: which server this is, its rules and settings, and who is online.
+- [x] **Server info in the game**: P, in the game's own dialogue: which server this is, who is online and who is near, and
+      its rules.
 - [ ] **Text chat in the game** between the players on a server (with the moderation it needs before going public).
 - [x] **Debug menu in the game**: F3, in the game's own dialogue: stamina, blood and the porter's battery, where test mode is
       on. A vehicle's battery is still to come.

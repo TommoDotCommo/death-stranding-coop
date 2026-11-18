@@ -365,7 +365,16 @@ static void capped(){
     CHECK(bea.client->nearby().size()==1&&bea.sees(north.relay->remoteId(0,24))&&nameShown(*bea.client,north.relay->remoteId(0,24))=="S4 \xc2\xb7 south");
 }
 
+// Who is on this server: its own players, not the linked server's it holds to show them.
+static void onlineHere(){
+    Net net;auto& north=net.server("north",0);auto& south=net.server("south",0);net.link(north,south,"key-of-north-and-south");
+    std::vector<std::string> said;north.config.online=[&](std::vector<std::string> n){said=std::move(n);};net.startAll();
+    net.add(north,7,"Bea",{0,0,0});net.add(south,9,"Carl",{10,0,0});
+    CHECK(net.until([&]{return north.relay->remotePlayers()==1&&said.size()>=1;},3000));net.run(500);
+    CHECK(said==(std::vector<std::string>{"Bea"}));
+}
 int main(){
+    onlineHere();
     // A broken protection may break the relay's own invariants: an exception is a failure like any other.
     for(auto test:{wire,across,interest,budget,loss,loops,identities,authentication,capped}){
         try{test();}catch(const std::exception& e){std::fprintf(stderr,"linked presence oracle: exception %s\n",e.what());++failures;}}

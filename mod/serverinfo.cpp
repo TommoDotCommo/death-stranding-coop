@@ -53,8 +53,7 @@ std::vector<std::u16string> pages(const Facts& f,const Policy& p){
         if(p.onlineKnown){
             first+=u"\nOnline now: "+number(p.online);
             auto names=nameList(p.names);if(!names.empty())first+=u"\n"+names;
-        }
-        first+=u"\nPlayers known here: "+number(p.known)+u" of "+number(p.limit);
+        }else first+=u"\nPlayers known here: "+number(p.known)+u" of "+number(p.limit);
     }else if(f.server)first=u"The server did not answer.";
     else first=f.group?u"No server.":u"Two-player game";
     if(!f.group){

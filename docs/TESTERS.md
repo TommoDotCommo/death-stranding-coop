@@ -51,7 +51,8 @@ player.
 
 ## Keys in the game
 
-Hold **F1** in the world for a list of the co-op keys that work in your session.
+Hold **F1** in the world for a list of the co-op keys that work in your session. Press **P** to see which server you are on,
+who is online and the server's rules.
 
 ## Test mode
 
