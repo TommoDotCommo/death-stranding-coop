@@ -1,8 +1,7 @@
-# Death Stranding Co-op v0.1.0-alpha.1 (draft, not published)
+# Death Stranding Co-op v0.1.0-alpha.1 (closed alpha)
 
-The first alpha for outside testers. **Draft:** the owner decides when it is tagged and published
-(`local/release/PUBLISH-v0.1.0-alpha.1.txt`, written by `tools/release.sh`). Before publishing, every line under
-"Not verified" must be re-read, and anything checked in the meantime moved up with its evidence.
+The first alpha for outside testers. Testers join the organiser's test server with a group invite (`DSG-...`) sent to
+them privately; how to install, join and report is in [docs/TESTERS.md](TESTERS.md).
 
 You need DEATH STRANDING DIRECTOR'S CUT on Steam, build 13300582, and 64-bit Windows 10 or 11.
 
@@ -23,6 +22,11 @@ You need DEATH STRANDING DIRECTOR'S CUT on Steam, build 13300582, and 64-bit Win
   of [STATUS.md](../STATUS.md) on the release commit.
 - Bug reports: F2 in the game and the launcher's diagnostics (see "Not verified"). In group play F2 also marks the
   logs of the players near you and the server's log (tested without the game: the fake world through the real server).
+- **Test mode** for testers: a server whose rules say so (or the launcher's Settings, "Test mode (alpha)", for your own
+  games) gives unlimited materials (U drops a set of material crates behind you) and keeps blood and stamina full.
+- **Route challenges** (K records a route; the launcher's Challenges tab runs, publishes and sends them) and
+  **collections** (a group of structures shared as a `DSK1-...` string and imported through the server): early, see
+  "Verified" and "Not verified".
 
 ## Verified
 
@@ -67,14 +71,34 @@ the player path (Setup or the launcher's install, the game started by Steam), no
 - **F2 in group play**: one F2 on one PC wrote the mark in that game's log, in the other player's log (`BUGMARK n from
   Laptop`, with its own flight file) and in the server's log (`bugmark n from <player> (Laptop)`), through the relay.
 
+### Over the internet (2026-11-18)
+
+- **A rented Linux server** (1 GB of memory, Ubuntu 24.04) set up with `deploy/vps/deploy.sh`: Public rules, player
+  keys, firewall, fail2ban. Two PCs on an ordinary home connection, each with this release installed through Setup,
+  joined by the group invite, met through the server's relay over the internet (24 ms round trip), were named on the
+  server by their launcher names, and an F2 mark reached the server's log. Repeated with this release's final build.
+
+### Features new in this alpha, each live once in one real game (2026-11-18)
+
+- **Test mode**: U dropped all six material crates (chiral crystals, metals, ceramics, chemicals, special alloys,
+  resins), read back from the game's cargo records; stamina and blood read full during a 25 s sprint.
+- **Route challenges**: a route recorded with K, a run finished, and a run that left the corridor failed on the right side.
+- **Collections**: a 30 m bridge and a rain shelter made on one server and imported on another were built by the
+  importer's own game and still there a minute later.
+
 ## Not verified
 
 - **Setup**: the administrator prompt of the firewall option for a user who is not already elevated (the option itself
   ran: ticking it added inbound rules for the game, the launcher and the server on Private and Public networks, and
   unticking took them away), the invite-link option, and SmartScreen's wording on a PC that downloaded the file from
   GitHub. Uninstall from the window ran (the game folder back as it was).
-- **The internet**: every two-PC run so far went over Tailscale; a rented server on a public address and players behind
-  ordinary home routers have not been tried (`deploy/vps` is checked on loopback only).
+- **The internet**: the two PCs that met through the rented server were at one place; players at different homes,
+  further away and behind other routers have not been tried together.
+- **Test mode**: the vehicle's battery is not kept full yet (accepted, does nothing); cargo damage, equipment wear and
+  timefall work as in the normal game.
+- **Route challenges**: the launcher's Challenges tab has not been seen on a screen; a run sent to a server and its board.
+- **Collections**: importing "here" (turned to your heading), turned ropes and bridges, another player's game seeing
+  the imports, and the launcher's collection windows.
 - An actual game crash producing a dump.
 - Structures from other players skip the game's spacing checks (`build_received`); they may overlap.
 - Roads paved through the server: the game asks and is answered but takes nothing yet.
@@ -89,6 +113,7 @@ the player path (Setup or the launcher's install, the game started by Steam), no
 - Another mod's `avrt.dll` in the game folder blocks the install (no chain-loading).
 - Traffic is not encrypted: play on a LAN, a VPN, or a server you trust.
 - Updating is manual: run the new Setup.
+- Route results made in test mode are not marked as such yet: on a test-mode server, times are for fun only.
 
 ## Reporting
 
