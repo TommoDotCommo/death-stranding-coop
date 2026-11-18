@@ -83,7 +83,9 @@ build/fake-testmode-menu.so: $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMUTANT_TESTMODE_MENU_IGNORED -fPIC -shared $(SRC) -o $@
 build/fake-serverinfo-base.so: $(SRC) $(HEADERS) | build
 	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMUTANT_SERVERINFO_BASE -fPIC -shared $(SRC) -o $@
-TESTMODE_FAKES = build/fake-testmode-event.so build/fake-testmode-rate.so build/fake-testmode-menu.so build/fake-serverinfo-base.so
+build/fake-chat-keys.so: $(SRC) $(HEADERS) | build
+	$(CXX) $(FLAGS) -DMOD_FAKE_NETWORK -DMUTANT_CHAT_KEYS -fPIC -shared $(SRC) -o $@
+TESTMODE_FAKES = build/fake-testmode-event.so build/fake-testmode-rate.so build/fake-testmode-menu.so build/fake-serverinfo-base.so build/fake-chat-keys.so
 # The real server (Linux build) for the broadcast fake-world test.
 ../world/build/coop-world: FORCE
 	$(MAKE) -C ../world build/coop-world

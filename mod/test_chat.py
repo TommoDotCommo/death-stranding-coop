@@ -20,9 +20,9 @@ class Server(strand.Server):
         self.world,self.folder,self.port=world,Path(folder),port;self.data,self.trace=self.folder/'world.json',self.folder/'calls.log';self.process=None;self.start('--name','North',*rules)
 def free_port():
     s=socket.socket();s.bind(('127.0.0.1',0));p=s.getsockname()[1];s.close();return p
-def game(folder,library,server,name):
+def game(folder,library,server,name,**extra):
     server.sign_in(name);t=server.notice_token(name);f=Path(folder)/name;f.mkdir()
-    g=Game(f,library,dict(nickname=name,chat=True,strand_token=t,online_server='http://127.0.0.1:%d/%s/auth/ds'%(server.port,strand.PREFIX)))
+    g=Game(f,library,dict(extra,nickname=name,chat=True,strand_token=t,online_server='http://127.0.0.1:%d/%s/auth/ds'%(server.port,strand.PREFIX)))
     g.lib.mod_test_telop.argtypes=[c.c_char_p,c.c_uint];g.lib.mod_test_telop.restype=c.c_uint;return g
 def command(g,text):(g.root/'puppet.chat').write_text('%s %s\n'%(text,g.lib.mod_test_run_stamp().decode()))
 def telop(g):
@@ -59,9 +59,22 @@ def run(world,library):
             oracle(pump([ann],6,lambda:chat(ann)['reads']>0),'no read');oracle(not chat(ann)['on'],chat(ann))
             command(ann,'open');oracle(pump([ann],6,lambda:'Text chat is off on this server.' in shown(ann)),shown(ann));oracle(not chat(ann)['typing'],chat(ann))
         finally:ann.close();server.stop()
+def keys(world,library):
+    """While typing, the letters are not the mod's keys: U drops no crates; after it, U does."""
+    with tempfile.TemporaryDirectory() as folder:
+        server=Server(world,folder,free_port());ann=game(folder,library,server,'Ann',test_mode={})
+        try:
+            oracle(pump([ann],6,lambda:chat(ann)['reads']>0),'no read');sets=lambda:ann.status()['test_mode']['sets']
+            command(ann,'open');oracle(pump([ann],3,lambda:chat(ann)['typing']),'not typing')
+            ann.script('key U 200\nwait 300\n');pump([ann],1.5,lambda:False);oracle(sets()==0,('U acted while typing',sets()))
+            command(ann,'esc');oracle(pump([ann],3,lambda:not chat(ann)['typing']),'esc')
+            pump([ann],1.2,lambda:False);ann.script('key U 200\nwait 300\n');oracle(pump([ann],3,lambda:sets()==1),('U after typing',sets()))
+        finally:ann.close();server.stop()
 if __name__=='__main__':
     world=str(Path(sys.argv[1]).resolve())
-    if len(sys.argv)==3:run(world,Path(sys.argv[2]).resolve())
+    if len(sys.argv)==3:keys(world,Path(sys.argv[2]).resolve());run(world,Path(sys.argv[2]).resolve())
     else:
-        run(world,ROOT/'build/fake.so')
+        keys(world,ROOT/'build/fake.so');run(world,ROOT/'build/fake.so')
+        r=subprocess.run([sys.executable,'-B',__file__,world,str(ROOT/'build/fake-chat-keys.so')],capture_output=True,text=True,timeout=200)
+        assert r.returncode==1 and 'test-mode oracle' in r.stderr,('SURVIVED fake-chat-keys.so',r.returncode,r.stderr[-500:])
         print('text chat (fake world): a line typed reaches both info logs under its name, Esc sends nothing, the rate limit and a server with chat off are told')
