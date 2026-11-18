@@ -96,14 +96,11 @@ On the test server, which the organiser runs:
 - The game itself sends its Steam sign-in data to the server it is given; the test server does not store your Steam
   id and never shows it to other players.
 
-## If the game closes by itself as it starts
+## Other programs inside the game
 
-The mod only lets expected code run inside the game. Discord's overlay and clips are allowed. Another program that puts
-itself into running games (a screen recorder's game capture or an FPS overlay, for example) makes the mod close the game:
-turn that program's overlay off for Death Stranding, or close the program. If you need it, the file it was stopped for is
-on a `MODULE_REFUSE` line of the newest `redirect-*.log` in `%LOCALAPPDATA%\DeathStrandingCoop\redirect-data`; put that full
-path on a line of its own in `%LOCALAPPDATA%\DeathStrandingCoop\extra-modules.txt`. That program then runs inside the game
-with the game's rights, so only do this for software you trust.
+Antivirus, overlays and capture tools often put themselves into running games. The mod lets the game go on: it notes the
+file in its log and holds that file to the mod's own limits on network and file access, so such a tool may not work fully
+inside the game. If the game misbehaves with one of them, try without it and mention it in your report.
 
 ## Report a problem
 

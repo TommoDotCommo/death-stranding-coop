@@ -105,11 +105,15 @@ int main(int argc,char** argv) {
         std::string many;for(size_t i=0;i<=MaxExtraModules;++i)many+="C:\\x\\m"+std::to_string(i)+".dll\n";check(!parse_module_extra(many,extra));
         many.clear();for(size_t i=0;i<MaxExtraModules;++i)many+="C:\\x\\m"+std::to_string(i)+".dll\n";check(parse_module_extra(many,extra)&&extra.size()==MaxExtraModules);
     }
-    // A refused request fails the load and the game goes on; a module found loaded after the fact ends the process.
-    check(refusal(ModuleMode::allowlist,ModulePhase::request)==Refusal::fail_load);
-    check(refusal(ModuleMode::allowlist,ModulePhase::loaded)==Refusal::end_process&&refusal(ModuleMode::allowlist,ModulePhase::mapped)==Refusal::end_process);
+    // A refused request fails the load and the game goes on; what the game's own request brought from elsewhere ends it;
+    // a module only noticed (injected from outside) is tolerated for a player and ends a closed test copy.
+    for(auto m:{ModuleMode::allowlist,ModuleMode::allowlist_closed}){check(refusal(m,ModulePhase::request)==Refusal::fail_load);check(refusal(m,ModulePhase::loaded)==Refusal::end_process&&refusal(m,ModulePhase::mapped)==Refusal::end_process);}
+    check(refusal(ModuleMode::allowlist,ModulePhase::noticed)==Refusal::tolerate&&refusal(ModuleMode::allowlist_closed,ModulePhase::noticed)==Refusal::end_process);
     // strict stays as closed as it was: any refusal ends the process.
-    for(auto phase:{ModulePhase::request,ModulePhase::mapped,ModulePhase::loaded})check(refusal(ModuleMode::strict,phase)==Refusal::end_process);
+    for(auto phase:{ModulePhase::request,ModulePhase::mapped,ModulePhase::loaded,ModulePhase::noticed})check(refusal(ModuleMode::strict,phase)==Refusal::end_process);
+    {   // The closed list admits what the open one does.
+        auto closed=c;closed.mode=ModuleMode::allowlist_closed;check(module_allowed(closed,L"c:\\windows\\system32\\x.dll",true)&&!module_allowed(closed,L"c:\\evil.dll",true));
+        check(classify_request(closed,L"api-ms-win-core-x-l1-1-0.dll",false,false)==RequestAction::api_set_forward);}
     check(classify_request(c,L"c:\\lab\\s0\\x.dll",false,true)==RequestAction::policy);
     check(classify_request(c,L"x.dll",true,false)==RequestAction::policy);
     {auto s=c;s.mode=ModuleMode::strict; check(classify_request(s,L"api-ms-win-core-x-l1-1-0.dll",false,false)==RequestAction::not_found);}
@@ -129,6 +133,11 @@ int main(int argc,char** argv) {
     patched=false;events.clear();
     check(!module_event(c,L"c:\\evil.dll",true,false,ModulePhase::mapped,audit,patch));
     check(!patched && events==std::vector<int>({0}));
+    {   // Injected and not on the list: recorded as refused by the list, the proxy's rules put on it, the game goes on.
+        patched=false;events.clear();check(module_event(c,L"c:\\tools\\overlay.dll",true,false,ModulePhase::noticed,audit,patch));check(patched&&events==std::vector<int>({0,2}));
+        patched=false;events.clear();check(module_event(c,L"c:\\lab\\s0\\x.dll",true,false,ModulePhase::noticed,audit,patch));check(patched&&events==std::vector<int>({1,2}));
+        auto closed=c;closed.mode=ModuleMode::allowlist_closed;patched=false;events.clear();check(!module_event(closed,L"c:\\tools\\overlay.dll",true,false,ModulePhase::noticed,audit,patch));check(!patched);
+        patched=false;check(!module_event(c,L"c:\\tools\\overlay.dll",true,false,ModulePhase::loaded,audit,patch));check(!patched);}
     c.mode=ModuleMode::strict;
     check(!module_allowed(c,L"c:\\windows\\system32\\x.dll",true));
     check(module_event(c,L"c:\\windows\\system32\\x.dll",true,true,ModulePhase::loaded,audit,patch));

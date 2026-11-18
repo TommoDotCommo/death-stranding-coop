@@ -139,7 +139,7 @@ RequestAction classify_request(const ModulePolicy& c,const std::wstring& request
 #ifdef MUTANT_MODULE_REQUEST
     return RequestAction::policy; // api-set names and absent files reach the policy and end the process
 #else
-    if(c.mode==ModuleMode::allowlist && is_api_set_name(requested)) return RequestAction::api_set_forward;
+    if((c.mode==ModuleMode::allowlist||c.mode==ModuleMode::allowlist_closed) && is_api_set_name(requested)) return RequestAction::api_set_forward;
     if(!file_exists) return RequestAction::not_found;
     return RequestAction::policy;
 #endif
@@ -148,9 +148,20 @@ Refusal refusal(ModuleMode mode,ModulePhase phase) {
 #ifdef MUTANT_MODULE_REFUSED_STAYS
     (void)mode;(void)phase;return Refusal::fail_load;
 #elif defined(MUTANT_MODULE_STRICT_GOES_ON)
-    (void)mode;return phase==ModulePhase::request?Refusal::fail_load:Refusal::end_process;
+    (void)mode;return phase==ModulePhase::request?Refusal::fail_load:phase==ModulePhase::noticed?Refusal::tolerate:Refusal::end_process;
 #else
-    return mode==ModuleMode::allowlist&&phase==ModulePhase::request?Refusal::fail_load:Refusal::end_process;
+    if(mode==ModuleMode::strict||mode==ModuleMode::log_only) return Refusal::end_process;
+    if(phase==ModulePhase::request) return Refusal::fail_load;
+#ifndef MUTANT_MODULE_NOTICED_ENDS
+    if(phase==ModulePhase::noticed&&mode==ModuleMode::allowlist) return Refusal::tolerate;
+#endif
+#ifdef MUTANT_MODULE_CLOSED_OPEN
+    if(phase==ModulePhase::noticed) return Refusal::tolerate;
+#endif
+#ifdef MUTANT_MODULE_LOADED_GOES_ON
+    if(phase==ModulePhase::loaded) return Refusal::tolerate;
+#endif
+    return Refusal::end_process;
 #endif
 }
 bool module_event(const ModulePolicy& c,const std::wstring& p,bool evidence,bool existing,
@@ -158,9 +169,15 @@ bool module_event(const ModulePolicy& c,const std::wstring& p,bool evidence,bool
                   const std::function<void()>& patch) {
     bool allowed=existing || module_allowed(c,p,evidence);
     audit(allowed);
-    if(!allowed) return false;
+    if(!allowed) {
+        if(refusal(c.mode,phase)!=Refusal::tolerate) return false;
+#ifndef MUTANT_MODULE_FOREIGN_UNPATCHED
+        patch();
+#endif
+        return true;
+    }
 #ifndef MUTANT_MODULE_PATCH
-    if(phase==ModulePhase::loaded) patch();
+    if(phase==ModulePhase::loaded||phase==ModulePhase::noticed) patch();
 #else
     (void)phase;(void)patch;
 #endif
