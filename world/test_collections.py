@@ -103,7 +103,7 @@ if __name__=='__main__':
         mutant=os.path.join(d,'coop-world-creator-self')
         mono=[str(ROOT/'../vendor/monocypher'/f) for f in ('monocypher.c','monocypher-ed25519.c')]
         subprocess.run(['g++','-std=c++17','-O1','-pthread','-DMUTANT_COLLECTION_CREATOR_SELF',
-                        *[str(ROOT/f) for f in ('main.cpp','front.cpp','api.cpp','link.cpp','world.cpp','collections.cpp','collection.cpp','relay.cpp','identity.cpp','signatures.cpp')],*mono,'-o',mutant],check=True)
+                        *[str(ROOT/f) for f in ('main.cpp','front.cpp','api.cpp','link.cpp','world.cpp','collections.cpp','collection.cpp','relay.cpp','identity.cpp','signatures.cpp','challenges.cpp','../mod/route.cpp')],*mono,'-o',mutant],check=True)
         try:run(mutant);survived=True
         except AssertionError as e:survived=False;print('KILLED MUTANT_COLLECTION_CREATOR_SELF ('+str(e)[:80]+')')
         oracle(not survived,'MUTANT_COLLECTION_CREATOR_SELF survived')
