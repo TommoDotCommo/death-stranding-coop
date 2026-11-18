@@ -186,6 +186,16 @@ copy, and its builder name must read "Name · collection"; (2) a collection impo
 game: built there; (3) the same imported Here: built at the porter, turned; (4) a bridge and a rope turned by 90
 degrees; (5) a like the importer's game sends for his own import, and one another game sends (his like history).
 
+## Live (2026-11-18, one real game, Episode 3 save; lab regression `collection_smoke`)
+
+- First run (0ee9af2): a collection of a 30 m bridge and a rain shelter made on server A, imported by the player at the
+  original place on server B: imported 2, but his game put both in its own list as Fail and never built them (the game
+  does not build an own object its save lacks). Not deleted, no copy uploaded.
+- With the collection builder (e807689): the same run; his game built both (first list, Activated), they were still
+  there a minute later, nothing deleted, no copy uploaded, no fault, saves unchanged.
+- Not run live yet: Here (turned to the player's heading), ropes and bridges turned, another player's game seeing the
+  imports, the launcher's windows.
+
 ## Tests
 
 All game-free, in `make test`:
