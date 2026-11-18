@@ -121,7 +121,7 @@ std::string config(const Session& s) {
         if(!s.relayToken.empty())key=s.relayToken;   // a server that takes keys: this player's relay token, not the group's key
 #endif
         std::string json="{\"server\":\""+server+"\",\"slot\":"+std::to_string(slot)+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)
-            +",\"required\":true,\"logging\":true,\"game_thread\":true,\"puppet_probe\":true,\"partner_tag\":true,\"others\":"+std::to_string(GroupOthers)
+            +",\"required\":true,\"logging\":true,\"game_thread\":true,\"puppet_probe\":true,\"partner_tag\":true,\"help_page\":true,\"others\":"+std::to_string(GroupOthers)
 #ifndef MUTANT_GROUP_NO_GEAR
             // What other players wear and carry, on their bodies (../mod/README.md, "Other players' gear and carried cases").
             +",\"others_gear\":true,\"others_carry\":"+std::to_string(GroupCarried)
@@ -171,7 +171,7 @@ std::string config(const Session& s) {
     // cargo and structures, MULEs put down and camp alarms, and standard orders (mod/README.md). The network-only
     // self_tick setup draws nothing.
 #ifndef MUTANT_CONFIG_PLAY
-    const std::string play="\"game_thread\":true,\"puppet_probe\":true,\"partner\":\"own\",\"partner_gear\":true,\"partner_marker\":true,\"partner_vehicle\":true,\"partner_cart\":true,\"carry_visual\":true,\"partner_tag\":true,\"notices\":"+std::string(s.solo?"false":"true")+",\"share_environment\":\"rain\",\"share_enemies\":true,\"share_orders\":true,\"share_order_units\":true,\"share_roads\":true,\"share_saved_structures\":true";
+    const std::string play="\"game_thread\":true,\"puppet_probe\":true,\"partner\":\"own\",\"partner_gear\":true,\"partner_marker\":true,\"partner_vehicle\":true,\"partner_cart\":true,\"carry_visual\":true,\"partner_tag\":true,\"help_page\":true,\"notices\":"+std::string(s.solo?"false":"true")+",\"share_environment\":\"rain\",\"share_enemies\":true,\"share_orders\":true,\"share_order_units\":true,\"share_roads\":true,\"share_saved_structures\":true";
 #else
     const std::string play="\"self_tick\":true";
 #endif

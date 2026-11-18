@@ -46,6 +46,7 @@ struct Config {
     unsigned othersCarry=0;    // with others_gear: the carried cases of the nearest N other players (cargo_stack.h, Stacks); 0: off; not run live
     bool partnerVehicle=false; // the partner's vehicle drawn under him while he rides (ride.h)
     bool partnerTag=false;     // the partner's name (their nickname) over the partner body (nametag.h)
+    bool helpPage=false;       // hold F1: the co-op keys on the game's common telop (help.h)
     bool shareOrderUnits=false; // with share_orders: a cargo unit one player hands in is delivered for the partner too (a split delivery); not yet run with a real partial hand-in
     bool shareOrderLoad=false;  // with share_orders: one shared load per order (orderload.h); not run live yet
     unsigned passengerKey=0x4a;      // with partner_vehicle: next to the partner's truck this key gets on and off (passenger.h); 0: off

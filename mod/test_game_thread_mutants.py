@@ -24,6 +24,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('marker',['LEFT','TWICE','RATE','FOREIGN','NEAR'],['marker_test.cpp','marker.cpp','discovery.cpp']),
           ('gear',['RESOURCE','REBUILD','CARGO','HIDDEN','NESTED','STALE_WORLD','VISIBILITY','SLOTS','FLICKER','ORDINAL','MIXED','RESEND','FIELDS','SET_BUDGET','SET_KEEP','SET_MIX','SET_SITE','SET_READS','SET_LOCAL'],['gear_test.cpp','gear.cpp','puppet.cpp','pose.cpp','discovery.cpp']),
           ('nametag',['MARKUP','STILL','ORDER','TAGS_KEEP','TAGS_MIX','TAGS_BODY','TAGS_EVENT','TAGS_FORGET','TAGS_LIMIT','TAGS_NEAREST','TAGS_FLAP','TAGS_FIRST'],['nametag_test.cpp','nametag.cpp','discovery.cpp','../core/core.cpp']),
+          ('help',['MATERIALS','EVENT','RELEASE','AGAIN','RETRY'],['help_test.cpp','help.cpp','discovery.cpp']),
           ('notice',['BOUND','GROUP_ALONE','LEFT','ALONE_ONCE','NAME_WAIT','WORLD','GAP','AWAY_SETTLE','BACK_PAIRED','LIKE_ICON','JOIN_HOLD','DOWN_ONCE','FREE_DOWN','CALL_GAP','LINK_HOLD','LINK_ONCE','EPISODE_ONCE','SCAN_GAP'],['notice_test.cpp','notice.cpp','nametag.cpp','discovery.cpp','../core/core.cpp']),
           ('strand',['PARSE','FIRST','ONCE','SHARED','CHOICE','GROUP','SINCE','STOP','BACKOFF','OLD_PARSE','OLD_REFUSED'],['strand_notices_test.cpp','strand_notices.cpp','nametag.cpp','discovery.cpp','../core/core.cpp']),
           ('enemy',['ALL_UP','KIND','ECHO','TWICE','HASTY','CAMP_ECHO','CAMP_TWICE'],['enemies_test.cpp','enemies.cpp','discovery.cpp']),

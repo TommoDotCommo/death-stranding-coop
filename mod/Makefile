@@ -4,8 +4,8 @@ CXX ?= g++
 MINGW ?= $(shell command -v x86_64-w64-mingw32-g++-posix >/dev/null 2>&1 && echo x86_64-w64-mingw32-g++-posix || echo x86_64-w64-mingw32-g++)
 FLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread
 WINFLAGS = $(FLAGS) -D_WIN32_WINNT=0x0602 -static-libgcc -static-libstdc++ -static
-SRC = route.cpp testmode.cpp offer_strand.cpp received.cpp own_strand.cpp strand_notices.cpp others.cpp crowd.cpp fights.cpp ../core/broadcast_client.cpp mule_goal.cpp enemy_poses.cpp rewards.cpp signals.cpp ui.cpp orderload.cpp carts.cpp wheels.cpp controls.cpp voidout.cpp passenger.cpp carry_place.cpp roads.cpp bts.cpp enemies.cpp orders.cpp story.cpp ../launcher/saves.cpp vitals.cpp online.cpp notice.cpp nametag.cpp likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
-HEADERS = testmode.h ../common/diag_log.h ../common/crash_handler.h bugmark.h route.h offer_strand.h received.h own_strand.h strand_notices.h ../world/json.h others.h crowd.h fights.h ../core/broadcast.h ../core/broadcast_client.h ../core/relay.h mule_goal.h enemy_poses.h rewards.h signals.h ui.h orderload.h carts.h wheels.h controls.h link.h guard_win.h voidout.h passenger.h carry_place.h roads.h bts.h enemies.h orders.h story.h ../launcher/saves.h vitals.h online.h notice.h nametag.h likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
+SRC = route.cpp testmode.cpp offer_strand.cpp received.cpp own_strand.cpp strand_notices.cpp others.cpp crowd.cpp fights.cpp ../core/broadcast_client.cpp mule_goal.cpp enemy_poses.cpp rewards.cpp signals.cpp ui.cpp orderload.cpp carts.cpp wheels.cpp controls.cpp voidout.cpp passenger.cpp carry_place.cpp roads.cpp bts.cpp enemies.cpp orders.cpp story.cpp ../launcher/saves.cpp vitals.cpp online.cpp notice.cpp help.cpp nametag.cpp likes.cpp cargo_stack.cpp weather.cpp ride.cpp environment.cpp join.cpp game_thread.cpp puppet.cpp double.cpp body.cpp gear.cpp outfit.cpp pad.cpp cargo.cpp carry_visual.cpp marker.cpp structures.cpp vehicle.cpp discovery.cpp mod.cpp config.cpp providers.cpp pose.cpp ../core/core.cpp
+HEADERS = testmode.h ../common/diag_log.h ../common/crash_handler.h bugmark.h route.h offer_strand.h received.h own_strand.h strand_notices.h ../world/json.h others.h crowd.h fights.h ../core/broadcast.h ../core/broadcast_client.h ../core/relay.h mule_goal.h enemy_poses.h rewards.h signals.h ui.h orderload.h carts.h wheels.h controls.h link.h guard_win.h voidout.h passenger.h carry_place.h roads.h bts.h enemies.h orders.h story.h ../launcher/saves.h vitals.h online.h notice.h help.h nametag.h likes.h cargo_stack.h weather.h ride.h environment.h join.h game_thread.h puppet.h double.h body.h gear.h outfit.h auto_continue.h pad.h cargo.h carry_visual.h marker.h structures.h vehicle.h pose.h fake_memory.h discovery_options.h discovery.h discovery_signatures.h timing.h mod.h config.h providers.h signature.h identity.h ../core/core.h ../core/build_id.h
 build:
 	mkdir -p $@
 identity:
@@ -167,6 +167,8 @@ gear-windows-test: gear_test.cpp gear.cpp gear.h puppet.cpp pose.cpp discovery.c
 .PHONY: gear-windows-test
 build/nametag-test: nametag_test.cpp nametag.cpp nametag.h discovery.cpp ../core/core.cpp | build
 	$(CXX) $(FLAGS) nametag_test.cpp nametag.cpp discovery.cpp ../core/core.cpp -o $@
+build/help-test: help_test.cpp help.cpp help.h discovery.cpp | build
+	$(CXX) $(FLAGS) help_test.cpp help.cpp discovery.cpp -o $@
 build/notice-test: notice_test.cpp notice.cpp notice.h nametag.cpp nametag.h discovery.cpp ../core/core.cpp | build
 	$(CXX) $(FLAGS) notice_test.cpp notice.cpp nametag.cpp discovery.cpp ../core/core.cpp -o $@
 build/strand-notices-test: strand_notices_test.cpp strand_notices.cpp strand_notices.h ../world/json.h nametag.cpp nametag.h discovery.cpp ../core/core.cpp | build
@@ -293,7 +295,7 @@ route-test: build/route-test
 	./build/route-test
 	python3 -B mutants.py --sources "route_test.cpp route.cpp" --prefix build/mutant-route- $(ROUTE_MUTANTS) && echo KILLED 29 route mutants
 .PHONY: route-test
-game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/mule-goal-test build/passenger-test build/place-test build/roads-test build/own-strand-test build/offer-strand-test build/received-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test build/strand-notices-test build/signals-test build/story-test build/enemy-poses-test build/others-test build/crowd-test build/fights-test build/testmode-test
+game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderload-test build/guard-test build/carts-test build/wheels-test build/controls-test build/voidout-test build/mule-goal-test build/passenger-test build/place-test build/roads-test build/own-strand-test build/offer-strand-test build/received-test build/bts-test build/enemies-test build/orders-test build/game-thread-test build/puppet-test build/double-test build/pad-test build/cargo-test build/carry-visual-test build/structures-test build/sync-fuzz build/world-fuzz build/structures-fuzz build/partner-test build/coop-partner build/body-test build/auto-continue-test build/marker-test build/gear-test build/outfit-test build/ride-test build/weather-test build/stack-test build/online-test build/link-test build/vitals-test build/likes-test build/nametag-test build/notice-test build/help-test build/strand-notices-test build/signals-test build/story-test build/enemy-poses-test build/others-test build/crowd-test build/fights-test build/testmode-test
 	./build/story-test
 	./build/wire-test
 	./build/rewards-test
@@ -353,6 +355,7 @@ game-thread-test: build/wire-test build/rewards-test build/ui-test build/orderlo
 	./build/orders-test
 	./build/link-test
 	./build/notice-test
+	./build/help-test
 	./build/strand-notices-test
 	./build/nametag-test
 	$(MAKE) gear-windows-test

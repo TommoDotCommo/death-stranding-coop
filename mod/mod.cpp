@@ -57,6 +57,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "../common/diag_log.h"
 #include "nametag.h"
 #include "notice.h"
+#include "help.h"
 #include "strand_notices.h"
 #include "received.h"
 #include "offer_strand.h"
@@ -1280,6 +1281,32 @@ struct Runtime final:ds::Transport {
 #ifdef MOD_FAKE_NETWORK
     std::vector<std::u16string> fakeNotices;   // the fake world's info log: every line shown, in order
 #endif
+    // Hold F1: the co-op keys on the game's common telop (help.h). puppet.help (lab): "at <pivot> <x> <y> <stamp>" moves
+    // it, "show <stamp>" / "hide <stamp>" hold and release the key for an unattended test.
+    std::unique_ptr<mod::help::Page> helpPage;bool helpTried=false,helpHeld=false;Background<mod::help::Api> helpJob;std::filesystem::path helpCommand;
+    void tickHelp(uint64_t now){
+        if(!config.helpPage)return;
+#ifndef MOD_FAKE_NETWORK
+        if(!helpPage&&!helpTried){
+            auto* sp=&*sampler;if(!helpJob.ready([sp]{return mod::help::nativeApi(*sp);}))return;   // checked beside the game
+            helpTried=true;
+            try{helpPage=std::make_unique<mod::help::Page>(helpJob.job.get(),[this](const std::string& row){note(row.c_str());});note("HELP on: hold F1\n");}
+            catch(const std::exception& e){note((std::string("HELP unavailable: ")+e.what()+"\n").c_str());}}
+#endif
+        if(!helpPage)return;
+        if(!helpCommand.empty()&&std::filesystem::exists(helpCommand)){
+            auto text=readConfig(helpCommand);std::filesystem::remove(helpCommand);
+            std::istringstream in(text);std::string verb,stamp;in>>verb;mod::help::Place p=helpPage->place;
+            if(verb=="at")in>>p.pivot>>p.x>>p.y;
+            in>>stamp;
+            if(stamp!=mod::runStamp())note("HELP ignored command for another process\n");
+            else if(verb=="at"){helpPage->close();helpPage->place=p;std::ostringstream o;o<<"HELP at "<<p.pivot<<" "<<p.x<<" "<<p.y<<"\n";note(o.str().c_str());}
+            else if(verb=="show"||verb=="hide")helpHeld=verb=="show";
+        }
+        mod::help::Facts f;f.ping=pingKey;f.like=partnerMode();f.ride=ride?config.passengerKey:0;f.route=config.routeRecordKey;
+        f.materials=config.testMode.on?config.testMode.materialsKey:0;f.story=config.storyResync!="off"?config.storyKey:0;
+        helpPage->tick(helpHeld||modKey(mod::help::Key),cache.available&&!cache.gated&&gameEvent&&!gameEvent(),f,now);
+    }
     void tickNotices(uint64_t now) {
         if(!config.notices&&!noticeTest&&!config.strandNotices&&!routeTold&&!config.testMode.on)return;
 #ifndef MOD_FAKE_NETWORK
@@ -2705,7 +2732,7 @@ struct Runtime final:ds::Transport {
 #endif
                 puppet=std::make_unique<mod::puppet::Probe>(std::move(api),[this](const std::string& row){note(row.c_str());});
                 twinCommand=path.parent_path()/"puppet.double";cargoCommand=path.parent_path()/"puppet.cargo";bodyCommand=path.parent_path()/"puppet.body";gearCommand=path.parent_path()/"puppet.gear";
-                markerCommand=path.parent_path()/"puppet.marker";rideCommand=path.parent_path()/"puppet.ride";
+                markerCommand=path.parent_path()/"puppet.marker";rideCommand=path.parent_path()/"puppet.ride";helpCommand=path.parent_path()/"puppet.help";
 #ifdef MOD_FAKE_NETWORK
                 // Fake tree: player entity 0x6000 -> CameraEntity 0xa000 -> parked double 0xa800.
                 fake->mutate([&]{auto B=fake->base;fake->put<uint64_t>(0x6078,B+0xa000);
@@ -3507,6 +3534,8 @@ struct Runtime final:ds::Transport {
             if(gameContext)tickTestMode(now);
             stage="notices";stages.enter("notices",mod::nowUs());
             if(gameContext)tickNotices(now);
+            stage="help";stages.enter("help",mod::nowUs());
+            if(gameContext)tickHelp(now);
             stage="cargo command";stages.enter("cargo command",mod::nowUs());
             if(cargoCreate&&gameContext&&std::filesystem::exists(cargoCommand)) {
                 auto text=readConfig(cargoCommand);
