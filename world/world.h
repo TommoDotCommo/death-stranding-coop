@@ -80,8 +80,15 @@ struct ImportResult { size_t added=0,updated=0,unchanged=0,removed=0,filtered=0,
 //   order newest|liked, per_builder N (0 = none), spread METRES (0 = off): which objects a game is handed (curate)
 //   identity none|keys: keys refuses every sign-in but a launcher's ticket, and every API call that is not signed
 //   near_cap N (0 = none): the most players near one broadcast player he is shown on the relay
+//   test_mode off|on: every player's co-op mod starts in test mode (unlimited materials, stamina and blood; for alpha
+//   testers); the launcher writes it into the game's config, the server itself does nothing with it
 struct Policy {
     std::string preset="friends",join="invite",build="everyone",acceptOffers="auto",withdrawal="go",offerBuilds="yes",offerOld="no",order="newest",identity="none";
+#ifndef MUTANT_POLICY_TEST_DEFAULT
+    std::string testMode="off";
+#else
+    std::string testMode="on";
+#endif
     int64_t limit=0,players=int64_t(MaxPlayers),perBuilder=0,spread=20,nearCap=32;
 };
 Policy presetPolicy(const std::string& name);       // friends, solo or public; throws for anything else

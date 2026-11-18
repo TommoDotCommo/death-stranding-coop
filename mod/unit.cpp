@@ -235,6 +235,30 @@ int main() {
     {   auto big=withKeys(game,"\"pad\":\"");big.pop_back();big+=std::string(4096-big.size()-2,'a')+"\"}";   // exactly at the cap still parses structurally
         assert(big.size()==4096);assert(refused(big));                           // ...but "pad" is an unknown key
     }
+    {   // Test mode (testmode.h): off without the object; the object (even empty) turns every switch on, U drops crates.
+        auto probe=withKeys(threaded,"\"puppet_probe\":true,\"required\":true");
+        auto off=mod::parseConfig(probe).testMode;assert(!off.on&&!off.materialsKey&&!off.stamina&&!off.blood&&!off.battery);
+        auto on=mod::parseConfig(withKeys(probe,"\"test_mode\":{}")).testMode;
+        assert(on.on&&on.materialsKey==0x55&&on.stamina&&on.blood&&on.battery);
+        auto some=mod::parseConfig(withKeys(probe,"\"test_mode\":{\"materials\":72,\"stamina\":false,\"battery\":false}")).testMode;
+        assert(some.on&&some.materialsKey==72&&!some.stamina&&some.blood&&!some.battery);
+        auto none=mod::parseConfig(withKeys(probe,"\"test_mode\":{ \"materials\" : 0 }")).testMode;assert(none.on&&!none.materialsKey);
+        // The mod's own keys, mouse buttons and modifiers are refused, and the partner's passenger and catch-up keys.
+        for(auto key:{"113","112","9","66","76","1","2","16","17","18","27","13","74","120"})
+            assert(refused(withKeys(probe,std::string("\"test_mode\":{\"materials\":")+key+"}")));
+        assert(refused(withKeys(probe,"\"passenger_key\":72,\"test_mode\":{\"materials\":72}")));
+        assert(mod::parseConfig(withKeys(probe,"\"passenger_key\":72,\"test_mode\":{\"materials\":74}")).testMode.materialsKey==74);   // J once the passenger key moved
+        for(int vk=0;vk<=0xfe;++vk)assert(mod::testKeyRefused(unsigned(vk))==(vk==1||vk==2||vk==4||vk==5||vk==6||vk==9||vk==13||vk==27||(vk>=16&&vk<=18)||(vk>=0xa0&&vk<=0xa5)||vk==0x70||vk==0x71||vk==0x42||vk==0x4c));
+        // Malformed: not an object, unknown or repeated switches, strings, nesting, out-of-range keys, other objects.
+        for(auto bad:{"\"test_mode\":true","\"test_mode\":\"on\"","\"test_mode\":{\"sprint\":true}","\"test_mode\":{\"stamina\":1}",
+                      "\"test_mode\":{\"stamina\":true,\"stamina\":true}","\"test_mode\":{\"materials\":\"U\"}","\"test_mode\":{\"blood\":{}}",
+                      "\"test_mode\":{\"materials\":255}","\"test_mode\":{\"materials\":085}","\"test_mode\":{\"materials\":-1}","\"test_mode\":{},\"test_mode\":{}",
+                      "\"notices\":{}","\"test_mode\":{\"stamina\":true"})
+            assert(refused(withKeys(probe,bad)));
+        // Only where the game thread runs; the crates only with the game's cargo calls (puppet_probe).
+        assert(refused(withKeys(good,"\"test_mode\":{\"materials\":0}"))&&refused(withKeys(game,"\"test_mode\":{\"materials\":0}")));
+        assert(refused(withKeys(threaded,"\"test_mode\":{}"))&&mod::parseConfig(withKeys(threaded,"\"test_mode\":{\"materials\":0}")).testMode.stamina);
+    }
     // Synthetic provider behaviour is unchanged, including its explicit stub-free trajectory.
     auto a=mod::trajectory(1000,0),b=mod::trajectory(1001,0);assert(ds::sanitise(a));assert(std::abs((b.position[0]-a.position[0])*1000-a.velocity[0])<.02);
     assert(ds::portForSlot(0)==49000&&ds::portForSlot(1)==49001);

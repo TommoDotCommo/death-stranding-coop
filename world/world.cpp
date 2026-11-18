@@ -1148,12 +1148,13 @@ void setPolicy(Policy& p,const std::string& keyValue){
     else if(key=="spread")number(p.spread,0,1000);
     else if(key=="identity")pick(p.identity,{"none","keys"});
     else if(key=="near_cap")number(p.nearCap,0,MaxNearCap);
-    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap)");
+    else if(key=="test_mode")pick(p.testMode,{"off","on"});
+    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, test_mode)");
 }
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy& p){
     return {{"join",p.join},{"build",p.build},{"accept_offers",p.acceptOffers},{"limit",std::to_string(p.limit)},{"withdrawal",p.withdrawal},
             {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld},
-            {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity},{"near_cap",std::to_string(p.nearCap)}};
+            {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity},{"near_cap",std::to_string(p.nearCap)},{"test_mode",p.testMode}};
 }
 void World::setPolicy(const Policy& p){std::lock_guard<std::mutex> g(lock_);policy_=p;dirty_=true;++changes_;}
 bool World::servedTo(const Object& o,const std::string& player) const {

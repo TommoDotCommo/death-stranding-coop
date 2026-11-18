@@ -766,6 +766,7 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `spread` | metres, 0 for off (up to 1000) | 20 | 20 | 20 |
 | `identity` | `none`, `keys` | none | none | keys |
 | `near_cap` | players near one player he is shown on the relay, 0 for no cap (up to 1024) | 32 | 32 | 16 |
+| `test_mode` | `off`, `on` | off | off | off |
 
 - `join`: recorded and shown, nothing more yet (there are no invitations).
 - `build`: whose uploads are shared. `members` are the players the owner marked (`player-set ... member=yes`); anyone
@@ -788,6 +789,12 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 - `near_cap`: how many of the players near one broadcast player the relay shows him ("How many players one player
   sees"), unless the server was started with `--broadcast-near`. A world file from before it has its preset's value; a
   `coop-world` from before it refuses a world file that has it (unknown setting).
+- `test_mode`: `on` puts every player's game here in test mode (`../mod/README.md`, "Test mode": material crates on U,
+  blood and stamina kept full), for alpha testers. The server does nothing else with it: the player's launcher reads it
+  with the rules before his game starts and writes the mod's `test_mode` into the game's config. Its line in words
+  (`on`): "Test mode: unlimited materials (U), stamina and blood for everyone here. For testing: the game does not play
+  as it should." A world file from before it is off; a `coop-world` from before it refuses a world file that has it.
+  Set it with `--policy-set test_mode=on` (or `coop-world policy --set test_mode=on`, or the Server owner window).
 
 ### The players' choices
 

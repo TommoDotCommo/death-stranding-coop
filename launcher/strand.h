@@ -63,9 +63,12 @@ bool takePasses(const Target&,const Transport&,Passes&,std::string& why);
 bool takeNoticeToken(const Target&,const Transport&,std::string& token,std::string& why);
 void usePasses(Session&,const Passes&);   // the game's config then signs in with the ticket and says HELLO with the token
 void useNoticeToken(Session&,const Passes&);   // the game's config then reads its builds' states (any identity)
+// What the server's rules ask of every game there: test_mode on starts the game's mod in test mode (Session::
+// serverTestMode). A server without the setting (older) or without rules: off.
+void usePolicy(Session&,const Policy&);
 // The host's own game, on the server his launcher just started: read its policy (up to `tries` times, half a second
 // apart, while it starts), on a server that takes keys take the passes, and a notice token. `keyed`: whether it does.
-bool hostPasses(Target&,const Transport&,unsigned tries,Passes&,bool& keyed,std::string& why);
+bool hostPasses(Target&,const Transport&,unsigned tries,Passes&,bool& keyed,std::string& why,Policy* read=nullptr);   // read: the policy as read
 // The player's choices for one server: offer_builds yes|no|ask, offer_old yes|no.
 struct Choices { std::string offerBuilds,offerOld; };
 bool validChoices(const Choices&);

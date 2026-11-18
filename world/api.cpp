@@ -36,6 +36,8 @@ std::string settingText(const std::string& key,const std::string& value,size_t p
                             "An object closer than "+value+" m to one of its kind already handed is left out of that answer.";
     if(key=="near_cap")return value=="0"?"Every player near you is shown to you, however many there are.":
                               "At most "+value+" of the players near you are shown to you at once: your friends first, then the nearest.";
+    if(key=="test_mode")return value=="on"?"Test mode: unlimited materials (U), stamina and blood for everyone here. For testing: the game does not play as it should.":
+                               "No test mode: the game plays as usual.";
     if(key=="identity")return value=="keys"?"Players are known by the key their launcher made: nobody signs in, builds or withdraws in another player's name (the traffic is not encrypted).":
                               "No player keys: whoever has the group's key can sign in or act as any player. For friends only.";
     return key+" "+value;

@@ -49,6 +49,24 @@ Your launcher makes a **player key** the first time (`player.key` in the co-op f
 server: nobody else can play or build in your name. Do not share that file; if you lose it, you start as a new
 player.
 
+## Test mode
+
+The test server may run in **test mode**, so you can try everything without gathering materials or resting. The
+server's rules say so before you join ("Test mode: unlimited materials (U), stamina and blood for everyone here"), and
+the game tells you once in its message feed at the side of the screen ("Test mode is on: ...").
+
+- Press **U** in the game: a set of material crates is put on the ground two metres behind you. Pick them up as any
+  cargo (stand next to them, E). One set every 5 seconds; at most 20 of your crates lie on the ground at once, so pick
+  some up before you ask for more (the game tells you when you have 20 out). Crates are never taken away. For now the
+  alpha knows only the resins crate; the other materials follow as soon as they are found in the game.
+- **Blood and stamina stay full**, except while a cutscene runs, while you are down or while BTs hold you.
+- Not in test mode (yet): your vehicle's battery, cargo damage, your equipment wearing out and timefall still work as
+  in the normal game.
+
+Test mode changes your co-op save (the crates you pick up stay in it). Your normal saves are not touched.
+
+To try it outside the test server, in your own solo or two-player games: Settings, **Test mode (alpha)**.
+
 ## What is recorded
 
 On your PC (in `%LOCALAPPDATA%\DeathStrandingCoop\`):

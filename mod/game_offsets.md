@@ -6495,6 +6495,45 @@ from 0.979 to 0.906, and both stayed there. So the hypothesis stands: the first 
 `Unbalance_Rate` (float 3), read by name from his animation manager like the other controls; the threshold for "off
 balance" (0.5) is a guess until it is watched live.
 
+## Test mode: material crates and the vehicle battery (2026-11-18, static only, nothing called)
+
+For `mod/testmode.h` ("Test mode" in `README.md`): the item hashes of the six materials' crates, and where a vehicle's
+battery charge is.
+
+**Material crates.** `CreateBaggage` takes an item hash (`DSGameBaggageListItem` +0x30, "Cargo" above). The names of
+the items ("Resins ({0})") are text resources in the packed game data, not in `ds.exe`, so a hash cannot be named from
+the executable alone. What is known:
+
+| Material | Hash | Status |
+|---|---|---|
+| resins | `0x0782598d` | **verified live** (2026-11-03): `CreateBaggage` made a "Resins (40)" crate. Whether a larger resins crate exists is not known |
+| chiral crystals, metals, ceramics, chemicals, special alloys | unknown | the mod leaves them out of a set and logs which |
+
+Leads, not confirmed:
+- `ds.exe` compares an item hash in `edi` against a sorted set of 23 constants (a compiler's binary search, RVA
+  `0x14bdcbd`..`0x14bde55`; the function returns early for all of them): `0x0782598d` (resins), `0x07cd5bdc`,
+  `0x1a8b69f4`, `0x20cccd70`, `0x25b8dffe`, `0x2b555a36`, `0x2c135263`, `0x2f82df73`, `0x36e82c0a`, `0x3a301c45`,
+  `0x3ba421c5`, `0x485b9f46`, `0x49cfa2c6`, `0x4a6e2ac1`, `0x593ed935`, `0x594cd15e`, `0x5c5e68cc`, `0x6171da8e`,
+  `0x61f4fc71`, `0x6296fd65`, `0x69dddce2`, `0x768c05ae`, `0x7b8d3887`. Resins is in it, and 23 is close to six
+  materials in four crate sizes: perhaps the material crates. What the function is for was not traced.
+- Of those, `0x594cd15e`, `0x3ba421c5`, `0x6296fd65`, `0x6171da8e` and `0x1a8b69f4` appear in test-copy mod logs
+  (`CARGO list`, cargo announcements); `0x594cd15e` is the most frequent after resins in early Episode 1, where the
+  porter's records were metals, MULE boots and resins ("Cargo" above): perhaps metals.
+- 48 code sites call a script-binding pointer (`[image+0x7c346b0]`) as `mov ecx, hash; mov edx, count; call`, resins
+  among them (RVA `0x3be3ee`, count 1); probably the game giving items at story points. Not traced.
+
+To settle them (README "Test mode", live checklist): a crate of each material on the ground beside the porter, the
+lab command `list 3 <stamp>` in `puppet.cargo`, the record's `item=` per material; then `CreateBaggage` with each.
+
+**Vehicle battery.** `VehicleEntityResource +0x130` ("Vehicles", "Entity and resource identities") is the resource's
+battery setting, shared by every vehicle of the kind, not a vehicle's charge. The script export
+`DSPlayerSystem_sExportedRecoverBattery` (name referenced at RVA `0x266c905`; thunk `0x26e6f50`, which takes an
+object from `0x283ec30`, presumably the player entity, and jumps to `0x2738940`) refills the **porter's** battery:
+`0x2738940` works on the component at that object's `+0x54e0` (floats `+0x104`, `+0x108`, `+0x110`, `+0x118`). The executable has no class or
+field name for a vehicle's charge (the strings `VehicleBatteryGaugeCoefficient` and `VehicleBatteryGaugeHeight` are HUD
+settings). Not known: where the riding vehicle keeps its charge. Next step: with a truck, read the vehicle entity's
+floats before and after a drive (the charge falls) and after a charger.
+
 ## Saving and loading on request (2026-11-14, static only, nothing called)
 
 Build 13300582, read with objdump from the pinned executable; no game ran. The mod's calls built on this are behind

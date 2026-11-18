@@ -136,6 +136,11 @@ std::string config(const Session& s) {
 #endif
                 +",\"strand_token\":\""+s.noticeToken+"\"")
 #endif
+#ifndef MUTANT_GROUP_TEST_OWN
+            +(s.serverTestMode?TestModeConfig:"")   // the server's rules, shown before the game started
+#else
+            +(s.testMode?TestModeConfig:"")
+#endif
             +",\"discovery_sha256\":\""+mod::discovery::PinnedHash+"\"}\n";
         mod::parseConfig(json);
         return json;
@@ -161,7 +166,7 @@ std::string config(const Session& s) {
 #else
     const std::string world=s.sharedWorld?",\"online_server\":\""+worldAddress(s)+"\"":"";
 #endif
-    std::string json="{\"role\":\""+std::string(host?"host":"client")+"\",\"peer\":\""+s.peer+"\",\"slot\":"+std::to_string(slot+(s.host?0:1))+",\"peer_slot\":"+std::to_string(slot+(s.host?1:0))+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)+",\"required\":true,\"logging\":true,"+play+world+",\"discovery_sha256\":\""+mod::discovery::PinnedHash+"\"}\n";
+    std::string json="{\"role\":\""+std::string(host?"host":"client")+"\",\"peer\":\""+s.peer+"\",\"slot\":"+std::to_string(slot+(s.host?0:1))+",\"peer_slot\":"+std::to_string(slot+(s.host?1:0))+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)+",\"required\":true,\"logging\":true,"+play+world+(s.testMode?TestModeConfig:"")+",\"discovery_sha256\":\""+mod::discovery::PinnedHash+"\"}\n";
     mod::parseConfig(json); // Use the production schema before writing anything.
     return json;
 }

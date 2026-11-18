@@ -348,6 +348,13 @@ policy](#server-policy). Compare [relay](#relay). *Where:* `world/api.h`, `world
 <a id="swarm"></a>**Swarm** (`coop-swarm`): many [stand-ins](#stand-in) in one process that join a [relay](#relay)
 and walk in circles, to test crowds without many games. *Where:* `mod/swarm.cpp`.
 
+<a id="test-mode"></a>**Test mode** (`test_mode`; launcher: "Test mode (alpha)"): a sandbox for alpha testers, off by
+default. **U** drops a set of material crates behind the porter (one set every 5 s, at most 20 of his crates on the
+ground), and blood and stamina stay full. A [world server](#world-server)'s policy setting `test_mode` puts every game
+on that server in test mode (the rules before joining say so); for solo and two-player games it is the player's own
+Settings choice. Not the same as the test saves ([saves](#saves)) or a test [copy](#copy). *Where:* `mod/testmode.h`,
+`world/README.md` ("Server policy"). See `docs/TESTERS.md`.
+
 <a id="tick"></a>**Tick**: one round of the mod's work, on the [game thread](#game-thread) (at most 20 a second) or on
 the network worker. In [broadcast mode](#broadcast) a game sends one update per tick.
 

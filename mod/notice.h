@@ -14,7 +14,7 @@ struct Api {
     // true: queued in the game's info log; false: no HUD now. icon: PlainIcon or LikeIcon (the game's own icon numbers).
     std::function<bool(const std::u16string& text,uint8_t icon)> show;
 };
-enum class Kind : uint8_t {Joined,Left,Alone,Away,Back,Liked,Down,Up,Caught,Free,Call,Slow,Steady,Episode,Scan,StoryOffer,StoryLoaded,StoryFailed,Strand};
+enum class Kind : uint8_t {Joined,Left,Alone,Away,Back,Liked,Down,Up,Caught,Free,Call,Slow,Steady,Episode,Scan,StoryOffer,StoryLoaded,StoryFailed,Strand,Test};
 constexpr uint8_t PlainIcon=0,LikeIcon=3;   // "20 minutes have passed." / "{1} Like(s) received from {0}."
 uint8_t icon(Kind);
 // The partner's name is cleaned like the name tag's (printable, no markup characters); "Your partner" without one.
@@ -55,6 +55,8 @@ public:
     void partnerless(){partner_=false;}
     // A finished line about this player's builds on the server (strand_notices.h), through the same queue.
     void strand(const std::u16string& line,uint64_t nowMs){add(Kind::Strand,{},nowMs);pending_.back().line=line;}
+    // A finished line of test mode (testmode.h): that it is on, a set of crates dropped.
+    void test(const std::u16string& line,uint64_t nowMs){add(Kind::Test,{},nowMs);pending_.back().line=line;}
     // Something the partner did that is worth a line of its own (Liked: his like has just been given to this porter).
     void event(Kind kind,const std::string& partnerName,uint64_t nowMs){add(kind,partnerName.empty()?lastName_:partnerName,nowMs);}
     size_t pending() const {return pending_.size();}

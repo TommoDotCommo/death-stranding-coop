@@ -196,6 +196,16 @@ players' structures out (the server keeps the objects of one kind in one answer 
 says `"build_received": false` and the game keeps its own rules. It is each player's own setting, not the host's;
 it does not apply to the two-player shared world.
 
+**Test mode.** A group server whose rules say `test_mode` on (`../world/README.md`, "Server policy") puts every game
+there in test mode (`../mod/README.md`, "Test mode": material crates on U, blood and stamina kept full). The joiner
+sees it in the rules before he joins ("Test mode: unlimited materials (U), stamina and blood for everyone here. ...");
+his launcher then writes `"test_mode":{}` into his game's group config (`strand::usePolicy`, from the policy it has
+just read; the host's launcher from the policy of the server it has just started). A server without the setting
+(older) or a join without rules (an older server) is not in test mode. In group play only the server's rules count:
+the player's own Settings choice (below) does not put a group game in test mode, and a server's rules do not reach a
+two-player game. For his own solo and two-player games the player ticks Settings, **Test mode (alpha)** (`test_mode`
+in `launcher.ini`, off by default); each player of a two-player game has his own.
+
 **Before you join: the server's rules.** The rule behind it: before a game connects, its player sees what the server
 will take from him and what it will show him; the server's owner sets the server's rules, the player sets the rules
 of his own contributions. So before the joiner's game starts, the launcher asks the server (its launcher API,
@@ -467,6 +477,11 @@ written), `GROUP_PEERS` (the proxy lists the partner instead of the server), `GR
 games' key is not the server's), `GROUP_ID` (a player number the config refuses), `GROUP_ROUTE` (a route that did not
 answer), `GROUP_INVITE_KIND` (a group invite taken for a lobby invite), `GROUP_SAME_PC`, `DIAG_GROUP_KEY`, `GROUP_POLICY`
 (the host's rules not given to a new world).
+
+Test mode: `core_test.cpp` checks the configs written (none by default; the player's own choice in a solo and a
+two-player game; in group play the server's rules only) and the policy read (`test_mode` on, off, absent). Mutants:
+`GROUP_TEST_OWN` (a group game put in test mode by the player's own choice), `STRAND_TEST_MODE` (every server with
+rules taken as test mode).
 
 The server's rules (`strand.h`): `core_test.cpp` checks the account a game signs in as, the policy read (and eleven
 documents refused), the rules in words with what the owner changed, choices kept per server beside the launcher's
