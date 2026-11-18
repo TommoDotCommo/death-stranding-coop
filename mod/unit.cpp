@@ -261,11 +261,11 @@ int main() {
         assert(some.on&&some.materialsKey==72&&!some.stamina&&some.blood&&!some.battery);
         auto none=mod::parseConfig(withKeys(probe,"\"test_mode\":{ \"materials\" : 0 }")).testMode;assert(none.on&&!none.materialsKey);
         // The mod's own keys, mouse buttons and modifiers are refused, and the partner's passenger and catch-up keys.
-        for(auto key:{"113","112","9","66","76","1","2","16","17","18","27","13","74","120"})
+        for(auto key:{"114","80","113","112","9","66","76","1","2","16","17","18","27","13","74","120"})
             assert(refused(withKeys(probe,std::string("\"test_mode\":{\"materials\":")+key+"}")));
         assert(refused(withKeys(probe,"\"passenger_key\":72,\"test_mode\":{\"materials\":72}")));
         assert(mod::parseConfig(withKeys(probe,"\"passenger_key\":72,\"test_mode\":{\"materials\":74}")).testMode.materialsKey==74);   // J once the passenger key moved
-        for(int vk=0;vk<=0xfe;++vk)assert(mod::testKeyRefused(unsigned(vk))==(vk==1||vk==2||vk==4||vk==5||vk==6||vk==9||vk==13||vk==27||(vk>=16&&vk<=18)||(vk>=0xa0&&vk<=0xa5)||vk==0x70||vk==0x71||vk==0x42||vk==0x4c));
+        for(int vk=0;vk<=0xfe;++vk)assert(mod::testKeyRefused(unsigned(vk))==(vk==1||vk==2||vk==4||vk==5||vk==6||vk==9||vk==13||vk==27||(vk>=16&&vk<=18)||(vk>=0xa0&&vk<=0xa5)||vk==0x70||vk==0x71||vk==0x72||vk==0x50||vk==0x42||vk==0x4c));
         // Malformed: not an object, unknown or repeated switches, strings, nesting, out-of-range keys, other objects.
         for(auto bad:{"\"test_mode\":true","\"test_mode\":\"on\"","\"test_mode\":{\"sprint\":true}","\"test_mode\":{\"stamina\":1}",
                       "\"test_mode\":{\"stamina\":true,\"stamina\":true}","\"test_mode\":{\"materials\":\"U\"}","\"test_mode\":{\"blood\":{}}",
