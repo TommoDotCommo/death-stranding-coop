@@ -113,7 +113,7 @@ void Screen::tick(bool pressed,bool allowed,const Facts& facts,uint64_t now){
 #ifndef MUTANT_SERVERINFO_PAGE
             page_=(page_+1)%pages_.size();
 #else
-            ++page_;
+            page_=(page_+2)%pages_.size();
 #endif
             state_=State::Turning;until_=now+ReopenMs;return;
         }
