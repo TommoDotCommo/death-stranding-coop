@@ -60,6 +60,8 @@ Service:
       rules, share it as a `DSR1-...` string or on a server; the mod checks the runner stays inside the corridor and
       the server keeps the best times (`docs/ROUTES.md`).
 
+- [ ] Route challenge results from a game in test mode (unlimited stamina) are marked, and boards keep them apart.
+
 ## Later features
 
 - [ ] Native custom orders: an order that appears at a terminal with its cargo and is handed in at another, with a
