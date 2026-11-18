@@ -2821,7 +2821,7 @@ struct Runtime final:ds::Transport {
                 }
 #ifndef MOD_FAKE_NETWORK
                 {
-                    auto made=mod::puppet::nativeApi(*sampler);auto driver=mod::puppet::nativeDoubleApi(*sampler);
+                    auto made=mod::puppet::nativeApi(*sampler);auto driver=mod::puppet::nativeDoubleApi(*sampler,true);
                     auto* sp=&*sampler;uint64_t camera=sampler->base+0x3d198e8,akukan=sampler->base+0x3d7de48;
                     mod::puppet::OwnBodyApi oa;auto resourceOf=made.resource;
                     oa.resource=[resourceOf,sp,camera,akukan](uint64_t porter){auto d=mod::puppet::findDouble(*sp,porter,camera,akukan);return d?resourceOf(d):0;};
@@ -2836,7 +2836,7 @@ struct Runtime final:ds::Transport {
                     ownTwin->walk(true);
                     // One more Sam, made like the body above and driven by a backend of its own (others.h).
                     bodyParts=[this,sp,camera,akukan]{
-                        mod::others::BodyParts p;auto made=mod::puppet::nativeApi(*sp);p.drive=mod::puppet::nativeDoubleApi(*sp);
+                        mod::others::BodyParts p;auto made=mod::puppet::nativeApi(*sp);p.drive=mod::puppet::nativeDoubleApi(*sp,true);
                         auto resourceOf=made.resource;
                         p.own.resource=[resourceOf,sp,camera,akukan](uint64_t porter){auto d=mod::puppet::findDouble(*sp,porter,camera,akukan);return d?resourceOf(d):0;};
                         p.own.create=made.create;p.own.remove=made.remove;

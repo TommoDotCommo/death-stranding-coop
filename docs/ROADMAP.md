@@ -9,7 +9,8 @@ Status of what exists: [STATUS.md](../STATUS.md). Words: [GLOSSARY.md](GLOSSARY.
 - [x] **(owner)** Rent the test server (a small Linux VPS near the testers: Ubuntu 24.04, 1 GB, public IPv4) and
       give the deploy SSH access; then `deploy/vps/deploy.sh` and send testers the `DSG-` invite privately.
 - [x] **(owner)** Publish `v0.1.0-alpha.1` for testers: a GitHub pre-release (2026-11-18).
-- [ ] Group play shows other players' gear and carried cargo (off in the `v0.1.0-alpha.1` group config).
+- [x] Group play shows other players' gear and carried cargo (next release; off in `v0.1.0-alpha.1`).
+- [x] No Odradek arm left floating by a hidden player's body (next release).
 - [x] First run of `deploy/vps` on a real server (2026-11-18): two PCs on one home network joined over the internet,
       met through the relay (24 ms round trip), F2 marks reached the server's log.
 - [ ] Players joining from other homes, behind ordinary routers.
@@ -61,6 +62,15 @@ Service:
       the server keeps the best times (`docs/ROUTES.md`).
 
 - [ ] Route challenge results from a game in test mode (unlimited stamina) are marked, and boards keep them apart.
+
+## Requested next
+
+In the game's own UI wherever it can carry them, rather than a display of our own.
+
+- [ ] **Server info in the game**: which server this is, its rules and settings, and who is online.
+- [ ] **Text chat in the game** between the players on a server (with the moderation it needs before going public).
+- [ ] **Debug menu in the game**: open it and switch infinite stamina, blood, battery and the like on and off.
+- [ ] **Hold F1 for a help page**: the mod's keys and useful information.
 
 ## Later features
 

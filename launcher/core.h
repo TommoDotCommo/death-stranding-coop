@@ -15,6 +15,7 @@ inline constexpr const char* GroupPrefix="DSG";   // a group invite: DSG-..., th
 // (coop-world with its relay); every player's game talks to that server only, and plays its own save.
 enum class Group : uint8_t {None,Host,Join};
 inline constexpr unsigned GroupOthers=15;        // other players shown at once: the server's sign-in holds 16 players
+inline constexpr unsigned GroupCarried=4;        // the nearest players whose carried cases are drawn (a full load is many meshes)
 // A player's number on the relay: made once from the system's random numbers and kept in the launcher's settings, so
 // it is the same in every session and says nothing about the player (never the Steam id). 1..PlayerIdMax: the mod's
 // config takes integers of at most 15 digits.

@@ -122,6 +122,10 @@ std::string config(const Session& s) {
 #endif
         std::string json="{\"server\":\""+server+"\",\"slot\":"+std::to_string(slot)+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)
             +",\"required\":true,\"logging\":true,\"game_thread\":true,\"puppet_probe\":true,\"partner_tag\":true,\"others\":"+std::to_string(GroupOthers)
+#ifndef MUTANT_GROUP_NO_GEAR
+            // What other players wear and carry, on their bodies (../mod/README.md, "Other players' gear and carried cases").
+            +",\"others_gear\":true,\"others_carry\":"+std::to_string(GroupCarried)
+#endif
             +",\"relay\":\""+relayAddress(s)+"\",\"relay_key\":\""+key+"\",\"player_id\":"+std::to_string(s.playerId)
 #ifndef MUTANT_GROUP_PAIRS
             +",\"relay_mode\":\"broadcast\""   // publish once, the server copies to everyone near (../mod/README.md, "The broadcast mode")

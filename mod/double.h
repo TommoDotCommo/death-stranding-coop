@@ -10,6 +10,7 @@
 #include <cmath>
 #include <optional>
 #include <string>
+#include <vector>
 namespace ds {struct Animation;}
 namespace mod::puppet {
 constexpr uint64_t FlagVisible=1ull<<1,FlagSleeping=1ull<<8;
@@ -36,7 +37,34 @@ struct DoubleApi {
     // Optional: the partner's own animation controls (controls.h) into the body's network, after animate; fresh: a new
     // sample (its pulses are due). nullptr: every control the mirror set goes back to zero and animate owns them again.
     std::function<void(uint64_t,const ds::Animation*,bool)> mirror;
+    // Optional, for a body the mod made: its own parts (OwnParts, below). false: hidden and asleep, called on every
+    // tick the body is parked or hidden; true: put back when the body is shown.
+    std::function<void(uint64_t,bool)> parts;
 };
+// A made body's own child entities (the Odradek arm with its pieces, the harmonica). Hiding the body leaves them shown
+// and awake where it was made (live 2026-11-18: they float there until the body is first driven), so they are hidden
+// with it. The list is taken once, as soon as the arm exists: gear copied onto the body later is a child too, and has
+// its own rule (gear.h).
+struct BodyPart {uint64_t entity=0,vtable=0,parent=0;};
+struct OwnPartsApi {
+    std::function<std::vector<BodyPart>(uint64_t body)> list;   // empty until the body's parts exist
+    std::function<bool(const BodyPart&)> same;                  // still that entity, under that parent
+    std::function<uint64_t(uint64_t)> flags;
+    std::function<void(uint64_t,bool)> visible,sleep;
+};
+class OwnParts {
+public:
+    explicit OwnParts(OwnPartsApi api):api_(std::move(api)) {}
+    void hide(uint64_t body);   // what is shown or awake is hidden and put to sleep, and remembered
+    void show(uint64_t body);   // exactly what hide changed goes back
+    size_t known() const {return held_.size();}
+private:
+    struct Held {BodyPart part;bool hid=false,slept=false;};
+    OwnPartsApi api_;uint64_t body_=0;std::vector<Held> held_;
+};
+// The body's children and their children, without the private-room floor effects (Double's `effects` has those). Empty
+// unless a direct child is the Odradek arm, or when a link does not read back.
+std::vector<BodyPart> readOwnParts(const discovery::Sampler&,uint64_t body,uint64_t armVtable,uint64_t floorVtable);
 constexpr double MovingSpeed=.3;   // m/s; below this the double plays its standing animation
 // The trigger uses the same running-network check as the float/bool setters; host tests inject the export.
 using AnimationTrigger=std::function<void(uint64_t,int,float)>;
@@ -71,7 +99,7 @@ struct FloatVariable {uint64_t manager=0,entity=0;uint32_t count=0;int index=-1;
 std::optional<float> readFloatVariable(const discovery::Sampler&,uint64_t entity,uint64_t animatorVtable,const char* name,FloatVariable&);
 // Adapter state (Y up) to a game transform (Z up), facing yaw; inverse of stateFromPose.
 Transform fromState(const std::array<double,3>& position,double yaw);
-DoubleApi nativeDoubleApi(discovery::Sampler&);
+DoubleApi nativeDoubleApi(discovery::Sampler&,bool ownBody=false);   // ownBody: for a body the mod made (sets `parts`)
 // Shared-cargo experiment: "create <type id> <run stamp>" (one command per file write). Returns the id, or nothing for a
 // malformed or foreign command. The id is the DSBaggage2 record id (+20, e.g. 519 for resins).
 std::optional<uint32_t> parseCargoCommand(const std::string& text,const std::string& stamp,const char* verb="create");
@@ -236,6 +264,7 @@ private:
     void drive(const Anchor&,const Transform&);
     void release(const Anchor&,bool force);
     void hide(const Anchor&);
+    void hideParked(const Anchor&);
     void reveal(const Anchor&,const Transform&);
     bool stillOurs(const Anchor&);
     void forget(const char* why);

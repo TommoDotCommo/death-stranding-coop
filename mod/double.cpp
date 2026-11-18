@@ -171,6 +171,9 @@ void Double::acquire(const Anchor& source,const Transform& target){
     // Record the floor effects' parked state before showing the double (showing it propagates to them a frame later).
     if(api_.effects){api_.effects(d,false);hidEffects_=true;}
     api_.place(d,target);api_.visible(d,true);api_.sleep(d,false);
+#ifndef MUTANT_DOUBLE_PARTS_ACQUIRE
+    if(api_.parts)api_.parts(d,true);
+#endif
     // Optional: a refused upgrade leaves the double as it was (identity and layout checks run before any write).
     if(walk_&&api_.upgrade){try{original_=api_.upgrade(d,source.entity);}catch(const std::exception&){original_=0;note("walk_unavailable",0,{});}}
     animateAll();
@@ -221,9 +224,25 @@ void Double::release(const Anchor& source,bool force){
 // Hidden: still borrowed (network, effects, mover), asleep and invisible where the partner was last seen.
 void Double::hide(const Anchor& source){
     clearMirror();api_.animate(double_,0,0);api_.visible(double_,false);api_.sleep(double_,true);
+#ifndef MUTANT_DOUBLE_PARTS_HIDDEN
+    if(api_.parts)api_.parts(double_,false);
+#endif
     auto after=api_.flags(double_);checkLocal(source);
     if(!parked(after)){note("hide_unconfirmed",after,{});release(source,true);return;}
     stage_=Stage::Hidden;note("hidden",after,{});
+}
+// A made body nobody drives yet: its own parts stay hidden with it. Never touches a body the game is using.
+void Double::hideParked(const Anchor& source){
+#ifndef MUTANT_DOUBLE_PARTS_PARKED
+    if(!api_.parts)return;
+    auto d=api_.find(source.entity);if(!d)return;
+#ifndef MUTANT_DOUBLE_PARTS_ANY
+    if(!parked(api_.flags(d)))return;
+#endif
+    api_.parts(d,false);
+#else
+    (void)source;
+#endif
 }
 // While hidden the double looks parked to the game. If the game takes it (private room) or it changes, give it up.
 bool Double::stillOurs(const Anchor& source){
@@ -238,6 +257,9 @@ bool Double::stillOurs(const Anchor& source){
 }
 void Double::reveal(const Anchor& source,const Transform& target){
     placed_=target;api_.anchor(double_,target);api_.place(double_,target);api_.visible(double_,true);api_.sleep(double_,false);
+#ifndef MUTANT_DOUBLE_PARTS_REVEAL
+    if(api_.parts)api_.parts(double_,true);
+#endif
     animateAll();
     if(api_.steer&&(flags_&VehicleMask))api_.steer(double_,float(steer_));
     if(hidEffects_)api_.effects(double_,false);
@@ -276,7 +298,7 @@ void Double::tick(bool permitted,const Transform* target,double speed,uint32_t f
         if(!source.entity)return;
 #endif
         switch(stage_){
-        case Stage::Parked:if(target)acquire(source,*target);break;
+        case Stage::Parked:if(target)acquire(source,*target);else hideParked(source);break;
         case Stage::Driving:
 #ifndef MUTANT_DOUBLE_RELEASE
             if(!target){
@@ -292,6 +314,9 @@ void Double::tick(bool permitted,const Transform* target,double speed,uint32_t f
             if(!stillOurs(source))break;
             if(target){reveal(source,*target);break;}
             if(!hold)release(source,true);
+#ifndef MUTANT_DOUBLE_PARTS_HIDDEN
+            else if(api_.parts)api_.parts(double_,false);
+#endif
             break;
         case Stage::Yielded:
             if(api_.find(source.entity)==double_&&parked(api_.flags(double_))){note("returned_by_game",parkedFlags_,{});double_=player_=0;stage_=Stage::Parked;}
@@ -299,6 +324,67 @@ void Double::tick(bool permitted,const Transform* target,double speed,uint32_t f
         default:break;
         }
     } catch(...) {stage_=Stage::Failed;note("failed",0,{});throw;}
+}
+void OwnParts::hide(uint64_t body){
+#ifndef MUTANT_OWNBODY_PARTS_BODY
+    if(body!=body_){body_=body;held_.clear();}
+#else
+    body_=body;
+#endif
+#ifdef MUTANT_OWNBODY_PARTS_FROZEN
+    held_.clear();
+#endif
+    if(held_.empty())for(const auto& p:api_.list(body))held_.push_back({p});
+    for(auto& h:held_){
+#ifndef MUTANT_OWNBODY_PARTS_SAME
+        if(!api_.same(h.part))continue;
+#endif
+        auto f=api_.flags(h.part.entity);
+        if(f&FlagVisible){api_.visible(h.part.entity,false);h.hid=true;}
+        if(!(f&FlagSleeping)){api_.sleep(h.part.entity,true);h.slept=true;}
+    }
+}
+void OwnParts::show(uint64_t body){
+    if(body!=body_)return;
+    for(auto& h:held_){
+#ifndef MUTANT_OWNBODY_PARTS_SAME
+        if(api_.same(h.part))
+#endif
+        {
+#ifndef MUTANT_OWNBODY_PARTS_RESTORE
+            if(h.slept)api_.sleep(h.part.entity,false);
+            if(h.hid)api_.visible(h.part.entity,true);
+#else
+            api_.sleep(h.part.entity,false);api_.visible(h.part.entity,true);
+#endif
+        }
+        h.hid=h.slept=false;
+    }
+}
+std::vector<BodyPart> readOwnParts(const discovery::Sampler& s,uint64_t body,uint64_t armVtable,uint64_t floorVtable){
+    constexpr unsigned MaxDepth=3;constexpr size_t MaxParts=64;
+    std::vector<BodyPart> out;bool arm=false;
+    std::function<bool(uint64_t,unsigned)> walk=[&](uint64_t parent,unsigned depth){
+        uint64_t c=0;if(!q(s,parent+FirstChildOffset,c))return false;
+        for(unsigned n=0;c;++n){
+            uint64_t v=0,back=0;
+            if(n>=MaxChildren||out.size()>=MaxParts||!q(s,c,v)||!q(s,c+ParentOffset,back)||back!=parent)return false;
+#ifndef MUTANT_OWNBODY_PARTS_FLOOR
+            if(depth||v!=floorVtable)
+#endif
+            {
+                if(!depth&&v==armVtable)arm=true;
+                out.push_back({c,v,parent});
+                if(depth+1<MaxDepth&&!walk(c,depth+1))return false;
+            }
+            if(!q(s,c+NextSiblingOffset,c))return false;
+        }
+        return true;};
+    if(!walk(body,0))return {};
+#ifndef MUTANT_OWNBODY_PARTS_ARM
+    if(!arm)return {};
+#endif
+    return out;
 }
 uint64_t OwnBody::tick(const Anchor& porter){
     if(!porter.entity||!porter.pose.available)return 0;
@@ -791,9 +877,9 @@ AnimationTrigger animationTrigger(const discovery::Sampler& s,AnimationTrigger r
         raw(manager,handle,seconds);
     };
 }
-DoubleApi nativeDoubleApi(discovery::Sampler& s){
+DoubleApi nativeDoubleApi(discovery::Sampler& s,bool ownBody){
 #ifndef _WIN32
-    (void)s;throw std::runtime_error("native double API requires Windows");
+    (void)s;(void)ownBody;throw std::runtime_error("native double API requires Windows");
 #else
     struct Entry{uint64_t rva;std::vector<uint8_t> bytes;};
     const std::array<Entry,9> entries={{
@@ -1013,6 +1099,16 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s){
                 if(!q(s,c+NextSiblingOffset,c))break;
             }
         }};
+    if(ownBody){   // what a made body brings with it stays hidden with the body (double.h, OwnParts)
+        const uint64_t odradekArm=s.base+0x3da2ee8;   // DSOdradekArmEntity
+        OwnPartsApi o;
+        o.list=[&s,odradekArm,floorEffect](uint64_t body){return readOwnParts(s,body,odradekArm,floorEffect);};
+        o.same=[&s](const BodyPart& p){uint64_t v=0,parent=0;return q(s,p.entity,v)&&v==p.vtable&&q(s,p.entity+ParentOffset,parent)&&parent==p.parent;};
+        o.flags=[&s](uint64_t e){uint64_t f=0;q(s,e+FlagsOffset,f);return f;};
+        o.visible=[visible](uint64_t e,bool b){visible(e,b);};o.sleep=[sleep](uint64_t e,bool b){sleep(e,b,0);};
+        auto held=std::make_shared<OwnParts>(std::move(o));
+        api.parts=[held](uint64_t body,bool show){if(show)held->show(body);else held->hide(body);};
+    }
     // The rider's steering (Turn_Heading, enum 0x04 in the porter's network; the game writes it from the vehicle's
     // steering at 0x2776680..0x27766c0) while the partner rides.
     api.mirror=[check,managerOf,handles,setFloat,setBool,trigger](uint64_t e,const ds::Animation* a,bool fresh){

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdio>
+#include <map>
 #include <stdexcept>
 #include <vector>
 using namespace mod::puppet;
@@ -363,6 +364,44 @@ void tree(){
     {fakemem::Fake g;build(g);g.put<uint64_t>(0x9880,B+0x9400);auto t=g.sampler();CHECK(findDouble(t,B+0x6000,B+0x1f10,B+0x1f20)==0);} // sibling loop
     {fakemem::Fake g;build(g);g.put<uint64_t>(0x9000,B+0x1f00);auto t=g.sampler();CHECK(findDouble(t,B+0x6000,B+0x1f10,B+0x1f20)==0);} // no camera
 }
+void ownParts(){
+    // The Double: hidden while parked or hidden, shown with the body, and a body the game is using is left alone.
+    {Scene s;std::vector<int> log;auto a=s.api();a.parts=[&](uint64_t e,bool show){CHECK(e==s.twin);log.push_back(show);};
+     Double d(a,[](const std::string&){});d.enable();
+     d.tick(true,nullptr,0,0,true);CHECK((log==std::vector<int>{0}));
+     s.flags|=FlagVisible;d.tick(true,nullptr,0,0,true);CHECK(log.size()==1);s.flags&=~FlagVisible;   // not parked: not ours
+     auto t=at(5);log.clear();d.tick(true,&t);CHECK(d.stage()==Double::Stage::Driving&&(log==std::vector<int>{1}));
+     log.clear();d.tick(true,nullptr,0,0,true);CHECK(d.stage()==Double::Stage::Hidden&&(log==std::vector<int>{0}));
+     d.tick(true,nullptr,0,0,true);CHECK((log==std::vector<int>{0,0}));
+     log.clear();auto u=at(6);d.tick(true,&u);CHECK(d.stage()==Double::Stage::Driving&&(log==std::vector<int>{1}));}
+    // OwnParts: 0xa shown and awake, 0xb invisible and awake, 0xc shown and asleep, 0xd arrives later (a gear copy).
+    struct Part{uint64_t flags;bool gone=false;};
+    std::map<uint64_t,Part> w{{0xa,{FlagVisible}},{0xb,{0}},{0xc,{FlagVisible|FlagSleeping}},{0xd,{FlagVisible}}};
+    std::vector<BodyPart> listed;std::vector<std::string> calls;
+    OwnPartsApi api;api.list=[&](uint64_t){return listed;};api.same=[&](const BodyPart& p){return !w.at(p.entity).gone;};api.flags=[&](uint64_t e){return w.at(e).flags;};
+    api.visible=[&](uint64_t e,bool b){calls.push_back((b?"show ":"hide ")+std::to_string(e));auto& f=w.at(e).flags;f=b?f|FlagVisible:f&~FlagVisible;};
+    api.sleep=[&](uint64_t e,bool b){calls.push_back((b?"sleep ":"wake ")+std::to_string(e));auto& f=w.at(e).flags;f=b?f|FlagSleeping:f&~FlagSleeping;};
+    OwnParts o(api);o.hide(1);CHECK(calls.empty()&&!o.known());                     // nothing yet: tried again next tick
+    listed={{0xa,1,1},{0xb,1,1},{0xc,1,1}};o.hide(1);CHECK(o.known()==3);
+    CHECK((calls==std::vector<std::string>{"hide 10","sleep 10","sleep 11","hide 12"}));
+    calls.clear();listed.push_back({0xd,1,1});o.hide(1);CHECK(calls.empty()&&o.known()==3&&(w.at(0xd).flags&FlagVisible));   // the list is kept
+    o.show(2);CHECK(calls.empty());                                                 // another body: nothing
+    o.show(1);CHECK((calls==std::vector<std::string>{"wake 10","show 10","wake 11","show 12"}));
+    CHECK(w.at(0xa).flags==FlagVisible&&w.at(0xb).flags==0&&w.at(0xc).flags==(FlagVisible|FlagSleeping));   // as they were
+    calls.clear();o.show(1);CHECK(calls.empty());                                   // once
+    o.hide(1);calls.clear();w.at(0xa).gone=true;o.show(1);CHECK((calls==std::vector<std::string>{"wake 11","show 12"}));   // a part that went is not touched
+    calls.clear();o.hide(1);CHECK((calls==std::vector<std::string>{"sleep 11","hide 12"}));
+    calls.clear();w.at(0xa).gone=false;listed={{0xd,1,2}};o.hide(2);CHECK(o.known()==1&&(calls==std::vector<std::string>{"hide 13","sleep 13"}));   // a new body: its own list
+    // Reading the tree: body 0x6000 -> floor effect 0x6800, plain part 0x6900, arm 0x6a00 -> piece 0x6b00.
+    auto build=[](fakemem::Fake& f){auto B=f.base;
+        auto link=[&](size_t e,uint64_t vt,uint64_t parent,uint64_t first,uint64_t next){f.put<uint64_t>(e,vt);f.put<uint64_t>(e+0x70,parent);f.put<uint64_t>(e+0x78,first);f.put<uint64_t>(e+0x80,next);};
+        f.put<uint64_t>(0x6078,B+0x6800);link(0x6800,B+0x1f00,B+0x6000,0,B+0x6900);link(0x6900,B+0x1f10,B+0x6000,0,B+0x6a00);
+        link(0x6a00,B+0x1f20,B+0x6000,B+0x6b00,0);link(0x6b00,B+0x1f10,B+0x6a00,0,0);};
+    fakemem::Fake f;build(f);auto s=f.sampler();auto B=f.base;
+    auto got=readOwnParts(s,B+0x6000,B+0x1f20,B+0x1f00);CHECK(got.size()==3&&got[0].entity==B+0x6900&&got[1].entity==B+0x6a00&&got[2].entity==B+0x6b00&&got[2].parent==B+0x6a00&&got[1].vtable==B+0x1f20);
+    CHECK(readOwnParts(s,B+0x6000,B+0x1f30,B+0x1f00).empty());                      // no arm yet
+    {fakemem::Fake g;build(g);g.put<uint64_t>(0x6a70,B+0x9000);auto t=g.sampler();CHECK(readOwnParts(t,B+0x6000,B+0x1f20,B+0x1f00).empty());}   // disowned
+}
 void conversion(){
     for(double yaw:{0.,1.,-2.5,3.}){auto t=fromState({4,5,6},yaw);
         CHECK(t.position[0]==4&&t.position[1]==6&&t.position[2]==5);
@@ -425,7 +464,7 @@ int main(){
     triggerLiveness();
     lifecycle();mirror();mover();animation();network();refusedUpgrade();actions();effects();releasedByGame();cargoCommand();privateRoom();ownBody();ownCommand();modelSwap();inPlaceSwap();bodyReport();
     try{transient();}catch(const std::exception& e){std::fprintf(stderr,"double oracle: transient threw %s\n",e.what());++failures;}
-    hold();busy();yields(true);yields(false);identity();unconfirmed();tree();conversion();
+    hold();busy();yields(true);yields(false);identity();unconfirmed();tree();ownParts();conversion();
     if(!failures)std::puts("double borrow, yield, release and pointer-path checks passed");
     return failures?1:0;
 }

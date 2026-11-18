@@ -1428,7 +1428,9 @@ Besides the one partner the mod can hold up to `"others": N` more remote players
 
 A body is hidden (asleep and invisible where it stands, still the mod's) while its player is not connected, is stale
 (the core's rule: no pose for 1.5 s), is in a private room or cutscene, or while this game is in a game event or
-loading. It is removed when the player leaves. After a load every body is made again in the new world, one every
+loading. Hiding a made body does not hide what it brings with it: its Odradek arm and harmonica stayed shown and awake
+in the air (live 2026-11-18, a tester's report), so they are hidden and put to sleep with it and put back when it shows
+(`OwnParts`, `double.h`; the partner's own body too). It is removed when the player leaves. After a load every body is made again in the new world, one every
 300 ms. A player who is down lies in the collapse pose, one caught by BTs in the drag pose, and a rider sits in the
 riding pose without a vehicle (as the partner does without `partner_vehicle`).
 
@@ -1502,11 +1504,11 @@ CONFIG_SHOW_OTHERS (`show_others`: its three values, four that are none, refused
 **Live** (2026-11-16/17): two real games and 12 stand-ins replaying a recorded walk, all near each other, each game
 showing the other 13 with names (the lab's group regression in broadcast mode), and two real games on two linked
 servers ("Presence across linked servers" in `../world/README.md`). The launcher's group configs use it since
-2026-11-17. Not yet looked at live: gear and cases in broadcast mode, and the poses of players beyond the
-server's full distance (one update in 200 ms by default: with loss the pose stops for a moment; the client measures
+2026-11-17. Gear and cases ran live in broadcast mode on 2026-11-18 (two real games, each showing the other's). Not
+yet looked at live: the poses of players beyond the server's full distance (one update in 200 ms by default: with loss the pose stops for a moment; the client measures
 that interval and waits for it: `adaptDelay` in `core/broadcast_client.cpp`).
 
-### Other players' gear and carried cases (`others_gear`, `others_carry`; built, not run live)
+### Other players' gear and carried cases (`others_gear`, `others_carry`; on in the launcher's group play)
 
 `"others_gear": true` (requires `others` and the game provider; default false) copies onto every other player's body
 the gear that player wears, as the partner's gear is copied onto the partner's body (`partner_gear`, below).
@@ -1547,8 +1549,9 @@ Log lines: `GEAR player <id> ...`, `STACK player <id> ...`, `OTHERS player <id> 
 entries`, and `GEAR N events of this porter's ... -> other players`. `mod_status` has `"gear_shown"` (`pieces`, `by`
 key, `sets` taken) and `"cases_shown"` (`cases`, `by` key, `sets` taken, `dropped_events`).
 
-**Not run live; what a live run must check.** The calls per body are the partner's, but they have only ever run on
-one body. A live run (two real games with `others_gear` and `others_carry`, then stand-ins) must look at:
+**Live with two real games; what a longer run must still check.** Each game has shown the other player's gear and
+cases (2026-11-16 in pairs, 2026-11-18 in broadcast mode), but never for several real players at once. A run with
+more real players must look at:
 
 - the game thread's tick time and the `STACK slow` lines while many bodies get their copies and cases;
 - the culling guard (`GUARD the culling job met a drawable ...`) and fault records, with many attached copies on

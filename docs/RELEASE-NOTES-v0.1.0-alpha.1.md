@@ -108,6 +108,8 @@ the player path (Setup or the launcher's install, the game started by Steam), no
 - The first start of the game shows the publisher's telemetry question (Cancel is fine) and two notices, and the first
   load shows a few "New additional content found" notices: press OK through them.
 - The game's graphics settings are per co-op profile: a weak PC should lower them once (Options, Graphics Settings).
+- Found after release, fixed for the next one: group play on a server shows other players without their gear or carried
+  cargo, and an Odradek arm can float in the air near you when another player arrives or goes out of sight.
 
 - Only Steam build 13300582. Other builds: co-op stays off.
 - Another mod's `avrt.dll` in the game folder blocks the install (no chain-loading).

@@ -110,7 +110,7 @@ a game shows the group invite and **Start group server and play** instead of a l
    after the last player.
 3. It writes the host's `mod.json`: no `peer`, `server` `127.0.0.1`, `relay` `127.0.0.1:P`, `relay_key` `wKEY`,
    `session` KEY, `player_id`, `relay_mode` `broadcast` (since 2026-11-17: each game publishes once and the server
-   copies to everyone near; `../mod/README.md`, "The broadcast mode"), `others` 15, `partner_tag`, `online_server` `http://127.0.0.1:P/wKEY/auth/ds`,
+   copies to everyone near; `../mod/README.md`, "The broadcast mode"), `others` 15, `others_gear`, `others_carry` 4, `partner_tag`, `online_server` `http://127.0.0.1:P/wKEY/auth/ds`,
    `build_received` (below, "Other players' structures"), and the play setup's `game_thread`, `puppet_probe`,
    `required`; with a notice token also `strand_notices`, `offer_strand` and `strand_token` (below, "What the game is
    told"). The proxy's peer list is `127.0.0.1`. On a server that

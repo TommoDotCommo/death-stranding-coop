@@ -16,7 +16,7 @@ the game, and it never will. You need your own copy of the game.
 |  | Feature | Status |
 |---|---|:---:|
 | 🧍 | **Another Sam** moving exactly as the other player's does: walking, running, resting, dozing, balancing, falling, picking things up | ✅ |
-| 🎒 | **Their gear, outfit and carried cargo**, drawn as the game's own cases on back, hips and arms. Works in a two-player lobby; `v0.1.0-alpha.1` does not turn it on for group play on a server | ⚠️ |
+| 🎒 | **Their gear, outfit and carried cargo**, drawn as the game's own cases on back, hips and arms (in group play on a server: from the release after `v0.1.0-alpha.1`) | ✅ |
 | 🏷️ | **Their name** over their head; across linked servers with their home server ("Host Sam · north") | ✅ |
 | 🏍️ | **Their bike or truck** in their paint, wheels and steering turning; **ride along** on it (key J) | ✅ |
 | 🗺️ | **On the map**, with pings | ✅ |
@@ -121,7 +121,7 @@ What is left before a public release, and the features planned: [docs/ROADMAP.md
 
 ## 🐞 Known issues
 
-- 🎒 In `v0.1.0-alpha.1`, **group play on a server shows other players without their gear or carried cargo**. A two-player lobby shows both.
+- 🎒 In `v0.1.0-alpha.1`, **group play on a server shows other players without their gear or carried cargo**, and **an Odradek arm can float in the air** near you when another player arrives or goes out of sight. Both are fixed for the next release.
 - 🖥️ Most features have only run as **two copies on one PC**. Two PCs in one home have met through a rented server; players in different homes, behind other routers, have not been tried together.
 - 🧱 With `build_received`, a received structure **skips the game's own spacing and area checks**, so it may overlap something in your world or stand where the game keeps other players' structures out. The server keeps the objects it hands out 20 m apart.
 - 🗑️ A structure **removed from the server** stays in a running game until its area loads again.
