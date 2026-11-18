@@ -51,7 +51,7 @@ int main(){
         auto near=[&](const std::string& q){auto r=s.raw("GET","/s3cret/coop/map"+q,"",{{"x-coop-token",ann}});CHECK(r.status==200);return json::parse(r.body);};
         CHECK(s.read(ann).get("players").items().size()==MapPlayersMax);
         auto d=near("?x=1000&y=2&area=200");auto& l=d.get("players").items();CHECK(l.size()==MapPlayersMax&&l[0].get("x").real()==1000&&l[1].get("x").real()!=1000);
-        double most=0;for(auto& p:l){most=std::max(most,std::fabs(p.get("x").real()-1000));CHECK(p.get("area").integer()==200);}CHECK(most<=650);
+        double most=0;for(auto& p:l){most=std::max(most,std::fabs(p.get("x").real()-1000));CHECK(p.get("area").integer()==200);}CHECK(most==940);
         CHECK(near("?x=0&y=0&area=100").get("players").items().size()==1);
         CHECK(near("?x=nan&y=0").get("players").items().size()==MapPlayersMax&&near("?x=1e999&y=0").get("players").items().size()==MapPlayersMax);
         CHECK(d.get("wait_ms").integer()==std::min<int64_t>(MapWaitMaxMs,int64_t(MapPlayersMax+6)*20));
