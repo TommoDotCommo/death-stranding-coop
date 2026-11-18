@@ -160,6 +160,7 @@ std::string config(const Session& s) {
 #endif
             +routeKey(s)
 #ifndef MUTANT_GROUP_TEST_OWN
+            +(s.serverFreeBuild?",\"free_build\":true":"")
             +(s.serverTestMode?TestModeConfig:"")   // the server's rules, shown before the game started
 #else
             +(s.testMode?TestModeConfig:"")

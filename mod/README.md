@@ -891,6 +891,15 @@ Without `online_server` it names the partner. Text from the server is stripped o
 when the config gives P to another feature. `serverinfo.h`; `mod_status` has `server_info` (`ready`, `open`, `opens`, `page`,
 `pages`, `answered`).
 
+## Free build (`free_build`, off by default; the launcher sets it from the server's rule)
+
+With the server's policy `free_build=on`, the game's rules on where a structure may stand are off for every game that joins
+through the launcher: too close to another structure, on each other, slopes, water, footing, obstacles, the chiral network
+and the safe house's distance from camps. What is built this way stays where it was put instead of being settled, moved or
+taken down. Bridges keep their rules for now. The change is thirteen single bytes of the game's code (`freebuild.h`,
+`game_offsets.md`, "Free build"), made before a save is read; if any byte around them differs nothing is changed
+(`FREEBUILD differs`). Structures clipped into walls or each other can trap a porter or a vehicle.
+
 ## Text chat (`chat`, off by default; the launcher turns it on for group play)
 
 **Y** in the world starts a line. What is typed shows on the game's common telop, **Enter** sends it, **Esc** drops it, and a

@@ -6550,6 +6550,18 @@ field name for a vehicle's charge (the strings `VehicleBatteryGaugeCoefficient` 
 settings). Not known: where the riding vehicle keeps its charge. Next step: with a truck, read the vehicle entity's
 floats before and after a drive (the charge falls) and after a charger.
 
+## Free build: the rules on where a structure may stand (static 2026-11-19; to be confirmed live)
+
+Aiming the construction device: tick `0x28d8a30`, preview `0x28b1c60`, master check `0x2c38200` by category (general
+`0x2c38740`, bridge `0x2c36590`, jump stand `0x2c3a560`, ladder `0x2c3c070`, rope `0x2c3f120`); passing sets player `+0xc08`
+bit 7 and confirming (`0x28d8070`) queues through `0x2c47af0` with no second check. A reason byte N shows the HUD text field
+`0x130+8N` (`0x306f861`): 01 outside the chiral network, 08 structure too close, 13 obstacle, 15 deep water, 16 footing, 17
+slope. After it is built, the class's settle (vtable `+0x60`, `0x2c346d0`; jump stand `0x2cf5c..`) casts four rays and takes
+down a structure with no ground, or moves it; a load does not repeat the placement check but settling follows it, so the
+settle changes must be on whenever such a structure exists. `freebuild.h` has every byte. Not covered: bridges (a bridge
+without its far end is taken down at `0x2d1fab0`), the per-kind `LimitOfPlayerCreation` (config `+0x90`: past it the game
+deletes an older structure), and `RestoreLastStrandingConstructions` (`0x2c8a710`), which still deletes overlaps.
+
 ## Icons on the device map (static 2026-11-19; to be confirmed live)
 
 The map menu's update `0x31baa60(map = widget+0xaf0, ...)` empties its icon list and calls `0x31bda70(map, xmm1)` from the only

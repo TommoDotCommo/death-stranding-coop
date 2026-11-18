@@ -172,6 +172,8 @@ int main(int argc,char** argv) {
         {auto off=h;off.buildReceived=false;check(!mod::parseConfig(launcher::config(off)).buildReceived,"unless the player turned it off");}
         // Test mode in group play: the server's rules, never the player's own Settings choice.
         check(!hc.testMode.on,"no test mode unless the server's rules say so");
+        check(!hc.freeBuild,"no free build unless the server's rules say so");
+        {auto rules=h;rules.serverFreeBuild=true;check(mod::parseConfig(launcher::config(rules)).freeBuild,"the server's rule reaches its games");}
         {auto own=h;own.testMode=true;check(!mod::parseConfig(launcher::config(own)).testMode.on,"the player's own choice does not put a group game in test mode");
          auto rules=h;rules.serverTestMode=true;auto t=mod::parseConfig(launcher::config(rules)).testMode;
          check(t.on&&t.materialsKey==0x55&&t.stamina&&t.blood,"the server's rules put every game there in test mode (U, stamina, blood)");}
@@ -268,7 +270,12 @@ int main(int argc,char** argv) {
             auto on=st::parsePolicy(doc.substr(0,doc.size()-2)+R"(,{"key":"test_mode","value":"on","preset":"off","text":"Test mode: unlimited materials (U), stamina and blood for everyone here."}]})");
             st::usePolicy(g,on);check(g.serverTestMode&&on.text().find("Test mode: unlimited materials (U)")!=std::string::npos,"test_mode on: the game starts in test mode, and the rules shown say so");
             auto off=st::parsePolicy(doc.substr(0,doc.size()-2)+R"(,{"key":"test_mode","value":"off","preset":"off","text":"No test mode: the game plays as usual."}]})");
-            st::usePolicy(g,off);check(!g.serverTestMode,"test_mode off: not in test mode");}
+            st::usePolicy(g,off);check(!g.serverTestMode,"test_mode off: not in test mode");
+            check(!g.serverFreeBuild,"no free_build setting: off");
+            auto free=st::parsePolicy(doc.substr(0,doc.size()-2)+R"(,{"key":"free_build","value":"on","preset":"off","text":"Free build."}]})");
+            st::usePolicy(g,free);check(g.serverFreeBuild,"free_build on: the game starts with it");
+            auto usual=st::parsePolicy(doc.substr(0,doc.size()-2)+R"(,{"key":"free_build","value":"off","preset":"off","text":"Usual."}]})");
+            st::usePolicy(g,usual);check(!g.serverFreeBuild,"free_build off: not");}
         auto edit=[&](const std::string& from,const std::string& to){auto x=doc;auto at=x.find(from);check(at!=std::string::npos,"fixture");return x.replace(at,from.size(),to);};
         for(auto wrong:{edit("\"format\":1","\"format\":2"),edit("a1b2c3d4e5f6a7b8","a1b2]\\nx=y"),edit("a1b2c3d4e5f6a7b8","ab"),edit("\"preset\":\"public\"","\"preset\":\"club\""),
                         edit("\"key\":\"offer_builds\"","\"key\":\"offer_new\""),edit("Open to anyone.","Open\\u0007"),edit("\"value\":\"ask\"","\"value\":\"maybe\""),

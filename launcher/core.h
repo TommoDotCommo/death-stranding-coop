@@ -65,6 +65,7 @@ struct Session {
     // server's rules decide (the policy setting test_mode, read before the game starts: strand::usePolicy); the
     // player's own choice does not count there.
     bool testMode=false,serverTestMode=false;
+    bool serverFreeBuild=false;   // group play: the server's rule free_build (../mod/README.md, "Free build")
 };
 // The mod config's test_mode object: every switch at its default (U drops crates; stamina and blood kept full).
 inline constexpr const char* TestModeConfig=",\"test_mode\":{}";

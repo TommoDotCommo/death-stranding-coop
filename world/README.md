@@ -770,6 +770,7 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `import_cost` | `free`, `materials` | free | free | free |
 | `chat` | `on`, `off` | on | off | off |
 | `map` | `on`, `off` | on | off | off |
+| `free_build` | `off`, `on` | off | off | off |
 | `test_mode` | `off`, `on` | off | off | off |
 
 - `join`: recorded and shown, nothing more yet (there are no invitations).
@@ -798,6 +799,8 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
   `coop-world` from before it refuses a world file that has it (unknown setting).
 - `chat`: `on` lets the players here talk with text chat ("Text chat", below).
 - `map`: `on` shows every player here to the others wherever they are ("Players on the map", below).
+- `free_build`: `on` makes every game that joins here through the launcher switch off the game's rules on where a structure may
+  stand (`../mod/README.md`, "Free build").
 - `test_mode`: `on` puts every player's game here in test mode (`../mod/README.md`, "Test mode": material crates on U,
   blood and stamina kept full), for alpha testers. The server does nothing else with it: the player's launcher reads it
   with the rules before his game starts and writes the mod's `test_mode` into the game's config. Its line in words

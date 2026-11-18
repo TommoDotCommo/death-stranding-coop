@@ -63,6 +63,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "serverinfo.h"
 #include "chat.h"
 #include "mapicons.h"
+#include "freebuild.h"
 #include "strand_notices.h"
 #include "received.h"
 #include "offer_strand.h"
@@ -1093,7 +1094,7 @@ struct Runtime final:ds::Transport {
             onlinePointed=true;
             if(!onlineApi->plain()||!onlineApi->point(config.onlineServer)){note("ONLINE unavailable: address or body functions not set\n");onlineApi.reset();return;}
             note(("ONLINE server "+config.onlineServer+"\n").c_str());
-            receivedPatch();}                                // before the game can sign in: no answer has arrived yet
+            freeBuildPatch();receivedPatch();}                                // before the game can sign in: no answer has arrived yet
         auto st=onlineApi->state();
         if(!(st==onlineSeen)){
             onlineSeen=st;
@@ -1111,6 +1112,14 @@ struct Runtime final:ds::Transport {
     // is made (a rain shelter is refused in that same frame). The scan stays: it has nothing to do then, and does the
     // work alone when the code differs.
     mod::received::Early receivedEarly=mod::received::Early::Off;
+    // Free build (freebuild.h): before any save is read, so what was built this way is not taken down as a save loads.
+    mod::freebuild::State freeBuild=mod::freebuild::State::Off;
+    void freeBuildPatch() {
+        if(!sampler||!config.freeBuild)return;
+        auto* sp=&*sampler;
+        freeBuild=mod::freebuild::apply(sampler->base,true,[sp](uint64_t at,uint8_t* out,size_t n){return sp->read(at,out,n);},mod::received::nativeCodeWrite());
+        note((std::string("FREEBUILD ")+mod::freebuild::label(freeBuild)+"\n").c_str());
+    }
     void receivedPatch() {
         if(!sampler||!mod::received::early(config.buildReceived,!config.onlineServer.empty()))return;
         receivedEarly=mod::received::patchAnswers(*sampler,sampler->base,mod::received::nativeCodeWrite());
@@ -4495,6 +4504,7 @@ unsigned mod_status(char* out,unsigned cap) {
          o<<",\"player_map\":{\"ready\":"<<(r.mapLink?"true":"false")<<",\"on\":"<<(k.on?"true":"false")<<",\"reads\":"<<k.reads<<",\"shown\":"<<k.shown<<",\"area\":"<<r.gameArea<<",\"updates\":"<<s.updates<<",\"taken\":"<<s.taken<<",\"refused\":"<<s.refused<<",\"shown_area\":"<<s.shownArea<<",\"mode\":"<<s.mode<<"}";}
         o<<",\"server_info\":{\"ready\":"<<(r.infoScreen?"true":"false")<<",\"open\":"<<(r.infoScreen&&r.infoScreen->open()?"true":"false")<<",\"opens\":"<<(r.infoScreen?r.infoScreen->opens():0)
          <<",\"page\":"<<(r.infoScreen?r.infoScreen->page():0)<<",\"pages\":"<<(r.infoScreen?r.infoScreen->pageCount():0)<<",\"answered\":"<<(r.infoScreen&&r.infoScreen->answered()?"true":"false")<<"}";
+        o<<",\"free_build\":\""<<mod::freebuild::label(r.freeBuild)<<"\"";
         o<<",\"received_structures\":{\"on\":"<<(r.receivedOn?"true":"false")<<",\"answers\":\""<<mod::received::label(r.receivedEarly)<<"\",\"built\":"<<r.receivedBuilder.changed()<<",\"skipped\":"<<r.receivedBuilder.skipped()<<"}";
         {mod::strand::Poller::Counters k;if(r.strandPoller)k=r.strandPoller->counters();
          o<<",\"strand\":{\"on\":"<<(r.strandPoller?"true":"false")<<",\"reads\":"<<k.reads<<",\"answers\":"<<k.answers<<",\"failures\":"<<k.failures<<",\"told\":"<<k.told

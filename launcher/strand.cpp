@@ -200,6 +200,11 @@ void usePolicy(Session& s,const Policy& p){
 #else
     s.serverTestMode=!p.settings.empty();
 #endif
+#ifndef MUTANT_STRAND_FREE_BUILD
+    s.serverFreeBuild=p.value("free_build")=="on";
+#else
+    s.serverFreeBuild=!p.settings.empty();
+#endif
 }
 bool takeNoticeToken(const Target& t,const Transport& send,std::string& token,std::string& why){
     token.clear();
