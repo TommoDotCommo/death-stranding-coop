@@ -80,8 +80,9 @@ hands them over, skipping the game's own range, placement and area checks. *Wher
 
 <a id="collection"></a>**Collection** (aka kit): a group of structures one player built, written as one line of text,
 a [DSK string](#dsk-string), so another player can import it on a [strand server](#strand-server): here where his game
-is, or at the original place. The server makes the structures as his own uploads, under its rules, and his game
-builds them like other players' ([build received](#build-received)). Made and imported in the launcher's "My strand
+is, or at the original place. The server makes the structures as his own uploads, under its rules, and tells every
+game, his own too, that his "collection builder" ("Name · collection") built them, so his game builds them like other
+players' ([build received](#build-received)). Made and imported in the launcher's "My strand
 on this server". *Where:* `world/collection.h`, `world/collections.cpp`; `docs/COLLECTIONS.md`.
 
 <a id="co-op-data-folder"></a>**Co-op data folder** (aka data folder): `%LOCALAPPDATA%\DeathStrandingCoop\` on a

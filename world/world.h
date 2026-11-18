@@ -105,7 +105,10 @@ std::string heldText(const std::string& why);       // why an object is held (bu
 struct Candidate {
     std::string id,creator,type;int64_t area=0,updated=0,likes=0;
     bool shared=true;                                // handed to every player (not kept, held or waiting)
-    bool collection=false;                           // imported from a collection: handed to its importer too, whatever its state
+    // `creator` is the builder the games are told; `owner` the player it belongs to ("": the creator). They differ
+    // only for a structure imported from a collection: told as its importer's collection builder, owned by him, and
+    // handed to him whatever its state (../docs/COLLECTIONS.md, "Who the games are told built it").
+    std::string owner;
     bool placed=false;double x=0,y=0,z=0;           // its position in metres, when it has one
 };
 struct Curated { std::vector<std::string> handed,remember; };
@@ -318,8 +321,14 @@ private:
     json::Value servedPost(const json::Value& post) const;
     Reply gateway(const Player&,const std::string& name,const json::Value& in,int64_t now);
     const Player* playerById(const std::string& id) const;
+    std::string shownCreator(const Object&) const;   // the builder the games are told (its collection builder for an import from a collection)
     void note(const std::string& line) const {if(log)log(line);}
 };
 // The player id for an account key: "zygo_" and 27 characters, the form the game's own ids have.
 std::string playerId(const std::string& key);
+// The builder the games are told for what a player imported from a collection (../docs/COLLECTIONS.md): a player id of
+// the same form, one per importer and always the same for him (made from his player id), never a player's. `lookup`
+// names it "Name · collection" (CollectionHome in the place of a server's name).
+std::string collectionBuilderId(const std::string& importer);
+constexpr const char* CollectionHome="collection";
 }

@@ -2,9 +2,11 @@
 does (Ann and Bob, /k/NAME), Ann's game uploads a ladder, a cairn and a bridge, her launcher makes a collection of them,
 and Bob's launcher imports it at the original place on a second server and here on the first: his game says where it is
 with a HELLO to the relay (written byte by byte, core/relay.h), and the server takes his place from it. Each time his
-game's findQpidObjects (what build_received builds from) is handed the imported structures, at the right places; on the
-first server Ann's game is handed his too. Then the same run against a server built with MUTANT_COLLECTION_NOT_SELF
-(his own game is not handed what he imported) must fail.
+game's findQpidObjects (what build_received builds from) is handed the imported structures, at the right places, told
+as built by another player (his collection builder, which lookup names "bob · collection"), never by his own id: his
+game sets objects of its own player that its save lacks to Fail. On the first server Ann's game is handed his too.
+Then the same run against a server built with MUTANT_COLLECTION_CREATOR_SELF (the games told that he built them)
+must fail.
 
   python3 test_collections.py COOP-WORLD"""
 import http.client,json,os,socket,struct,subprocess,sys,tempfile,time
@@ -59,8 +61,13 @@ def run(exe):
             bob=b.game('bob')
             status,got=b.api('import',{'player':'bob','collection':text,'place':'original'})
             oracle(status==200 and got['imported']==3 and got['source']=='North camp',got)
+            own=b.upload(bob,'l',3000,2000,30);ownId=b.gate(bob,'getQpidObjects',{'ids':[own]})['objects'][0]['c']
             handed=b.handed(bob)
-            oracle(set(got['ids'])<=set(handed),('his game is handed what he imported',got['ids'],list(handed)))
+            oracle(set(got['ids'])<=set(handed) and own not in handed,('his game is handed what he imported, not what he built',got['ids'],list(handed)))
+            builders={handed[i]['c'] for i in got['ids']}
+            oracle(len(builders)==1 and ownId not in builders,('told another builder than his own id',builders,ownId))
+            users=b.gate(bob,'lookup',{'ids':list(builders)})['users']
+            oracle(len(users)==1 and users[0]['displayName']=='bob \u00b7 collection',('lookup names his collection builder',users))
             byKind={o['t']:o for o in handed.values()}
             oracle(near(place(byKind['l']),(1000,2000,30)) and near(place(byKind['e']),(1030,2000,30)) and near(place(byKind['b']),(1000,2040,30)),'at their places')
             oracle(byKind['l']['r'][2]==4500000 and byKind['b']['bi']=={'a':-111525} and byKind['b']['st']=='30' and byKind['e']['si']=={'r':1},'with their angles, level and blocks')
@@ -76,6 +83,7 @@ def run(exe):
             status,got=a.api('import',{'player':'bob','collection':text,'place':'here','relay_id':'4242'})
             oracle(status==200 and got['imported']==3 and got['anchor']['area']==300 and abs(got['anchor']['x']-5000)<0.05 and abs(got['anchor']['y']-7000)<0.05,(status,got))
             mine=a.handed(bob,300);oracle(set(got['ids'])<=set(mine),('his game is handed what he imported here',got['ids'],list(mine)))
+            oracle(len({mine[i]['c'] for i in got['ids']})==1,'one collection builder for all he imported')
             ladderHere=[o for o in mine.values() if o['t']=='l' and o['id'] in got['ids']][0]
             # The anchor of a collection made from named objects is their middle (1010, 2013.33, 30): the ladder was 10 m and 13.33 m from it.
             oracle(near(place(ladderHere),(4990,6986.67,40)),('the ladder kept its place from the middle of the three',place(ladderHere)))
@@ -90,13 +98,13 @@ def run(exe):
 if __name__=='__main__':
     exe=sys.argv[1]
     run(exe)
-    # The mutant: a server that does not hand an importer his own imports must fail this test.
+    # The mutant: a server that tells the games the importer built them (so his game is not handed them) must fail.
     with tempfile.TemporaryDirectory(prefix='ds-collections-mutant-') as d:
-        mutant=os.path.join(d,'coop-world-not-self')
+        mutant=os.path.join(d,'coop-world-creator-self')
         mono=[str(ROOT/'../vendor/monocypher'/f) for f in ('monocypher.c','monocypher-ed25519.c')]
-        subprocess.run(['g++','-std=c++17','-O1','-pthread','-DMUTANT_COLLECTION_NOT_SELF',
+        subprocess.run(['g++','-std=c++17','-O1','-pthread','-DMUTANT_COLLECTION_CREATOR_SELF',
                         *[str(ROOT/f) for f in ('main.cpp','front.cpp','api.cpp','link.cpp','world.cpp','collections.cpp','collection.cpp','relay.cpp','identity.cpp','signatures.cpp')],*mono,'-o',mutant],check=True)
         try:run(mutant);survived=True
-        except AssertionError as e:survived=False;print('KILLED MUTANT_COLLECTION_NOT_SELF ('+str(e)[:80]+')')
-        oracle(not survived,'MUTANT_COLLECTION_NOT_SELF survived')
-    print('collections over sockets passed: made, imported at the original place and here, handed to the importer and the others')
+        except AssertionError as e:survived=False;print('KILLED MUTANT_COLLECTION_CREATOR_SELF ('+str(e)[:80]+')')
+        oracle(not survived,'MUTANT_COLLECTION_CREATOR_SELF survived')
+    print('collections over sockets passed: made, imported at the original place and here, handed to the importer as another builder, and to the others')

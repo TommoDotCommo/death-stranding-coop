@@ -115,8 +115,18 @@ std::string playerId(const std::string& key){
     for(uint64_t part=0;id.size()<32;++part){uint64_t h=fnv(key,part*0x9e3779b97f4a7c15ull);for(int i=0;i<9&&id.size()<32;++i){id+=digits[h%62];h/=62;}}
     return id;
 }
+std::string collectionBuilderId(const std::string& importer){return playerId(importer+"/collection");}
 World::World(std::function<std::string()> randomToken):random_(randomToken?std::move(randomToken):defaultToken),serverId_(randomHex(16)),epoch_(randomHex(8)){}
 const World::Player* World::playerById(const std::string& id) const {for(auto& p:players_)if(p.second.id==id)return &p.second;return nullptr;}
+// Who the games are told built an object (../docs/COLLECTIONS.md, "Who the games are told built it"): its builder, but
+// for a structure imported from a collection its importer's collection builder. The importer's own game sets an object
+// whose builder is its own player and that its save lacks to Fail and never builds it; told another builder, it builds
+// it with the other players' structures. On the server the object stays the importer's (`creator`).
+std::string World::shownCreator(const Object& o) const {
+#ifndef MUTANT_COLLECTION_CREATOR_SELF
+    if(!o.collection.empty()&&o.originServer.empty())return collectionBuilderId(o.creator);
+#endif
+    return o.creator;}
 // A friend's objects come first where the policy orders by likes (curate): his friends by their player ids.
 std::set<std::string> World::friendsOf(const std::string& player) const {
     std::set<std::string> out;
@@ -338,7 +348,7 @@ json::Value World::servedPost(const Value& post) const {
 }
 json::Value World::objectResponse(const Object& o) const {
     const Value& p=o.post;Value r=Value::object();
-    r.set("id",o.id);r.set("c",o.creator);r.set("t",p.get("t"));
+    r.set("id",o.id);r.set("c",shownCreator(o));r.set("t",p.get("t"));
     r.set("m",triple(p,"x","y","m"));r.set("l",triple(p,"px","py","pz"));r.set("r",triple(p,"rx","ry","rz"));
     r.set("exp",p.get("exp").integer());r.set("lp",o.likes);r.set("ut",o.updated);r.set("q",p.get("q").integer());
 #ifndef MUTANT_WORLD_STRIP_SERVE
@@ -514,6 +524,17 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
             const std::string shown=builderLabel(p.second.name,homeLocked(serverId_,name_));
 #endif
             Value u=Value::object();u.set("account",p.second.id);u.set("boundAccount",p.second.key);u.set("displayName",shown);u.set("provider","steam");users.push(u);}
+        // A player's collection builder (what he imported from collections): "Name · collection", and no account.
+        if(name=="lookup")for(auto& id:in.get("ids").items()){
+            if(playerById(id.string()))continue;
+            for(auto& p:players_){
+                if(collectionBuilderId(p.second.id)!=id.string())continue;
+#ifndef MUTANT_COLLECTION_LOOKUP_NAME
+                const std::string shown=builderLabel(p.second.name,CollectionHome);
+#else
+                const std::string shown=p.second.name;
+#endif
+                Value u=Value::object();u.set("account",id.string());u.set("boundAccount","");u.set("displayName",shown);u.set("provider","steam");users.push(u);break;}}
         // The builders of imported objects: their name as their own server gave it with that server's display name
         // ("Name · Home", README "Builder names"), and no account.
         if(name=="lookup"&&!byOrigin_.empty())for(auto& id:in.get("ids").items()){
@@ -1044,29 +1065,31 @@ Reply World::linkPull(const Filter& f,const std::string& body,int64_t now) const
 // ---- Which objects a game is handed (README, "Which objects a game is handed").
 Curated curate(const std::string& player,int64_t area,const std::map<std::string,int64_t>* counts,const std::vector<Candidate>& candidates,
                const std::vector<std::string>& previous,const Policy& policy,const std::set<std::string>& friends){
-    // Who may be handed what: every player's shared objects of this area, never the asker's own.
+    // Who may be handed what: every player's shared objects of this area, never the asker's own (by the builder the
+    // games are told: what he imported from a collection is told as another builder's, ../docs/COLLECTIONS.md).
+    // Whose an object is (`owner`): its builder, or the importer of a structure from a collection.
+    auto owner=[](const Candidate& c)->const std::string&{return c.owner.empty()?c.creator:c.owner;};
     std::vector<const Candidate*> pool;std::map<std::string,const Candidate*> byId;
     for(auto& c:candidates){
         if(c.area!=area)continue;
-        // His own objects are in his save, except what he imported from a collection (../docs/COLLECTIONS.md): those
-        // his game has never had, so they are handed to him too, whatever their state (they are his).
-#ifndef MUTANT_COLLECTION_NOT_SELF
-        const bool importedByHim=c.collection&&c.creator==player;
-#else
-        const bool importedByHim=false;
-#endif
 #if !defined(MUTANT_WORLD_OWN)&&!defined(MUTANT_CURATE_OWN)
-        if(c.creator==player&&!importedByHim)continue;
+        if(c.creator==player)continue;
 #endif
+        // Kept, held or waiting: nobody's but its owner's. His own builds are gone already; what is left of his is what
+        // he imported, which only the server has, so he is handed it in any state (it is his, as getQpidObjects says).
 #ifndef MUTANT_CURATE_UNSHARED
-        if(!c.shared&&!importedByHim)continue;
+#ifndef MUTANT_COLLECTION_UNSHARED_HIDDEN
+        if(!c.shared&&owner(c)!=player)continue;
+#else
+        if(!c.shared)continue;
+#endif
 #endif
         pool.push_back(&c);byId[c.id]=&c;}
     // The order: newest first; with `liked`, the asker's friends first, then the most liked, then the newest.
     const bool liked=policy.order=="liked";
     std::stable_sort(pool.begin(),pool.end(),[&](const Candidate* a,const Candidate* b){
 #ifndef MUTANT_CURATE_ORDER
-        if(liked){bool fa=friends.count(a->creator)>0,fb=friends.count(b->creator)>0;if(fa!=fb)return fa;if(a->likes!=b->likes)return a->likes>b->likes;}
+        if(liked){bool fa=friends.count(owner(*a))>0,fb=friends.count(owner(*b))>0;if(fa!=fb)return fa;if(a->likes!=b->likes)return a->likes>b->likes;}
         if(a->updated!=b->updated)return a->updated>b->updated;
 #else
         (void)liked;
@@ -1083,7 +1106,7 @@ Curated curate(const std::string& player,int64_t area,const std::map<std::string
         return l!=left.end()&&l->second>=0;
 #endif
     };
-    auto take=[&](const Candidate& c){out.handed.push_back(c.id);taken.insert(c.id);if(counts)--left[c.type];++byBuilder[{c.type,c.creator}];if(c.placed)placed[c.type].push_back(&c);};
+    auto take=[&](const Candidate& c){out.handed.push_back(c.id);taken.insert(c.id);if(counts)--left[c.type];++byBuilder[{c.type,owner(c)}];if(c.placed)placed[c.type].push_back(&c);};
     // What this game was handed here before comes first, as long as it is still there and shared.
 #ifndef MUTANT_CURATE_UNSTABLE
     for(auto& id:previous){auto f=byId.find(id);if(f!=byId.end()&&!taken.count(id)&&room(*f->second))take(*f->second);}
@@ -1092,7 +1115,7 @@ Curated curate(const std::string& player,int64_t area,const std::map<std::string
         if(taken.count(c->id)||!room(*c))continue;
 #ifndef MUTANT_CURATE_BUILDER_CAP
         // No one builder fills a kind of an area.
-        if(policy.perBuilder>0&&byBuilder[{c->type,c->creator}]>=policy.perBuilder)continue;
+        if(policy.perBuilder>0&&byBuilder[{c->type,owner(*c)}]>=policy.perBuilder)continue;
 #endif
 #ifndef MUTANT_CURATE_SPREAD
         // The game fails an object placed too close to another of its kind: one farther away is handed instead.
@@ -1111,8 +1134,7 @@ Curated curate(const std::string& player,int64_t area,const std::map<std::string
 }
 Candidate World::candidateOf(const Object& o) const {
     Candidate c;const Value& p=o.post;
-    c.id=o.id;c.creator=o.creator;c.type=p.get("t").string();c.area=p.get("q").integer();c.updated=o.updated;c.likes=o.likes;c.shared=o.share.empty();
-    c.collection=!o.collection.empty()&&o.originServer.empty()&&!o.remnant;
+    c.id=o.id;c.creator=shownCreator(o);c.owner=o.creator;c.type=p.get("t").string();c.area=p.get("q").integer();c.updated=o.updated;c.likes=o.likes;c.shared=o.share.empty();
     // The game's own reading: l / 10^exp, and an exp of zero or less counts as 2 (mod/game_offsets.md).
     if(p.get("px").isInt()&&p.get("py").isInt()&&p.get("pz").isInt()){
         int64_t e=p.get("exp").integer();if(e<=0)e=2;if(e>18)e=18;double scale=std::pow(10.0,double(e));

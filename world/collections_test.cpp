@@ -1,8 +1,9 @@
 // Collections on the server (../docs/COLLECTIONS.md) through the HTTP surface: a player makes one from his own objects
 // (named, or near his spot, facing his way) and never from another's; another imports it at the original place or
 // here (moved to his spot, turned by his heading, in the area of the nearest object), as his own uploads under the
-// policy (who may import, the limit, the spread, the hard cap); his own game is handed what he imported, the others
-// as any shared object; bad bodies and strings change nothing; signed under identity keys; the world file keeps the
+// policy (who may import, the limit, the spread, the hard cap); the games, his own included, are told another builder
+// (his collection builder, "Name · collection") and handed them as another player's structures, while they stay his
+// (limit, withdrawal, likes, `mine`); bad bodies and strings change nothing; signed under identity keys; the world file keeps the
 // source; the relay's report becomes a spot in the game's axes.
 #include "front.h"
 #include "api.h"
@@ -55,6 +56,7 @@ static void original(){
     CHECK(same.get("imported").integer()==0&&same.get("left_out").items().size()==3);
     // On another server Bob imports it where it was: three objects of his, from a collection, at the same places.
     Server t;bob=t.signIn("bob","Bob");cy=t.signIn("cy","Cy");
+    const std::string bobsOwn=t.build(bob,'l',3000,2000,30);
     auto before=t.w.objects();
     auto in=t.doc(t.post("import","{\"player\":\"bob\",\"collection\":\""+text+"\",\"place\":\"original\"}"));
     CHECK(in.get("imported").integer()==3&&in.get("shared").integer()==3&&t.w.objects()==before+3&&in.get("source").string()=="Ann's camp"&&in.get("left_out").items().empty());
@@ -66,10 +68,26 @@ static void original(){
         CHECK(std::abs(metres(p,"px")-1000)<0.02&&std::abs(metres(p,"py")-2000)<0.02&&std::abs(metres(p,"pz")-30)<0.02&&p.get("rz").integer()==4500000&&p.get("q").integer()==226&&p.get("m").integer()==22123);
         auto b=t.object(made[2]).get("post");CHECK(b.get("q").integer()==227&&b.get("bi").get("a").integer()==-111525&&b.get("mt").items().size()==1);
         CHECK(t.object(made[1]).get("post").get("si").get("r").integer()==1);
-        // His own game is handed what he imported (it is not in his save); Cy's game is handed it as anyone's.
+        // Every game, his own too, is told another builder: his collection builder, not his player id (his game sets an
+        // object of its own player that its save lacks to Fail). So his game is handed them as another player's, as
+        // Cy's is, and never his own build.
         auto toBob=t.handed(bob),toCy=t.handed(cy);
-        CHECK(has(toBob,made[0])&&has(toBob,made[1])&&!has(toBob,bobs)&&has(toCy,made[0])&&has(toCy,made[1]));
+        CHECK(has(toBob,made[0])&&has(toBob,made[1])&&!has(toBob,bobsOwn)&&has(toCy,made[0])&&has(toCy,made[1])&&has(toCy,bobsOwn));
         CHECK(has(t.handed(bob,227),made[2]));
+        const std::string builder=collectionBuilderId(playerId("bob"));
+        CHECK(builder!=playerId("bob")&&builder.size()==playerId("bob").size()&&builder.rfind("zygo_",0)==0&&collectionBuilderId(playerId("cy"))!=builder);
+        for(auto& o2:toBob)if(o2.get("id").string()!=bobsOwn)CHECK(o2.get("c").string()==builder);
+        for(auto& o2:toCy){if(o2.get("id").string()==bobsOwn)CHECK(o2.get("c").string()==playerId("bob"));else CHECK(o2.get("c").string()==builder);}
+        // lookup names the collection builder "Bob · collection", with no account; Bob himself by his name only.
+        auto look=json::parse(t.w.call(cy,"lookup","{\"ids\":[\""+builder+"\",\""+playerId("bob")+"\",\"zygo_nobody\"]}",t.now).body).get("users").items();
+        CHECK(look.size()==2);
+        for(auto& u:look){
+            if(u.get("account").string()==builder)CHECK(u.get("displayName").string()=="Bob \xC2\xB7 collection"&&u.get("boundAccount").string().empty());
+            else CHECK(u.get("account").string()==playerId("bob")&&u.get("displayName").string()=="Bob");}
+        // Likes on them are Bob's: his like history has Cy's like.
+        CHECK(t.w.call(cy,"sendLike","{\"oid\":\""+made[1]+"\",\"lp\":3,\"lp2\":0,\"lt\":\"m\"}",t.now).status==200);
+        auto likes=json::parse(t.w.call(bob,"getLikeHistory","{\"since\":0}",t.now).body).get("like_histories").items();
+        CHECK(likes.size()==1&&likes.size()&&likes[0].get("oid").string()==made[1]&&likes[0].get("uid").string()==playerId("cy"));
         // His view lists them with their source; he withdraws them as his own.
         auto mine=t.doc(t.raw("GET","/s3cret/coop/mine?player=bob"));size_t sourced=0;
         for(auto& o2:mine.get("objects").items())sourced+=o2.get("collection").string()=="Ann's camp";
@@ -135,7 +153,20 @@ static void policy(){
      auto text=s.doc(s.post("collection","{\"player\":\"ann\",\"objects\":[\""+a+"\",\""+b+"\"]}")).get("collection").string();
      auto in=s.doc(s.post("import","{\"player\":\"bob\",\"collection\":\""+text+"\",\"place\":\"original\"}"));
      CHECK(in.get("imported").integer()==2&&in.get("shared").integer()==1&&in.get("held").integer()==1&&in.get("materials").items()[0].integer()==5&&in.get("cost").string()=="materials");
-     size_t costed=0;for(auto& i:in.get("ids").items())costed+=s.object(i.string()).get("cost").items().size()==6;CHECK(costed==2);}
+     size_t costed=0;for(auto& i:in.get("ids").items())costed+=s.object(i.string()).get("cost").items().size()==6;CHECK(costed==2);
+     // The limit is his: an upload of his own is held now too. The held import is handed to his game (it is his, and
+     // only the server has it), not to Ann's.
+     auto bob=s.signIn("bob","Bob");auto own=s.build(bob,'r',500,10,0);CHECK(s.object(own).get("held").string()=="limit");
+     std::string held,shared;for(auto& i:in.get("ids").items())(s.object(i.string()).get("held").string()=="limit"?held:shared)=i.string();
+     CHECK(!held.empty()&&!shared.empty()&&has(s.handed(bob),held)&&has(s.handed(bob),shared)&&!has(s.handed(ann),held)&&has(s.handed(ann),shared)&&!has(s.handed(bob),own));}
+    // Kept by his choice (offer_builds no): his game is handed them, nobody else's.
+    {Server s("friends",{"offer_builds=no","spread=0"});auto ann=s.signIn("ann","Ann");
+     auto a=s.build(ann,'l',10,10,0);
+     auto text=s.doc(s.post("collection","{\"player\":\"ann\",\"objects\":[\""+a+"\"]}")).get("collection").string();
+     Server t("friends",{"offer_builds=no","spread=0"});auto bob=t.signIn("bob","Bob"),cy=t.signIn("cy","Cy");
+     auto in=t.doc(t.post("import","{\"player\":\"bob\",\"collection\":\""+text+"\",\"place\":\"original\"}"));
+     CHECK(in.get("kept").integer()==1&&in.get("ids").items().size()==1);
+     if(in.get("ids").items().size()==1){const std::string k=in.get("ids").items()[0].string();CHECK(has(t.handed(bob),k)&&!has(t.handed(cy),k));}}
     // The spread: of two cairns 8 m apart one is left out, and one 5 m from a cairn already handed to everyone.
     {Server s;auto ann=s.signIn("ann","Ann"),bob=s.signIn("bob","Bob");
      auto a=s.build(ann,'e',10,10,0),b=s.build(ann,'e',18,10,0),c=s.build(ann,'e',200,10,0);
@@ -183,8 +214,17 @@ static void refusals(){
     k.w.noteSpot(id::relayId(bobKeys.pub),Spot{});
     auto none=k.post("collection","{\"player\":\""+bobAccount+"\",\"near\":10}",&bobKeys);CHECK(none.status==409);
 }
+// A long name is cut to fit the game's label (24 characters, 32 bytes); " · collection" is never cut.
+static void longName(){
+    Server s;auto ann=s.signIn("ann","Ann");s.signIn("bob","Bartholomew Longname-Smythe");
+    auto look=json::parse(s.w.call(ann,"lookup","{\"ids\":[\""+collectionBuilderId(playerId("bob"))+"\"]}",s.now).body).get("users").items();
+    CHECK(look.size()==1);
+    if(look.size()==1){const std::string label=look[0].get("displayName").string(),tail=" \xC2\xB7 collection";
+        CHECK(label=="Bartholomew"+tail);   // 24 characters: 11 of the name, " · ", 10 of "collection"
+        CHECK(label.size()<=MaxLabelBytes&&label.size()>tail.size()&&label.compare(label.size()-tail.size(),tail.size(),tail)==0);}
+}
 int main(){
-    original();here();policy();refusals();
+    original();here();policy();refusals();longName();
     if(failures){std::fprintf(stderr,"collections oracle: %u failures\n",failures);return 1;}
     std::puts("collections tests passed");return 0;
 }

@@ -63,7 +63,7 @@ loopback, a LAN or a VPN.
 | `createObject`, `updateObject`, `deleteObject` | stored; the new id is the type letter and 12 characters (the game reads the kind from that letter), or the id the upload brings ("An object's own id"); only the builder changes or removes an object; an upload the server policy does not let be shared is answered the same way and held for its builder ("Server policy"); over 4000 objects of one player, 403; the account names in an upload's materials are kept for this server's players only ("An object's own id") |
 | `findQpidObjects` | the other players' objects in that area that every player is handed ("Server policy"), at most the asked number per type, never the asker's own, chosen as "Which objects a game is handed" says |
 | `getQpidObjects`, `reverseLookup` | from the stored objects and players |
-| `lookup` | a builder's name: this server's players by name only, a builder from a linked server as "Name · Home" ("Builder names") |
+| `lookup` | a builder's name: this server's players by name only, a builder from a linked server as "Name · Home" ("Builder names"), a player's collection builder as "Name · collection" ("Collections") |
 | `sendLike`, `getLikeHistory` | a like is added to the object and to its builder's history (the last 2000 likes are kept); a player reads only his own history, after the time he names |
 | `devoteHighwayResources`, `getHighwayResources`, `sendHighwayLikes` | what each player put into the game's auto-pavers, added up; each player is answered with what the others put in that the policy shares, and his own ("Roads paved together") |
 | `getRankingSchedules`, `getWastedBaggages`, `findMissions`, `getOrderedMissions`, … | empty lists |
@@ -1004,16 +1004,22 @@ rules are in [../docs/COLLECTIONS.md](../docs/COLLECTIONS.md)). Built and tested
   area (`q`), cell and map of the nearest object with a place within 1.5 km (409 when there is none, or no spot from
   the last 10 minutes).
 - **What a game is handed.** An imported structure closer than `spread` to one of its kind (one this import made, one
-  everyone is handed, or one of his own) is left out (`too-close`). What he imported is the one kind of his own objects
-  `findQpidObjects` hands back to him (`curate`: his save has never had it), whatever its state.
+  everyone is handed, or one of his own) is left out (`too-close`). An imported structure is his on the server (his
+  limit, withdrawal, `mine`, likes, the owner's review and kick, ban and removal; exported to linked servers under him),
+  but every game is told another builder: his **collection builder** (`collectionBuilderId`, an id of the player-id
+  form made from his, never a player's), which `lookup` names "Name · collection" (cut like "Name · Home", "Builder
+  names"). Live (2026-11-18), his own game set structures handed to it as its own player's to Fail and never built them
+  (`mod/game_offsets.md`, "Own objects served back"); told another builder, every game, his too, gets them as another
+  player's (`curate` hands nobody what is told as his own). A kept, held or waiting import is handed to its owner only
+  (`Candidate::owner`); `per_builder` and the friends-first order count it as his.
 - **The spot.** The relay gives the world each player's place, and a broadcast player's facing, about once a second
   (`RelayConfig::spotted`); under identity keys a player's spot is his key's relay id, under identity none the one the
   launcher names (`relay_id`). Not saved.
 - **The world file** keeps each import's source (`collection`) and, under `import_cost=materials`, what it carried
   (`cost`). A `coop-world` from before refuses the file anyway (its policy has `import`, a setting it does not know).
 
-Unknown, for the first live run: whether a game takes structures whose builder is its own player and that its save
-does not have, and whether it places a structure with a neighbour's area and cell.
+Unknown, for the next live run (`collection_smoke` again): whether the importer's game builds them now that it is told
+the collection builder, and whether a game places a structure with a neighbour's area and cell.
 
 ## Identity
 
@@ -1141,7 +1147,8 @@ game asks again only when the area loads (`mod/game_offsets.md`, "What the game 
 So the server chooses. For each kind, at most the asked number (a kind not asked gets none; a request without `ct`
 gets every kind with no number), from the objects of that area that every player is handed: built here by other
 players, remnants and imported ones alike. Never the asker's own (his game has them in its save), and nothing kept,
-held or waiting ("Server policy"). In this order:
+held or waiting ("Server policy"), except to its owner what he imported from a collection ("Collections"). In this
+order:
 
 1. **What his game was handed there before**, while it is still on the server and handed to everyone, in the order it
    was handed. A structure that was there last time is there again, so structures do not change between sessions.
@@ -1197,8 +1204,9 @@ it does when one it was handed is no longer in the answer. Nothing of this has b
 
 Collections: `collection_test.cpp` (the DSK string and its fuzzer, under the sanitizers), `collections_test.cpp` (the
 two calls, the policy, the transform, the spot), `relay_test.cpp` and `broadcast_test.cpp` (the spot the relay
-reports), `test_collections.py` (the built server, stand-in games, the importer's game handed his imports; a
-`MUTANT_COLLECTION_NOT_SELF` build must fail it). Nineteen mutants; the list is in `../docs/COLLECTIONS.md`, "Tests".
+reports), `test_collections.py` (the built server, stand-in games, the importer's game handed his imports as another
+builder's, `lookup` naming "Name · collection"; a `MUTANT_COLLECTION_CREATOR_SELF` build must fail it). Twenty-two
+mutants; the list is in `../docs/COLLECTIONS.md`, "Tests".
 
 `make test`: the core (`world_test.cpp`), the HTTP surface without sockets (`front_test.cpp`), the built server over a
 real socket (`test_server.py`), and a mutant for every protection (`test_mutants.py`): a call without a session, a

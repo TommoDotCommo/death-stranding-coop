@@ -225,7 +225,14 @@ json::Value World::apiImport(const std::string& key,const std::string& text,cons
         if(i.materials){Value mt=Value::array(),e=Value::object(),mat=Value::array(),rmat=Value::array();for(auto n:i.material){mat.push(n);rmat.push(0);}
             e.set("c","");e.set("t",0);e.set("mat",mat);e.set("rmat",rmat);mt.push(e);post.set("mt",mt);
             for(size_t k=0;k<6;++k)carried[k]+=i.material[k];}
-        Object o;o.id=freshId(post.get("t").string(),me.id);o.creator=me.id;o.post=post;o.updated=now;o.name=me.name;o.collection=source;
+        // His object on the server (his limit, his withdrawal, his likes); the games are told its collection builder
+        // (World::shownCreator), so his own game builds it as another player's.
+        Object o;o.id=freshId(post.get("t").string(),me.id);o.post=post;o.updated=now;o.name=me.name;o.collection=source;
+#ifndef MUTANT_COLLECTION_OWNER_LOST
+        o.creator=me.id;
+#else
+        o.creator=collectionBuilderId(me.id);
+#endif
         if(policy_.importCost=="materials"){o.costed=true;o.cost=i.material;}
         const std::string held=choice=="no"?std::string():blocked(me,false);
         o.share=choice=="no"?"kept":!held.empty()?"held":choice=="ask"?"ask":shareAfterOffer();

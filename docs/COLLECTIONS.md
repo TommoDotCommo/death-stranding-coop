@@ -6,8 +6,9 @@ those structures for him, here where he stands or at their original place; his g
 every other player's structures (`build_received` builds them). The owner asked for it on 2026-11-18: "some sort of
 way to select items in your game and form them into a group for sharing, maybe somehow make it import/export string".
 
-Built and tested without a game (2026-11-18). No game has received an imported collection yet; what a live run must
-check is at the end.
+Built and tested without a game (2026-11-18). The first live run (2026-11-18, below) found that the importer's own game
+did not build what it was handed as his; the server now tells every game another builder for them ("Who the games are
+told built it"). That change has not been run with a game yet; what a live run must check is at the end.
 
 ## What a player does
 
@@ -102,10 +103,43 @@ left out. A string over 16384 characters is refused: choose fewer.
    setting or the per-player `limit`), kept or waiting, as his choices and the policy say. It carries the collection's
    name (or `DSK1-` and its CRC) as its source (`collection` in the world file and in `mine`).
 
-His own game is then handed them like other players' structures: an object he imported from a collection is the one
-kind of his own objects that `findQpidObjects` gives back to him (his save does not have it), whatever its state;
-the others are handed them as any shared object. Withdrawal, review, offer, the owner's removal and linked servers
-treat them as his objects.
+Every game, his own included, is then handed them as another player's structures ("Who the games are told built it",
+next). Withdrawal, review, offer, the owner's removal, his limit and linked servers treat them as his objects.
+
+## Who the games are told built it
+
+**The live result (2026-11-18, two servers, the regression `collection_smoke`).** A collection of a 30 m bridge and a
+rain shelter made on server A and imported by a player at the original place on server B: 2 imported, their ids
+returned. His game, signed in to B with `build_received` on, was handed both, with his own player id as their builder.
+It put both into its **own** objects list (the third list, as `syncobj.py` reads it) with state 4 (Fail) and kept them so
+for a minute: not built. It did not delete them and uploaded no copy. This is what `mod/game_offsets.md` found for own
+objects served back ("Own objects served back": the game does not rebuild an own object its save lacks). So objects
+whose builder is the importer cannot appear in the importer's game.
+
+**The split.** An imported structure has an **owner** on the server and a **builder the games are told**:
+
+| | Who | Where |
+|---|---|---|
+| Owner | the importer (`creator` in the world file) | his per-player `limit` and the hard cap, his withdrawal, his `mine`, his offer and the owner's review, kick, ban and removal of him, the likes on it (his like history), the linked servers (below) |
+| Builder the games are told | his **collection builder**: an id of the game's player-id form (`zygo_` and 27 characters), made from his player id (`collectionBuilderId`: `playerId(<his player id> + "/collection")`), one per importer and always the same, never a player's | `c` of every object the gateway answers (`findQpidObjects`, `getQpidObjects`, `createObject` and `updateObject` answers); `lookup` names it **"Name · collection"** with no account |
+
+So every game, his own too, takes them as another player's structures: the first list, built by `build_received`.
+`findQpidObjects` no longer has a case of its own for him: it hands nobody objects whose told builder is the asker,
+and his imports are not that. What it still does for him alone: an object that is not shared (kept by his choice, held
+for the limit or `build`, waiting) is handed to its owner only, so his game builds what he imported in any state, as
+`getQpidObjects` always answered him. The `per_builder` cap and the friends-first order count an import as its owner's.
+
+The label: the name is cut to fit the game's label (24 characters, 32 bytes; `world/README.md`, "Builder names") and
+" · collection" never is: `Bartholomew · collection` for a long name. A withdrawn import that stays (`withdrawal=stay`)
+keeps its told builder.
+
+**Linked servers.** An import is exported under its owner, as before: the travelling form names the importer (his player
+id and his name) as its builder, and the taking server names him "Name · Home" like any builder from there. The
+collection builder is this server's way of telling games apart from their own player and does not travel.
+
+**Not changed:** the mod and its wire identity (`mod/build_id.py` lists no server source; no game-facing call or field
+changed shape: the gateway's `c` was always some player's id) and the world file (the owner stays `creator`; the told
+builder is made from it whenever it is needed).
 
 `import_cost`: `free` (every preset) or `materials`. With `materials` the server records what the structures carried
 (the six counts, summed) on each object and in the answer; nothing is taken from anyone yet.
@@ -135,17 +169,22 @@ import Here is not turned (each structure keeps its own `rz`).
 - **The area of a place.** The game says which area its porter is in only by what it asks; the server takes the area
   of the nearest object it knows. Wrong near an area's border is possible. Whether the game places a structure whose
   `q`, cell and map are those of a neighbour is unknown.
-- **The importer's own game** is handed objects whose builder is its own player. Whether the game takes those as its
-  own (and so, perhaps, deletes or uploads them) is unknown: the first live check.
+- **The importer's own game** (2026-11-18, live): handed his imports as his own, it set them to Fail and did not build
+  them ("Who the games are told built it"). Told the collection builder now; that it builds them is unverified until
+  `collection_smoke` runs again.
+- **Like history.** A like on an import is in its owner's like history (`getLikeHistory`), naming an object his game
+  holds as another player's. What the game shows for such an entry is unknown.
 - **Turning.** `rz` follows the game's angle reading (`mod/game_offsets.md`, "What the body holds"): turning a
   structure by a heading changes `rz` by minus that heading. The blocks are carried unchanged: a climbing rope's
   heading (`ri.h`) or a bridge's angle (`bi.a`) may be in the world's axes and then point the old way after a turn.
 - What a received structure skips (the game's spacing and area checks, `mod/README.md`, "Received structures built")
   applies to imported ones too.
 
-Live checks: (1) a collection of a ladder and a cairn imported at the original place by a second game: built there;
-(2) the same imported Here: built at the porter, turned; (3) the importer's own game: does it build them, and does it
-send `deleteObject` or `createObject` for them; (4) a bridge and a rope turned by 90 degrees.
+Live checks left: (1) re-run `collection_smoke` (the bridge and the rain shelter from server A imported at the original
+place on server B): the importer's game must put both into its first list and build them, delete none and upload no
+copy, and its builder name must read "Name · collection"; (2) a collection imported at the original place by a second
+game: built there; (3) the same imported Here: built at the porter, turned; (4) a bridge and a rope turned by 90
+degrees; (5) a like the importer's game sends for his own import, and one another game sends (his like history).
 
 ## Tests
 
@@ -160,21 +199,30 @@ All game-free, in `make test`:
   Mutants `COLLECTION_CRC`, `_VERSION`, `_COUNT`, `_RANGE`, `_ORDER`, `_TRAILING`, `_SIZE`, `_CANONICAL`, `_TURN_SIGN`.
 - `world/collections_test.cpp`: the two calls through the HTTP surface: own objects only; at the original place on the
   same server nothing is made (the originals stand there), on another all of it, with angles, levels, blocks and
-  materials; the importer's game is handed his imports and a third player's too; withdrawal; the world file; near the
-  spot, a stale spot, here (moved, turned by 90 degrees, in the area of the nearest object, 409 where there is none);
-  `import` nobody, members, owner; the limit; `import_cost`; the spread; the hard cap; bodies and strings refused;
-  identity keys (unsigned 401, another's key 403, the key's own relay id). Mutants `COLLECTION_NOT_SELF`, `_OTHERS`,
-  `_IMPORT_ANYONE`, `_NO_TURN`, `_CAP`, `_SPREAD`, `_SAVE_LOST`, `_SPOT_AXES`.
+  materials; the importer's game is handed his imports (and not what he built himself) and a third player's too, both
+  told his collection builder (not his player id) as their builder; `lookup` names it "Bob · collection" and Bob by
+  his name, and cuts a long name to fit; a like on an import is in the importer's like history; withdrawal; the world
+  file (the owner stays `creator`); near the spot, a stale spot, here (moved, turned by 90 degrees, in the area of the
+  nearest object, 409 where there is none); `import` nobody, members, owner; the limit (his: an upload of his own is
+  held after the import, and a held import is handed to him and not to others); a kept import (offer_builds no) handed
+  to him only; `import_cost`; the spread; the hard cap; bodies and strings refused; identity keys (unsigned 401,
+  another's key 403, the key's own relay id). Mutants `COLLECTION_CREATOR_SELF` (the games told the importer built
+  them), `_UNSHARED_HIDDEN` (a kept or held import not handed to its owner), `_LOOKUP_NAME` (lookup without
+  " · collection"), `_OWNER_LOST` (the import owned by the collection builder: not his limit, withdrawal or likes),
+  `_OTHERS`, `_IMPORT_ANYONE`, `_NO_TURN`, `_CAP`, `_SPREAD`, `_SAVE_LOST`, `_SPOT_AXES`.
 - `world/relay_test.cpp` and `world/broadcast_test.cpp`: the relay reports a player's place about once a second, never
   one without a place, and a broadcast player's facing once another player is near (mutants `RELAY_SPOT_NO_POSITION`,
   `RELAY_SPOT_YAW`).
 - `world/test_collections.py`: the built server over sockets, the stand-in games signing in and asking
   `findQpidObjects` as the game does: one game's ladder, cairn and bridge collected, imported at the original place on
   a second server and here on the first (the importer's place from a HELLO to the relay), and handed to the importer's
-  game (what `build_received` builds) and to the others. A server built with `MUTANT_COLLECTION_NOT_SELF` must fail it.
+  game (what `build_received` builds) told as built by one collection builder that is not his own id (his own upload
+  says it), which `lookup` names "bob · collection", and to the others. A server built with
+  `MUTANT_COLLECTION_CREATOR_SELF` must fail it.
 - `launcher/core_test.cpp` and `launcher/test_collections.py`: a pasted text and a `.dsk` file found, checked and
   described; the file's name and its save (never over another); the launcher's calls on the built server, from rows
   and near the game, imported from a file and from a chat line; a changed string refused before it is sent (mutant
   `LAUNCHER_COLLECTION_UNCHECKED`, in both).
 
-Not checked: the launcher's window (built for Windows, not seen on a screen), and anything in a game.
+Not checked: the launcher's window (built for Windows, not seen on a screen), and anything in a game but the one live
+run above (before the told builder).
