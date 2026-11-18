@@ -69,7 +69,8 @@ In the game's own UI wherever it can carry them, rather than a display of our ow
 
 - [x] **Server info in the game**: P, in the game's own dialogue: which server this is, who is online and who is near, and
       its rules.
-- [ ] **Text chat in the game** between the players on a server (with the moderation it needs before going public).
+- [x] **Text chat in the game** between the players on a server: Y, typed on the game's caption, lines in its info log. Off
+      by default on public servers until there is more moderation than kick and ban.
 - [x] **Debug menu in the game**: F3, in the game's own dialogue: stamina, blood and the porter's battery, where test mode is
       on. A vehicle's battery is still to come.
 - [x] **Hold F1 for a help page**: the co-op keys of this session, in the game's own caption.

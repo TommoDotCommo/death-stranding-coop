@@ -104,6 +104,7 @@ config names the server instead:
 | `build_received` | with `online_server`: other players' structures that server hands the game are built at once, without the game's range, placement and area checks ("Received structures built", below); off by default; the launcher writes it in group play from its setting (on unless the player turns it off); live: served bridges are built straight from the answer; received rain shelters were still removed before the area check was skipped (2026-11-17, not run since) |
 | `offer_strand` | with `online_server` and `strand_token`: the structures this player's save already holds are offered to that server through the game's own upload, one at a time, while the server says his older strand may be ("Offering your existing strand", below); off by default; the launcher writes it on in group play with `strand_token`, so the player's `offer_old` on that server decides; live: all 26 own structures of an Episode 3 save offered in about 3 minutes |
 | `help_page` | hold F1: the co-op keys on the game's common telop ("The F1 page", below). The launcher turns it on |
+| `chat` | Y: text chat through the server ("Text chat", below); requires `online_server` and `strand_token`. The launcher turns it on with the notice token |
 | `server_info` | P: the server, who is online and its rules on the game's common dialogue ("The server page", below). The launcher turns it on |
 | `test_mode` | the launcher writes `{}` when the server's rules say `test_mode` on ("Test mode", below): material crates on U; blood, stamina and battery kept full, switched with F3 |
 | `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
@@ -889,6 +890,22 @@ answer. A server older than this page does not report who is connected: the page
 Without `online_server` it names the partner. Text from the server is stripped of control characters. The key is not taken
 when the config gives P to another feature. `serverinfo.h`; `mod_status` has `server_info` (`ready`, `open`, `opens`, `page`,
 `pages`, `answered`).
+
+## Text chat (`chat`, off by default; the launcher turns it on for group play)
+
+**Y** in the world starts a line. What is typed shows on the game's common telop, **Enter** sends it, **Esc** drops it, and a
+game event, a menu or a dialogue ends typing. Lines go to everyone on the server and arrive in the game's info log as
+"Name: text", the sender's own included (so seeing it means the server has it). A game sees only what is said after it joined.
+
+While typing, a message hook on the game's window thread takes every key press (raw input and the window messages) away from
+the game and turns it into text with the player's keyboard layout; dead keys are not combined. Key releases still reach the
+game, so a key held when typing began does not stay down. The mod's own keys do nothing while typing.
+
+The lines travel over HTTP on a thread of their own: `GET`/`POST .../coop/chat` with the `strand_token`
+(`../world/README.md`, "Text chat"), read every 2 s. A line refused is told in the info log (too many lines, chat off). On a
+server whose rules say `chat` off, Y only says so. Requires `online_server` and `strand_token`. `chat.h`; `mod_status` has `chat`
+(`ready`, `on`, `typing`, `reads`, `sent`, `refused`, `received`). The lab's `puppet.chat` takes `open`, `type WORD` (`_` for a
+space), `enter` and `esc`, each with the run stamp.
 
 ## Strand notices (`strand_notices`, off by default; live once, 2026-11-17)
 

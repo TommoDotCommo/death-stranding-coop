@@ -887,6 +887,21 @@ What it holds to:
 | The world file keeps the policy, the choices and every object's state; it is format 2, which a `coop-world` from before refuses | an older server would hand out what is kept and let remnants be changed |
 | A `coop-world` from before `order`, `per_builder` and `spread` refuses a world file that has them (unknown setting) | it would not choose as the owner set |
 
+### Text chat
+
+The policy setting `chat` (`on` in the friends preset, `off` in solo and public until there is more moderation than kick and
+ban). A game talks with the notice token its launcher took for the player, in the header `X-Coop-Token`:
+
+| Call | Answer |
+|---|---|
+| `GET …/coop/chat[?since=N]` | `format` 1, `on`, `next` (what to give as `since` next time) and `lines` (`n`, `name`, `text`), at most 50, from `since` on. Without `since`: no lines, so a game that joins sees no history |
+| `POST …/coop/chat` `{"text":...}` | `format` 1 and the line's `n`. 403 `chat-off` or a bad token, 400 `chat-text`, 429 `chat-rate` |
+
+A line is 1 to 160 characters of well-formed UTF-8 without control characters, trimmed of spaces, under the name the player
+signed in with ("Porter" without one). A player says at most 5 lines in 10 s. The server keeps the last 200 lines in memory
+only, not in the world file, and writes each to its event log (`--log`), so its owner can see what was said. A kicked or
+banned player's token ends at once. Lines are not encrypted, and players of linked servers do not see them.
+
 ### The launcher's API
 
 Beside the game's gateway, under the same secret prefix, for the launcher and never the game (`api.h`). The launcher

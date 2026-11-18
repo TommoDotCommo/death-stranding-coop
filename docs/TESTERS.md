@@ -52,7 +52,8 @@ player.
 ## Keys in the game
 
 Hold **F1** in the world for a list of the co-op keys that work in your session. Press **P** to see which server you are on,
-who is online and the server's rules.
+who is online and the server's rules. Press **Y** to chat: type, **Enter** sends to everyone on the server, **Esc** cancels.
+The server's owner can read what is said.
 
 ## Test mode
 
