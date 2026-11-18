@@ -768,6 +768,7 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `near_cap` | players near one player he is shown on the relay, 0 for no cap (up to 1024) | 32 | 32 | 16 |
 | `import` | `everyone`, `members`, `owner`, `nobody` | everyone | everyone | members |
 | `import_cost` | `free`, `materials` | free | free | free |
+| `chat` | `on`, `off` | on | off | off |
 | `test_mode` | `off`, `on` | off | off | off |
 
 - `join`: recorded and shown, nothing more yet (there are no invitations).
@@ -794,6 +795,7 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 - `near_cap`: how many of the players near one broadcast player the relay shows him ("How many players one player
   sees"), unless the server was started with `--broadcast-near`. A world file from before it has its preset's value; a
   `coop-world` from before it refuses a world file that has it (unknown setting).
+- `chat`: `on` lets the players here talk with text chat ("Text chat", below).
 - `test_mode`: `on` puts every player's game here in test mode (`../mod/README.md`, "Test mode": material crates on U,
   blood and stamina kept full), for alpha testers. The server does nothing else with it: the player's launcher reads it
   with the rules before his game starts and writes the mod's `test_mode` into the game's config. Its line in words
