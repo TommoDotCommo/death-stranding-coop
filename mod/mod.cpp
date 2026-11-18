@@ -61,6 +61,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "dialog.h"
 #include "debugmenu.h"
 #include "serverinfo.h"
+#include "chat.h"
 #include "strand_notices.h"
 #include "received.h"
 #include "offer_strand.h"
@@ -186,7 +187,11 @@ struct PadShared {std::mutex lock;mod::pad::Player player;std::atomic<bool> enab
 PadShared padShared;
 // One of the mod's own keys (like, ping): held by the player (focused window only), or by a running pad script, so an
 // unattended test presses it like any other scripted key.
+std::atomic<bool> chatTyping{false};   // text is being typed: letters are not the mod's keys (chat.h)
 bool modKey(unsigned vk) {
+#ifndef MUTANT_CHAT_KEYS
+    if(chatTyping.load(std::memory_order_relaxed))return false;
+#endif
     if(mod::marker::keyDown(vk))return true;
     if(!vk||!padShared.enabled.load(std::memory_order_acquire))return false;
     std::lock_guard<std::mutex> l(padShared.lock);mod::pad::Gamepad g;mod::pad::Keys k;
@@ -1288,6 +1293,9 @@ struct Runtime final:ds::Transport {
     std::unique_ptr<mod::debugmenu::Menu> debugMenu;Background<mod::dialog::Api> dialogJob;mod::marker::KeyEdge debugEdge;
     // The game's common dialogue, once its code is checked; shared by the menus below. 0 unknown, 1 there, 2 not there.
     std::optional<mod::dialog::Api> dialogApi;int dialogState=0;
+    // Y: text chat (chat.h, tickChat). puppet.chat (lab): "open", "type WORD" (_ for a space), "enter", "esc", each with the run's stamp.
+    std::unique_ptr<mod::chat::Link> chatLink;std::unique_ptr<mod::chat::Box> chatBox;Background<mod::help::Api> chatHudJob;bool chatHudTried=false;std::optional<mod::help::Api> chatHud;
+    mod::marker::KeyEdge chatEdge;std::vector<std::u16string> chatLines;std::filesystem::path chatCommand;std::vector<mod::chat::Press> chatScripted;bool chatOpenCommand=false;
     // P: the server page (serverinfo.h, tickServerInfo).
     std::unique_ptr<mod::serverinfo::Screen> infoScreen;mod::marker::KeyEdge infoEdge;std::future<mod::strand::Fetched> infoRead;
     // Hold F1: the co-op keys on the game's common telop (help.h). puppet.help (lab): "at <pivot> <x> <y> <stamp>" moves
@@ -1313,11 +1321,11 @@ struct Runtime final:ds::Transport {
             else if(verb=="show"||verb=="hide")helpHeld=verb=="show";
         }
         mod::help::Facts f;f.ping=pingKey;f.like=partnerMode();f.ride=ride?config.passengerKey:0;f.route=config.routeRecordKey;
-        f.materials=config.testMode.on?config.testMode.materialsKey:0;f.story=config.storyResync!="off"?config.storyKey:0;f.debug=config.testMode.on&&debugMenu?mod::debugmenu::Key:0;f.server=infoScreen&&infoKeyFree()?mod::serverinfo::Key:0;
+        f.materials=config.testMode.on?config.testMode.materialsKey:0;f.story=config.storyResync!="off"?config.storyKey:0;f.debug=config.testMode.on&&debugMenu?mod::debugmenu::Key:0;f.server=infoScreen&&infoKeyFree()?mod::serverinfo::Key:0;f.chat=chatBox&&chatLink&&chatLink->counters().on&&keyFree(mod::chat::Key)?mod::chat::Key:0;
         helpPage->tick(helpHeld||modKey(mod::help::Key),cache.available&&!cache.gated&&gameEvent&&!gameEvent(),f,now);
     }
     void tickNotices(uint64_t now) {
-        if(!config.notices&&!noticeTest&&!config.strandNotices&&!routeTold&&!config.testMode.on)return;
+        if(!config.notices&&!noticeTest&&!config.strandNotices&&!routeTold&&!config.testMode.on&&!config.chat)return;
 #ifndef MOD_FAKE_NETWORK
         if(!noticeApi&&!noticeTried){
             auto* sp=&*sampler;if(!noticeJob.ready([sp]{return mod::notice::nativeApi(*sp);}))return;   // checked beside the game
@@ -1330,7 +1338,7 @@ struct Runtime final:ds::Transport {
         if(!noticeApi)return;
         if(noticeTest){noticeTest=false;note(noticeApi->show(u"Co-op mod: test notice.",mod::notice::PlainIcon)?"NOTICE test shown\n":"NOTICE test refused: no info log now\n");}
 #ifndef MOD_MUTANT_STRAND_PARTNER
-        if(!config.notices&&!config.strandNotices&&!routeTold&&!config.testMode.on)return;
+        if(!config.notices&&!config.strandNotices&&!routeTold&&!config.testMode.on&&!config.chat)return;
 #else
         if(!config.notices&&!config.testMode.on)return;   // the mutant: strand lines only beside the partner's notices
 #endif
@@ -1339,6 +1347,8 @@ struct Runtime final:ds::Transport {
         {for(auto& line:routeLines)notices->route(line,now);routeLines.clear();}   // the route challenge's lines (tickRoute)
         for(auto& line:testLines)notices->test(line,now);   // test mode's lines (tickTestMode), finished like the strand's
         testLines.clear();
+        for(auto& line:chatLines)notices->chat(line,now);   // what the players said (tickChat)
+        chatLines.clear();
         if(strandPoller&&config.strandNotices){for(auto& row:strandPoller->logs())note(row.c_str());for(auto& line:strandPoller->lines())notices->strand(line,now);}
 #ifdef MOD_MUTANT_OFFER_LINES
         else if(strandPoller){for(auto& line:strandPoller->lines())notices->strand(line,now);}
@@ -1370,7 +1380,7 @@ struct Runtime final:ds::Transport {
 #ifdef MOD_FAKE_NETWORK
     std::vector<mod::testmode::Drop> fakeDrops;   // the fake world's crates: every one asked for, until the test takes it
     mod::vitals::State fakeVitals{true,false,false,false};
-    bool fakeDialogUp=false;unsigned fakeDialogAnswer=mod::dialog::NoAnswer;std::u16string fakeDialogBody;   // the fake world's common dialogue
+    bool fakeDialogUp=false;unsigned fakeDialogAnswer=mod::dialog::NoAnswer;std::u16string fakeDialogBody,fakeTelop;   // the fake world's common dialogue and telop
 #endif
     static std::string keyName(unsigned vk){
         if((vk>='A'&&vk<='Z')||(vk>='0'&&vk<='9'))return std::string(1,char(vk));
@@ -1457,7 +1467,49 @@ struct Runtime final:ds::Transport {
         auto address=mod::peerAddress(url.substr(7,colon-7));if(!address)return std::nullopt;
         ServerAt at;at.address=*address;at.port=uint16_t(std::stoul(url.substr(colon+1,slash-colon-1)));at.base=mod::serverApiBase(url).value_or(std::string());return at;
     }
-    bool infoKeyFree() const {const unsigned k=mod::serverinfo::Key;return config.passengerKey!=k&&config.storyKey!=k&&config.routeRecordKey!=k&&config.testMode.materialsKey!=k;}
+    bool keyFree(unsigned k) const {return config.passengerKey!=k&&config.storyKey!=k&&config.routeRecordKey!=k&&config.testMode.materialsKey!=k;}
+    bool infoKeyFree() const {return keyFree(mod::serverinfo::Key);}
+    void tickChat(uint64_t now){
+        if(!config.chat||!sampler)return;
+        if(!chatHud){
+#ifndef MOD_FAKE_NETWORK
+            if(chatHudTried)return;
+            auto* sp=&*sampler;if(!chatHudJob.ready([sp]{return mod::help::nativeApi(*sp);}))return;
+            chatHudTried=true;
+            try{chatHud=chatHudJob.job.get();}catch(const std::exception& e){note((std::string("CHAT unavailable: ")+e.what()+"\n").c_str());return;}
+#else
+            mod::help::Api a;a.show=[this](const std::u16string&,const std::u16string& text,const mod::help::Place&){fakeTelop=text;return true;};a.hide=[this]{fakeTelop.clear();};chatHud=a;
+#endif
+        }
+        if(!chatLink){
+            auto at=serverAt();if(!at){note("CHAT unavailable: no server address\n");config.chat=false;return;}
+            const std::string target=at->base+"/coop/chat",token=config.strandToken;const uint32_t address=at->address;const uint16_t port=at->port;
+            chatLink=std::make_unique<mod::chat::Link>(
+                [=](const std::string& since){auto r=mod::strand::get(address,port,target+(since.empty()?std::string():"?since="+since),token,mod::strand::ConnectMs);return mod::chat::Result{r.status,r.body};},
+                [=](const std::string& body){auto r=mod::strand::post(address,port,target,token,body,mod::strand::ConnectMs);return mod::chat::Result{r.status,r.body};});
+            mod::chat::Hud hud;auto api=*chatHud;mod::help::Place place;place.y=700;
+            hud.show=[api,place](const std::u16string& title,const std::u16string& text){return api.show(title,text,place);};hud.hide=api.hide;
+            chatBox=std::make_unique<mod::chat::Box>(hud,mod::chat::nativeKeyboard(),[this](const std::string& line){chatLink->say(line);},[this](const std::string& row){note(row.c_str());});
+            note(keyFree(mod::chat::Key)?"CHAT on: Y\n":"CHAT off: Y is another key of this game's config\n");
+        }
+        for(auto& line:chatLink->take())chatLines.push_back(line);
+        std::vector<mod::chat::Press> scripted;
+        if(!chatCommand.empty()&&std::filesystem::exists(chatCommand)){
+            auto text=readConfig(chatCommand);std::filesystem::remove(chatCommand);std::istringstream in(text);std::vector<std::string> words;std::string w;while(in>>w)words.push_back(w);
+            if(words.size()<2||words.back()!=mod::runStamp())note("CHAT ignored command for another process\n");
+            else if(words[0]=="open")chatOpenCommand=true;
+            else if(words[0]=="enter")scripted.push_back({mod::chat::Press::Enter,0});
+            else if(words[0]=="esc")scripted.push_back({mod::chat::Press::Escape,0});
+            else if(words[0]=="type"&&words.size()==3)for(char c:words[1])scripted.push_back({mod::chat::Press::Char,c=='_'?u' ':char16_t(static_cast<unsigned char>(c))});
+        }
+        bool pressed=chatEdge.pressed(keyFree(mod::chat::Key)&&modKey(mod::chat::Key),now)||chatOpenCommand;chatOpenCommand=false;
+        const auto seen=chatLink->counters();
+        if(pressed&&seen.reads&&!seen.on){chatLines.push_back(u"Text chat is off on this server.");pressed=false;}
+        const bool active=pressed||chatBox->typing();
+        const bool allowed=active&&inWorldNow()&&(chatBox->typing()||!dialogApi||!config.testMode.on&&!config.serverInfo||dialogApi->free());
+        chatBox->tick(pressed,mod::marker::keyDown(mod::chat::Key),allowed,scripted);
+        chatTyping.store(chatBox->typing(),std::memory_order_relaxed);
+    }
     void tickServerInfo(uint64_t now){
         if(!config.serverInfo||!sampler||!dialogReady())return;
         if(!infoScreen){
@@ -2806,7 +2858,7 @@ struct Runtime final:ds::Transport {
 #endif
                 puppet=std::make_unique<mod::puppet::Probe>(std::move(api),[this](const std::string& row){note(row.c_str());});
                 twinCommand=path.parent_path()/"puppet.double";cargoCommand=path.parent_path()/"puppet.cargo";bodyCommand=path.parent_path()/"puppet.body";gearCommand=path.parent_path()/"puppet.gear";
-                markerCommand=path.parent_path()/"puppet.marker";rideCommand=path.parent_path()/"puppet.ride";helpCommand=path.parent_path()/"puppet.help";
+                markerCommand=path.parent_path()/"puppet.marker";rideCommand=path.parent_path()/"puppet.ride";helpCommand=path.parent_path()/"puppet.help";chatCommand=path.parent_path()/"puppet.chat";
 #ifdef MOD_FAKE_NETWORK
                 // Fake tree: player entity 0x6000 -> CameraEntity 0xa000 -> parked double 0xa800.
                 fake->mutate([&]{auto B=fake->base;fake->put<uint64_t>(0x6078,B+0xa000);
@@ -3610,6 +3662,8 @@ struct Runtime final:ds::Transport {
             if(gameContext)tickDebugMenu(now);
             stage="server page";stages.enter("server page",mod::nowUs());
             if(gameContext)tickServerInfo(now);
+            stage="chat";stages.enter("chat",mod::nowUs());
+            if(gameContext)tickChat(now);
             stage="notices";stages.enter("notices",mod::nowUs());
             if(gameContext)tickNotices(now);
             stage="help";stages.enter("help",mod::nowUs());
@@ -4157,6 +4211,7 @@ struct Runtime final:ds::Transport {
         if(core && socket!=INVALID_SOCKET) {try{core->disconnect(mod::nowMs());}catch(...){}}
         if(others){try{others->clear(mod::nowMs());}catch(...){}}
         relayStop();
+        if(chatBox)chatBox->close();chatTyping=false;chatLink.reset();   // its thread ends within a read's time-outs
         if(infoRead.valid())infoRead.wait();   // a read of the server page ends within its time-outs
         strandPoller.reset();   // its thread ends within a read's time-outs, before the sockets' library goes
         if(socket!=INVALID_SOCKET)closesocket(socket);
@@ -4200,6 +4255,8 @@ MOD_API void mod_test_gauges(float* four) {
 // The fake dialogue's body, as UTF-8 for ASCII text (other characters as '?'); returns its length.
 MOD_API unsigned mod_test_dialog_body(char* out,unsigned cap){std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return 0;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
     unsigned n=0;for(char16_t c:r.fakeDialogBody){if(n+1<cap)out[n]=c<0x80?char(c):'?';++n;}if(cap)out[std::min(n,cap-1)]=0;return n;}
+MOD_API unsigned mod_test_telop(char* out,unsigned cap){std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return 0;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
+    unsigned n=0;for(char16_t c:r.fakeTelop){if(n+1<cap)out[n]=c<0x80?char(c):'?';++n;}if(cap)out[std::min(n,cap-1)]=0;return n;}
 MOD_API void mod_test_dialog_answer(unsigned row) {std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);r.fakeDialogAnswer=row;}
 MOD_API int mod_test_take_crate(unsigned index) {std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return 0;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
     if(index>=r.fakeDrops.size())return 0;
@@ -4384,6 +4441,8 @@ unsigned mod_status(char* out,unsigned cap) {
          <<",\"on_ground\":"<<r.testDropper.onGround()<<",\"blood_writes\":"<<r.testBloodWrites<<",\"stamina_writes\":"<<r.testStaminaWrites<<",\"battery_writes\":"<<r.testBatteryWrites<<",\"gauges\":\""<<r.testGaugeWhy<<"\""
          <<",\"keep\":{\"stamina\":"<<(r.testStamina?"true":"false")<<",\"blood\":"<<(r.testBlood?"true":"false")<<",\"battery\":"<<(r.testBattery?"true":"false")<<"}"
          <<",\"menu\":{\"ready\":"<<(r.debugMenu?"true":"false")<<",\"open\":"<<(r.debugMenu&&r.debugMenu->open()?"true":"false")<<",\"opens\":"<<(r.debugMenu?r.debugMenu->opens():0)<<",\"switches\":"<<(r.debugMenu?r.debugMenu->switches():0)<<",\"selected\":"<<(r.debugMenu?r.debugMenu->selected():0)<<"}}";
+        {mod::chat::Link::Counters k;if(r.chatLink)k=r.chatLink->counters();
+         o<<",\"chat\":{\"ready\":"<<(r.chatBox?"true":"false")<<",\"on\":"<<(k.on?"true":"false")<<",\"typing\":"<<(r.chatBox&&r.chatBox->typing()?"true":"false")<<",\"reads\":"<<k.reads<<",\"sent\":"<<k.sent<<",\"refused\":"<<k.refused<<",\"received\":"<<k.received<<"}";}
         o<<",\"server_info\":{\"ready\":"<<(r.infoScreen?"true":"false")<<",\"open\":"<<(r.infoScreen&&r.infoScreen->open()?"true":"false")<<",\"opens\":"<<(r.infoScreen?r.infoScreen->opens():0)
          <<",\"page\":"<<(r.infoScreen?r.infoScreen->page():0)<<",\"pages\":"<<(r.infoScreen?r.infoScreen->pageCount():0)<<",\"answered\":"<<(r.infoScreen&&r.infoScreen->answered()?"true":"false")<<"}";
         o<<",\"received_structures\":{\"on\":"<<(r.receivedOn?"true":"false")<<",\"answers\":\""<<mod::received::label(r.receivedEarly)<<"\",\"built\":"<<r.receivedBuilder.changed()<<",\"skipped\":"<<r.receivedBuilder.skipped()<<"}";

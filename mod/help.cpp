@@ -23,6 +23,7 @@ std::u16string body(const Facts& f){
 #endif
     line(f.story,u"Catch up with the story");
     line(f.server,u"Server and players");
+    line(f.chat,u"Text chat");
     line(f.debug,u"Test mode switches");
     return out;
 }

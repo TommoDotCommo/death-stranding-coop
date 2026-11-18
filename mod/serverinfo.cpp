@@ -2,6 +2,18 @@
 #include "../world/json.h"
 namespace mod::serverinfo {
 namespace {
+std::u16string number(long n){auto s=std::to_string(n);return std::u16string(s.begin(),s.end());}
+std::u16string nameList(const std::vector<std::string>& names){
+    std::u16string out;size_t shown=0,total=0;
+    for(auto& n:names){auto w=wide(n);if(w.empty())continue;++total;
+#ifndef MUTANT_SERVERINFO_NAMES
+        if(shown==NamesShown)continue;
+#endif
+        if(shown++)out+=u", ";out+=w;}
+    if(total>shown)out+=u" and "+number(long(total-shown))+u" more";
+    return out;
+}
+}
 // UTF-8 to UTF-16 for text from the server: control characters and invalid bytes dropped, so it cannot lay out the page.
 std::u16string wide(const std::string& s){
     std::u16string out;
@@ -19,18 +31,6 @@ std::u16string wide(const std::string& s){
         else if(v<0xd800||v>0xdfff)out+=char16_t(v);
     }
     return out;
-}
-std::u16string number(long n){auto s=std::to_string(n);return std::u16string(s.begin(),s.end());}
-std::u16string nameList(const std::vector<std::string>& names){
-    std::u16string out;size_t shown=0,total=0;
-    for(auto& n:names){auto w=wide(n);if(w.empty())continue;++total;
-#ifndef MUTANT_SERVERINFO_NAMES
-        if(shown==NamesShown)continue;
-#endif
-        if(shown++)out+=u", ";out+=w;}
-    if(total>shown)out+=u" and "+number(long(total-shown))+u" more";
-    return out;
-}
 }
 Policy parse(const std::string& body){
     Policy p;

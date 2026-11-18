@@ -34,6 +34,8 @@ build/front-test: front_test.cpp front.cpp front.h $(API) $(LINK) world.cpp worl
 build/api-test: api_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h collections.cpp collection.cpp collection.h | build
 	$(CXX) $(FLAGS) api_test.cpp front.cpp api.cpp link.cpp world.cpp collections.cpp collection.cpp identity.cpp signatures.cpp $(MONO) -o $@
 # What the game is told (README "What the game is told"): the notice token and the mod's read.
+build/chat-test: chat_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h collections.cpp collection.cpp collection.h | build
+	$(CXX) $(FLAGS) chat_test.cpp front.cpp api.cpp link.cpp world.cpp collections.cpp collection.cpp identity.cpp signatures.cpp $(MONO) -o $@
 build/notices-test: notices_test.cpp front.cpp front.h $(API) $(LINK) world.cpp world.h json.h collections.cpp collection.cpp collection.h | build
 	$(CXX) $(FLAGS) notices_test.cpp front.cpp api.cpp link.cpp world.cpp collections.cpp collection.cpp identity.cpp signatures.cpp $(MONO) -o $@
 # Kick and ban (README "Kick and ban"): the owner's calls end a player's sessions and passes; a ban refuses new ones.
@@ -88,7 +90,7 @@ build/coop-world.exe: $(SERVER) | build
 ../mod/build/coop-swarm: FORCE
 	$(MAKE) -C ../mod build/coop-swarm
 FORCE:
-test: build/identity-test build/world-test build/policy-test build/curate-test build/highway-test build/names-test build/link-test build/front-test build/api-test build/notices-test build/ban-test build/challenges-test build/limits-test build/keys-test build/relay-test build/broadcast-test build/fight-test build/presence-test build/coop-world ../mod/build/coop-swarm build/collection-test build/collections-test
+test: build/chat-test build/identity-test build/world-test build/policy-test build/curate-test build/highway-test build/names-test build/link-test build/front-test build/api-test build/notices-test build/ban-test build/challenges-test build/limits-test build/keys-test build/relay-test build/broadcast-test build/fight-test build/presence-test build/coop-world ../mod/build/coop-swarm build/collection-test build/collections-test
 	./build/identity-test
 	./build/collection-test 3000
 	./build/collections-test
@@ -100,6 +102,7 @@ test: build/identity-test build/world-test build/policy-test build/curate-test b
 	./build/link-test
 	./build/front-test
 	./build/api-test
+	./build/chat-test
 	./build/notices-test
 	./build/ban-test
 	$(MAKE) challenges-test

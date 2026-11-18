@@ -50,6 +50,7 @@ uint64_t delayAfter(int status,bool good,unsigned& failures);
 // One HTTP GET to the server over a new TCP connection: at most `ms` to connect and for each read; the answer bounded.
 struct Fetched { int status=0;std::string body; };   // status 0: no answer in HTTP form
 Fetched get(uint32_t address,uint16_t port,const std::string& target,const std::string& token,unsigned ms);
+Fetched post(uint32_t address,uint16_t port,const std::string& target,const std::string& token,const std::string& body,unsigned ms);   // the same with a JSON body
 // The reads on a thread of their own (never the game's): `fetch(target)` is `get` to the server in the mod, a function
 // of the test's in a test. Lines and log rows wait until taken.
 class Poller {

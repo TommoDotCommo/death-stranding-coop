@@ -20,6 +20,7 @@ struct Policy {
     std::vector<std::string> rules;
 };
 Policy parse(const std::string& body);  // nothing read from anything else; never throws
+std::u16string wide(const std::string& utf8);   // for the screen: control characters and invalid bytes dropped
 struct Facts {
     bool group=false,server=false;      // server: this game has a server to ask
     std::string partner;bool partnerHere=false;

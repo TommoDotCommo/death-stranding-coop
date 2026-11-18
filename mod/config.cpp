@@ -37,7 +37,7 @@ Config parseConfig(const std::string& s) {
     }
     take('}');ws();if(at!=s.size()) throw std::runtime_error("trailing JSON");
     if(values.count("test_mode")&&!testGiven) throw std::runtime_error("test_mode must be an object");
-    for(auto& kv:values) if(!std::set<std::string>{"slot","server","relay","relay_key","relay_mode","show_others","host_fights","join_fights","player_id","share_story_orders","share_rewards","story_resync","story_key","share_environment","share_enemies","share_enemy_positions","enemy_position_pull","enemy_position_goal","share_orders","share_order_units","share_order_load","share_roads","share_saved_structures","body_update_link","passenger_key","partner_poses","partner_animation","partner_cart","record_animation","join_move","carry_visual","partner","partner_gear","others_gear","others_carry","partner_marker","partner_vehicle","partner_likes","partner_tag","help_page","server_info","notices","online_server","strand_notices","strand_token","build_received","offer_strand","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","link","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","max_log_mb","bind","progress_mismatch","join_at_host","partner_shout","partner_shout_voice","partner_scan","partner_vitals","others","route","route_record_key","test_mode"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
+    for(auto& kv:values) if(!std::set<std::string>{"slot","server","relay","relay_key","relay_mode","show_others","host_fights","join_fights","player_id","share_story_orders","share_rewards","story_resync","story_key","share_environment","share_enemies","share_enemy_positions","enemy_position_pull","enemy_position_goal","share_orders","share_order_units","share_order_load","share_roads","share_saved_structures","body_update_link","passenger_key","partner_poses","partner_animation","partner_cart","record_animation","join_move","carry_visual","partner","partner_gear","others_gear","others_carry","partner_marker","partner_vehicle","partner_likes","partner_tag","help_page","server_info","chat","notices","online_server","strand_notices","strand_token","build_received","offer_strand","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","link","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","max_log_mb","bind","progress_mismatch","join_at_host","partner_shout","partner_shout_voice","partner_scan","partner_vitals","others","route","route_record_key","test_mode"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
     auto text=[&](const char* k){if(!strings.count(k)) throw std::runtime_error(std::string("missing/string expected: ")+k);return values.at(k);};
     auto number=[&](const char* k){auto v=values[k];if(strings.count(k)||v.empty()||v.size()>15||v.find_first_not_of("0123456789")!=std::string::npos||(v.size()>1&&v[0]=='0')) throw std::runtime_error(std::string("invalid integer: ")+k);return std::stoull(v);};
     auto boolean=[&](const char* k,bool d){if(!values.count(k)) return d;auto v=values[k];if(strings.count(k)||(v!="true"&&v!="false")) throw std::runtime_error("boolean expected");return v=="true";};
@@ -188,7 +188,13 @@ Config parseConfig(const std::string& s) {
 #ifndef MUTANT_CONFIG_STRAND
     if(c.strandNotices&&(c.onlineServer.empty()||!serverApiBase(c.onlineServer)))throw std::runtime_error("strand_notices requires online_server (http://ADDRESS:PORT[/PREFIX]/auth/ds)");
     if(c.strandNotices&&!tokenText)throw std::runtime_error("strand_notices requires strand_token (letters and digits, at most 32)");
-    if(!c.strandNotices&&!c.offerStrand&&values.count("strand_token"))throw std::runtime_error("strand_token requires strand_notices or offer_strand");
+    if(!c.strandNotices&&!c.offerStrand&&!boolean("chat",false)&&values.count("strand_token"))throw std::runtime_error("strand_token requires strand_notices, offer_strand or chat");
+#endif
+    // Text chat: the same server and the same token.
+    c.chat=boolean("chat",false);
+#ifndef MUTANT_CONFIG_CHAT
+    if(c.chat&&(c.onlineServer.empty()||!serverApiBase(c.onlineServer)||!tokenText))throw std::runtime_error("chat requires online_server and strand_token");
+    if(c.chat&&(c.provider!="game"||!c.gameThread))throw std::runtime_error("chat requires the game provider and game_thread");
 #endif
 #ifndef MUTANT_CONFIG_OFFER
     if(c.offerStrand&&(c.onlineServer.empty()||!serverApiBase(c.onlineServer)))throw std::runtime_error("offer_strand requires online_server (http://ADDRESS:PORT[/PREFIX]/auth/ds)");
@@ -308,7 +314,7 @@ Config parseConfig(const std::string& s) {
             t.materialsKey=unsigned(std::stoul(v));}
 #ifndef MUTANT_CONFIG_TEST_KEYS
         if(t.materialsKey&&(testKeyRefused(t.materialsKey)||t.materialsKey==c.passengerKey||t.materialsKey==c.storyKey))
-            throw std::runtime_error("test_mode materials: that key is the co-op mod's own (F1, F2, F3, P, Tab, B, L, the passenger or catch-up key) or a mouse button or modifier");
+            throw std::runtime_error("test_mode materials: that key is the co-op mod's own (F1, F2, F3, P, Y, Tab, B, L, the passenger or catch-up key) or a mouse button or modifier");
 #endif
 #ifndef MUTANT_CONFIG_TEST_NEEDS
         if(c.provider!="game"||!c.gameThread)throw std::runtime_error("test_mode requires the game provider and game_thread");
@@ -322,7 +328,7 @@ bool testKeyRefused(unsigned vk){
                     0x09u,0x0du,0x1bu,                // Tab (the player list), Enter, Escape
                     0x10u,0x11u,0x12u,0xa0u,0xa1u,0xa2u,0xa3u,0xa4u,0xa5u,   // Shift, Ctrl, Alt
                     0x70u,0x71u,0x72u,                // F1 the guide, F2 the bug mark, F3 the test-mode switches
-                    0x42u,0x4cu,0x50u})               // B the ping, L the like, P the server page
+                    0x42u,0x4cu,0x50u,0x59u})         // B the ping, L the like, P the server page, Y the chat
         if(vk==k)return true;
     return false;
 }

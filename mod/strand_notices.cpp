@@ -142,7 +142,7 @@ namespace {using Sock=int;const Sock NoSock=-1;void closeSock(Sock s){close(s);}
 void blocking(Sock s,bool yes){int f=fcntl(s,F_GETFL,0);fcntl(s,F_SETFL,yes?(f&~O_NONBLOCK):(f|O_NONBLOCK));}bool connecting(){return errno==EINPROGRESS;}
 void timeouts(Sock s,unsigned ms){timeval t{long(ms/1000),long(ms%1000)*1000};setsockopt(s,SOL_SOCKET,SO_RCVTIMEO,&t,sizeof t);setsockopt(s,SOL_SOCKET,SO_SNDTIMEO,&t,sizeof t);}}
 #endif
-Fetched get(uint32_t address,uint16_t port,const std::string& target,const std::string& token,unsigned ms){
+static Fetched exchange(const char* method,uint32_t address,uint16_t port,const std::string& target,const std::string& token,const std::string& body,unsigned ms){
     Fetched out;
     Sock s=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);if(s==NoSock)return out;
     sockaddr_in a{};a.sin_family=AF_INET;a.sin_port=htons(port);a.sin_addr.s_addr=htonl(address);
@@ -155,7 +155,9 @@ Fetched get(uint32_t address,uint16_t port,const std::string& target,const std::
     blocking(s,true);timeouts(s,ms);
     char host[32];unsigned char b[4]={uint8_t(address>>24),uint8_t(address>>16),uint8_t(address>>8),uint8_t(address)};
     std::snprintf(host,sizeof host,"%u.%u.%u.%u:%u",b[0],b[1],b[2],b[3],unsigned(port));
-    const std::string request="GET "+target+" HTTP/1.1\r\nHost: "+host+"\r\nX-Coop-Token: "+token+"\r\nConnection: close\r\n\r\n";
+    std::string request=std::string(method)+" "+target+" HTTP/1.1\r\nHost: "+host+"\r\nX-Coop-Token: "+token+"\r\nConnection: close\r\n";
+    if(!body.empty())request+="Content-Type: application/json\r\nContent-Length: "+std::to_string(body.size())+"\r\n";
+    request+="\r\n"+body;
 #ifdef _WIN32
     const int flags=0;
 #else
@@ -181,6 +183,8 @@ Fetched get(uint32_t address,uint16_t port,const std::string& target,const std::
     if(!have||length>MaxAnswerBytes||in.size()-end-4!=length)return out;
     out.status=status;out.body=in.substr(end+4);return out;
 }
+Fetched get(uint32_t address,uint16_t port,const std::string& target,const std::string& token,unsigned ms){return exchange("GET",address,port,target,token,std::string(),ms);}
+Fetched post(uint32_t address,uint16_t port,const std::string& target,const std::string& token,const std::string& body,unsigned ms){return exchange("POST",address,port,target,token,body,ms);}
 Poller::Poller(std::string base,Fetch fetch,Schedule schedule):base_(std::move(base)),fetch_(std::move(fetch)),schedule_(schedule?std::move(schedule):Schedule(delayAfter)){thread_=std::thread([this]{run();});}
 Poller::~Poller(){{std::lock_guard<std::mutex> g(lock_);stop_=true;}wake_.notify_all();if(thread_.joinable())thread_.join();}
 std::vector<std::u16string> Poller::lines(){std::lock_guard<std::mutex> g(lock_);std::vector<std::u16string> out(lines_.begin(),lines_.end());lines_.clear();return out;}

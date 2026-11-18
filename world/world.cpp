@@ -229,6 +229,59 @@ json::Value World::apiNoticeToken(const std::string& account,int64_t now){
     Value out=Value::object();out.set("format",1);out.set("token",pass(noticeTokens_,account,0,now));out.set("expires",now+NoticeTokenUnusedSeconds);
     note("notice token for "+p.id);return out;
 }
+const World::Player* World::chatPlayer(const std::string& token,int64_t now){
+    auto t=passText(token)?noticeTokens_.find(token):noticeTokens_.end();
+    if(t==noticeTokens_.end())return nullptr;
+#ifndef MUTANT_CHAT_EXPIRY
+    if(t->second.used?now>t->second.used+NoticeTokenIdleSeconds:now>t->second.issued+NoticeTokenUnusedSeconds)return nullptr;
+#endif
+    auto found=players_.find(t->second.account);
+    if(found==players_.end()||found->second.banned)return nullptr;
+    if(!t->second.used||now>=t->second.used+NoticeTokenSaveSeconds)dirty_=true;
+    t->second.used=std::max(t->second.used,now);
+    return &found->second;
+}
+Reply World::chatRead(const std::string& token,const std::string& since,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+    if(!chatPlayer(token,now))return refuse(403,"notice-token","the notice token is unknown or expired: start the game from the launcher again");
+    Value out=Value::object(),lines=Value::array();out.set("format",1);out.set("on",policy_.chat=="on");uint64_t next=chatNext_;
+    uint64_t from=0;bool have=!since.empty()&&since.size()<=19;for(char c:since){have=have&&c>='0'&&c<='9';if(have)from=from*10+uint64_t(c-'0');}
+#ifndef MUTANT_CHAT_HISTORY
+    if(have&&from<=chatNext_){
+#else
+    {
+#endif
+        size_t given=0;
+        for(auto& l:chat_){if(l.n<from)continue;if(given==ChatBatch){next=l.n;break;}
+            Value v=Value::object();v.set("n",int64_t(l.n));v.set("name",l.name);v.set("text",l.text);lines.push(v);++given;}}
+    out.set("next",int64_t(next));out.set("lines",lines);Reply r;r.body=out.dump();return r;
+}
+Reply World::chatSay(const std::string& token,const std::string& body,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+    auto* p=chatPlayer(token,now);
+    if(!p)return refuse(403,"notice-token","the notice token is unknown or expired: start the game from the launcher again");
+#ifndef MUTANT_CHAT_OFF
+    if(policy_.chat!="on")return refuse(403,"chat-off","text chat is off on this server");
+#endif
+    std::string text;
+    try{auto d=json::parse(body);text=d.get("text").string();}catch(const std::exception&){return refuse(400,"chat-text","no text");}
+    while(!text.empty()&&text.front()==' ')text.erase(0,1);
+    while(!text.empty()&&text.back()==' ')text.pop_back();
+#ifndef MUTANT_CHAT_TEXT
+    if(text.empty()||text.size()>ChatMaxBytes||!utf8Text(text)||chars(text)>ChatMaxChars)return refuse(400,"chat-text","a line of 1 to 160 characters, without control characters");
+#endif
+    auto& times=chatTimes_[p->id];while(!times.empty()&&now-times.front()>=ChatWindowSeconds)times.pop_front();
+#ifndef MUTANT_CHAT_RATE
+    if(times.size()>=ChatPerWindow)return refuse(429,"chat-rate","too many lines: wait a moment");
+#endif
+    times.push_back(now);
+    ChatLine l;l.n=chatNext_++;l.name=p->name.empty()?"Porter":p->name;l.text=text;chat_.push_back(l);
+#ifndef MUTANT_CHAT_KEEP
+    while(chat_.size()>ChatKept)chat_.pop_front();
+#endif
+    note("chat "+p->id+": "+text);
+    Value out=Value::object();out.set("format",1);out.set("n",int64_t(l.n));Reply r;r.body=out.dump();return r;
+}
 Reply World::notices(const std::string& token,const std::string& since,int64_t now){
     std::lock_guard<std::mutex> g(lock_);
     auto t=passText(token)?noticeTokens_.find(token):noticeTokens_.end();
@@ -1161,8 +1214,8 @@ void World::remember(const std::string& player,int64_t area,const std::vector<st
 Policy presetPolicy(const std::string& name){
     Policy p;p.preset=name;
     if(name=="friends")return p;
-    if(name=="solo"){p.players=1;return p;}
-    if(name=="public"){p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";p.nearCap=16;p.challenges="members";p.importWho="members";return p;}
+    if(name=="solo"){p.players=1;p.chat="off";return p;}
+    if(name=="public"){p.chat="off";p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";p.nearCap=16;p.challenges="members";p.importWho="members";return p;}
     bad("policy: unknown preset '"+name+"' (friends, solo or public)");
 }
 void setPolicy(Policy& p,const std::string& keyValue){
@@ -1189,14 +1242,15 @@ void setPolicy(Policy& p,const std::string& keyValue){
     else if(key=="challenges")pick(p.challenges,{"everyone","members","owner","nobody"});
     else if(key=="import")pick(p.importWho,{"everyone","members","owner","nobody"});
     else if(key=="import_cost")pick(p.importCost,{"free","materials"});
+    else if(key=="chat")pick(p.chat,{"on","off"});
     else if(key=="test_mode")pick(p.testMode,{"off","on"});
-    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges, import, import_cost, test_mode)");
+    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges, import, import_cost, chat, test_mode)");
 }
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy& p){
     return {{"join",p.join},{"build",p.build},{"accept_offers",p.acceptOffers},{"limit",std::to_string(p.limit)},{"withdrawal",p.withdrawal},
             {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld},
             {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity},{"near_cap",std::to_string(p.nearCap)},{"challenges",p.challenges},
-            {"import",p.importWho},{"import_cost",p.importCost},{"test_mode",p.testMode}};
+            {"import",p.importWho},{"import_cost",p.importCost},{"chat",p.chat},{"test_mode",p.testMode}};
 }
 void World::setPolicy(const Policy& p){std::lock_guard<std::mutex> g(lock_);policy_=p;dirty_=true;++changes_;}
 bool World::servedTo(const Object& o,const std::string& player) const {

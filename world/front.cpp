@@ -59,6 +59,12 @@ Reply Front::handle(const Request& r,int64_t now){
         if(r.method!="GET")return notFound();
         auto token=r.headers.find("x-coop-token");
         return world_.notices(token==r.headers.end()?std::string():token->second,query(q,"since"),now);}
+    // Text chat from the mod (world.h chatRead, chatSay): the same token, in the same header; it reads the lines and says one.
+    if(path=="/coop/chat"){
+        auto token=r.headers.find("x-coop-token");const std::string t=token==r.headers.end()?std::string():token->second;
+        if(r.method=="GET")return world_.chatRead(t,query(q,"since"),now);
+        if(r.method=="POST")return world_.chatSay(t,r.body,now);
+        return notFound();}
     // The launcher's API (api.h): under the prefix, never under /k/NAME, never the game's.
     if(path.compare(0,6,"/coop/")==0){
         // A signed call is checked whole (identity.h) before the API sees it: the signer is the player it may act for.

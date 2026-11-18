@@ -14,7 +14,7 @@ struct Api {
     // true: queued in the game's info log; false: no HUD now. icon: PlainIcon or LikeIcon (the game's own icon numbers).
     std::function<bool(const std::u16string& text,uint8_t icon)> show;
 };
-enum class Kind : uint8_t {Joined,Left,Alone,Away,Back,Liked,Down,Up,Caught,Free,Call,Slow,Steady,Episode,Scan,StoryOffer,StoryLoaded,StoryFailed,Strand,Route,Test};
+enum class Kind : uint8_t {Joined,Left,Alone,Away,Back,Liked,Down,Up,Caught,Free,Call,Slow,Steady,Episode,Scan,StoryOffer,StoryLoaded,StoryFailed,Strand,Route,Test,Chat};
 constexpr uint8_t PlainIcon=0,LikeIcon=3;   // "20 minutes have passed." / "{1} Like(s) received from {0}."
 uint8_t icon(Kind);
 // The partner's name is cleaned like the name tag's (printable, no markup characters); "Your partner" without one.
@@ -27,7 +27,7 @@ public:
     // Away: the partner has been in a game event or a private room (where his body is hidden) for AwayMs; Back when he
     // returns after that was told. A partner who connects while his game is still loading (he reports the same state)
     // is announced when he is in the world, or after JoinHoldMs; that first absence is not told as "away".
-    static constexpr uint64_t NameMs=3000,AloneMs=60000,AwayMs=2000,JoinHoldMs=120000,GapMs=2500,RetryMs=1000,GiveUpMs=30000;static constexpr size_t MaxPending=4;
+    static constexpr uint64_t NameMs=3000,AloneMs=60000,AwayMs=2000,JoinHoldMs=120000,GapMs=2500,ChatGapMs=400,RetryMs=1000,GiveUpMs=30000;static constexpr size_t MaxPending=4;
     Notifier(Api api,std::function<void(const std::string&)> log):api_(std::move(api)),log_(std::move(log)){}
     // One call per game-thread tick. inWorld: the porter is in the world and no game event runs (nothing is shown
     // otherwise, but what happened meanwhile is told afterwards). connected: the session with the partner is up.
@@ -59,6 +59,8 @@ public:
     void route(const std::u16string& line,uint64_t nowMs){add(Kind::Route,{},nowMs);pending_.back().line=line;}
     // A finished line of test mode (testmode.h): that it is on, a set of crates dropped.
     void test(const std::u16string& line,uint64_t nowMs){add(Kind::Test,{},nowMs);pending_.back().line=line;}
+    // A finished line of text chat (chat.h), with a shorter gap than the other notices.
+    void chat(const std::u16string& line,uint64_t nowMs){add(Kind::Chat,{},nowMs);pending_.back().line=line;}
     // Something the partner did that is worth a line of its own (Liked: his like has just been given to this porter).
     void event(Kind kind,const std::string& partnerName,uint64_t nowMs){add(kind,partnerName.empty()?lastName_:partnerName,nowMs);}
     size_t pending() const {return pending_.size();}
