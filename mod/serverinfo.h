@@ -23,7 +23,7 @@ Policy parse(const std::string& body);  // nothing read from anything else; neve
 struct Facts {
     bool group=false,server=false;      // server: this game has a server to ask
     std::string partner;bool partnerHere=false;
-    std::vector<std::string> near;      // the other players shown around this porter now
+    std::vector<std::string> nearby;    // the other players shown around this porter now
 };
 std::vector<std::u16string> pages(const Facts&,const Policy&);
 struct Fetch {

@@ -17,7 +17,7 @@ struct Net {
     Fetch fetch(){Fetch f;f.start=[this]{++starts;};f.poll=[this]{auto v=ready;ready.reset();return v;};return f;}
 };
 int main(){
-    auto none=[](const std::string&){};Facts net;net.group=true;net.server=true;net.near={"Cid"};
+    auto none=[](const std::string&){};Facts net;net.group=true;net.server=true;net.nearby={"Cid"};
     {   auto p=parse(Doc);CHECK(p.read&&p.name=="Bridges \xc3\xa9"&&p.preset=="friends"&&p.known==5&&p.limit==16&&p.onlineKnown&&p.online==2&&p.names.size()==2&&p.rules.size()==6);
         for(auto bad:{"","nonsense","[1]","{\"format\":2}","{\"format\":\"1\"}"})CHECK(!parse(bad).read);
         auto old=parse(R"({"format":1,"name":"","preset":"p","players":{"count":1,"limit":2},"settings":[]})");CHECK(old.read&&!old.onlineKnown);

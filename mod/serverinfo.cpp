@@ -61,7 +61,7 @@ std::vector<std::u16string> pages(const Facts& f,const Policy& p){
         auto who=wide(f.partner);if(who.empty())who=u"Partner";
         first+=u"\n"+who+(f.partnerHere?u": connected":u": not connected");
     }
-    auto near=nameList(f.near);first+=u"\nNear you: "+(near.empty()?std::u16string(u"nobody"):near);
+    auto nearby=nameList(f.nearby);first+=u"\nNear you: "+(nearby.empty()?std::u16string(u"nobody"):nearby);
     std::vector<std::u16string> out{first};
     if(!f.server||!p.read)return out;
     const size_t rulePages=(p.rules.size()+RulesPerPage-1)/RulesPerPage;

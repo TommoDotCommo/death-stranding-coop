@@ -1477,7 +1477,7 @@ struct Runtime final:ds::Transport {
             note(infoKeyFree()?"SERVERINFO on: P\n":"SERVERINFO off: P is another key of this game's config\n");
         }
         mod::serverinfo::Facts f;f.group=config.group;f.server=!config.onlineServer.empty();f.partner=partnerName;f.partnerHere=core&&core->connected();
-        for(auto& s:othersShown)if(s.visible&&!s.name.empty())f.near.push_back(s.name);
+        for(auto& s:othersShown)if(s.visible&&!s.name.empty())f.nearby.push_back(s.name);
         infoScreen->tick(infoEdge.pressed(infoKeyFree()&&modKey(mod::serverinfo::Key),now),inWorldNow(),f,now);
     }
     // --- Names over heads (nametag.h): one of the game's hologram-name records above the partner body and above every
