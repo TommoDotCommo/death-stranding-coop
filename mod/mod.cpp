@@ -1298,7 +1298,7 @@ struct Runtime final:ds::Transport {
     std::unique_ptr<mod::chat::Link> chatLink;std::unique_ptr<mod::chat::Box> chatBox;Background<mod::help::Api> chatHudJob;bool chatHudTried=false;std::optional<mod::help::Api> chatHud;
     mod::marker::KeyEdge chatEdge;std::vector<std::u16string> chatLines;std::filesystem::path chatCommand;std::vector<mod::chat::Press> chatScripted;bool chatOpenCommand=false;
     // P: the server page (serverinfo.h, tickServerInfo).
-    std::unique_ptr<mod::mapicons::Link> mapLink;const mod::mapicons::Board* mapBoard=nullptr;bool mapHooked=false,areaTried=false;uint32_t gameArea=0;std::function<uint32_t()> areaOf;std::filesystem::path mapCommand;
+    std::unique_ptr<mod::mapicons::Link> mapLink;const mod::mapicons::Board* mapBoard=nullptr;bool mapHooked=false,areaTried=false;uint32_t gameArea=0;uint64_t mapNotedUpdates=0,mapNotedAt=0;std::function<uint32_t()> areaOf;std::filesystem::path mapCommand;
     std::unique_ptr<mod::serverinfo::Screen> infoScreen;mod::marker::KeyEdge infoEdge;std::future<mod::strand::Fetched> infoRead;
     // Hold F1: the co-op keys on the game's common telop (help.h). puppet.help (lab): "at <pivot> <x> <y> <stamp>" moves
     // it, "show <stamp>" / "hide <stamp>" hold and release the key for an unattended test.
@@ -1523,7 +1523,7 @@ struct Runtime final:ds::Transport {
     }
     // The other players on the game's map (mapicons.h). puppet.map (lab): "kind N", "ring METRES COUNT" (test icons around this
     // porter, at that moment), "clear", each with the run's stamp.
-    void tickPlayerMap(){
+    void tickPlayerMap(uint64_t now){
         if(!config.playerMap||!sampler)return;
         static mod::mapicons::Board board;   // the map's update reads it for as long as the game runs
         mapBoard=&board;
@@ -1539,6 +1539,9 @@ struct Runtime final:ds::Transport {
             const std::string target=at->base+"/coop/map",token=config.strandToken;const uint32_t address=at->address;const uint16_t port=at->port;
             mapLink=std::make_unique<mod::mapicons::Link>([=]{auto r=mod::strand::get(address,port,target,token,mod::strand::ConnectMs);return mod::mapicons::Result{r.status,r.body};},board,std::to_string(config.playerId));
         }
+        const auto seen=mod::mapicons::stats();
+        if(seen.updates!=mapNotedUpdates&&now>=mapNotedAt+5000){mapNotedUpdates=seen.updates;mapNotedAt=now;auto k=mapLink->counters();std::ostringstream o;
+            o<<"MAP open: updates "<<seen.updates<<" taken "<<seen.taken<<" refused "<<seen.refused<<" map area "<<seen.shownArea<<" mode "<<seen.mode<<" porter area "<<gameArea<<" server on "<<k.on<<" players "<<k.shown<<"\n";note(o.str().c_str());}
         if(!mapCommand.empty()&&std::filesystem::exists(mapCommand)){
             auto text=readConfig(mapCommand);std::filesystem::remove(mapCommand);std::istringstream in(text);std::vector<std::string> w;std::string one;while(in>>one)w.push_back(one);
             if(w.size()<2||w.back()!=mod::runStamp())note("MAP ignored command for another process\n");
@@ -3703,7 +3706,7 @@ struct Runtime final:ds::Transport {
             stage="server page";stages.enter("server page",mod::nowUs());
             if(gameContext)tickServerInfo(now);
             stage="map";stages.enter("map",mod::nowUs());
-            if(gameContext){tickArea();tickPlayerMap();}
+            if(gameContext){tickArea();tickPlayerMap(now);}
             stage="chat";stages.enter("chat",mod::nowUs());
             if(gameContext)tickChat(now);
             stage="notices";stages.enter("notices",mod::nowUs());
