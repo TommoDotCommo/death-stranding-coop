@@ -178,8 +178,8 @@ build/nametag-test: nametag_test.cpp nametag.cpp nametag.h discovery.cpp ../core
 	$(CXX) $(FLAGS) nametag_test.cpp nametag.cpp discovery.cpp ../core/core.cpp -o $@
 build/help-test: help_test.cpp help.cpp help.h discovery.cpp | build
 	$(CXX) $(FLAGS) help_test.cpp help.cpp discovery.cpp -o $@
-build/mapicons-test: mapicons_test.cpp mapicons.cpp mapicons.h ../world/json.h discovery.cpp | build
-	$(CXX) $(FLAGS) -pthread mapicons_test.cpp mapicons.cpp discovery.cpp -o $@
+build/mapicons-test: mapicons_test.cpp mapicons.cpp mapicons.h serverinfo.cpp serverinfo.h dialog.cpp dialog.h ../world/json.h discovery.cpp | build
+	$(CXX) $(FLAGS) -pthread mapicons_test.cpp mapicons.cpp serverinfo.cpp dialog.cpp discovery.cpp -o $@
 build/chat-test: chat_test.cpp chat.cpp chat.h serverinfo.cpp serverinfo.h dialog.cpp dialog.h ../world/json.h discovery.cpp | build
 	$(CXX) $(FLAGS) -pthread chat_test.cpp chat.cpp serverinfo.cpp dialog.cpp discovery.cpp -o $@
 build/serverinfo-test: serverinfo_test.cpp serverinfo.cpp serverinfo.h dialog.cpp dialog.h ../world/json.h discovery.cpp | build

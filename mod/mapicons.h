@@ -16,11 +16,13 @@
 namespace mod::mapicons {
 constexpr uint64_t PollMs=2000,BackoffMs=15000;
 constexpr size_t MaxIcons=32,ItemSize=0x60;
-constexpr uint8_t DefaultKind=0xb5;     // the map's NPC icon: a person, in the class of icons shared with structures
+constexpr size_t NameChars=24;
+constexpr uint8_t DefaultKind=0x9e;     // the map's "Porter" icon (seen live), in the class of icons shared with structures
 struct Player {std::string id,name;double x=0,y=0,z=0;uint32_t area=0;};
 struct Answer {bool read=false,on=false;std::vector<Player> players;};
 Answer parse(const std::string& body);  // never throws
-struct Icon {float x=0,y=0,z=0;uint32_t area=0;uint64_t id=0;};
+struct Icon {float x=0,y=0,z=0;uint32_t area=0;uint64_t id=0;char16_t name[NameChars+1]={};};
+void setName(Icon&,const std::string& utf8);   // control characters dropped, cut to NameChars, a surrogate pair kept whole
 // The icons of an answer: not this player's own (self: his relay id as text), only finite places inside the world's range,
 // at most MaxIcons. Each id is stable for a player and cannot be a real marker's.
 std::vector<Icon> icons(const Answer&,const std::string& self);
@@ -30,6 +32,7 @@ public:
     struct Picture {uint32_t count=0;std::array<Icon,MaxIcons> icons{};};
     void publish(const std::vector<Icon>&);
     void read(Picture&) const;
+    bool nameOf(uint64_t id,char16_t (&out)[NameChars+1]) const;   // false: no such icon, or it has no name
 private:
     static constexpr unsigned Slots=8;      // a reader would have to stall for Slots-1 publications to meet the writer
     std::array<Picture,Slots> slots_{};std::atomic<unsigned> current_{0};
@@ -64,7 +67,7 @@ private:
 };
 uint64_t delayAfter(bool good,unsigned& failures);
 struct Stats {uint64_t updates=0,taken=0,refused=0;uint32_t shownArea=0,mode=0;};
-// Windows: puts the map's update through the mod (a retargeted call; every byte checked first, nothing changed on a mismatch).
+// Windows: puts the map's update and its icon label through the mod (two retargeted calls; every byte checked first, nothing changed on a mismatch).
 // Throws when it cannot. board lives as long as the process. Game thread.
 void install(discovery::Sampler&,const Board& board);
 void setKind(uint8_t);

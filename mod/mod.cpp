@@ -1549,7 +1549,7 @@ struct Runtime final:ds::Transport {
             else if(w[0]=="clear")mapLink->setExtra({});
             else if(w[0]=="ring"&&w.size()==4&&cache.available){
                 const double r=std::atof(w[1].c_str());const int n=std::min(std::atoi(w[2].c_str()),int(mod::mapicons::MaxIcons));std::vector<mod::mapicons::Icon> v;
-                for(int i=0;i<n;++i){const double a=6.283185307*i/std::max(n,1);mod::mapicons::Icon k;k.x=float(cache.local.position[0]+r*std::cos(a));k.y=float(cache.local.position[2]+r*std::sin(a));k.z=float(cache.local.position[1]);k.area=gameArea;k.id=0x4d51000000000000ull+uint64_t(i);v.push_back(k);}
+                for(int i=0;i<n;++i){const double a=6.283185307*i/std::max(n,1);mod::mapicons::Icon k;k.x=float(cache.local.position[0]+r*std::cos(a));k.y=float(cache.local.position[2]+r*std::sin(a));k.z=float(cache.local.position[1]);k.area=gameArea;k.id=0x4d51000000000000ull+uint64_t(i);mod::mapicons::setName(k,"Test "+std::to_string(i+1));v.push_back(k);}
                 mapLink->setExtra(std::move(v));note(("MAP test ring of "+w[2]+"\n").c_str());}
         }
     }

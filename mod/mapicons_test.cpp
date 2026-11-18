@@ -20,6 +20,10 @@ int main(){
         auto off=a;off.on=false;CHECK(icons(off,"").empty());auto un=a;un.read=false;CHECK(icons(un,"").empty());
         auto bad=a;bad.players[0].x=NAN;bad.players[1].z=2e6;CHECK(icons(bad,"").empty());
         Answer many;many.read=many.on=true;many.players.resize(MaxIcons+9);for(size_t i=0;i<many.players.size();++i)many.players[i].id=std::to_string(i);CHECK(icons(many,"").size()==MaxIcons);}
+    {   // Names: each icon its own, without control characters, cut without splitting a pair; unknown ids have none.
+        auto v=icons(parse(Doc),"");Board b;b.publish(v);char16_t n[NameChars+1];CHECK(b.nameOf(v[1].id,n)&&std::u16string(n)==u"Bob");CHECK(b.nameOf(v[0].id,n)&&std::u16string(n)==u"Ann");CHECK(!b.nameOf(42,n));
+        Icon k;setName(k,"A\nB");CHECK(std::u16string(k.name)==u"AB");setName(k,std::string(NameChars+9,'x'));CHECK(std::u16string(k.name).size()==NameChars);
+        setName(k,std::string(NameChars-1,'x')+"\xf0\x9f\x98\x80");CHECK(std::u16string(k.name)==std::u16string(NameChars-1,u'x'));setName(k,"");std::vector<Icon> e{k};e[0].id=5;b.publish(e);CHECK(!b.nameOf(5,n));}
     {   // The item the game gets.
         Icon n;n.x=1.5f;n.y=2.5f;n.z=3.5f;n.id=0x4d50000000000042ull;alignas(16) uint8_t item[ItemSize];std::memset(item,0xee,ItemSize);fillItem(item,n,0xb5);
         float f[4];std::memcpy(f,item,16);CHECK(f[0]==1.5f&&f[1]==2.5f&&f[2]==3.5f&&f[3]==0);CHECK(!std::memcmp(item,item+0x10,16)&&item[0x20]==0xb5&&item[0x21]==0&&item[0x22]==0);

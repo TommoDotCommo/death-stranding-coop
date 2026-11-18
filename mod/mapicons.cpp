@@ -1,4 +1,5 @@
 #include "mapicons.h"
+#include "serverinfo.h"
 #include "../world/json.h"
 #include <algorithm>
 #include <chrono>
@@ -19,6 +20,13 @@ Answer parse(const std::string& body){
     }catch(const std::exception&){a=Answer{};}
     return a;
 }
+void setName(Icon& n,const std::string& utf8){
+    auto w=serverinfo::wide(utf8);size_t k=std::min(w.size(),NameChars);
+#ifndef MUTANT_MAPICONS_SPLIT
+    if(k&&k<w.size()&&w[k-1]>=0xd800&&w[k-1]<0xdc00)--k;
+#endif
+    std::memcpy(n.name,w.data(),k*sizeof(char16_t));n.name[k]=0;
+}
 std::vector<Icon> icons(const Answer& a,const std::string& self){
     std::vector<Icon> out;
 #ifndef MUTANT_MAPICONS_OFF
@@ -35,7 +43,7 @@ std::vector<Icon> icons(const Answer& a,const std::string& self){
         if(out.size()==MaxIcons)break;
 #endif
         uint64_t h=1469598103934665603ull;for(unsigned char c:p.id){h^=c;h*=1099511628211ull;}
-        Icon n;n.x=float(p.x);n.y=float(p.y);n.z=float(p.z);n.area=p.area;n.id=0x4d50000000000000ull|(h&0xffffffffffffull);out.push_back(n);
+        Icon n;n.x=float(p.x);n.y=float(p.y);n.z=float(p.z);n.area=p.area;n.id=0x4d50000000000000ull|(h&0xffffffffffffull);setName(n,p.name);out.push_back(n);
     }
     return out;
 }
@@ -45,6 +53,17 @@ void Board::publish(const std::vector<Icon>& v){
     current_.store(next,std::memory_order_release);
 }
 void Board::read(Picture& out) const {out=slots_[current_.load(std::memory_order_acquire)];}
+bool Board::nameOf(uint64_t id,char16_t (&out)[NameChars+1]) const {
+    const Picture& p=slots_[current_.load(std::memory_order_acquire)];
+    for(uint32_t i=0;i<p.count&&i<MaxIcons;++i)if(p.icons[i].id==id){
+#ifndef MUTANT_MAPICONS_NAME
+        std::memcpy(out,p.icons[i].name,sizeof out);
+#else
+        std::memcpy(out,p.icons[0].name,sizeof out);
+#endif
+        return out[0]!=0;}
+    return false;
+}
 void fillItem(uint8_t (&item)[ItemSize],const Icon& n,uint8_t kind){
     std::memset(item,0,ItemSize);const float place[4]={n.x,n.y,n.z,0};const float alpha=1;
     std::memcpy(item,place,16);std::memcpy(item+0x10,place,16);item[0x20]=kind;std::memcpy(item+0x28,&n.id,8);std::memcpy(item+0x3c,&alpha,4);
@@ -74,8 +93,9 @@ void Link::run(){
 }
 #ifdef _WIN32
 namespace {
-constexpr uint64_t CallSite=0x31bac63,Gather=0x31bda70,AddItem=0x31a8780,Stub=0x31ba24b;
-using GatherFn=void(*)(void*,float);using AddFn=bool(*)(void*,void*);
+constexpr uint64_t CallSite=0x31bac63,Gather=0x31bda70,AddItem=0x31a8780,Stub=0x31ba24b,LabelSite=0x319c5e6,Label=0x31c5fd0,LabelStub=0x31b9cfb;
+using GatherFn=void(*)(void*,float);using AddFn=bool(*)(void*,void*);using Text=uint64_t;using LabelFn=void(*)(void*,Text*,Text*,uint8_t);
+LabelFn labelOriginal=nullptr;void(*textMake)(Text*,const char16_t*)=nullptr;void(*textAssign)(Text*,const Text*)=nullptr;void(*textDrop)(Text*)=nullptr;
 std::atomic<const Board*> board{nullptr};std::atomic<uint8_t> kind{DefaultKind};GatherFn original=nullptr;AddFn addItem=nullptr;
 std::atomic<uint64_t> updates{0},taken{0},refused{0};std::atomic<uint32_t> shownArea{0},mode{0};
 // The map's own update, before it gathers its icons (sorting and slots are done in there). No allocation, no lock.
@@ -89,6 +109,14 @@ void hook(void* map,float dt){
     }
     original(map,dt);
 }
+// The text of the icon under the cursor: the game's, then this player's name for an icon of the mod's.
+void label(void* item,Text* title,Text* detail,uint8_t flag){
+    labelOriginal(item,title,detail,flag);
+    auto* b=board.load(std::memory_order_acquire);if(!b||!item||!title)return;
+    uint64_t id=0;std::memcpy(&id,static_cast<uint8_t*>(item)+0x28,8);if((id>>56)!=0x4d)return;
+    char16_t name[NameChars+1];if(!b->nameOf(id,name))return;
+    Text t=0;textMake(&t,name);textAssign(title,&t);textDrop(&t);
+}
 void writeCode(uint64_t at,const void* bytes,size_t n){
     DWORD old=0,ignored=0;if(!VirtualProtect(reinterpret_cast<void*>(at),n,PAGE_EXECUTE_READWRITE,&old))throw std::runtime_error("map code cannot be written");
     std::memcpy(reinterpret_cast<void*>(at),bytes,n);VirtualProtect(reinterpret_cast<void*>(at),n,old,&ignored);FlushInstructionCache(GetCurrentProcess(),reinterpret_cast<void*>(at),n);}
@@ -99,9 +127,17 @@ void install(discovery::Sampler& s,const Board& b){
     if(!s.read(s.base+CallSite,got,13)||std::memcmp(got,site,13))throw std::runtime_error("map update differs");
     if(!s.read(s.base+AddItem,head,16)||std::memcmp(head,addHead,16))throw std::runtime_error("map icon list differs");
     if(!s.read(s.base+Stub,pad,12))throw std::runtime_error("map padding unreadable");for(auto c:pad)if(c!=0xcc)throw std::runtime_error("map padding in use");
+    static const uint8_t labelCall[9]={0xe8,0xe5,0x99,0x02,0x00,0x48,0x8b,0x4d,0x10};uint8_t labelGot[9]{},labelPad[12]{};
+    if(!s.read(s.base+LabelSite,labelGot,9)||std::memcmp(labelGot,labelCall,9))throw std::runtime_error("map label differs");
+    if(!s.read(s.base+LabelStub,labelPad,12))throw std::runtime_error("map padding unreadable");for(auto c:labelPad)if(c!=0xcc)throw std::runtime_error("map padding in use");
+    static const uint8_t makeHead[6]={0x40,0x53,0x48,0x83,0xec,0x20},assignHead[5]={0x48,0x89,0x5c,0x24,0x08},dropHead[5]={0x48,0x8b,0x09,0xb8,0xff};uint8_t a[6]{},b2[5]{},c2[5]{};
+    if(!s.read(s.base+0x191ca20,a,6)||std::memcmp(a,makeHead,6)||!s.read(s.base+0x191caf0,b2,5)||std::memcmp(b2,assignHead,5)||!s.read(s.base+0x191cad0,c2,5)||std::memcmp(c2,dropHead,5))throw std::runtime_error("game strings differ");
+    labelOriginal=reinterpret_cast<LabelFn>(s.base+Label);textMake=reinterpret_cast<void(*)(Text*,const char16_t*)>(s.base+0x191ca20);textAssign=reinterpret_cast<void(*)(Text*,const Text*)>(s.base+0x191caf0);textDrop=reinterpret_cast<void(*)(Text*)>(s.base+0x191cad0);
     original=reinterpret_cast<GatherFn>(s.base+Gather);addItem=reinterpret_cast<AddFn>(s.base+AddItem);board.store(&b,std::memory_order_release);
     uint8_t stub[12]={0x48,0xb8,0,0,0,0,0,0,0,0,0xff,0xe0};void* target=reinterpret_cast<void*>(hook);std::memcpy(stub+2,&target,8);writeCode(s.base+Stub,stub,12);
     const int32_t rel=int32_t(int64_t(Stub)-int64_t(CallSite+5));writeCode(s.base+CallSite+1,&rel,4);   // four aligned bytes: one store
+    uint8_t stub2[12]={0x48,0xb8,0,0,0,0,0,0,0,0,0xff,0xe0};void* target2=reinterpret_cast<void*>(label);std::memcpy(stub2+2,&target2,8);writeCode(s.base+LabelStub,stub2,12);
+    const int32_t rel2=int32_t(int64_t(LabelStub)-int64_t(LabelSite+5));writeCode(s.base+LabelSite+1,&rel2,4);   // the map is closed now: nothing runs this
 }
 void setKind(uint8_t k){kind.store(k,std::memory_order_relaxed);}
 Stats stats(){return {updates.load(std::memory_order_relaxed),taken.load(std::memory_order_relaxed),refused.load(std::memory_order_relaxed),shownArea.load(std::memory_order_relaxed),mode.load(std::memory_order_relaxed)};}
