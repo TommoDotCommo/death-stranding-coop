@@ -1,6 +1,7 @@
 #include "core.h"
 #include "strand.h"
 #include "owner.h"
+#include "../world/collection.h"
 #include <array>
 #include "../world/signatures.h"   // the server's check of a signed call, standing in for the server
 #include <chrono>
@@ -44,6 +45,21 @@ int main(int argc,char** argv) {
         if(std::string(argv[1])=="--strand-act"&&argc==8) {   // ADDRESS PORT PREFIX ACCOUNT offer|withdraw OBJECT|all
             std::string result,object=argv[7];bool ok=st::act(t,send,argv[6],object=="all"?"":object,result);
             std::cout<<(ok?"done ":"refused ")<<result<<'\n';return 0;
+        }
+        // Collections (../docs/COLLECTIONS.md), for test_collections.py.
+        if(std::string(argv[1])=="--strand-collect"&&argc>=10) {   // ADDRESS PORT PREFIX ACCOUNT RELAY-ID FOLDER NAME|- OBJECT...|near:METRES
+            std::vector<std::string> ids;int64_t nearMetres=0;
+            for(int i=9;i<argc;++i){std::string a2=argv[i];if(a2.rfind("near:",0)==0)nearMetres=std::stoll(a2.substr(5));else ids.push_back(a2);}
+            std::string name=std::string(argv[8])=="-"?std::string():std::string(argv[8]),why;st::Made m;
+            if(!st::makeCollection(t,send,ids,nearMetres,name,std::stoull(argv[6]),m,why)){std::cout<<"refused "<<why<<'\n';return 0;}
+            auto file=st::saveCollection(argv[7],m.text,name,int64_t(std::time(nullptr)),why);
+            std::cout<<"collection "<<m.text<<"\ncount "<<m.count<<"\nfile "<<file<<"\nsaid "<<m.message()<<'\n';return 0;
+        }
+        if(std::string(argv[1])=="--strand-import"&&argc==9) {   // ADDRESS PORT PREFIX ACCOUNT RELAY-ID here|original FILE (a .dsk file or a pasted text)
+            std::string text,description,why;st::Imported m;
+            if(!st::loadCollection(argv[8],text,description,why)){std::cout<<"unreadable "<<why<<'\n';return 0;}
+            if(!st::importCollection(t,send,text,argv[7],std::stoull(argv[6]),m,why)){std::cout<<"refused "<<why<<'\n';return 0;}
+            std::cout<<"imported "<<m.imported<<"\nshared "<<m.shared<<"\nsource "<<m.source<<"\nsaid "<<m.message()<<'\n';return 0;
         }
         return 2;
     }
@@ -528,6 +544,32 @@ int main(int argc,char** argv) {
         auto big=launcher::diagnostics(d,std::string(400000,'h'));
         check(big.size()<=launcher::DiagnosticsMax&&big.find("(report shortened)")!=npos&&r.size()<launcher::DiagnosticsMax,"report bounded");
         check(launcher::diagnostics(root/"no-such-folder","h").find("(missing)")!=npos,"a missing data folder still gives a report");
+    }
+    // Collections (../docs/COLLECTIONS.md): a pasted text and a .dsk file read and checked, the file's name, its round trip.
+    {
+        namespace st=launcher::strand;
+        collection::Collection c;c.name="Lake camp";c.items.resize(2);c.items[1].type='e';c.items[1].dx=1200;std::string why,good=collection::write(c,why);
+        check(!good.empty(),"a collection for the launcher's tests");
+        std::string text,description;
+        check(st::readCollection("Here: "+good+" (from Ann)",text,description,why)&&text==good&&description=="2 structures (1 cairn, 1 ladder), named Lake camp","a pasted collection is found and described");
+        std::string wrapped;for(size_t i=0;i<good.size();++i){wrapped+=good[i];if(i%30==29)wrapped+="\r\n";}
+        check(st::readCollection(wrapped,text,description,why)&&text.find('\n')==std::string::npos,"a wrapped paste is joined");
+        check(!st::readCollection("no collection here",text,description,why)&&why.find("DSK1-")!=std::string::npos,"a text without one");
+        std::string changed=good;changed[7]=changed[7]=='A'?'B':'A';
+        check(!st::readCollection(changed,text,description,why)&&why.find("cannot be read")!=std::string::npos,"a changed collection is refused before it is sent");
+        check(!st::readCollection(std::string(70000,'x'),text,description,why),"too long a paste");
+        check(st::collectionFileName("Lake camp!",1795000000)=="Lake-camp-20261118-110640.dsk"&&st::collectionFileName("",0)=="collection-19700101-000000.dsk"
+              &&st::collectionFileName("../../x",0)=="x-19700101-000000.dsk","the file's name is safe");
+        auto folder=fs::temp_directory_path()/("ds-collections-"+std::to_string(std::time(nullptr))+"-"+std::to_string(std::rand()));
+        auto file=st::saveCollection(folder/"collections",good,"Lake camp",1795000000,why);
+        check(!file.empty()&&fs::path(file).filename()=="Lake-camp-20261118-110640.dsk","saved in the collections folder");
+        auto second=st::saveCollection(folder/"collections",good,"Lake camp",1795000000,why);
+        check(!second.empty()&&second!=file&&fs::exists(file),"a second save never overwrites the first");
+        check(st::loadCollection(file,text,description,why)&&text==good,"loaded back");
+        check(st::saveCollection(folder/"collections",changed,"x",0,why).empty(),"a bad collection is not saved");
+        {std::ofstream(folder/"big.dsk",std::ios::binary)<<std::string(70000,'0');}
+        check(!st::loadCollection(folder/"big.dsk",text,description,why)&&!st::loadCollection(folder/"none.dsk",text,description,why),"too big a file, and none");
+        std::error_code e;fs::remove_all(folder,e);
     }
     // Setup from the launcher: install_test.cpp (the shared install core).
     std::cout<<"PASS: launcher config, DS invites, discovery, rendezvous, safe release startup, isolated backups and diagnostics\n";

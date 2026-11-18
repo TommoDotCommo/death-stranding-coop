@@ -5,7 +5,9 @@
 // service or knows its keys. One World is one co-op group's shared world and is saved as one JSON document.
 #include "identity.h"
 #include "json.h"
+#include <array>
 #include <cstdint>
+#include <stdexcept>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -41,6 +43,13 @@ constexpr size_t MaxFriends=256;constexpr int64_t MaxNearCap=1024;
 constexpr size_t MaxHighwayEntries=64,MaxHighwayKeys=1024;
 constexpr int64_t MaxPaverId=999999,HighwayResources=6,MaxHighwayAmount=100000,MaxHighwayTotal=1000000000;
 struct Reply { int status=200;std::string body="{}"; };
+// A launcher's call refused with this status and reason (the collection calls: 400, 403 or 409).
+struct Refused : std::runtime_error { int status;Refused(int s,const std::string& why):std::runtime_error(why),status(s){} };
+// Collections (../docs/COLLECTIONS.md): where a player's game last was, as the relay heard it (World::noteSpot). Game
+// axes in metres (x, y on the ground, z up); `yaw` the porter's facing in radians (0: +y, pi/2: +x), when known.
+struct Spot { double x=0,y=0,z=0;bool haveYaw=false;double yaw=0;int64_t at=0; };
+constexpr size_t MaxSpots=1024;
+constexpr int64_t SpotFreshSeconds=600,MaxNearMetres=2000,AreaSearchMetres=1500;
 // What may travel between two servers. Text form: "all", "none", or terms separated by ';':
 //   types=l,rope,e   owners=NAME,zygo_...   areas=226,227   max-age=30d (s, m, h, d)   likes=no   imported=yes
 // A term that is left out does not narrow. `imported=yes` also passes objects that are themselves imports.
@@ -81,8 +90,11 @@ struct ImportResult { size_t added=0,updated=0,unchanged=0,removed=0,filtered=0,
 //   identity none|keys: keys refuses every sign-in but a launcher's ticket, and every API call that is not signed
 //   near_cap N (0 = none): the most players near one broadcast player he is shown on the relay
 //   challenges everyone|members|owner|nobody: who may publish a route challenge (challenges.h)
+//   import everyone|members|owner|nobody: who may import a collection (../docs/COLLECTIONS.md); import_cost free|materials
+//   (materials: what an imported structure carried is recorded on it; nothing is taken yet)
 struct Policy {
     std::string preset="friends",join="invite",build="everyone",acceptOffers="auto",withdrawal="go",offerBuilds="yes",offerOld="no",order="newest",identity="none",challenges="everyone";
+    std::string importWho="everyone",importCost="free";
     int64_t limit=0,players=int64_t(MaxPlayers),perBuilder=0,spread=20,nearCap=32;
 };
 Policy presetPolicy(const std::string& name);       // friends, solo or public; throws for anything else
@@ -94,6 +106,10 @@ std::string heldText(const std::string& why);       // why an object is held (bu
 struct Candidate {
     std::string id,creator,type;int64_t area=0,updated=0,likes=0;
     bool shared=true;                                // handed to every player (not kept, held or waiting)
+    // `creator` is the builder the games are told; `owner` the player it belongs to ("": the creator). They differ
+    // only for a structure imported from a collection: told as its importer's collection builder, owned by him, and
+    // handed to him whatever its state (../docs/COLLECTIONS.md, "Who the games are told built it").
+    std::string owner;
     bool placed=false;double x=0,y=0,z=0;           // its position in metres, when it has one
 };
 struct Curated { std::vector<std::string> handed,remember; };
@@ -220,6 +236,14 @@ public:
     // `show_others` everyone|friends|nobody|default ("" leaves it). Throws std::runtime_error with the reason when
     // refused, and then changed nothing; makes the player when the key is new, as apiChoices does.
     json::Value apiFriends(const std::string& key) const;
+    // Collections (../docs/COLLECTIONS.md; collections.cpp). `relayId`: the player's relay id (made from his key under
+    // identity keys, else the one his launcher names; 0 none), for his spot. Both throw Refused with the status and the
+    // reason, and then changed nothing. `owner`: the call is signed with the owner's key (the import setting `owner`).
+    json::Value apiCollection(const std::string& key,const std::vector<std::string>& objects,int64_t nearMetres,const std::string& name,uint64_t relayId,int64_t now);
+    json::Value apiImport(const std::string& key,const std::string& text,const std::string& place,uint64_t relayId,bool owner,int64_t now);
+    // Where a player's game is, from the relay (about once a second for each player who says where he is). Not saved.
+    void noteSpot(uint64_t relayId,const Spot&);
+    bool spotOf(uint64_t relayId,Spot&) const;
     void apiSetFriends(const std::string& key,const std::vector<std::string>& add,const std::vector<std::string>& remove,const std::string& show);
     // What the relay holds for a broadcast player (relay.h RelayViewer), by his relay id. Only under identity keys is a
     // relay id someone's (made from his key: identity::relayId): there, his choice ("" none) and the relay ids of the
@@ -245,7 +269,8 @@ private:
     // never); "" in a world file from before. `stamp`: when its state last changed (stamps_; not saved).
     struct Object { std::string id,creator;json::Value post;int64_t updated=0;int64_t likes=0;
                     std::string originServer,originId,via,originName,home;int64_t originLikes=0;
-                    std::string name,share,held,kept;bool remnant=false,heldAsk=false;uint64_t stamp=0; };
+                    std::string name,share,held,kept;bool remnant=false,heldAsk=false;uint64_t stamp=0;
+                    std::string collection;bool costed=false;std::array<int64_t,6> cost{}; };   // imported from a collection: its source, what it carried
     struct Like { std::string to,from,object,type;int64_t time=0,points=0,autoPoints=0; };   // to: the object's builder
     mutable std::mutex lock_;
     std::function<std::string()> random_;
@@ -281,6 +306,8 @@ private:
     std::set<std::string> friendsOf(const std::string& player) const;   // the player ids of a player's friends (curate)
     std::string friendEntry(const std::string& key,const std::string& entry) const;   // an account key for a list entry, or it throws
     mutable std::map<std::string,uint64_t> relayIds_;    // account of a key -> its relay id (relayViewer)
+    std::map<uint64_t,Spot> spots_;                       // relay id -> where his game last was (collections)
+    std::string freshId(const std::string& type,const std::string& creator);
     std::string versionLocked() const {return epoch_+"-"+std::to_string(changes_);}
     bool servedTo(const Object&,const std::string& player) const;          // may this player be handed it
     std::string shareAfterOffer() const;                                   // what an offered upload becomes
@@ -295,8 +322,14 @@ private:
     json::Value servedPost(const json::Value& post) const;
     Reply gateway(const Player&,const std::string& name,const json::Value& in,int64_t now);
     const Player* playerById(const std::string& id) const;
+    std::string shownCreator(const Object&) const;   // the builder the games are told (its collection builder for an import from a collection)
     void note(const std::string& line) const {if(log)log(line);}
 };
 // The player id for an account key: "zygo_" and 27 characters, the form the game's own ids have.
 std::string playerId(const std::string& key);
+// The builder the games are told for what a player imported from a collection (../docs/COLLECTIONS.md): a player id of
+// the same form, one per importer and always the same for him (made from his player id), never a player's. `lookup`
+// names it "Name · collection" (CollectionHome in the place of a server's name).
+std::string collectionBuilderId(const std::string& importer);
+constexpr const char* CollectionHome="collection";
 }

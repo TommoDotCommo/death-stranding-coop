@@ -219,8 +219,17 @@ static void hundred(){
     for(auto& p:s.peers){std::set<uint64_t> in;for(auto& e:p->events){if(e.enter?!in.insert(e.id).second:!in.erase(e.id))++unbalanced;}unbalanced+=unsigned(in.size());}
     CHECK(unbalanced==0);
 }
+// Where each player is, for the server's collections (RelayConfig::spotted): only a player who says where he is.
+static void spots(){
+    RelayConfig config;std::map<uint64_t,std::array<double,3>> got;std::map<uint64_t,bool> yaw;
+    config.spotted=[&](uint64_t id,uint32_t,const std::array<double,3>& at,bool haveYaw,double){got[id]=at;yaw[id]=haveYaw;};
+    Sim s(config);auto& a=s.add(1,"Ann",{10,2,30});auto& b=s.add(2,"Bob",{0,0,0});b.client->clearPosition();
+    (void)a;s.run(2500);
+    CHECK(got.count(1)&&got[1]==(std::array<double,3>{10,2,30})&&!yaw[1]);
+    CHECK(!got.count(2));
+}
 int main(){
-    nearAndFar();forwarding();silenceAndBye();rateCap();playerCap();lateHello();restarts();hundred();
+    spots();nearAndFar();forwarding();silenceAndBye();rateCap();playerCap();lateHello();restarts();hundred();
     if(failures)return 1;
     std::puts("relay tests passed");return 0;
 }

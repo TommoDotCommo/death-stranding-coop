@@ -118,6 +118,10 @@ struct RelayConfig {
     bool pinBuild=false;uint32_t game=0;ds::broadcast::BuildId build{};   // set: broadcast players of another build are refused
     size_t nearCap=0;                        // the most players near one player he is shown (0: no cap; at most RelayPlayersMax)
     double nearMargin=10;                    // one shown stays until one not shown is this many metres nearer (0..1000)
+    // Set: where each player of this server last was, about once a second (collections, ../docs/COLLECTIONS.md): his
+    // relay id, area and position (core/relay.h axes: x, up, y, metres), and his facing from his latest presence (a
+    // broadcast player's; `haveYaw` false for the other mode). A player without a position is not reported.
+    std::function<void(uint64_t id,uint32_t area,const std::array<double,3>& position,bool haveYaw,double yaw)> spotted;
     // Set: what the server holds for a broadcast player (asked at each of his HELLOs): his choice, his friends, his cap.
     std::function<RelayViewer(uint64_t id)> viewer;
     // Fights with visitors.
@@ -178,6 +182,7 @@ private:
         // Broadcast mode (mode 2).
         uint16_t mode=1; uint32_t game=0; ds::broadcast::BuildId build{};
         bool havePublish=false,haveAt=false; uint32_t publishSequence=0; uint64_t publishStamp=0; std::array<double,3> at{};
+        bool haveYaw=false; double yaw=0; uint64_t spottedAt=0;   // his facing from his latest presence; when he was last reported
         // Who he is shown of the players near (a subset of `nearby`), his choice, his friends' ids and his cap.
         std::set<uint64_t> shown; ds::broadcast::Show show=ds::broadcast::Show::Everyone; std::set<uint64_t> friends; size_t cap=0;
         struct Blob {uint32_t version=0; ds::relay::Buffer bytes;};

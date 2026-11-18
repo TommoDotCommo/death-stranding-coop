@@ -34,6 +34,7 @@ the game, and it never will. You need your own copy of the game.
 | ⛺ | **Other players' rain shelters** built and kept (option `build_received`) | ✅ |
 | 📤 | **Offering what you built before** (option `offer_strand`): the structures already in your save go to the server, one at a time, when you and the server say so | ✅ |
 | 🙋 | **The builder's name and likes** over a structure, as the server names them | ✅ |
+| 🧳 | **Collections**: select what you built, share it as one line of text (`DSK1-...`), and import someone's here or at its original place ([docs/COLLECTIONS.md](docs/COLLECTIONS.md)) | 🧪 |
 | 👥 | **Players' own choices** per server: share new builds or not, offer older ones or not, show everyone, friends or nobody | 🧪 |
 | 💬 | **Told in the game** when your build isn't shared there ("Your ladder is not shared on North: …") | ✅ |
 | 🎯 | **Fair picks** when an area is full: newest or most liked first, a cap per builder, spread out, the same picks every time | 🧪 |

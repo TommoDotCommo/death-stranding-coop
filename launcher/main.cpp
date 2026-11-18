@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <commdlg.h>
 #include "net_win.h"
 #include "launch_win.h"
 #include "firewall_win.h"
@@ -47,6 +48,7 @@ enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,
 const char* PolicyNames[]={"friends","solo","public"};
 HWND child(int id){return GetDlgItem(window,id);}
 std::wstring text(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(n+1,0);GetWindowTextW(h,s.data(),n+1);s.resize(n);return s;}
+std::wstring text_(HWND h){return text(h);}   // where a local `text` hides the one above
 std::string utf8(const std::wstring& s){if(s.empty())return {};int n=WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),nullptr,0,nullptr,nullptr);std::string v(n,0);WideCharToMultiByte(CP_UTF8,0,s.data(),int(s.size()),v.data(),n,nullptr,nullptr);return v;}
 void set(int id,const std::wstring& s){if(text(child(id))!=s)SetWindowTextW(child(id),s.c_str());}
 void error(const std::exception& e){diagnostic.Line(std::string("error: ")+e.what());MessageBoxW(window,wtext(e.what()).c_str(),L"Death Stranding co-op - try again",MB_OK|MB_ICONERROR);}
@@ -358,13 +360,55 @@ void friendsView(const strand::Target& t,const strand::Transport& send){
         popupControl(h,Close,L"BUTTON",L"Close",BS_DEFPUSHBUTTON,530,560,194,36);
         refresh();});
 }
+// Text to the clipboard (a collection's DSK string).
+void copyText(HWND owner,const std::string& text){
+    auto value=wtext(text);if(!OpenClipboard(owner))throw std::runtime_error("The clipboard is busy. Try again.");
+    auto memory=GlobalAlloc(GMEM_MOVEABLE,(value.size()+1)*sizeof(wchar_t));if(!memory){CloseClipboard();throw std::runtime_error("Cannot copy to the clipboard.");}
+    auto p=GlobalLock(memory);if(!p){GlobalFree(memory);CloseClipboard();throw std::runtime_error("Cannot copy to the clipboard.");}
+    memcpy(p,value.c_str(),(value.size()+1)*sizeof(wchar_t));GlobalUnlock(memory);EmptyClipboard();
+    if(!SetClipboardData(CF_UNICODETEXT,memory)){GlobalFree(memory);CloseClipboard();throw std::runtime_error("Cannot copy to the clipboard.");}
+    CloseClipboard();}
+// "Import a collection" (../docs/COLLECTIONS.md): a pasted DSK string or a .dsk file, here or at the original place.
+void importView(const strand::Target& t,const strand::Transport& send){
+    enum {Info=701,Paste,Load,Here,Original,Go,Note,Close};
+    Popup pop;auto item=[&](int id){return GetDlgItem(pop.h,id);};
+    auto note=[&](const std::string& text){SetWindowTextW(item(Note),wtext(text).c_str());};
+    pop.command=[&](int id){
+        if(id==Close){pop.done=true;return;}
+        if(id==Load){
+            wchar_t file[MAX_PATH]{};auto folder=(options.data/"collections").wstring();
+            OPENFILENAMEW o{};o.lStructSize=sizeof o;o.hwndOwner=pop.h;o.lpstrFilter=L"Collections (*.dsk)\0*.dsk\0Text (*.txt)\0*.txt\0All files\0*.*\0";o.lpstrFile=file;o.nMaxFile=MAX_PATH;
+            o.lpstrInitialDir=folder.c_str();o.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
+            if(!GetOpenFileNameW(&o))return;
+            std::string text,description,why;
+            if(!strand::loadCollection(fs::path(file),text,description,why)){note(why);return;}
+            SetWindowTextW(item(Paste),wtext(text).c_str());note("Loaded: "+description+".");return;}
+        if(id==Go){
+            std::string text,description,why;
+            if(!strand::readCollection(utf8(text_(item(Paste))),text,description,why)){note(why);return;}
+            const bool here=SendMessageW(item(Here),BM_GETCHECK,0,0)==BST_CHECKED;
+            strand::Imported m;
+            if(!strand::importCollection(t,send,text,here?"here":"original",strandSession.playerId,m,why)){note(why);return;}
+            note(m.message());}};
+    runPopup(pop,L"Import a collection",760,470,[&](HWND h){
+        popupControl(h,Info,L"STATIC",L"Paste a collection (a text that begins with DSK1-), or load a .dsk file. The server makes its structures as yours, "
+                                     L"under its rules; your game is handed them when it loads that area.",SS_LEFT,20,16,704,44);
+        popupControl(h,Paste,L"EDIT",L"",ES_MULTILINE|ES_AUTOVSCROLL|WS_VSCROLL,20,64,704,150);
+        popupControl(h,Load,L"BUTTON",L"Load .dsk file...",0,20,222,220,34);
+        popupControl(h,Here,L"BUTTON",L"Here: where my game is, turned the way I face",BS_AUTORADIOBUTTON|WS_GROUP,20,266,704,26);
+        popupControl(h,Original,L"BUTTON",L"Original place: where its builder built it",BS_AUTORADIOBUTTON,20,294,704,26);
+        SendMessageW(GetDlgItem(h,Here),BM_SETCHECK,BST_CHECKED,0);
+        popupControl(h,Note,L"STATIC",L"",SS_LEFT,20,326,704,56);
+        popupControl(h,Go,L"BUTTON",L"Import",BS_DEFPUSHBUTTON,20,390,220,36);popupControl(h,Close,L"BUTTON",L"Close",0,504,390,220,36);});
+}
 // "My strand on this server": what the player built on the group server he last hosted or joined, its state and
-// likes; his offer and withdrawal of the selected rows or of all; his choices there.
+// likes; his offer and withdrawal of the selected rows or of all; his choices there; collections of the selected rows
+// or of what he built near his game, and importing one.
 void strandView(){
     if(!haveStrand)throw std::runtime_error("Host or join a group server first.");
     auto t=targetOf(strandSession);
     auto send=strand::transport(t);
-    enum {Info=501,List,Note,OfferSelected,WithdrawSelected,OfferAll,WithdrawAll,Mine,Refresh,Close,WhoISee};
+    enum {Info=501,List,Note,OfferSelected,WithdrawSelected,OfferAll,WithdrawAll,Mine,Refresh,Close,WhoISee,CollectionName,MakeSelected,Radius,MakeNear,ImportCollection,NameLabel,RadiusLabel};
     Popup pop;strand::Policy rules;bool shown=false;strand::Me me;std::vector<strand::Object> rows;
     auto item=[&](int id){return GetDlgItem(pop.h,id);};
     auto note=[&](const std::string& text){SetWindowTextW(item(Note),wtext(text).c_str());};
@@ -379,7 +423,21 @@ void strandView(){
         if(shown&&strand::fetchMine(t,send,rows,why)){for(auto& o:rows){auto w=wtext(o.text());SendMessageW(item(List),LB_ADDSTRING,0,reinterpret_cast<LPARAM>(w.c_str()));}
             note(rows.empty()?"Nothing you built is on this server yet.":std::to_string(rows.size())+" of your objects on this server. Select rows, then Offer or Withdraw.");}
         else note(shown?why:"");
-        for(int id:{OfferSelected,WithdrawSelected,OfferAll,WithdrawAll,Mine,WhoISee})EnableWindow(item(id),shown);};
+        for(int id:{OfferSelected,WithdrawSelected,OfferAll,WithdrawAll,Mine,WhoISee,MakeSelected,MakeNear,ImportCollection})EnableWindow(item(id),shown);};
+    // A collection (../docs/COLLECTIONS.md): to the clipboard and a .dsk file in the collections folder.
+    auto collect=[&](bool selected){
+        std::vector<std::string> ids;int64_t metres=0;
+        if(selected){int n=int(SendMessageW(item(List),LB_GETSELCOUNT,0,0));std::vector<int> at(size_t(n>0?n:0));
+            if(n>0)SendMessageW(item(List),LB_GETSELITEMS,WPARAM(n),reinterpret_cast<LPARAM>(at.data()));
+            for(int i:at)if(i>=0&&size_t(i)<rows.size())ids.push_back(rows[size_t(i)].id);
+            if(ids.empty())throw std::runtime_error("Select one or more rows first.");}
+        else{try{metres=std::stoll(utf8(text_(item(Radius))));}catch(const std::exception&){metres=0;}
+            if(metres<1||metres>2000)throw std::runtime_error("A distance from 1 to 2000 metres.");}
+        std::string name=utf8(text_(item(CollectionName))),why;strand::Made m;
+        if(!strand::makeCollection(t,send,ids,metres,name,strandSession.playerId,m,why))throw std::runtime_error(why);
+        copyText(pop.h,m.text);
+        auto file=strand::saveCollection(options.data/"collections",m.text,name,int64_t(std::time(nullptr)),why);
+        note(m.message()+" Copied to the clipboard"+(file.empty()?" ("+why+")":" and saved as "+file)+".");};
     auto act=[&](const char* call,bool all){
         std::vector<std::string> ids;
         if(all)ids.push_back("");
@@ -401,6 +459,9 @@ void strandView(){
         if(id==Refresh)refresh();
         if(id==Close)pop.done=true;
         if(id==WhoISee)friendsView(t,send);
+        if(id==MakeSelected)collect(true);
+        if(id==MakeNear)collect(false);
+        if(id==ImportCollection){importView(t,send);refresh();}
         if(id==Mine){
             auto chosen=strand::remembered(readIni(),rules);
             if(me.known&&!me.offerBuilds.empty())chosen.offerBuilds=me.offerBuilds;
@@ -408,7 +469,7 @@ void strandView(){
             if(!choicesScreen(rules,me.text(),chosen,L"Save my choices for this server"))return;
             auto j=strand::join(t,send,readIni(),chosen,false);atomicWrite(settingsFile,j.ini);refresh();note(j.message);
             if(!j.start)throw std::runtime_error(j.message);}};
-    runPopup(pop,L"My strand on this server",860,700,[&](HWND h){
+    runPopup(pop,L"My strand on this server",860,800,[&](HWND h){
         popupControl(h,Info,L"EDIT",L"",ES_READONLY|ES_MULTILINE|WS_VSCROLL,20,20,804,210);
         popupControl(h,List,L"LISTBOX",L"",LBS_EXTENDEDSEL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT|WS_VSCROLL,20,240,804,250);
         popupControl(h,Note,L"STATIC",L"",SS_LEFT,20,498,804,44);
@@ -417,6 +478,10 @@ void strandView(){
         popupControl(h,Mine,L"BUTTON",L"My choices for this server",0,20,600,195,36);popupControl(h,WhoISee,L"BUTTON",L"Who I see",0,223,600,195,36);
         popupControl(h,Refresh,L"BUTTON",L"Refresh",0,426,600,195,36);
         popupControl(h,Close,L"BUTTON",L"Close",BS_DEFPUSHBUTTON,629,600,195,36);
+        popupControl(h,NameLabel,L"STATIC",L"Collection name (optional):",SS_LEFT,20,654,195,24);popupControl(h,CollectionName,L"EDIT",L"",ES_AUTOHSCROLL,223,650,195,28);
+        popupControl(h,RadiusLabel,L"STATIC",L"Metres around my game:",SS_LEFT,426,654,195,24);popupControl(h,Radius,L"EDIT",L"100",ES_NUMBER,629,650,195,28);
+        popupControl(h,MakeSelected,L"BUTTON",L"Make a collection of selected",0,20,692,195,36);popupControl(h,MakeNear,L"BUTTON",L"Collect near me",0,223,692,195,36);
+        popupControl(h,ImportCollection,L"BUTTON",L"Import a collection...",0,426,692,195,36);
         refresh();});
 }
 // "Server owner": the owner's actions on the group server this launcher hosts and gave its key as the owner's

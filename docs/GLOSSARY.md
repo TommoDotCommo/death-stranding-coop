@@ -27,6 +27,7 @@ code. Terms marked **(lab only)** belong to the developers' test setup and never
 | The program `coop-world.exe` as a whole | [world server](#world-server) | relay, strand server |
 | Its part that carries built objects, likes and roads (HTTP) | [strand server](#strand-server) | relay |
 | Its part that carries where players are, in real time (UDP) | [relay](#relay) | strand server |
+| A group of structures one player shares with others as text | [collection](#collection) (its text: a [DSK string](#dsk-string)) | kit, blueprint |
 | The game company's own online servers | [the publisher's service](#publishers-service) | server, strand server |
 | The two players in a lobby | [host](#host) and [guest](#guest) | host and client |
 | The `role` field in `mod.json`, or the two ends of one core session | host and client ([role](#role)) | host and guest |
@@ -82,11 +83,18 @@ hands them over, skipping the game's own range, placement and area checks. *Wher
 players run in their own game while the mod checks them. Not one of the game's own orders. A finished *run* sends its
 *track* (`DST1-...`) to the group's server, which replays it before it counts on the challenge's board. *Where:*
 `mod/route.h`, `world/challenges.h`, `launcher/challenges.h`; described in `docs/ROUTES.md`.
+<a id="collection"></a>**Collection** (aka kit): a group of structures one player built, written as one line of text,
+a [DSK string](#dsk-string), so another player can import it on a [strand server](#strand-server): here where his game
+is, or at the original place. The server makes the structures as his own uploads, under its rules, and tells every
+game, his own too, that his "collection builder" ("Name · collection") built them, so his game builds them like other
+players' ([build received](#build-received)). Made and imported in the launcher's "My strand
+on this server". *Where:* `world/collection.h`, `world/collections.cpp`; `docs/COLLECTIONS.md`.
 
 <a id="co-op-data-folder"></a>**Co-op data folder** (aka data folder): `%LOCALAPPDATA%\DeathStrandingCoop\` on a
 player's PC. It holds the [co-op saves](#saves) under `redirect-data\`, the mod under `redirect-data\mod\`,
 `launcher.ini`, [`player.key`](#player-key), the [launcher ticket](#launcher-ticket), [backups](#backups), the
 recorded routes and runs of [challenges](#challenge) (`redirect-data\mod\routes\`) and the group's world file. Uninstalling the mod keeps it. See also [redirect](#redirect).
+[collections](#collection) a player made (`collections\*.dsk`) and the group's world file. Uninstalling the mod keeps it. See also [redirect](#redirect).
 
 <a id="core"></a>**Core** (aka presence core, protocol 1): the game-free networking heart of the real-time layer:
 handshake, player snapshots, clock and [round-trip](#round-trip) estimates, smoothing and a reliable channel for
@@ -111,6 +119,11 @@ this player's pose and receives everyone near. Also the lab command `crowd N` th
 other player, about 120 ms by default, so their movement can be smoothed between snapshots; on a poor
 [link](#link) it grows. Also the one-way delay a link profile adds. *Where:* `core/`, `mod/timing.h`;
 `mod/README.md`, "Why 120 ms delay".
+
+<a id="dsk-string"></a>**DSK string** (aka collection string; a `.dsk` file holds one): the text form of a
+[collection](#collection): `DSK1-` and Crockford base32 in groups of five, like an invite, with a CRC-32. At most 200
+structures and 16384 characters; anything cut, changed or malformed is refused whole. *Where:* `world/collection.h`;
+`docs/COLLECTIONS.md`, "The DSK string".
 
 <a id="diagnostics"></a>**Diagnostics** (aka diagnostics zip, bug report): About → **Send diagnostics** in the
 launcher (or `deathstranding-coop.exe --diagnostics-zip`) saves a redacted zip on the Desktop with the text report,

@@ -1,4 +1,5 @@
 #include "api.h"
+#include "collection.h"
 #include <algorithm>
 namespace world {
 namespace {
@@ -41,6 +42,10 @@ std::string settingText(const std::string& key,const std::string& value,size_t p
                                 value=="nobody"?"No route challenges are published here.":"Any player may publish a route challenge for the others to run.";
     if(key=="identity")return value=="keys"?"Players are known by the key their launcher made: nobody signs in, builds or withdraws in another player's name (the traffic is not encrypted).":
                               "No player keys: whoever has the group's key can sign in or act as any player. For friends only.";
+    if(key=="import")return value=="nobody"?"Nobody imports collections here.":value=="members"?"Members import collections (shared groups of structures) here; others do not.":
+                            value=="owner"?"Only the server's owner imports collections here.":"Any player may import a collection (a shared group of structures) here.";
+    if(key=="import_cost")return value=="materials"?"What an imported structure carried in materials is recorded with it (nothing is taken yet).":
+                                 "Importing a collection costs nothing.";
     return key+" "+value;
 }
 json::Value World::apiPolicy(int64_t now) const {
@@ -90,6 +95,7 @@ json::Value World::apiMine(const std::string& key) const {
         v.set("state",state);
         if(ob.share=="ask"||ob.heldAsk)v.set("waiting_for","you");else if(ob.share=="review")v.set("waiting_for","owner");
         if(ob.share=="held"){v.set("held",ob.held);v.set("held_text",heldText(ob.held));}
+        if(!ob.collection.empty())v.set("collection",ob.collection);
         list.push(v);}
     Value out=Value::object();out.set("format",1);out.set("player",id);out.set("objects",list);return out;
 }
@@ -193,6 +199,14 @@ World::Viewer World::relayViewer(uint64_t relayId) const {
         break;}
     return v;
 }
+Spot relaySpot(const std::array<double,3>& p,bool haveYaw,double yaw,int64_t now){
+    Spot s;
+#ifndef MUTANT_COLLECTION_SPOT_AXES
+    s.x=p[0];s.y=p[2];s.z=p[1];
+#else
+    s.x=p[0];s.y=p[1];s.z=p[2];
+#endif
+    s.haveYaw=haveYaw;s.yaw=yaw;s.at=now;return s;}
 std::vector<uint64_t> relayEvictions(World& w){
     std::vector<uint64_t> out;
     for(auto& account:w.takeEvictions()){identity::PublicKey k{};if(identity::keyOf(account,k))out.push_back(identity::relayId(k));}
@@ -266,7 +280,7 @@ Reply launcherApi(World& w,const std::string& method,const std::string& call,con
     if(call.compare(0,6,"owner/")==0)return ownerApi(w,method,call.substr(6),text,signer);
     const bool friends=call=="friends";   // GET reads the list, POST changes it
     // notice-token is taken as a change is: for any player under identity none, signed by its player under keys.
-    const bool read=call=="policy"||call=="me"||call=="mine"||(friends&&method=="GET"),change=call=="choices"||call=="offer"||call=="withdraw"||call=="notice-token"||(friends&&method!="GET"),pass=call=="ticket"||call=="relay-token";
+    const bool read=call=="policy"||call=="me"||call=="mine"||(friends&&method=="GET"),change=call=="choices"||call=="offer"||call=="withdraw"||call=="notice-token"||call=="collection"||call=="import"||(friends&&method!="GET"),pass=call=="ticket"||call=="relay-token";
 #ifndef MUTANT_API_METHOD
     if((read&&method!="GET")||((change||pass)&&method!="POST")||(!read&&!change&&!pass))return answer(404,"not found");   // a change is never a GET
 #else
@@ -274,6 +288,7 @@ Reply launcherApi(World& w,const std::string& method,const std::string& call,con
 #endif
     if(call=="policy")return ok(w.apiPolicy(now));
     const bool keys=w.policy().identity=="keys";
+    const bool collect=call=="collection"||call=="import";
     // Who may act for `key`: under identity keys, or for a ticket or relay token, only a call signed with that key; a
     // signed call only for its signer; an account of a key never by an unsigned call.
     auto actor=[&](const std::string& key)->int{
@@ -308,6 +323,39 @@ Reply launcherApi(World& w,const std::string& method,const std::string& call,con
         if(int r=actor(player))return refusal(r);
         if(barred(player))return answer(403,"this player is banned from this server");
         return ok(call=="me"?w.apiMe(player):friends?w.apiFriends(player):w.apiMine(player));}
+    if(collect){
+        // Collections (../docs/COLLECTIONS.md). collection: {"player":KEY,"objects":[ID,...]} or {"player":KEY,"near":METRES},
+        // optional "name"; import: {"player":KEY,"collection":TEXT,"place":"here|original"}. Both: optional "relay_id"
+        // (decimal) under identity none, where a relay id is whatever the launcher names; under keys it is the key's.
+        if(method!="POST")return answer(404,"not found");
+        Value in;
+        try{if(text.size()>collection::MaxTextChars+1024)bad("too long");in=json::parse(text);if(!in.isObject())bad("not an object");}
+        catch(const std::exception&){return answer(400,"the body is a JSON object");}
+        const std::vector<std::string> fields=call=="collection"?std::vector<std::string>{"player","objects","near","name","relay_id"}:std::vector<std::string>{"player","collection","place","relay_id"};
+        for(auto& m:in.members()){
+            if(std::find(fields.begin(),fields.end(),m.first)==fields.end())return answer(400,"unknown field "+m.first);
+            const bool good=m.first=="objects"?m.second.isArray():m.first=="near"?m.second.isInt():m.second.isString();
+            if(!good)return answer(400,m.first+" is in the wrong form");}
+        const std::string key=in.get("player").string();
+        if(!accountKeyText(key))return answer(400,"player: the account key his game signs in with");
+        if(int r=actor(key))return refusal(r);
+        if(barred(key))return answer(403,"this player is banned from this server");
+        uint64_t relayId=0;
+        if(keys){identity::PublicKey k{};if(identity::keyOf(key,k))relayId=identity::relayId(k);}
+        else if(in.has("relay_id")){
+            const std::string r=in.get("relay_id").string();
+            if(r.empty()||r.size()>20||r.find_first_not_of("0123456789")!=std::string::npos)return answer(400,"relay_id: the player number in decimal");
+            relayId=std::stoull(r);}
+        try{
+            if(call=="collection"){
+                std::vector<std::string> ids;
+                for(auto& i:in.get("objects").items()){if(!i.isString()||!objectIdText(i.string()))return answer(400,"objects: a list of object ids");ids.push_back(i.string());}
+                if(in.has("objects")&&ids.empty())return answer(400,"objects: name at least one");
+                return ok(w.apiCollection(key,ids,in.get("near").integer(),in.get("name").string(),relayId,now));}
+            const bool owner=!signer.empty()&&signer==w.owner();
+            return ok(w.apiImport(key,in.get("collection").string(),in.get("place").string(),relayId,owner,now));
+        }catch(const Refused& e){return answer(e.status,e.what());}
+        catch(const std::exception& e){return answer(403,e.what());}}
     if(friends){
         // {"player":KEY,"add":[...],"remove":[...],"show_others":"everyone|friends|nobody|default"}, one or more of the last three.
         std::string why;Value in=body(text,{"player","show_others"},why,{},{"add","remove"});if(!why.empty())return answer(400,why);
