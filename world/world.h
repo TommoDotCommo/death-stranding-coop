@@ -232,6 +232,8 @@ public:
     // apiChoices throws std::runtime_error with the reason when it is refused, and then changed nothing. It makes the
     // player when the key is new (as a sign-in would: the `players` setting applies), so his choices are in place
     // before his game first signs in.
+    // Who is on the relay now (RelayConfig::online), for the policy's `online`. Not saved; without a relay the policy has none.
+    void setOnline(std::vector<std::string> names){std::lock_guard<std::mutex> g(lock_);online_=std::move(names);onlineKnown_=true;}
     json::Value apiPolicy(int64_t now=0) const;          // with the server's clock (`time`), for the launcher's signatures
     json::Value apiPlayers() const;                       // the owner's: playerList and waiting as documents
     json::Value apiWaiting() const;
@@ -298,7 +300,7 @@ private:
     std::string pass(std::map<std::string,Pass>& passes,const std::string& account,uint64_t relayId,int64_t now);
     Player& playerFor(const std::string& account,const char* why);   // made when new, within `players`
     size_t kickLocked(Player&);
-    std::vector<std::string> evictions_;
+    std::vector<std::string> evictions_,online_;bool onlineKnown_=false;
     Reply signInLocked(const std::string& key,const std::string& displayName,const std::string& gateway);
     // What each player's game was handed per area (curate): kept so the same structures come back, saved with the world.
     struct Picks { int64_t asked=0;std::vector<std::string> ids; };

@@ -123,7 +123,7 @@ std::string config(const Session& s) {
         std::string json="{\"server\":\""+server+"\",\"slot\":"+std::to_string(slot)+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)
             +",\"required\":true,\"logging\":true,\"game_thread\":true,\"puppet_probe\":true,\"partner_tag\":true,\"others\":"+std::to_string(GroupOthers)
 #ifndef MUTANT_GROUP_NO_HELP
-            +",\"help_page\":true"   // hold F1 (../mod/README.md, "The F1 page")
+            +",\"help_page\":true,\"server_info\":true"   // hold F1, and P for the server page (../mod/README.md)
 #endif
 #ifndef MUTANT_GROUP_NO_GEAR
             // What other players wear and carry, on their bodies (../mod/README.md, "Other players' gear and carried cases").
@@ -174,7 +174,7 @@ std::string config(const Session& s) {
     // cargo and structures, MULEs put down and camp alarms, and standard orders (mod/README.md). The network-only
     // self_tick setup draws nothing.
 #ifndef MUTANT_CONFIG_PLAY
-    const std::string play="\"game_thread\":true,\"puppet_probe\":true,\"partner\":\"own\",\"partner_gear\":true,\"partner_marker\":true,\"partner_vehicle\":true,\"partner_cart\":true,\"carry_visual\":true,\"partner_tag\":true,\"help_page\":true,\"notices\":"+std::string(s.solo?"false":"true")+",\"share_environment\":\"rain\",\"share_enemies\":true,\"share_orders\":true,\"share_order_units\":true,\"share_roads\":true,\"share_saved_structures\":true";
+    const std::string play="\"game_thread\":true,\"puppet_probe\":true,\"partner\":\"own\",\"partner_gear\":true,\"partner_marker\":true,\"partner_vehicle\":true,\"partner_cart\":true,\"carry_visual\":true,\"partner_tag\":true,\"help_page\":true,\"server_info\":true,\"notices\":"+std::string(s.solo?"false":"true")+",\"share_environment\":\"rain\",\"share_enemies\":true,\"share_orders\":true,\"share_order_units\":true,\"share_roads\":true,\"share_saved_structures\":true";
 #else
     const std::string play="\"self_tick\":true";
 #endif

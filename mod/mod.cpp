@@ -60,6 +60,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "help.h"
 #include "dialog.h"
 #include "debugmenu.h"
+#include "serverinfo.h"
 #include "strand_notices.h"
 #include "received.h"
 #include "offer_strand.h"
@@ -1284,7 +1285,11 @@ struct Runtime final:ds::Transport {
     std::vector<std::u16string> fakeNotices;   // the fake world's info log: every line shown, in order
 #endif
     // F3: the test-mode switches on the game's common dialogue (debugmenu.h, tickDebugMenu).
-    std::unique_ptr<mod::debugmenu::Menu> debugMenu;bool debugTried=false;Background<mod::dialog::Api> dialogJob;mod::marker::KeyEdge debugEdge;
+    std::unique_ptr<mod::debugmenu::Menu> debugMenu;Background<mod::dialog::Api> dialogJob;mod::marker::KeyEdge debugEdge;
+    // The game's common dialogue, once its code is checked; shared by the menus below. 0 unknown, 1 there, 2 not there.
+    std::optional<mod::dialog::Api> dialogApi;int dialogState=0;
+    // P: the server page (serverinfo.h, tickServerInfo).
+    std::unique_ptr<mod::serverinfo::Screen> infoScreen;mod::marker::KeyEdge infoEdge;std::future<mod::strand::Fetched> infoRead;
     // Hold F1: the co-op keys on the game's common telop (help.h). puppet.help (lab): "at <pivot> <x> <y> <stamp>" moves
     // it, "show <stamp>" / "hide <stamp>" hold and release the key for an unattended test.
     std::unique_ptr<mod::help::Page> helpPage;bool helpTried=false,helpHeld=false;Background<mod::help::Api> helpJob;std::filesystem::path helpCommand;
@@ -1308,7 +1313,7 @@ struct Runtime final:ds::Transport {
             else if(verb=="show"||verb=="hide")helpHeld=verb=="show";
         }
         mod::help::Facts f;f.ping=pingKey;f.like=partnerMode();f.ride=ride?config.passengerKey:0;f.route=config.routeRecordKey;
-        f.materials=config.testMode.on?config.testMode.materialsKey:0;f.story=config.storyResync!="off"?config.storyKey:0;f.debug=config.testMode.on&&debugMenu?mod::debugmenu::Key:0;
+        f.materials=config.testMode.on?config.testMode.materialsKey:0;f.story=config.storyResync!="off"?config.storyKey:0;f.debug=config.testMode.on&&debugMenu?mod::debugmenu::Key:0;f.server=infoScreen&&infoKeyFree()?mod::serverinfo::Key:0;
         helpPage->tick(helpHeld||modKey(mod::help::Key),cache.available&&!cache.gated&&gameEvent&&!gameEvent(),f,now);
     }
     void tickNotices(uint64_t now) {
@@ -1365,7 +1370,7 @@ struct Runtime final:ds::Transport {
 #ifdef MOD_FAKE_NETWORK
     std::vector<mod::testmode::Drop> fakeDrops;   // the fake world's crates: every one asked for, until the test takes it
     mod::vitals::State fakeVitals{true,false,false,false};
-    bool fakeDialogUp=false;unsigned fakeDialogAnswer=mod::dialog::NoAnswer;   // the fake world's common dialogue
+    bool fakeDialogUp=false;unsigned fakeDialogAnswer=mod::dialog::NoAnswer;std::u16string fakeDialogBody;   // the fake world's common dialogue
 #endif
     static std::string keyName(unsigned vk){
         if((vk>='A'&&vk<='Z')||(vk>='0'&&vk<='9'))return std::string(1,char(vk));
@@ -1419,25 +1424,61 @@ struct Runtime final:ds::Transport {
             if(testGaugeWhy!=k.refused){testGaugeWhy=k.refused;note(*k.refused?("TESTMODE gauges not kept: "+testGaugeWhy+"\n").c_str():"TESTMODE gauges kept full\n");}
         }
     }
-    void tickDebugMenu(uint64_t now){
-        if(!config.testMode.on||!testNoted||!sampler)return;
-        if(!debugMenu&&!debugTried){
-            mod::dialog::Api api;
+    bool dialogReady(){
+        if(dialogState==0){
 #ifndef MOD_FAKE_NETWORK
-            auto* sp=&*sampler;if(!dialogJob.ready([sp]{return mod::dialog::nativeApi(*sp);}))return;   // checked beside the game
-            debugTried=true;
-            try{api=dialogJob.job.get();}catch(const std::exception& e){note((std::string("DEBUGMENU unavailable: ")+e.what()+"\n").c_str());return;}
+            auto* sp=&*sampler;if(!dialogJob.ready([sp]{return mod::dialog::nativeApi(*sp);}))return false;   // checked beside the game
+            try{dialogApi=dialogJob.job.get();dialogState=1;}catch(const std::exception& e){dialogState=2;note((std::string("DIALOGUE unavailable: ")+e.what()+"\n").c_str());}
 #else
-            debugTried=true;
+            mod::dialog::Api api;
             api.free=[this]{return !fakeDialogUp;};api.showing=[this]{return fakeDialogUp;};
-            api.open=[this](const mod::dialog::Request&){fakeDialogUp=true;fakeDialogAnswer=mod::dialog::NoAnswer;return true;};
+            api.open=[this](const mod::dialog::Request& r){fakeDialogUp=true;fakeDialogAnswer=mod::dialog::NoAnswer;fakeDialogBody=r.body;return true;};
             api.take=[this]{auto v=fakeDialogAnswer;fakeDialogAnswer=mod::dialog::NoAnswer;if(v!=mod::dialog::NoAnswer)fakeDialogUp=false;return v;};
+            dialogApi=api;dialogState=1;
 #endif
-            debugMenu=std::make_unique<mod::debugmenu::Menu>(api,std::vector<mod::debugmenu::Item>{{u"Unlimited stamina",&testStamina},{u"Unlimited blood",&testBlood},{u"Unlimited battery (not vehicles yet)",&testBattery}},
+        }
+        return dialogState==1;
+    }
+    bool inWorldNow(){return cache.available&&!cache.gated&&gameEvent&&!gameEvent();}
+    void tickDebugMenu(uint64_t now){
+        if(!config.testMode.on||!testNoted||!sampler||!dialogReady())return;
+        if(!debugMenu){
+            debugMenu=std::make_unique<mod::debugmenu::Menu>(*dialogApi,std::vector<mod::debugmenu::Item>{{u"Unlimited stamina",&testStamina},{u"Unlimited blood",&testBlood},{u"Unlimited battery (not vehicles yet)",&testBattery}},
                 [this](const std::string& row){note(row.c_str());});
             note("DEBUGMENU on: F3\n");
         }
-        if(debugMenu)debugMenu->tick(debugEdge.pressed(modKey(mod::debugmenu::Key),now),cache.available&&!cache.gated&&gameEvent&&!gameEvent(),now);
+        debugMenu->tick(debugEdge.pressed(modKey(mod::debugmenu::Key),now),inWorldNow(),now);
+    }
+    // The address the page reads: this game's server from online_server, whose form the config has checked.
+    struct ServerAt {uint32_t address=0;uint16_t port=0;std::string base;};
+    std::optional<ServerAt> serverAt() const {
+        const std::string& url=config.onlineServer;if(url.empty())return std::nullopt;
+        const size_t colon=url.find(':',7),slash=url.find('/',7);if(colon==std::string::npos||slash==std::string::npos)return std::nullopt;
+        auto address=mod::peerAddress(url.substr(7,colon-7));if(!address)return std::nullopt;
+        ServerAt at;at.address=*address;at.port=uint16_t(std::stoul(url.substr(colon+1,slash-colon-1)));at.base=mod::serverApiBase(url).value_or(std::string());return at;
+    }
+    bool infoKeyFree() const {const unsigned k=mod::serverinfo::Key;return config.passengerKey!=k&&config.storyKey!=k&&config.routeRecordKey!=k&&config.testMode.materialsKey!=k;}
+    void tickServerInfo(uint64_t now){
+        if(!config.serverInfo||!sampler||!dialogReady())return;
+        if(!infoScreen){
+            mod::serverinfo::Fetch fetch;
+            if(auto at=serverAt()){
+#ifndef MUTANT_SERVERINFO_BASE
+                const std::string target=at->base+"/coop/policy";
+#else
+                const std::string target="/coop/policy";
+#endif
+                fetch.start=[this,a=*at,target]{infoRead=std::async(std::launch::async,[a,target]{return mod::strand::get(a.address,a.port,target,std::string(),mod::strand::ConnectMs);});};
+                fetch.poll=[this]()->std::optional<std::string>{
+                    if(!infoRead.valid()||infoRead.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return std::nullopt;
+                    auto got=infoRead.get();return got.status==200?got.body:std::string();};
+            }
+            infoScreen=std::make_unique<mod::serverinfo::Screen>(*dialogApi,fetch,[this](const std::string& row){note(row.c_str());});
+            note(infoKeyFree()?"SERVERINFO on: P\n":"SERVERINFO off: P is another key of this game's config\n");
+        }
+        mod::serverinfo::Facts f;f.group=config.group;f.server=!config.onlineServer.empty();f.partner=partnerName;f.partnerHere=core&&core->connected();
+        for(auto& s:othersShown)if(s.visible&&!s.name.empty())f.near.push_back(s.name);
+        infoScreen->tick(infoEdge.pressed(infoKeyFree()&&modKey(mod::serverinfo::Key),now),inWorldNow(),f,now);
     }
     // --- Names over heads (nametag.h): one of the game's hologram-name records above the partner body and above every
     // other player's body (others.h). On with config partner_tag; `puppet.ride` "tag on" / "tag off" test it. The
@@ -3567,6 +3608,8 @@ struct Runtime final:ds::Transport {
             if(gameContext)tickTestMode(now);
             stage="debug menu";stages.enter("debug menu",mod::nowUs());
             if(gameContext)tickDebugMenu(now);
+            stage="server page";stages.enter("server page",mod::nowUs());
+            if(gameContext)tickServerInfo(now);
             stage="notices";stages.enter("notices",mod::nowUs());
             if(gameContext)tickNotices(now);
             stage="help";stages.enter("help",mod::nowUs());
@@ -4114,6 +4157,7 @@ struct Runtime final:ds::Transport {
         if(core && socket!=INVALID_SOCKET) {try{core->disconnect(mod::nowMs());}catch(...){}}
         if(others){try{others->clear(mod::nowMs());}catch(...){}}
         relayStop();
+        if(infoRead.valid())infoRead.wait();   // a read of the server page ends within its time-outs
         strandPoller.reset();   // its thread ends within a read's time-outs, before the sockets' library goes
         if(socket!=INVALID_SOCKET)closesocket(socket);
         diagnostic.Close();
@@ -4153,6 +4197,9 @@ MOD_API void mod_test_set_gauges(float blood,float bloodMax,float stamina,float 
 MOD_API void mod_test_gauges(float* four) {
     std::lock_guard<std::mutex> lock(lifecycle);if(!runtime||!runtime->fake||!four)return;auto* f=runtime->fake.get();
     f->mutate([&]{for(int i=0;i<4;++i){uint64_t at=0xf800+(i==0?mod::testmode::BloodValue:i==1?mod::testmode::BloodMax:i==2?mod::testmode::StaminaValue:mod::testmode::StaminaMax);std::memcpy(&four[i],f->data.data()+at,4);}});}
+// The fake dialogue's body, as UTF-8 for ASCII text (other characters as '?'); returns its length.
+MOD_API unsigned mod_test_dialog_body(char* out,unsigned cap){std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return 0;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
+    unsigned n=0;for(char16_t c:r.fakeDialogBody){if(n+1<cap)out[n]=c<0x80?char(c):'?';++n;}if(cap)out[std::min(n,cap-1)]=0;return n;}
 MOD_API void mod_test_dialog_answer(unsigned row) {std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);r.fakeDialogAnswer=row;}
 MOD_API int mod_test_take_crate(unsigned index) {std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return 0;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
     if(index>=r.fakeDrops.size())return 0;
@@ -4337,6 +4384,8 @@ unsigned mod_status(char* out,unsigned cap) {
          <<",\"on_ground\":"<<r.testDropper.onGround()<<",\"blood_writes\":"<<r.testBloodWrites<<",\"stamina_writes\":"<<r.testStaminaWrites<<",\"battery_writes\":"<<r.testBatteryWrites<<",\"gauges\":\""<<r.testGaugeWhy<<"\""
          <<",\"keep\":{\"stamina\":"<<(r.testStamina?"true":"false")<<",\"blood\":"<<(r.testBlood?"true":"false")<<",\"battery\":"<<(r.testBattery?"true":"false")<<"}"
          <<",\"menu\":{\"ready\":"<<(r.debugMenu?"true":"false")<<",\"open\":"<<(r.debugMenu&&r.debugMenu->open()?"true":"false")<<",\"opens\":"<<(r.debugMenu?r.debugMenu->opens():0)<<",\"switches\":"<<(r.debugMenu?r.debugMenu->switches():0)<<",\"selected\":"<<(r.debugMenu?r.debugMenu->selected():0)<<"}}";
+        o<<",\"server_info\":{\"ready\":"<<(r.infoScreen?"true":"false")<<",\"open\":"<<(r.infoScreen&&r.infoScreen->open()?"true":"false")<<",\"opens\":"<<(r.infoScreen?r.infoScreen->opens():0)
+         <<",\"page\":"<<(r.infoScreen?r.infoScreen->page():0)<<",\"pages\":"<<(r.infoScreen?r.infoScreen->pageCount():0)<<",\"answered\":"<<(r.infoScreen&&r.infoScreen->answered()?"true":"false")<<"}";
         o<<",\"received_structures\":{\"on\":"<<(r.receivedOn?"true":"false")<<",\"answers\":\""<<mod::received::label(r.receivedEarly)<<"\",\"built\":"<<r.receivedBuilder.changed()<<",\"skipped\":"<<r.receivedBuilder.skipped()<<"}";
         {mod::strand::Poller::Counters k;if(r.strandPoller)k=r.strandPoller->counters();
          o<<",\"strand\":{\"on\":"<<(r.strandPoller?"true":"false")<<",\"reads\":"<<k.reads<<",\"answers\":"<<k.answers<<",\"failures\":"<<k.failures<<",\"told\":"<<k.told

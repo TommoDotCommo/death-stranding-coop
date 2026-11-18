@@ -228,8 +228,16 @@ static void spots(){
     CHECK(got.count(1)&&got[1]==(std::array<double,3>{10,2,30})&&!yaw[1]);
     CHECK(!got.count(2));
 }
+static void onlineNames(){
+    RelayConfig config;std::vector<std::vector<std::string>> told;config.online=[&](std::vector<std::string> n){told.push_back(std::move(n));};
+    Sim s(config);s.step();CHECK(told.size()==1&&told[0].empty());         // said once at the start, even with nobody on
+    auto& b=s.add(2,"Bob",{0,0,0});s.add(1,"Ann",{9000,0,0});s.run(1500);    // near each other or not, everyone counts
+    CHECK(told.back()==(std::vector<std::string>{"Ann","Bob"}));const size_t n=told.size();
+    s.run(2000);CHECK(told.size()==n);                                       // nothing new, nothing said
+    b.silent=true;s.run(s.config.timeoutMs+1000);CHECK(told.back()==(std::vector<std::string>{"Ann"}));
+}
 int main(){
-    spots();nearAndFar();forwarding();silenceAndBye();rateCap();playerCap();lateHello();restarts();hundred();
+    onlineNames();spots();nearAndFar();forwarding();silenceAndBye();rateCap();playerCap();lateHello();restarts();hundred();
     if(failures)return 1;
     std::puts("relay tests passed");return 0;
 }

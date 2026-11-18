@@ -35,6 +35,9 @@ static void policy(){
     auto p=s.doc(s.get("policy"));
     CHECK(p.get("format").integer()==1&&p.get("server").string()==s.w.serverId()&&p.get("preset").string()=="friends");
     CHECK(p.get("players").get("count").integer()==0&&p.get("players").get("limit").integer()==16);
+    CHECK(!p.has("online"));                                   // no relay has spoken: the policy does not guess
+    {std::vector<std::string> on={"","Ann"};for(int i=0;i<70;++i)on.push_back("P");s.w.setOnline(on);auto o=s.doc(s.get("policy")).get("online");
+     CHECK(o.get("count").integer()==72&&o.get("names").items().size()==64&&o.get("names").items()[0].string()=="Ann");s.w.setOnline({});CHECK(s.doc(s.get("policy")).get("online").get("count").integer()==0);}
     auto& settings=p.get("settings").items();CHECK(settings.size()==17);
     for(auto& item:settings)CHECK(item.get("text").string().size()>20&&item.get("value").string()==item.get("preset").string());
     CHECK(settings.size()==17&&settings[1].get("key").string()=="build"&&settings[1].get("text").string()=="What any player builds here may be shared with the others.");

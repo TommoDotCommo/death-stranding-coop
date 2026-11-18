@@ -572,6 +572,7 @@ int main(int argc,char** argv){
         relayConfig.viewer=[&w,nearGiven](uint64_t id){return world::relayViewer(w,id,nearGiven);};
         // Where each player's game is, for collections made "near me" and imported "here" (../docs/COLLECTIONS.md).
         relayConfig.spotted=[&w](uint64_t id,uint32_t,const std::array<double,3>& at,bool haveYaw,double yaw){w.noteSpot(id,world::relaySpot(at,haveYaw,yaw,nowSeconds()));};
+        relayConfig.online=[&w](std::vector<std::string> names){w.setOnline(std::move(names));};   // who is on, for the policy
         try{world::Relay check(relayConfig,[](const world::RelayAddress&,const uint8_t*,size_t){});}
         catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 2;}
         sockaddr_in relayAddress=address;relayAddress.sin_port=htons(uint16_t(relayPort));

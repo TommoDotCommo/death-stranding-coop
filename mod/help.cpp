@@ -22,6 +22,7 @@ std::u16string body(const Facts& f){
     line(f.materials?f.materials:0x55,u"Drop test materials");
 #endif
     line(f.story,u"Catch up with the story");
+    line(f.server,u"Server and players");
     line(f.debug,u"Test mode switches");
     return out;
 }

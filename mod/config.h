@@ -11,7 +11,7 @@ constexpr unsigned OthersCarryMax=8;   // others.h MaxCarriers
 // switch at its default. materials: the virtual-key code of the key that drops a set of material crates (0: none).
 constexpr unsigned TestMaterialsKey=0x55;   // U: free in the game's default bindings and not one of the mod's keys
 struct TestMode { bool on=false;unsigned materialsKey=0;bool stamina=false,blood=false,battery=false; };
-// Keys test mode may not take: the mod's own (F1 guide, F2 bug mark, F3 switches, Tab, B ping, L like) and the mouse buttons,
+// Keys test mode may not take: the mod's own (F1 guide, F2 bug mark, F3 switches, P server page, Tab, B ping, L like) and the mouse buttons,
 // Escape, Enter and modifiers; the partner's passenger and catch-up keys are checked against the config's own values.
 bool testKeyRefused(unsigned vk);
 struct Config {
@@ -47,6 +47,7 @@ struct Config {
     bool partnerVehicle=false; // the partner's vehicle drawn under him while he rides (ride.h)
     bool partnerTag=false;     // the partner's name (their nickname) over the partner body (nametag.h)
     bool helpPage=false;       // hold F1: the co-op keys on the game's common telop (help.h)
+    bool serverInfo=false;     // P: the server, who is on it and its rules, on the game's common dialogue (serverinfo.h)
     bool shareOrderUnits=false; // with share_orders: a cargo unit one player hands in is delivered for the partner too (a split delivery); not yet run with a real partial hand-in
     bool shareOrderLoad=false;  // with share_orders: one shared load per order (orderload.h); not run live yet
     unsigned passengerKey=0x4a;      // with partner_vehicle: next to the partner's truck this key gets on and off (passenger.h); 0: off

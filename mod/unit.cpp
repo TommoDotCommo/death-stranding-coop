@@ -166,8 +166,8 @@ int main() {
      std::string game=R"({"server":"10.1.2.3","slot":0,"nickname":"test","provider":"game","session":123,"game_thread":true,"puppet_probe":true,"required":true,)"+pin+"}";
      assert(mod::parseConfig(game).group&&mod::parseConfig(game).puppetProbe);
      for(auto more:{"\"partner\":\"own\"","\"partner\":\"peer\"","\"join_at_host\":true","\"share_environment\":\"rain\"","\"share_orders\":true,\"share_rewards\":true"})assert(refused(withKeys(game,more)));
-     auto full=mod::parseConfig(withKeys(game,"\"partner_tag\":true,\"help_page\":true,\"others\":15,\"relay\":\"10.1.2.3:49100\",\"relay_key\":\"w77\",\"player_id\":999999999999999,\"online_server\":\"http://10.1.2.3:49100/w77/auth/ds\""));
-     assert(full.group&&full.others==15&&full.relayAddress==0x0a010203u&&full.relayPort==49100&&full.playerId==999999999999999ull&&full.onlineServer=="http://10.1.2.3:49100/w77/auth/ds"&&full.partnerTag&&full.helpPage);
+     auto full=mod::parseConfig(withKeys(game,"\"partner_tag\":true,\"help_page\":true,\"server_info\":true,\"others\":15,\"relay\":\"10.1.2.3:49100\",\"relay_key\":\"w77\",\"player_id\":999999999999999,\"online_server\":\"http://10.1.2.3:49100/w77/auth/ds\""));
+     assert(full.group&&full.others==15&&full.relayAddress==0x0a010203u&&full.relayPort==49100&&full.playerId==999999999999999ull&&full.onlineServer=="http://10.1.2.3:49100/w77/auth/ds"&&full.partnerTag&&full.helpPage&&full.serverInfo);
      assert(refused(withKeys(game,"\"others\":15,\"relay\":\"10.1.2.3:49100\",\"relay_key\":\"w77\",\"player_id\":1000000000000000")));   // an id is at most 15 digits
      auto o=withKeys(game,"\"others\":4");
      assert(refused(withKeys(o,"\"relay\":\"10.9.9.9:49100\",\"relay_key\":\"k\",\"player_id\":7")));           // not the listed server

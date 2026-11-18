@@ -56,6 +56,15 @@ json::Value World::apiPolicy(int64_t now) const {
     out.set("time",now);out.set("owner",!owner_.empty());   // the server's clock, for a launcher whose clock is off
     out.set("name",name_);                                    // this world's display name ("" none; README "Builder names")
     Value players=Value::object();players.set("count",int64_t(players_.size()));players.set("limit",int64_t(std::min<int64_t>(int64_t(MaxPlayers),policy_.players)));out.set("players",players);
+#ifndef MUTANT_API_ONLINE_ALWAYS
+    if(onlineKnown_){
+#else
+    {
+#endif
+        // Who is connected now: every player counts, at most OnlineNames names are listed, a player without one is not.
+        constexpr size_t OnlineNames=64;Value online=Value::object(),names=Value::array();size_t listed=0;
+        for(auto& n:online_)if(!n.empty()&&listed<OnlineNames){names.push(n);++listed;}
+        online.set("count",int64_t(online_.size()));online.set("names",names);out.set("online",online);}
     auto items=policyItems(policy_),preset=policyItems(presetPolicy(policy_.preset));Value settings=Value::array();
     for(size_t i=0;i<items.size();++i){
         Value s=Value::object();s.set("key",items[i].first);s.set("value",items[i].second);s.set("preset",preset[i].second);

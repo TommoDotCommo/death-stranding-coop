@@ -122,6 +122,9 @@ struct RelayConfig {
     // relay id, area and position (core/relay.h axes: x, up, y, metres), and his facing from his latest presence (a
     // broadcast player's; `haveYaw` false for the other mode). A player without a position is not reported.
     std::function<void(uint64_t id,uint32_t area,const std::array<double,3>& position,bool haveYaw,double yaw)> spotted;
+    // Set: called from a tick when the names of the players on this server change, and once at the first tick, sorted,
+    // one entry a player ("" for no name). Not linked servers' players. For the policy's `online` (World::setOnline).
+    std::function<void(std::vector<std::string>)> online;
     // Set: what the server holds for a broadcast player (asked at each of his HELLOs): his choice, his friends, his cap.
     std::function<RelayViewer(uint64_t id)> viewer;
     // Fights with visitors.
@@ -276,6 +279,7 @@ private:
     RelayConfig config_;Send send_;RelayStats stats_;uint32_t streams_=0;
     std::vector<std::pair<uint64_t,uint64_t>> entered_;   // (to, from) pairs that came near in this HELLO: states to hand out
     std::map<uint64_t,Player> players_;std::map<RelayAddress,uint64_t> byAddress_;ds::relay::Buffer out_;
+    std::vector<std::string> onlineSaid_;bool onlineTold_=false;
     std::vector<Link> links_;size_t remotes_=0;uint64_t now_=0;   // the latest time given (receive, tick)
 };
 }

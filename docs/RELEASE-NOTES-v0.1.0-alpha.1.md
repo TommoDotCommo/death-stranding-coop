@@ -82,7 +82,7 @@ the player path (Setup or the launcher's install, the game started by Steam), no
 
 - **Test mode**: U dropped all six material crates (chiral crystals, metals, ceramics, chemicals, special alloys,
   resins), read back from the game's cargo records. ("Stamina and blood read full during a 25 s sprint" proved nothing: see
-  Known limits.)
+  "Not verified".)
 - **Route challenges**: a route recorded with K, a run finished, and a run that left the corridor failed on the right side.
 - **Collections**: a 30 m bridge and a rain shelter made on one server and imported on another were built by the
   importer's own game and still there a minute later.

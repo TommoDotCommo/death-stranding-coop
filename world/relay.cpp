@@ -388,6 +388,20 @@ void Relay::tick(uint64_t now){
         if(!p.have)continue;
 #endif
         p.spottedAt=now;config_.spotted(p.id,p.area,where(p),p.mode==bc::Version&&p.haveYaw,p.yaw);}
+    if(config_.online){
+        std::vector<std::string> names;
+#ifndef MUTANT_RELAY_ONLINE_LINKS
+        for(auto& entry:players_)if(!entry.second.link)names.push_back(entry.second.nickname);
+#else
+        for(auto& entry:players_)names.push_back(entry.second.nickname);
+#endif
+        std::sort(names.begin(),names.end());
+#ifndef MUTANT_RELAY_ONLINE_STALE
+        if(!onlineTold_||names!=onlineSaid_){onlineTold_=true;onlineSaid_=names;config_.online(std::move(names));}
+#else
+        if(!onlineTold_){onlineTold_=true;onlineSaid_=names;config_.online(std::move(names));}
+#endif
+    }
 }
 
 // ---- Broadcast mode ---------------------------------------------------------------------------------------------------

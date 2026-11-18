@@ -44,7 +44,7 @@ class Game:
         lib.mod_test_thread_id.restype=c.c_uint32;lib.mod_test_frame_caller.restype=c.c_uint64;lib.mod_test_run_stamp.restype=c.c_char_p
         lib.mod_test_set_pose.argtypes=[c.POINTER(c.c_double),c.POINTER(c.c_float),c.c_int]
         lib.mod_test_set_gauges.argtypes=[c.c_float]*4;lib.mod_test_gauges.argtypes=[c.POINTER(c.c_float)]
-        lib.mod_test_dialog_answer.argtypes=[c.c_uint];lib.mod_test_set_vitals.argtypes=[c.c_int,c.c_int];lib.mod_test_set_event.argtypes=[c.c_int]
+        lib.mod_test_dialog_answer.argtypes=[c.c_uint];lib.mod_test_dialog_body.argtypes=[c.c_char_p,c.c_uint];lib.mod_test_dialog_body.restype=c.c_uint;lib.mod_test_set_vitals.argtypes=[c.c_int,c.c_int];lib.mod_test_set_event.argtypes=[c.c_int]
         config=dict(slot=0,server='127.0.0.1',nickname='Ann',provider='game',session=46,required=True,game_thread=True,puppet_probe=True,
                     virtual_pad=True,discovery_sha256=PIN)
         config.update(extra)

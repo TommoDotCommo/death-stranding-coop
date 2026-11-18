@@ -18,7 +18,7 @@ struct Api {
     std::function<void()> hide;
 };
 // The mod's keys that do something in this session; 0 or false: not listed.
-struct Facts {unsigned ping=0,ride=0,route=0,materials=0,story=0,debug=0;bool like=false;};
+struct Facts {unsigned ping=0,ride=0,route=0,materials=0,story=0,debug=0,server=0;bool like=false;};
 std::u16string keyName(unsigned vk);
 std::u16string body(const Facts&);
 class Page {
