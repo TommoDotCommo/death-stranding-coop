@@ -138,8 +138,8 @@ once (H7). Press K: "Recording a route." in the info log; walk the route; press 
 written (or "Route too short: nothing recorded." for less than two points):
 
 - a line `ROUTE recorded <points> points, <length> m: DSR1-...` in the game's log, and
-- a file `routes\recorded-<UTC yyyymmdd-hhmmss>.txt` in the co-op data folder (`%LOCALAPPDATA%\DeathStrandingCoop`;
-  in the fake world `$XDG_STATE_HOME/DeathStrandingCoop`), holding the string. It is recorded with the default
+- a file `routes\recorded-<UTC yyyymmdd-hhmmss>.txt` beside the mod's config (`redirect-data\mod\routes` in the co-op
+  data folder `%LOCALAPPDATA%\DeathStrandingCoop`, where the proxy lets the mod write; in the fake world the game's folder), holding the string. It is recorded with the default
   rules (10 m wide, 10 m zones, 5 s grace, no limits) and the player's nickname as the author; the launcher changes
   them.
 
@@ -213,14 +213,14 @@ Nothing more is claimed.
 A **Challenges** tab between Saves and Settings (STANDARD.md A1 allows one game tab there; the Witness has its
 Randomizers in the same place):
 
-- **Recorded:** the routes in `routes\recorded-*.txt` with name, points and length; for the selected one: name,
+- **Recorded:** the routes in `redirect-data\mod\routes\recorded-*.txt` with name, points and length; for the selected one: name,
   corridor width, start and finish radius, grace, time limit, no vehicles, at least N cases; **Copy string** puts the
   edited `DSR1-` string on the clipboard (the launcher re-encodes it: `route::encode`), **Publish** sends it to the
   group's server.
 - **Run:** a paste box for a string (it says what it read: name, author, width, rules, length, or why not) or the
   server's list with author and best times; **Run this challenge** writes it into the config for the next start
   (`route`), **Clear** takes it out.
-- **Results:** the `routes\result-*.json` files; **Send to server** for a finished run of a server's challenge (found
+- **Results:** the `redirect-data\mod\routes\result-*.json` files; **Send to server** for a finished run of a server's challenge (found
   by the route's CRC in the server's list).
 
 The server is the group server this launcher last hosted or joined (as for "My strand on this server"), read and

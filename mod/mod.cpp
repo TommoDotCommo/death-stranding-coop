@@ -1184,7 +1184,10 @@ struct Runtime final:ds::Transport {
         char b[32];std::strftime(b,sizeof b,"%Y%m%d-%H%M%S",&utc);return b;}
     // The co-op data folder's routes\ (beside logs\: %LOCALAPPDATA%\DeathStrandingCoop for a player, a test copy's own
     // folder in the lab, $XDG_STATE_HOME/DeathStrandingCoop in the fake world). Never a path from the config.
-    static std::filesystem::path routesDir(){auto logs=diag::DefaultLogsDir();return logs.empty()?logs:logs.parent_path()/"routes";}
+    // Beside the mod's own files (the mod config's folder, redirect-data\mod): the proxy lets the mod write there; a folder
+    // beside the logs is outside it (live 2026-11-18: "routes folder unavailable" in every game).
+    std::filesystem::path modFolder;
+    std::filesystem::path routesDir() const {return modFolder.empty()?modFolder:modFolder/"routes";}
     bool routeWrite(const std::string& name,const std::string& text){
         auto dir=routesDir();if(dir.empty())return false;
         std::error_code ec;std::filesystem::create_directories(dir,ec);
@@ -2555,6 +2558,7 @@ struct Runtime final:ds::Transport {
         } catch(const std::exception& e) {std::lock_guard<std::timed_mutex> guard(mutex);failed=true;failure=e.what();try{note(failure.c_str());}catch(...){}running=false;}
     }
     void init(const std::filesystem::path& path) {
+        modFolder=path.parent_path();
         config=mod::parseConfig(readConfig(path));config.link=mod::link::chosen(config.link,std::getenv("COOP_LINK"));mod::link::profile(config.link,linkProfile);
         diagnostic.Bind(diagnosticHost);
         if(!diagnostic.Open(diag::DefaultLogsDir(),"game",config.maxLogMb))

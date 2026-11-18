@@ -86,7 +86,7 @@ players run in their own game while the mod checks them. Not one of the game's o
 <a id="co-op-data-folder"></a>**Co-op data folder** (aka data folder): `%LOCALAPPDATA%\DeathStrandingCoop\` on a
 player's PC. It holds the [co-op saves](#saves) under `redirect-data\`, the mod under `redirect-data\mod\`,
 `launcher.ini`, [`player.key`](#player-key), the [launcher ticket](#launcher-ticket), [backups](#backups), the
-recorded routes and runs of [challenges](#challenge) (`routes\`) and the group's world file. Uninstalling the mod keeps it. See also [redirect](#redirect).
+recorded routes and runs of [challenges](#challenge) (`redirect-data\mod\routes\`) and the group's world file. Uninstalling the mod keeps it. See also [redirect](#redirect).
 
 <a id="core"></a>**Core** (aka presence core, protocol 1): the game-free networking heart of the real-time layer:
 handshake, player snapshots, clock and [round-trip](#round-trip) estimates, smoothing and a reliable channel for

@@ -30,7 +30,7 @@ def game(folder,library,name,state,extra):
     os.environ['XDG_STATE_HOME']=str(state)
     return Game(folder,library,name,(0,0,5),partner=None,others=0,extra=dict(dict(notices=True,virtual_pad=True),**extra))
 def log(g):return next(g.root.glob('mod-*.log')).read_text()
-def routes(state):return state/'DeathStrandingCoop'/'routes'
+def routes(g):return g.root/'routes'   # beside the mod's config (redirect-data\\mod in a game)
 
 def walk(g,path,speed,tail=0.0):
     """Moves the porter along `path` (game axes: x, y on the ground, z up) at `speed` m/s in real time, ticking."""
@@ -69,7 +69,7 @@ def route_property(library):
             oracle(m,('no recorded route in the log',text[-1500:]))
             points,length,route=int(m.group(1)),int(m.group(2)),m.group(3)
             oracle(2<=points<=10 and 58<=length<=62,('the recorded route',points,length))
-            files=list(routes(state).glob('recorded-*.txt'))
+            files=list(routes(a).glob('recorded-*.txt'))
             oracle(len(files)==1 and files[0].read_text().strip()==route,('the recording file',files))
             oracle(any(n.startswith('Recording a route') for n in s['notices_shown']) and any(re.match(r'Route recorded: (5[89]|6[012]) m\. ',n) for n in s['notices_shown']),('notices',s['notices_shown']))
 
@@ -85,7 +85,7 @@ def route_property(library):
             oracle(re.search(r'ROUTE started: Route \d{8}-\d{4} started\.',text) and re.search(r'ROUTE finished: .* finished in 0:0\d\.\d\.',text),('the log lines',text[-1500:]))
             oracle(any('finished in 0:0' in n for n in s['notices_shown']),('the finish notice',s['notices_shown']))
             m=re.search(r'ROUTE result finished (\d+) ms track=(DST1-[0-9A-Z-]+)',text);oracle(m and int(m.group(1))==r['elapsed_ms'],('the result line',text[-800:]))
-            files=list(routes(state).glob('result-*.json'));oracle(len(files)==1,('one result file',files))
+            files=list(routes(b).glob('result-*.json'));oracle(len(files)==1,('one result file',files))
             res=json.loads(files[0].read_text())
             oracle(res['route']==route and res['outcome']=='finished' and res['ms']==r['elapsed_ms'] and res['track']==m.group(2) and res['reason']=='',('the result file',res))
 
@@ -98,7 +98,7 @@ def route_property(library):
             r=s['route'];oracle(r['state']=='failed' and r['reason']=='left the corridor',('Cee was not failed',r,text[-1500:]))
             oracle(any(n.startswith('Leaving the corridor: 5 s. Corridor: ') for n in s['notices_shown']),('the leaving notice',s['notices_shown']))
             oracle(re.search(r'ROUTE failed: .* failed: left the corridor\.',text) and 'ROUTE result failed' in text,('the log lines',text[-1200:]))
-            res=json.loads(next(routes(state).glob('result-*.json')).read_text());oracle(res['outcome']=='failed' and res['reason']=='left the corridor',res)
+            res=json.loads(next(routes(cc).glob('result-*.json')).read_text());oracle(res['outcome']=='failed' and res['reason']=='left the corridor',res)
 
             # Dee jumps 35 m between two ticks. Her config has no notices (as in group play): the route's lines still reach
             # the info log.

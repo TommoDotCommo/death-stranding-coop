@@ -26,7 +26,7 @@ std::vector<fs::path> files(const fs::path& dir,const std::string& prefix,const 
     std::sort(out.begin(),out.end(),[](const fs::path& a,const fs::path& b){return a.filename().string()>b.filename().string();});
     return out;}
 }
-fs::path folder(const fs::path& data){return data/"routes";}
+fs::path folder(const fs::path& data){return data/"redirect-data"/"mod"/"routes";}   // where the mod writes them (beside its config)
 std::vector<Recorded> recordings(const fs::path& data){
     std::vector<Recorded> out;
     for(auto& f:files(folder(data),"recorded-",".txt")){

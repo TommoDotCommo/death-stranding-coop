@@ -2227,7 +2227,7 @@ stay inside the corridor. The whole design, the formats and the server side: [..
 - **Recording:** K (config `route_record_key`, a virtual-key code; 0 off; F2, `passenger_key` and `story_key` are
   refused) starts and stops it. K is free in the game's default bindings ("Keys" in `game_offsets.md`) and is no shared
   co-op key. The mod samples the porter's position (the presence axes, `cache.local`), simplifies it to at most 300
-  points and writes `ROUTE recorded <n> points, <m> m: DSR1-...` to the log and `routes\recorded-<UTC>.txt` in the
+  points and writes `ROUTE recorded <n> points, <m> m: DSR1-...` to the log and `routes\recorded-<UTC>.txt` beside its config (`redirect-data\mod`) in the
   co-op data folder (the parent of `diag::DefaultLogsDir()`). The info log says "Recording a route." and
   "Route recorded: 412 m. ...".
 - **Running:** `"route":"DSR1-..."` (the launcher writes it; the config checks its form, the mod decodes it at start
