@@ -168,6 +168,20 @@ One run per game start; to run again, start the game again from the launcher (a 
 finished or failed). **Map pins** along the route are not shown: the game's user markers are saved with the game and
 the mod's marker code keeps two groups for the partner and pings ([Later](#later)).
 
+### Live (2026-11-18, one real game, Episode 1 save, the porter driven by the mod's pad script)
+
+- K, a 57 m walk with a right turn, K: "ROUTE recorded 3 points, 57 m: DSR1-..." and the file
+  `redirect-data\mod\routes\recorded-*.txt`.
+- The same walk as a challenge: ready at the start, started, "finished in 0:11.3", the result line and file.
+- Turning left after 3 s instead: "Leaving the corridor: 5 s. Corridor: 1 m to your right." (the porter had turned left:
+  the side is right), then "failed: left the corridor", the result file.
+- Found and fixed on the way: the first live runs "finished" a 26 m route 1.4 s after leaving the start zone, going the
+  wrong way (the finish took progress short of the end by the 60 m search window; now by 2 m), and no route file was
+  written ("routes folder unavailable": the folder beside the logs is outside what the proxy lets the mod write; now
+  beside the mod's config).
+- Not run live yet: the launcher's Challenges tab, publishing to a server and its boards, vehicles, a long route over
+  hills, loading screens and fast travel during a run.
+
 ## The result and its track (DST1)
 
 `DST1-` and base32 like the challenge. Bytes: version 1; the claimed time in ms (u32); the number of points (u16,
