@@ -229,6 +229,7 @@ json::Value World::apiNoticeToken(const std::string& account,int64_t now){
     Value out=Value::object();out.set("format",1);out.set("token",pass(noticeTokens_,account,0,now));out.set("expires",now+NoticeTokenUnusedSeconds);
     note("notice token for "+p.id);return out;
 }
+Reply World::noticeTokenRefused(){return refuse(403,"notice-token","the notice token is unknown or expired: start the game from the launcher again");}
 const World::Player* World::chatPlayer(const std::string& token,int64_t now){
     auto t=passText(token)?noticeTokens_.find(token):noticeTokens_.end();
     if(t==noticeTokens_.end())return nullptr;
@@ -1214,8 +1215,8 @@ void World::remember(const std::string& player,int64_t area,const std::vector<st
 Policy presetPolicy(const std::string& name){
     Policy p;p.preset=name;
     if(name=="friends")return p;
-    if(name=="solo"){p.players=1;p.chat="off";return p;}
-    if(name=="public"){p.chat="off";p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";p.nearCap=16;p.challenges="members";p.importWho="members";return p;}
+    if(name=="solo"){p.players=1;p.chat="off";p.map="off";return p;}
+    if(name=="public"){p.chat="off";p.map="off";p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";p.nearCap=16;p.challenges="members";p.importWho="members";return p;}
     bad("policy: unknown preset '"+name+"' (friends, solo or public)");
 }
 void setPolicy(Policy& p,const std::string& keyValue){
@@ -1243,14 +1244,15 @@ void setPolicy(Policy& p,const std::string& keyValue){
     else if(key=="import")pick(p.importWho,{"everyone","members","owner","nobody"});
     else if(key=="import_cost")pick(p.importCost,{"free","materials"});
     else if(key=="chat")pick(p.chat,{"on","off"});
+    else if(key=="map")pick(p.map,{"on","off"});
     else if(key=="test_mode")pick(p.testMode,{"off","on"});
-    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges, import, import_cost, chat, test_mode)");
+    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges, import, import_cost, chat, map, test_mode)");
 }
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy& p){
     return {{"join",p.join},{"build",p.build},{"accept_offers",p.acceptOffers},{"limit",std::to_string(p.limit)},{"withdrawal",p.withdrawal},
             {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld},
             {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity},{"near_cap",std::to_string(p.nearCap)},{"challenges",p.challenges},
-            {"import",p.importWho},{"import_cost",p.importCost},{"chat",p.chat},{"test_mode",p.testMode}};
+            {"import",p.importWho},{"import_cost",p.importCost},{"chat",p.chat},{"map",p.map},{"test_mode",p.testMode}};
 }
 void World::setPolicy(const Policy& p){std::lock_guard<std::mutex> g(lock_);policy_=p;dirty_=true;++changes_;}
 bool World::servedTo(const Object& o,const std::string& player) const {

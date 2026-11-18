@@ -454,7 +454,7 @@ static void marks(){
 // his presence, a player of the other mode without one; about once a second each.
 static void spots(){
     RelayConfig config;std::map<uint64_t,std::vector<std::tuple<std::array<double,3>,bool,double,uint64_t>>> got;Sim* sim=nullptr;
-    config.spotted=[&](uint64_t id,uint32_t,const std::array<double,3>& at,bool haveYaw,double yaw){got[id].emplace_back(at,haveYaw,yaw,sim->now);};
+    config.spotted=[&](uint64_t id,uint32_t,const std::array<double,3>& at,bool haveYaw,double yaw,const std::string&){got[id].emplace_back(at,haveYaw,yaw,sim->now);};
     Sim s(config);sim=&s;auto& a=s.add(1,"Ann",{50,0,-20});a.pose=[](double){ds::State x;x.position={50,3,-20};x.yaw=-2.25;x.action=3;return x;};
     s.addPairs(2,"Bob",{60,0,-20});
     // A broadcast player publishes only while another is near him: alone, his place is known and his facing is not.

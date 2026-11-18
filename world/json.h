@@ -27,6 +27,7 @@ public:
     bool isString() const {return kind_==String;} bool isInt() const {return kind_==Int;}
     bool boolean(bool d=false) const {return kind_==Bool?i_!=0:d;}
     int64_t integer(int64_t d=0) const {return kind_==Int?i_:kind_==Real?int64_t(d_):d;}
+    double real(double d=0) const {return kind_==Real?d_:kind_==Int?double(i_):d;}
     const std::string& string() const {static const std::string empty;return kind_==String?s_:empty;}
     const std::vector<Value>& items() const {static const std::vector<Value> none;return kind_==Array?a_:none;}
     const std::vector<std::pair<std::string,Value>>& members() const {static const std::vector<std::pair<std::string,Value>> none;return kind_==Object?o_:none;}

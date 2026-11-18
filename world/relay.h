@@ -120,8 +120,8 @@ struct RelayConfig {
     double nearMargin=10;                    // one shown stays until one not shown is this many metres nearer (0..1000)
     // Set: where each player of this server last was, about once a second (collections, ../docs/COLLECTIONS.md): his
     // relay id, area and position (core/relay.h axes: x, up, y, metres), and his facing from his latest presence (a
-    // broadcast player's; `haveYaw` false for the other mode). A player without a position is not reported.
-    std::function<void(uint64_t id,uint32_t area,const std::array<double,3>& position,bool haveYaw,double yaw)> spotted;
+    // broadcast player's; `haveYaw` false for the other mode), and his name. A player without a position is not reported.
+    std::function<void(uint64_t id,uint32_t area,const std::array<double,3>& position,bool haveYaw,double yaw,const std::string& name)> spotted;
     // Set: called from a tick when the names of the players on this server change, and once at the first tick, sorted,
     // one entry a player ("" for no name). Not linked servers' players. For the policy's `online` (World::setOnline).
     std::function<void(std::vector<std::string>)> online;

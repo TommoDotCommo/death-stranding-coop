@@ -49,8 +49,9 @@ struct Reply { int status=200;std::string body="{}"; };
 struct Refused : std::runtime_error { int status;Refused(int s,const std::string& why):std::runtime_error(why),status(s){} };
 // Collections (../docs/COLLECTIONS.md): where a player's game last was, as the relay heard it (World::noteSpot). Game
 // axes in metres (x, y on the ground, z up); `yaw` the porter's facing in radians (0: +y, pi/2: +x), when known.
-struct Spot { double x=0,y=0,z=0;bool haveYaw=false;double yaw=0;int64_t at=0; };
+struct Spot { double x=0,y=0,z=0;bool haveYaw=false;double yaw=0;int64_t at=0;std::string name; };
 constexpr size_t MaxSpots=1024;
+constexpr int64_t MapFreshSeconds=5;constexpr size_t MapPlayersMax=64;   // who counts as there for the map, and how many it lists
 constexpr int64_t SpotFreshSeconds=600,MaxNearMetres=2000,AreaSearchMetres=1500;
 // What may travel between two servers. Text form: "all", "none", or terms separated by ';':
 //   types=l,rope,e   owners=NAME,zygo_...   areas=226,227   max-age=30d (s, m, h, d)   likes=no   imported=yes
@@ -95,11 +96,13 @@ struct ImportResult { size_t added=0,updated=0,unchanged=0,removed=0,filtered=0,
 //   import everyone|members|owner|nobody: who may import a collection (../docs/COLLECTIONS.md); import_cost free|materials
 //   (materials: what an imported structure carried is recorded on it; nothing is taken yet)
 //   chat on|off: players' text chat on this server (World::chatSay); off in the public preset until it has more moderation
+//   map on|off: every player here is shown on the others' map (World::mapRead); off in the public preset, where strangers
+//   would follow each other across the world
 //   test_mode off|on: every player's co-op mod starts in test mode (unlimited materials, stamina and blood; for alpha
 //   testers); the launcher writes it into the game's config, the server itself does nothing with it
 struct Policy {
     std::string preset="friends",join="invite",build="everyone",acceptOffers="auto",withdrawal="go",offerBuilds="yes",offerOld="no",order="newest",identity="none",challenges="everyone";
-    std::string importWho="everyone",importCost="free",chat="on";
+    std::string importWho="everyone",importCost="free",chat="on",map="on";
 #ifndef MUTANT_POLICY_TEST_DEFAULT
     std::string testMode="off";
 #else
@@ -162,6 +165,10 @@ public:
     // to the server's event log for its owner. 403 off or no good token, 400 no usable text, 429 too fast.
     Reply chatRead(const std::string& token,const std::string& since,int64_t now);
     Reply chatSay(const std::string& token,const std::string& body,int64_t now);
+    // The other players for this player's map (README, "Players on the map"): with a notice token, `on` and, while the policy
+    // says on, each player the relay placed in the last MapFreshSeconds: `id`, `name`, x, y, z (game axes), `yaw` when known.
+    // Under identity keys his own entry is left out and his choice of who he is shown holds; elsewhere the game knows its id.
+    Reply mapRead(const std::string& token,int64_t now);
     // The owner's account key (identity::account of the host's launcher key; "" none): his signed calls are the
     // owner's actions in the API. Saved with the world.
     void setOwner(const std::string& account);
@@ -313,6 +320,9 @@ private:
     struct ChatLine {uint64_t n=0;std::string name,text;};
     std::deque<ChatLine> chat_;uint64_t chatNext_=1;std::map<std::string,std::deque<int64_t>> chatTimes_;
     const Player* chatPlayer(const std::string& token,int64_t now);
+    static Reply noticeTokenRefused();
+    uint64_t relayIdOf(const std::string& account) const;   // under identity keys; 0 none
+    Viewer viewerOf(uint64_t relayId) const;
     Reply signInLocked(const std::string& key,const std::string& displayName,const std::string& gateway);
     // What each player's game was handed per area (curate): kept so the same structures come back, saved with the world.
     struct Picks { int64_t asked=0;std::vector<std::string> ids; };

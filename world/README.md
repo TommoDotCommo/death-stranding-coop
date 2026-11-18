@@ -769,6 +769,7 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `import` | `everyone`, `members`, `owner`, `nobody` | everyone | everyone | members |
 | `import_cost` | `free`, `materials` | free | free | free |
 | `chat` | `on`, `off` | on | off | off |
+| `map` | `on`, `off` | on | off | off |
 | `test_mode` | `off`, `on` | off | off | off |
 
 - `join`: recorded and shown, nothing more yet (there are no invitations).
@@ -796,6 +797,7 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
   sees"), unless the server was started with `--broadcast-near`. A world file from before it has its preset's value; a
   `coop-world` from before it refuses a world file that has it (unknown setting).
 - `chat`: `on` lets the players here talk with text chat ("Text chat", below).
+- `map`: `on` shows every player here to the others wherever they are ("Players on the map", below).
 - `test_mode`: `on` puts every player's game here in test mode (`../mod/README.md`, "Test mode": material crates on U,
   blood and stamina kept full), for alpha testers. The server does nothing else with it: the player's launcher reads it
   with the rules before his game starts and writes the mod's `test_mode` into the game's config. Its line in words
@@ -888,6 +890,23 @@ What it holds to:
 | `remove-player` removes that builder's objects only | the other builders of the same linked server are not touched |
 | The world file keeps the policy, the choices and every object's state; it is format 2, which a `coop-world` from before refuses | an older server would hand out what is kept and let remnants be changed |
 | A `coop-world` from before `order`, `per_builder` and `spread` refuses a world file that has them (unknown setting) | it would not choose as the owner set |
+
+### Players on the map
+
+The policy setting `map` (`on` in the friends preset, `off` in solo and public: under public rules strangers could follow
+each other across the world). A game asks with its notice token, in the header `X-Coop-Token`:
+
+| Call | Answer |
+|---|---|
+| `GET …/coop/map` | `format` 1, `on`, `players`: at most 64 players the relay placed in the last 5 s, each `id` (the relay id, as text), `name`, `x`, `y`, `z` (game axes, metres, z up) and `yaw` (radians) when known. While `on` is false, none. 403 for a bad token |
+
+The relay reports each player's place about once a second, so a player who has left drops off within seconds; players of
+linked servers are not listed. Under identity keys the asker's own entry is left out and his choice of who he is shown
+(`everyone`, `friends`, `nobody`, "How many players one player sees") holds; elsewhere a relay id is whatever the game says,
+so the game leaves itself out. That choice is about who he sees: nobody can hide from the map but through the `map` setting.
+Places are not encrypted and are not kept: only the latest one of each player is held, in memory.
+
+Tests: `map_test.cpp`; mutants `MAP_TOKEN`, `MAP_OFF`, `MAP_STALE`, `MAP_SELF`, `MAP_CHOICE`.
 
 ### Text chat
 

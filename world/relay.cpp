@@ -387,7 +387,7 @@ void Relay::tick(uint64_t now){
 #ifndef MUTANT_RELAY_SPOT_NO_POSITION
         if(!p.have)continue;
 #endif
-        p.spottedAt=now;config_.spotted(p.id,p.area,where(p),p.mode==bc::Version&&p.haveYaw,p.yaw);}
+        p.spottedAt=now;config_.spotted(p.id,p.area,where(p),p.mode==bc::Version&&p.haveYaw,p.yaw,p.nickname);}
     if(config_.online){
         std::vector<std::string> names;
 #ifndef MUTANT_RELAY_ONLINE_LINKS

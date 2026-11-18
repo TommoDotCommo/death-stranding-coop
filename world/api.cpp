@@ -41,6 +41,7 @@ std::string settingText(const std::string& key,const std::string& value,size_t p
                                 value=="owner"?"Only the server's owner publishes route challenges; everyone may run them.":
                                 value=="nobody"?"No route challenges are published here.":"Any player may publish a route challenge for the others to run.";
     if(key=="chat")return value=="on"?"Players can talk here with text chat (Y in the game).":"Text chat is off on this server.";
+    if(key=="map")return value=="on"?"Every player here is shown on the others' map, wherever they are.":"Other players are not shown on the map here.";
     if(key=="test_mode")return value=="on"?"Test mode: unlimited materials (U), stamina and blood for everyone here. For testing: the game does not play as it should.":
                                "No test mode: the game plays as usual.";
     if(key=="identity")return value=="keys"?"Players are known by the key their launcher made: nobody signs in, builds or withdraws in another player's name (the traffic is not encrypted).":
@@ -197,17 +198,54 @@ void World::apiSetFriends(const std::string& key,const std::vector<std::string>&
     if(!show.empty())p.showOthers=show=="default"?"":show;
     dirty_=true;++changes_;note("friends of "+p.id+": "+std::to_string(p.friends.size())+", show_others "+(p.showOthers.empty()?"(his game's)":p.showOthers));
 }
+Reply World::mapRead(const std::string& token,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+#ifndef MUTANT_MAP_TOKEN
+    if(!chatPlayer(token,now))return noticeTokenRefused();
+#endif
+    Value out=Value::object(),list=Value::array();out.set("format",1);out.set("on",policy_.map=="on");
+#ifndef MUTANT_MAP_OFF
+    if(policy_.map=="on"){
+#else
+    {
+#endif
+        uint64_t me=0;Viewer choice;
+        if(policy_.identity=="keys"){auto t=noticeTokens_.find(token);if(t!=noticeTokens_.end())me=relayIdOf(t->second.account);if(me)choice=viewerOf(me);}
+        size_t listed=0;
+#ifndef MUTANT_MAP_CHOICE
+        if(choice.show!="nobody")
+#endif
+        for(auto& e:spots_){
+            auto& s=e.second;if(listed==MapPlayersMax)break;
+#ifndef MUTANT_MAP_STALE
+            if(s.at+MapFreshSeconds<now)continue;
+#endif
+#ifndef MUTANT_MAP_SELF
+            if(e.first==me)continue;
+#endif
+#ifndef MUTANT_MAP_CHOICE
+            if(choice.show=="friends"&&!choice.friends.count(e.first))continue;
+#endif
+            Value v=Value::object();v.set("id",std::to_string(e.first));v.set("name",s.name);v.set("x",s.x);v.set("y",s.y);v.set("z",s.z);if(s.haveYaw)v.set("yaw",s.yaw);
+            list.push(v);++listed;}
+    }
+    out.set("players",list);Reply r;r.body=out.dump();return r;
+}
+uint64_t World::relayIdOf(const std::string& account) const {
+    auto it=relayIds_.find(account);if(it!=relayIds_.end())return it->second;
+    identity::PublicKey k{};uint64_t id=identity::keyOf(account,k)?identity::relayId(k):0;relayIds_[account]=id;return id;
+}
 World::Viewer World::relayViewer(uint64_t relayId) const {
     std::lock_guard<std::mutex> g(lock_);
+    return viewerOf(relayId);
+}
+World::Viewer World::viewerOf(uint64_t relayId) const {
     Viewer v;v.cap=policy_.nearCap;
     if(policy_.identity!="keys")return v;   // a relay id is whatever the game says: nobody's choice or friends
-    auto idOf=[&](const std::string& account)->uint64_t{
-        auto it=relayIds_.find(account);if(it!=relayIds_.end())return it->second;
-        identity::PublicKey k{};uint64_t id=identity::keyOf(account,k)?identity::relayId(k):0;relayIds_[account]=id;return id;};
     for(auto& p:players_){
-        if(idOf(p.first)!=relayId)continue;
+        if(relayIdOf(p.first)!=relayId)continue;
         v.show=p.second.showOthers;
-        for(auto& f:p.second.friends)if(uint64_t id=idOf(f))v.friends.insert(id);
+        for(auto& f:p.second.friends)if(uint64_t id=relayIdOf(f))v.friends.insert(id);
         break;}
     return v;
 }
