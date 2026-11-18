@@ -6,7 +6,7 @@ installation is needed. The game is still experimental; this launcher does not m
 shared story progression or the partner body release-ready.
 
 The [co-op standard](https://github.com/TommoDotCommo/coop-mod-kit/blob/main/STANDARD.md)
-and its prototype define the structure: Play / Saves / Settings / About (A1),
+and its prototype define the structure: Play / Saves / Challenges / Settings / About (A1: Challenges is the one tab of its own a game may add),
 Host / Join / Solo and one primary action (A2), Lobby as a state of Play (A3),
 network discovery and invites (B1/B2/B5–B9, C3–C5), ready/start (D3), settings saved
 on change (E1), separate co-op saves and backups (F1), per-user invite links (G3).
@@ -313,6 +313,19 @@ two-player features (cargo, structures made in the session, vehicles, enemies, o
 play; no list of who is in the group, no way to leave except closing the game, no check of the host's firewall; the
 owner's window does not refresh by itself (Refresh), and it has no kick or ban (the server has them as owner calls:
 `../world/README.md`, "Kick and ban"; `../deploy/vps/` uses them over SSH).
+
+## Challenges (built 2026-11-18; not seen on a screen)
+
+The tab between Saves and Settings (STANDARD.md A1: one tab of the game's own) for route challenges
+([../docs/ROUTES.md](../docs/ROUTES.md)): the routes the mod recorded (key K in the game) with a name and rules to set
+(corridor width, start and finish zones, grace, a time limit in minutes, at least N cases, no vehicles), **Copy
+string**, **Run it next game** and **Publish on the group server**; a paste box that says what a `DSR1-` string holds,
+the group server's challenges with their best times (**Refresh**), **Run this challenge next game** and **Run no
+challenge**; and the runs the mod wrote, with **Send to server** for a finished one. The chosen challenge is kept in
+launcher.ini (`challenge=`) and written into every game config as `route` (`core.cpp`). The server is the group server
+this launcher last hosted or joined, as for "My strand on this server". Game-free: `challenges.*`,
+`challenges_test.cpp` (`make challenges-test`: 3 mutants, CHALLENGES_EDIT_POINTS, CHALLENGES_SEND_FAILED,
+CONFIG_ROUTE_DROPPED).
 
 ## Diagnostics for a bug report
 

@@ -24,6 +24,7 @@
 // With --relay-port it is also the relay of the real-time layer (relay.h): one UDP socket on the same address, one thread.
 #include "api.h"
 #include "front.h"
+#include "challenges.h"
 #include "limits.h"
 #include "relay.h"
 #include <algorithm>
@@ -65,14 +66,16 @@ void line(const std::string& text){
     std::lock_guard<std::mutex> g(outLock);diagnostic->Line(text);std::cout<<text<<std::endl;
     if(!logPath.empty()){std::ofstream f(logPath,std::ios::app);f<<text<<'\n';}}
 int64_t nowSeconds(){return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();}
+world::Challenges challenges;   // route challenges (challenges.h), saved in the world file beside the world
 void save(world::World& w){
-    if(dataPath.empty()||!w.dirty())return;
+    if(dataPath.empty()||(!w.dirty()&&!challenges.dirty()))return;
     static std::mutex m;std::lock_guard<std::mutex> g(m);
-    auto text=w.snapshot().dump();auto tmp=dataPath+".tmp";
+    auto doc=w.snapshot();if(challenges.size()||challenges.dirty())doc.set("challenges",challenges.snapshot());
+    auto text=doc.dump();auto tmp=dataPath+".tmp";
     {std::ofstream f(tmp,std::ios::binary|std::ios::trunc);f<<text;if(!f){line("save failed: "+tmp);return;}}
     std::remove(dataPath.c_str());
     if(std::rename(tmp.c_str(),dataPath.c_str())!=0){line("save failed: "+dataPath);return;}
-    w.saved();}
+    w.saved();challenges.saved();}
 bool sendAll(sock_t s,const std::string& data){
     size_t at=0;while(at<data.size()){auto n=send(s,data.data()+at,int(data.size()-at),0);if(n<=0)return false;at+=size_t(n);}return true;}
 const char* reason(int status){return status==200?"OK":status==400?"Bad Request":status==401?"Unauthorized":status==403?"Forbidden":status==404?"Not Found":status==429?"Too Many Requests":"Error";}
@@ -203,7 +206,7 @@ int loadWorld(world::World& w,bool mustExist){
         if(mustExist){std::cerr<<"cannot read "<<dataPath<<"\n";return 1;}
         w.setServerId(w.serverId());return 0;}   // a new world: its id is saved with the first write
     std::stringstream text;text<<f.rdbuf();
-    try{w.restore(json::parseFile(text.str(),world::MaxWorldFileBytes));}
+    try{auto doc=json::parseFile(text.str(),world::MaxWorldFileBytes);w.restore(doc);challenges.restore(doc.get("challenges"));}
     catch(const std::exception& e){std::cerr<<"cannot read "<<dataPath<<": "<<e.what()<<" (left untouched; move it away to start a new world)\n";return 1;}
     return 0;
 }
@@ -549,6 +552,8 @@ int main(int argc,char** argv){
     // This world's display name, saved with it (README, "Builder names").
     if(naming&&name!=w.name()){w.setName(name);save(w);}
     world::Front front(w,prefix,links);
+    front.challenges=[&w](const std::string& m,const std::string& c,const std::string& b,const std::string& signer,int64_t now){
+        auto r=world::challengesApi(w,challenges,m,c,b,signer,now);if(challenges.dirty())save(w);return r;};
     if(limits)gate=std::make_unique<world::Gate>(gateConfig);
     sockaddr_in address{};address.sin_family=AF_INET;address.sin_port=htons(uint16_t(port));
     if(inet_pton(AF_INET,bind.c_str(),&address.sin_addr)!=1){std::cerr<<"--bind needs a numeric IPv4 address\n";return 2;}

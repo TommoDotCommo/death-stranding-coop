@@ -2319,7 +2319,8 @@ settings. The profile's `bindings.cfg` (read 2026-11-09 in a test copy with defa
 `bind "<Context>_kDSFunction<Action>" "<Key>" "<0|1>"`) binds **V to Melee** and Tab to the main menu; keys 1-5, A, C,
 D, E, F, F8, G, I, Q, R, S, T, W, Z, Space, Left Alt/Ctrl/Shift and the mouse buttons are taken. Free: B, H, J, K, L,
 M, N, O, P, U, X, Y. The mod's ping key is therefore **B** (changeable at run time with the `key <vk>` command), read
-only while the game window has the focus. Middle mouse has a menu meaning (`EMenuInputFunction_FUNCTION_MOUSE_MIDDLE`,
+only while the game window has the focus. Of the others the mod uses J (ride along), L (a like) and K (record a route
+challenge, `route_record_key`; `docs/ROUTES.md`). Middle mouse has a menu meaning (`EMenuInputFunction_FUNCTION_MOUSE_MIDDLE`,
 map menu `OnMouseMiddle...` handlers).
 
 ## Time of day and weather (static only, build 13300582)

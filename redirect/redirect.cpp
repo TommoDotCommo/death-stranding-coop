@@ -1102,8 +1102,8 @@ void install_redirect(void* self,bool releaseSession) {
         // Read the same strict config as bootstrap_mod; never derive a write path from it.
         auto cfg=policy.instance+L"\\mod\\mod.json";
         HANDLE f=real_cf(cfg.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
-        if(f!=INVALID_HANDLE_VALUE){char bytes[4097];DWORD n=0;bool ok=ReadFile(f,bytes,sizeof bytes,&n,nullptr);CloseHandle(f);
-            if(ok&&n<=4096)maxMb=mod::parseConfig(std::string(bytes,n)).maxLogMb;}
+        if(f!=INVALID_HANDLE_VALUE){static char bytes[mod::ConfigMax+1];DWORD n=0;bool ok=ReadFile(f,bytes,sizeof bytes,&n,nullptr);CloseHandle(f);
+            if(ok&&n<=mod::ConfigMax)maxMb=mod::parseConfig(std::string(bytes,n)).maxLogMb;}
         if(!player_log.Open(diag::DefaultLogsDir(),"proxy",maxMb))OutputDebugStringA("redirect: player diagnostic log unavailable");
     }
     for(auto& e:modules.extra) note(L"MODULE_EXTRA",e,L"admitted by the player's extra-modules.txt for this copy");
@@ -1258,8 +1258,8 @@ BOOL CALLBACK bootstrap_mod(PINIT_ONCE,PVOID,PVOID*) {
         if(!safe_tree(config,true)||!safe_tree(dll,true)) fatal("redirect: unsafe mod/config path\n");
         HANDLE f=real_cf(config.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
         if(f==INVALID_HANDLE_VALUE) fatal("redirect: cannot read mod config\n");
-        char bytes[4097];DWORD n=0;bool ok=ReadFile(f,bytes,sizeof(bytes),&n,nullptr);CloseHandle(f);
-        if(!ok||n>4096) fatal("redirect: mod config read/size failure\n");
+        static char bytes[mod::ConfigMax+1];DWORD n=0;bool ok=ReadFile(f,bytes,sizeof(bytes),&n,nullptr);CloseHandle(f);
+        if(!ok||n>mod::ConfigMax) fatal("redirect: mod config read/size failure\n");
         auto c=mod::parseConfig(std::string(bytes,n));
         if(c.gameThread&&(!trace_enabled||net.mode!=redirect::NetMode::enforce))fatal("redirect: game_thread requires observer hooks and enforced networking\n");
         if(c.virtualPad!=pad_enabled)fatal("redirect: COOP_VIRTUAL_PAD and mod virtual_pad must agree\n");

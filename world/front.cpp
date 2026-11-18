@@ -66,7 +66,9 @@ Reply Front::handle(const Request& r,int64_t now){
         if(signatures_.check(r.headers,r.method,r.target,r.body,world_.serverId(),now,signer,why)==identity::Checker::Result::Bad){
             if(world_.log)world_.log("signed call refused: "+why);
             Reply e;e.status=401;json::Value v=json::Value::object();v.set("status","401");v.set("code",401);v.set("message",why);e.body=v.dump();return e;}
-        return launcherApi(world_,r.method,path.substr(6),query(q,"player"),r.body,signer,now);}
+        const std::string call=path.substr(6);
+        if(challenges&&(call=="challenges"||call.compare(0,10,"challenge-")==0))return challenges(r.method,call,r.body,signer,now);
+        return launcherApi(world_,r.method,call,query(q,"player"),r.body,signer,now);}
     std::string key,ticket;
     if(path.compare(0,3,"/k/")==0){
         size_t end=path.find('/',3);if(end==std::string::npos)return notFound();

@@ -145,7 +145,7 @@ def main():
         mono = [str(ROOT / '../vendor/monocypher' / f) for f in ('monocypher.c', 'monocypher-ed25519.c')]
         subprocess.run(['g++', '-std=c++17', '-O1', '-pthread', '-DMUTANT_GATE_DRIP',
                         *[str(ROOT / f) for f in ('main.cpp', 'front.cpp', 'api.cpp', 'link.cpp', 'world.cpp', 'relay.cpp',
-                                                  'identity.cpp', 'signatures.cpp')], *mono, '-o', mutant], check=True)
+                                                  'identity.cpp', 'signatures.cpp', 'challenges.cpp', '../mod/route.cpp')], *mono, '-o', mutant], check=True)
         server = start(mutant, port, os.path.join(d, 'world2.json'))
         try:
             survived = drip_cut(port)

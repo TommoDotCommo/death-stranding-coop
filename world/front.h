@@ -13,6 +13,7 @@
 // (identity.h; the signature of every /coop/ call that carries one is checked here, before the API sees it).
 #include "link.h"
 #include "signatures.h"
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -25,6 +26,9 @@ public:
     // `links`: the servers that may ask this one for objects, each known by its key. None: /link/ does not exist.
     Front(World& w,std::string prefix,std::vector<LinkConfig> links={}):world_(w),prefix_(std::move(prefix)),links_(std::move(links)){}
     Reply handle(const Request&,int64_t nowSeconds);
+    // Route challenges (challenges.h): the /coop/ calls challengeCall() names go here, after the signature check, when
+    // set (coop-world sets it; without it they are not found).
+    std::function<Reply(const std::string& method,const std::string& call,const std::string& body,const std::string& signer,int64_t now)> challenges;
 private:
     World& world_;std::string prefix_;std::vector<LinkConfig> links_;identity::Checker signatures_;
 };

@@ -34,6 +34,7 @@ std::u16string text(Kind kind,const std::string& partnerName){
     case Kind::StoryLoaded:return u"Loaded the checkpoint of "+name+u". You share the story again.";
     case Kind::StoryFailed:return u"The checkpoint of "+name+u" could not be loaded here.";
     case Kind::Strand:return {};   // its line comes finished (Notifier::strand)
+    case Kind::Route:return {};    // its line comes finished (Notifier::route)
     }
     return {};
 }
@@ -171,9 +172,9 @@ void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& 
 #ifndef MUTANT_NOTICE_GAP
     if(shown_&&now-lastShown_<GapMs)return;
 #endif
-    if(api_.show&&api_.show(e.kind==Kind::Strand?e.line:text(e.kind,e.name),icon(e.kind))){
+    if(api_.show&&api_.show((e.kind==Kind::Strand||e.kind==Kind::Route)?e.line:text(e.kind,e.name),icon(e.kind))){
         ++shown_;lastShown_=now;if(e.kind==Kind::Joined)joining_=false;
-        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call","slow","steady","episode","scan","story offer","story loaded","story failed","strand"};static_assert(sizeof(names)/sizeof(names[0])==size_t(Kind::Strand)+1,"a name for every notice");
+        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call","slow","steady","episode","scan","story offer","story loaded","story failed","strand","route"};static_assert(sizeof(names)/sizeof(names[0])==size_t(Kind::Route)+1,"a name for every notice");
         log_(std::string("NOTICE shown: ")+names[unsigned(e.kind)]+"\n");
         pending_.pop_front();return;
     }

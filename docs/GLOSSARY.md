@@ -77,14 +77,25 @@ that number. The reader already understands them: `tools/diag_report.py --align`
 player turns it off, that makes the game build other players' structures as soon as the [strand server](#strand-server)
 hands them over, skipping the game's own range, placement and area checks. *Where:* `mod/received.h`.
 
+<a id="challenge"></a>**Challenge** (aka route challenge; string `DSR1-...`): a recorded delivery route with a
+[corridor](#corridor), a start and a finish zone and rules (a time limit, no vehicles, at least N cases), which other
+players run in their own game while the mod checks them. Not one of the game's own orders. A finished *run* sends its
+*track* (`DST1-...`) to the group's server, which replays it before it counts on the challenge's board. *Where:*
+`mod/route.h`, `world/challenges.h`, `launcher/challenges.h`; described in `docs/ROUTES.md`.
+
 <a id="co-op-data-folder"></a>**Co-op data folder** (aka data folder): `%LOCALAPPDATA%\DeathStrandingCoop\` on a
 player's PC. It holds the [co-op saves](#saves) under `redirect-data\`, the mod under `redirect-data\mod\`,
-`launcher.ini`, [`player.key`](#player-key), the [launcher ticket](#launcher-ticket), [backups](#backups) and the
-group's world file. Uninstalling the mod keeps it. See also [redirect](#redirect).
+`launcher.ini`, [`player.key`](#player-key), the [launcher ticket](#launcher-ticket), [backups](#backups), the
+recorded routes and runs of [challenges](#challenge) (`redirect-data\mod\routes\`) and the group's world file. Uninstalling the mod keeps it. See also [redirect](#redirect).
 
 <a id="core"></a>**Core** (aka presence core, protocol 1): the game-free networking heart of the real-time layer:
 handshake, player snapshots, clock and [round-trip](#round-trip) estimates, smoothing and a reliable channel for
 events such as cargo. One core runs per pair of players. *Where:* `core/`, described in `core/CORE.md`.
+
+<a id="corridor"></a>**Corridor**: the part of the ground a [challenge](#challenge)'s runner must stay in: everything
+within half its width (2 to 100 m) of the recorded route's line, measured flat, so a corridor over a mountain is as
+wide as on the plain; the start and finish zones count as inside. Outside it for longer than the grace, the run
+fails. *Where:* `mod/route.h`.
 
 <a id="crash-record"></a>**Crash record** (aka crash recorder, hang note): an opt-in part of the proxy
 (`COOP_CRASH_RECORD=1` or `2`) that writes every fault address as module plus offset, the stack, a hang note when the

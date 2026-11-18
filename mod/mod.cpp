@@ -74,6 +74,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "others.h"
 #include "crowd.h"
 #include "fights.h"
+#include "route.h"
 #include "../core/relay.h"
 #ifdef MOD_FAKE_NETWORK
 #include "fake_memory.h"
@@ -83,6 +84,7 @@ constexpr int INVALID_SOCKET=-1;
 #include <cmath>
 #include <iomanip>
 #include <cstring>
+#include <ctime>
 #include <deque>
 #include <optional>
 #include <filesystem>
@@ -1164,6 +1166,112 @@ struct Runtime final:ds::Transport {
         strandPoller=std::make_unique<mod::strand::Poller>(base,[a=*address,port,token](const std::string& target){return mod::strand::get(a,port,target,token,mod::strand::ConnectMs);});
         note(config.strandNotices?"STRAND notices on: this player's builds on the server are read every 5 s\n":"STRAND read on: the server's word on this player's older strand is read every 5 s (offer_strand)\n");
     }
+    // --- Route challenges (route.h, docs/ROUTES.md). The recording key (config route_record_key, K by default) starts and
+    // stops recording the porter's path; the string goes into the log and a file in the co-op data folder's routes\.
+    // A config `route` is a challenge this game runs: the checker is fed every tick with the porter's position; what it
+    // says goes into the log (ROUTE ...) and, with `notices`, the info log; at the end a result file for the launcher.
+    mod::route::Recorder routeRecorder;mod::marker::KeyEdge routeEdge;std::optional<mod::route::Checker> routeRun;
+    std::string routeString;std::vector<std::u16string> routeLines;bool routeOver=false,routeTold=false;   // routeTold: a line was ever said
+    uint64_t routeCasesAt=0;std::optional<unsigned> routeCasesSeen;
+    static std::u16string routeWide(const std::string& s){std::u16string w;for(unsigned char c:s)w+=char16_t(c>=0x20&&c<0x7f?c:'?');return w;}
+    static std::string routeStamp(){
+        std::time_t t=std::time(nullptr);std::tm utc{};
+#ifdef _WIN32
+        gmtime_s(&utc,&t);
+#else
+        gmtime_r(&t,&utc);
+#endif
+        char b[32];std::strftime(b,sizeof b,"%Y%m%d-%H%M%S",&utc);return b;}
+    // The co-op data folder's routes\ (beside logs\: %LOCALAPPDATA%\DeathStrandingCoop for a player, a test copy's own
+    // folder in the lab, $XDG_STATE_HOME/DeathStrandingCoop in the fake world). Never a path from the config.
+    // Beside the mod's own files (the mod config's folder, redirect-data\mod): the proxy lets the mod write there; a folder
+    // beside the logs is outside it (live 2026-11-18: "routes folder unavailable" in every game).
+    std::filesystem::path modFolder;
+    std::filesystem::path routesDir() const {return modFolder.empty()?modFolder:modFolder/"routes";}
+    bool routeWrite(const std::string& name,const std::string& text){
+        auto dir=routesDir();if(dir.empty())return false;
+        std::error_code ec;std::filesystem::create_directories(dir,ec);
+        auto file=dir/name;
+#ifdef _WIN32
+        HANDLE h=CreateFileW(file.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);if(h==INVALID_HANDLE_VALUE)return false;
+        DWORD n=0;bool ok=WriteFile(h,text.data(),DWORD(text.size()),&n,nullptr)&&n==text.size();CloseHandle(h);return ok;
+#else
+        int fd=::open(file.c_str(),O_CREAT|O_EXCL|O_WRONLY,0600);if(fd<0)return false;
+        bool ok=::write(fd,text.data(),text.size())==ssize_t(text.size());::close(fd);return ok;
+#endif
+    }
+    // Route lines reach the info log whether or not `notices` is on (group play has no partner notices): the first one
+    // brings the info log up, without a partner (Notifier::partnerless).
+    void routeSay(const std::string& line){routeTold=true;routeLines.push_back(routeWide(line));if(routeLines.size()>8)routeLines.erase(routeLines.begin());}
+    void routeStart(){
+        if(config.route.empty())return;
+        std::string why;auto r=mod::route::decode(config.route,&why);
+        if(!r)throw std::runtime_error("route: "+why);
+        routeString=config.route;routeRun.emplace(*r);
+        char id[16];std::snprintf(id,sizeof id,"%08x",mod::route::id(config.route));
+        note(("ROUTE challenge \""+r->name+"\" by \""+r->author+"\": "+mod::route::rulesText(r->rules)+", "+std::to_string(r->points.size())+" points, "
+              +std::to_string(long(std::lround(mod::route::length(r->points))))+" m (id "+id+")\n").c_str());
+    }
+    // The porter's carried cases, read at most twice a second (carry_visual.h: cargo slots only); nullopt: unreadable.
+    std::optional<unsigned> routeCases(uint64_t now){
+        if(now-routeCasesAt<500)return routeCasesSeen;
+        routeCasesAt=now;std::optional<mod::carry::Summary> read;auto anchor=anchorNow();uint64_t manager=0;
+        if(sampler&&anchor.entity&&cargoManagerSlot&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
+            if(auto items=mod::carry::readCarried(*sampler,anchor.entity,sampler->base+mod::carry::ComponentVtable,manager))read=mod::carry::summarise(*items);
+#ifdef MOD_FAKE_NETWORK
+        if(anchor.entity&&fakeCarried)read=*fakeCarried;
+#endif
+        if(!read){routeCasesSeen.reset();return routeCasesSeen;}
+        unsigned n=0;for(auto& e:*read)n+=e.count;routeCasesSeen=n;return routeCasesSeen;
+    }
+    void tickRoute(uint64_t now){
+        const bool pose=cache.available&&!cache.gated;
+#ifndef MOD_MUTANT_ROUTE_AXES
+        const mod::route::Point at{cache.local.position[0],cache.local.position[1],cache.local.position[2]};   // presence axes: y up
+#else
+        const mod::route::Point at{cache.local.position[0],cache.local.position[2],cache.local.position[1]};   // the mutant: the game's axes (z up)
+#endif
+        if(config.routeRecordKey&&routeEdge.pressed(modKey(config.routeRecordKey),now)){
+            if(!routeRecorder.on()){routeRecorder.start();if(pose)routeRecorder.sample(at,now);note("ROUTE recording started\n");routeSay("Recording a route. Press the key again to stop.");}
+            else{
+                if(pose)routeRecorder.sample(at,now);
+                auto points=routeRecorder.stop();
+                mod::route::Route r;r.name="Route "+routeStamp().substr(0,13);r.points=points;
+                r.author=mod::route::nameText(config.nickname,mod::route::AuthorMax,true)?config.nickname:std::string();
+                std::string text;
+                try{if(points.size()>=2)text=mod::route::encode(r);}catch(const std::exception& e){note((std::string("ROUTE recording not kept: ")+e.what()+"\n").c_str());}
+                if(text.empty()){note("ROUTE recording too short: nothing written\n");routeSay("Route too short: nothing recorded.");}
+                else{
+                    const std::string file="recorded-"+routeStamp()+".txt";
+                    note(("ROUTE recorded "+std::to_string(points.size())+" points, "+std::to_string(long(std::lround(mod::route::length(points))))+" m: "+text+"\n").c_str());
+                    note((routeWrite(file,text+"\n")?"ROUTE recording file routes/"+file+"\n":"ROUTE recording file not written (routes folder unavailable)\n").c_str());
+                    routeSay("Route recorded: "+std::to_string(long(std::lround(mod::route::length(points))))+" m. Open the launcher's Challenges to share it.");}
+            }
+        }
+        if(routeRecorder.on()&&pose)routeRecorder.sample(at,now);
+        if(!routeRun||routeOver||!pose)return;
+        mod::route::Sample sm;sm.ms=now;sm.at=at;sm.yaw=cache.local.yaw;
+        sm.vehicle=(cache.local.flags&(ds::Vehicle|ds::Passenger))!=0;
+        // The provider's own Teleport flag is set for any 5 m between two samples (providers.h), which a truck passes
+        // in one long frame: the checker's own jump and speed rules decide instead.
+        if(routeRun->route().rules.minCases)sm.cases=routeCases(now);
+        auto events=routeRun->feed(sm);
+        static const char* const kinds[]={"away","ready","started","leaving","back","failed","finished","wait"};
+        for(auto& e:events){note(("ROUTE "+std::string(kinds[size_t(e.kind)])+": "+e.text+"\n").c_str());routeSay(e.text);}
+        auto phase=routeRun->phase();
+        if(phase!=mod::route::Phase::Failed&&phase!=mod::route::Phase::Finished)return;
+        routeOver=true;const bool done=phase==mod::route::Phase::Finished;
+        std::string track;
+        try{auto r=routeRun->route();track=mod::route::encodeTrack({mod::route::id(routeString),routeRun->result(),routeRun->track()},r.points.front());}
+        catch(const std::exception& e){note((std::string("ROUTE track not kept: ")+e.what()+"\n").c_str());}
+        char id[16];std::snprintf(id,sizeof id,"%08x",mod::route::id(routeString));
+        note(("ROUTE result "+std::string(done?"finished":"failed")+" "+std::to_string(routeRun->result())+" ms"+(done?"":" ("+routeRun->reason()+")")
+              +(routeRun->casesVerified()?"":", cases unverified")+" track="+track+"\n").c_str());
+        std::string json="{\"route\":\""+routeString+"\",\"outcome\":\""+(done?"finished":"failed")+"\",\"ms\":"+std::to_string(routeRun->result())
+            +",\"reason\":\""+(done?"":routeRun->reason())+"\",\"cases_verified\":"+(routeRun->casesVerified()?"true":"false")+",\"track\":\""+track+"\"}\n";
+        const std::string file="result-"+routeStamp()+"-"+id+".json";
+        note((routeWrite(file,json)?"ROUTE result file routes/"+file+"\n":"ROUTE result file not written (routes folder unavailable)\n").c_str());
+    }
     // --- Notices (notice.h): opt-in `notices`. The partner joined / left / nobody yet, in the game's own info log.
     // `puppet.ride` "notice" shows a test line whatever the session does. With `strand_notices` alone (group play has
     // no partner) the same queue tells the lines about this player's builds, and nothing about a partner.
@@ -1172,7 +1280,7 @@ struct Runtime final:ds::Transport {
     std::vector<std::u16string> fakeNotices;   // the fake world's info log: every line shown, in order
 #endif
     void tickNotices(uint64_t now) {
-        if(!config.notices&&!noticeTest&&!config.strandNotices)return;
+        if(!config.notices&&!noticeTest&&!config.strandNotices&&!routeTold)return;
 #ifndef MOD_FAKE_NETWORK
         if(!noticeApi&&!noticeTried){
             auto* sp=&*sampler;if(!noticeJob.ready([sp]{return mod::notice::nativeApi(*sp);}))return;   // checked beside the game
@@ -1185,12 +1293,13 @@ struct Runtime final:ds::Transport {
         if(!noticeApi)return;
         if(noticeTest){noticeTest=false;note(noticeApi->show(u"Co-op mod: test notice.",mod::notice::PlainIcon)?"NOTICE test shown\n":"NOTICE test refused: no info log now\n");}
 #ifndef MOD_MUTANT_STRAND_PARTNER
-        if(!config.notices&&!config.strandNotices)return;
+        if(!config.notices&&!config.strandNotices&&!routeTold)return;
 #else
         if(!config.notices)return;   // the mutant: strand lines only beside the partner's notices
 #endif
         if(!notices){notices=std::make_unique<mod::notice::Notifier>(*noticeApi,[this](const std::string& row){note(row.c_str());});
             if(config.group||!config.notices)notices->partnerless();}   // nobody is expected: no "No partner yet"
+        {for(auto& line:routeLines)notices->route(line,now);routeLines.clear();}   // the route challenge's lines (tickRoute)
         if(strandPoller&&config.strandNotices){for(auto& row:strandPoller->logs())note(row.c_str());for(auto& line:strandPoller->lines())notices->strand(line,now);}
 #ifdef MOD_MUTANT_OFFER_LINES
         else if(strandPoller){for(auto& line:strandPoller->lines())notices->strand(line,now);}
@@ -2449,6 +2558,7 @@ struct Runtime final:ds::Transport {
         } catch(const std::exception& e) {std::lock_guard<std::timed_mutex> guard(mutex);failed=true;failure=e.what();try{note(failure.c_str());}catch(...){}running=false;}
     }
     void init(const std::filesystem::path& path) {
+        modFolder=path.parent_path();
         config=mod::parseConfig(readConfig(path));config.link=mod::link::chosen(config.link,std::getenv("COOP_LINK"));mod::link::profile(config.link,linkProfile);
         diagnostic.Bind(diagnosticHost);
         if(!diagnostic.Open(diag::DefaultLogsDir(),"game",config.maxLogMb))
@@ -2463,6 +2573,7 @@ struct Runtime final:ds::Transport {
             auto filename=path.parent_path()/("mod-"+mod::runStamp()+".log");safePath(filename);log=open(filename.c_str(),O_CREAT|O_EXCL|O_WRONLY,0600);if(log==-1)throw std::runtime_error("cannot create mod log");
 #endif
         }
+        routeStart();   // a bad challenge string refuses the start with its reason
         if(config.discovery) {
             discovery=std::make_unique<mod::discovery::Worker>(path,config.discoveryOptions);
             note("read-only discovery worker started; no provider, network or game calls\n");
@@ -3083,6 +3194,8 @@ struct Runtime final:ds::Transport {
                 // A bool control's byte read as a float is a denormal, which the game's floating-point mode takes for zero: the bits.
                 uint32_t bits=0;if(v)std::memcpy(&bits,&*v,4);bool resting=(bits&0xff)!=0;if(resting)cache.local.flags|=ds::Rest;
                 if(resting!=localResting){localResting=resting;note(resting?"REST this porter sits down to rest\n":"REST this porter is up again\n");}}}
+            stages.enter("route",mod::nowUs());
+            tickRoute(now);
             // The porter's own animation controls (controls.h), every frame: a one-frame pulse is seen only so.
             stages.enter("controls",mod::nowUs());
             bool othersUp=others&&others->connected();   // other players (others.h) get the controls too, at their own rate
@@ -4054,6 +4167,9 @@ unsigned mod_status(char* out,unsigned cap) {
           <<",\"hosted\":"<<k.hosted<<",\"visits\":"<<k.joined<<",\"released\":"<<k.released<<",\"states\":"<<k.states<<",\"reports\":"<<k.reports
           <<",\"states_taken\":"<<k.statesTaken<<",\"reports_taken\":"<<k.reportsTaken<<",\"damage_applied\":"<<k.damageApplied<<",\"gazers_applied\":"<<k.gazersApplied
           <<",\"kills_taken\":"<<k.killsTaken<<",\"kills_refused\":"<<k.killsRefused<<",\"own_first\":"<<k.ownFirst<<",\"commands\":"<<k.commands<<",\"writes\":"<<k.writes<<"}";}
+        o<<",\"route\":{\"on\":"<<(r.routeRun?"true":"false")<<",\"state\":\""<<(r.routeRun?mod::route::phaseName(r.routeRun->phase()):"none")<<"\",\"elapsed_ms\":"<<(r.routeRun?r.routeRun->elapsed():0)
+         <<",\"progress_m\":"<<(r.routeRun?r.routeRun->progress():0)<<",\"outside_m\":"<<(r.routeRun?r.routeRun->outside():0)<<",\"reason\":\""<<(r.routeRun?r.routeRun->reason():std::string())
+         <<"\",\"recording\":"<<(r.routeRecorder.on()?"true":"false")<<",\"recorded_samples\":"<<r.routeRecorder.samples()<<"}";
         o<<",\"received_structures\":{\"on\":"<<(r.receivedOn?"true":"false")<<",\"answers\":\""<<mod::received::label(r.receivedEarly)<<"\",\"built\":"<<r.receivedBuilder.changed()<<",\"skipped\":"<<r.receivedBuilder.skipped()<<"}";
         {mod::strand::Poller::Counters k;if(r.strandPoller)k=r.strandPoller->counters();
          o<<",\"strand\":{\"on\":"<<(r.strandPoller?"true":"false")<<",\"reads\":"<<k.reads<<",\"answers\":"<<k.answers<<",\"failures\":"<<k.failures<<",\"told\":"<<k.told

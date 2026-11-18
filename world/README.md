@@ -983,6 +983,15 @@ good, the states of that player's objects.
   object it had is no longer handed to it (withdrawn with `go`, removed by the owner).
 - A setting that changes applies to uploads from then on: nothing stored changes its state.
 
+### Route challenges (`/coop/challenge*`)
+
+Players publish route challenges on the server and send their finished runs; each run's track is replayed through the
+mod's own checker (`../mod/route.h` `verify`) before it counts, and every challenge has a board of best times
+(`challenges.h`, saved in the world file as `"challenges"`). The calls, the policy setting `challenges`
+(`everyone`, `members`, `owner`, `nobody`; public: members) and the limits are in
+[../docs/ROUTES.md](../docs/ROUTES.md), "On the server". Tests: `challenges_test.cpp` (6 mutants) and
+`test_challenges.py` (the real server over HTTP, with formats encoded in Python).
+
 ## Identity
 
 **Names under player keys (2026-11-18).** The launcher's ticket call carries the name the player chose in the launcher (`name`, printable, at most 64 bytes); the server keeps that as the player's name. The game's sign-in with the ticket brings the Steam name as `display_name`: under player keys the server ignores it, so strangers on a public server never see each other's Steam names. A launcher that sends no name leaves the player as `Porter`. Tests: `keys_test.cpp` (mutants `TICKET_NAME`, `TICKET_STEAM_NAME`).
