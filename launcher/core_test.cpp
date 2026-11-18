@@ -299,9 +299,9 @@ int main(int argc,char** argv) {
          // What the game is told: a notice token for the same account, into the game's config with strand_notices.
          check(f.sent[2]=="POST /w305419896/coop/notice-token {\"player\":\"76561197960266962\"}"&&j.passes.noticeToken=="n0t1ce5","a notice token for this account");
          {launcher::Session g=launcher::groupJoin(v,0,me);st::useNoticeToken(g,j.passes);auto gc=mod::parseConfig(launcher::config(g));
-          check(gc.strandNotices&&gc.strandToken=="n0t1ce5"&&!gc.notices,"the game's config reads its builds' states with it");
+          check(gc.strandNotices&&gc.strandToken=="n0t1ce5"&&!gc.notices,"the game's config reads its builds' states with it");check(gc.chat,"and has text chat, through the same token");
           check(gc.offerStrand,"and offers the save's older strand while the server says yes to it");
-          auto bare=mod::parseConfig(launcher::config(launcher::groupJoin(v,0,me)));check(!bare.strandNotices&&!bare.offerStrand&&bare.strandToken.empty(),"without a token: no strand notices, nothing offered");
+          auto bare=mod::parseConfig(launcher::config(launcher::groupJoin(v,0,me)));check(!bare.chat&&!bare.strandNotices&&!bare.offerStrand&&bare.strandToken.empty(),"without a token: no strand notices, nothing offered");
           auto host=h;st::useNoticeToken(host,j.passes);auto hc2=mod::parseConfig(launcher::config(host));check(hc2.offerStrand&&hc2.strandNotices&&hc2.buildReceived,"the host's game the same");}
          // A server that gives none (an older one, or one that refuses): the game starts all the same, without them.
          {Fake o;o.answers=f.answers;o.answers.erase("POST /w305419896/coop/notice-token");auto k=st::join(t,fake(o),"",{});

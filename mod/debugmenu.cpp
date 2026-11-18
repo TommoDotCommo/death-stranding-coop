@@ -34,7 +34,7 @@ void Menu::tick(bool pressed,bool allowed,uint64_t now){
 #ifndef MUTANT_DEBUGMENU_NEXT
             selected_=(selected_+1)%items_.size();
 #else
-            ++selected_;
+            selected_=0;
 #endif
             again_=true;row_=RowNext;until_=now+ReopenMs;
         }else log_("DEBUGMENU closed\n");
