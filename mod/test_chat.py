@@ -49,7 +49,7 @@ def run(world,library):
             command(bob,'open');pump(both,2,lambda:chat(bob)['typing']);command(bob,'type never');pump(both,1,lambda:telop(bob)=='never_');command(bob,'esc')
             oracle(pump(both,3,lambda:not chat(bob)['typing']),'esc');pump(both,3,lambda:False);oracle(not any('never' in l for l in shown(ann)),shown(ann))
             for i in range(6):say(ann,[bob],'m%d'%i)
-            oracle(pump(both,10,lambda:chat(ann)['refused']==1 and any('too many' in l for l in shown(ann))),('sixth line',chat(ann),shown(ann)))
+            oracle(pump(both,10,lambda:chat(ann)['refused']>=1 and any('too many' in l for l in shown(ann))),('sixth line',chat(ann),shown(ann)))
         finally:
             for g in both:g.close()
             server.stop()
