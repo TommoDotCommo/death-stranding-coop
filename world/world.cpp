@@ -1189,13 +1189,14 @@ void setPolicy(Policy& p,const std::string& keyValue){
     else if(key=="challenges")pick(p.challenges,{"everyone","members","owner","nobody"});
     else if(key=="import")pick(p.importWho,{"everyone","members","owner","nobody"});
     else if(key=="import_cost")pick(p.importCost,{"free","materials"});
-    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges, import, import_cost)");
+    else if(key=="test_mode")pick(p.testMode,{"off","on"});
+    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges, import, import_cost, test_mode)");
 }
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy& p){
     return {{"join",p.join},{"build",p.build},{"accept_offers",p.acceptOffers},{"limit",std::to_string(p.limit)},{"withdrawal",p.withdrawal},
             {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld},
             {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity},{"near_cap",std::to_string(p.nearCap)},{"challenges",p.challenges},
-            {"import",p.importWho},{"import_cost",p.importCost}};
+            {"import",p.importWho},{"import_cost",p.importCost},{"test_mode",p.testMode}};
 }
 void World::setPolicy(const Policy& p){std::lock_guard<std::mutex> g(lock_);policy_=p;dirty_=true;++changes_;}
 bool World::servedTo(const Object& o,const std::string& player) const {

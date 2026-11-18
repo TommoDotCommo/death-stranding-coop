@@ -92,9 +92,16 @@ struct ImportResult { size_t added=0,updated=0,unchanged=0,removed=0,filtered=0,
 //   challenges everyone|members|owner|nobody: who may publish a route challenge (challenges.h)
 //   import everyone|members|owner|nobody: who may import a collection (../docs/COLLECTIONS.md); import_cost free|materials
 //   (materials: what an imported structure carried is recorded on it; nothing is taken yet)
+//   test_mode off|on: every player's co-op mod starts in test mode (unlimited materials, stamina and blood; for alpha
+//   testers); the launcher writes it into the game's config, the server itself does nothing with it
 struct Policy {
     std::string preset="friends",join="invite",build="everyone",acceptOffers="auto",withdrawal="go",offerBuilds="yes",offerOld="no",order="newest",identity="none",challenges="everyone";
     std::string importWho="everyone",importCost="free";
+#ifndef MUTANT_POLICY_TEST_DEFAULT
+    std::string testMode="off";
+#else
+    std::string testMode="on";
+#endif
     int64_t limit=0,players=int64_t(MaxPlayers),perBuilder=0,spread=20,nearCap=32;
 };
 Policy presetPolicy(const std::string& name);       // friends, solo or public; throws for anything else

@@ -59,7 +59,14 @@ struct Session {
     // A route challenge the player chose in Challenges (../docs/ROUTES.md): "DSR1-..." written into the game's config as
     // `route`, in every kind of session; "" none.
     std::string route;
+    // Test mode (../mod/README.md "Test mode": material crates on U, unlimited stamina and blood). testMode: the player's
+    // own Settings choice "Test mode (alpha)", for his solo and two-player games. serverTestMode: in group play the
+    // server's rules decide (the policy setting test_mode, read before the game starts: strand::usePolicy); the
+    // player's own choice does not count there.
+    bool testMode=false,serverTestMode=false;
 };
+// The mod config's test_mode object: every switch at its default (U drops crates; stamina and blood kept full).
+inline constexpr const char* TestModeConfig=",\"test_mode\":{}";
 // This install's key pair: made once and kept in `file` (player.key, beside launcher.ini). Its secret half is never
 // sent anywhere; the public half is the player on servers that take keys. A file that is there but cannot be read is
 // an error, never replaced (a new key would be a new player).

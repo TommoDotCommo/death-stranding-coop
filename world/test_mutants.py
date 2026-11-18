@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parent
 families=[('world_test.cpp',['world.cpp','collections.cpp','collection.cpp'],['WORLD_NO_TOKEN','WORLD_OWNER','WORLD_OWN','WORLD_OBJECT_CAP','WORLD_PLAYER_CAP','WORLD_LIKE_RANGE','WORLD_ID_LETTER','WORLD_LIKES_MINE','WORLD_LIKES_SINCE','WORLD_ID_SHAPE','WORLD_ID_AGAIN','WORLD_ID_TAKEN','WORLD_ID_KEEP','WORLD_STRIP_STORE','WORLD_STRIP_SERVE']),
           ('policy_test.cpp',['world.cpp','collections.cpp','collection.cpp'],['POLICY_PLAYERS','POLICY_BUILD_NOBODY','POLICY_BUILD_MEMBERS','POLICY_LIMIT','POLICY_ASK','POLICY_REVIEW','POLICY_PENDING_SERVED','POLICY_OFFER_NO_SERVED',
                                              'POLICY_REMNANT_CHANGE','POLICY_REMNANT_LIKES','POLICY_PLAYER_ANY','POLICY_WITHDRAW_STAY_REMOVES','POLICY_WITHDRAW_GO_KEEPS','POLICY_REMOVE_PLAYER_OTHERS',
-                                             'POLICY_EXPORT_PENDING','POLICY_SAVE_LOST','POLICY_HELD_SERVED','POLICY_HELD_RELEASE']),
+                                             'POLICY_EXPORT_PENDING','POLICY_SAVE_LOST','POLICY_HELD_SERVED','POLICY_HELD_RELEASE','POLICY_TEST_DEFAULT']),
           ('curate_test.cpp',['world.cpp','collections.cpp','collection.cpp'],['CURATE_OWN','CURATE_UNSHARED','CURATE_ORDER','CURATE_COUNTS','CURATE_UNSTABLE','CURATE_BUILDER_CAP','CURATE_SPREAD',
                                             'CURATE_SAVE_LOST','CURATE_UNBOUNDED']),
           ('highway_test.cpp',['world.cpp','collections.cpp','collection.cpp'],['HIGHWAY_OWN','HIGHWAY_ASKED','HIGHWAY_RANGE','HIGHWAY_WHOLE','HIGHWAY_KEYS','HIGHWAY_CHOICE','HIGHWAY_REVIEW','HIGHWAY_BUILD',

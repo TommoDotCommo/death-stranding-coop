@@ -103,6 +103,7 @@ config names the server instead:
 | `strand_notices`, `strand_token` | with `online_server`: lines in the game's info log about this player's builds on the server, read with the notice token the launcher took ("Strand notices", below); the launcher writes both |
 | `build_received` | with `online_server`: other players' structures that server hands the game are built at once, without the game's range, placement and area checks ("Received structures built", below); off by default; the launcher writes it in group play from its setting (on unless the player turns it off); live: served bridges are built straight from the answer; received rain shelters were still removed before the area check was skipped (2026-11-17, not run since) |
 | `offer_strand` | with `online_server` and `strand_token`: the structures this player's save already holds are offered to that server through the game's own upload, one at a time, while the server says his older strand may be ("Offering your existing strand", below); off by default; the launcher writes it on in group play with `strand_token`, so the player's `offer_old` on that server decides; live: all 26 own structures of an Episode 3 save offered in about 3 minutes |
+| `test_mode` | the launcher writes `{}` when the server's rules say `test_mode` on ("Test mode", below): material crates on U, blood and stamina kept full |
 | `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
 | `show_others` | `"everyone"` (default), `"friends"` or `"nobody"`: who of the players near this player the server shows him (broadcast only, sent in every HELLO; `world/README.md`, "How many players one player sees"). The server's own record of his choice, set from the launcher, comes first; `friends` needs a server with player keys. Requires `relay_mode` `"broadcast"`. A server from before this refuses a HELLO with anything but everyone |
 | `slot` | still required (0..15), but no port is bound from it |
@@ -767,6 +768,96 @@ nothing. The HUD object is found through the UI owner global and checked by its 
 (`game_offsets.md`, "Info log"). Log lines start with `NOTICE`. `puppet.ride` "notice" shows one test line without
 the config. In group play (no `peer`) nobody is expected, so "No partner yet" is never said. Tests: `notice_test.cpp` (mutants BOUND, GROUP_ALONE, LEFT, ALONE_ONCE, NAME_WAIT, WORLD, GAP, AWAY_SETTLE, BACK_PAIRED, LIKE_ICON, JOIN_HOLD). The launcher's play
 setup turns it on.
+
+## Test mode (`test_mode`, off by default; built 2026-11-18, live once the same day)
+
+Live (2026-11-18, one real game, Episode 1 save, `"test_mode":{}`): U dropped six crates beside the porter, read back from
+the game's cargo records: Chiral Crystals (32), Metals (1000), Ceramics (800), Chemicals (600), Special Alloys (1200),
+Resins (800) (the hashes in `testmode.cpp`, taken from the item list with the kit's `listitems.py`); 12 and 18 s into a
+25 s sprint both status pairs read 1.000 (stamina and blood kept full). The battery switch writes nothing yet (the
+vehicle's charge is not found).
+
+A sandbox for alpha testers: material crates on a key, and blood and stamina kept full. The config's one nested object:
+
+```json
+"test_mode":{"materials":85,"stamina":true,"blood":true,"battery":true}
+```
+
+| Switch | Default (when `test_mode` is there) | What it does |
+|---|---|---|
+| `materials` | 85 (U) | the virtual-key code that drops a set of material crates; 0: none. Refused: the mod's own keys (F1, F2, Tab, B, L, `passenger_key`, `story_key`), the mouse buttons, Escape, Enter, Shift, Ctrl and Alt. Requires `puppet_probe` (the game's cargo calls) |
+| `stamina`, `blood` | true | the gauge kept at its maximum |
+| `battery` | true | accepted; does nothing yet (below) |
+
+`test_mode` absent: off. Present, even `{}`: on, with every switch at its default. Requires the game provider and
+`game_thread`. Unknown or repeated switches, strings and anything nested deeper are refused. The launcher writes
+`"test_mode":{}` from the group server's rules (`../world/README.md`, "Server policy", `test_mode`) or, for solo and
+two-player games, from the player's Settings box "Test mode (alpha)" (`../launcher/README.md`).
+
+**Materials.** One press asks the game for one crate of each material it has a hash for, with
+`CreateBaggage(hash, transform)` on the game thread, as the lab command `puppet.cargo` does: a row across the porter's
+back, two metres behind him, 1.2 m apart, half a metre up, upright (`testmode.h` `places`). At most one set every 5 s,
+and at most 20 of this player's crates on the ground: a crate counts from its request until 10 s pass without its
+record showing up, and then while a record of its item lies in the world within 2 m of where it was last seen (one
+record counts for one crate). A crate picked up (carried, location 2), used or gone stops counting. What lies there
+is never removed to make room: the press is refused ("20 of your crates are on the ground already", also in the info
+log). Of the six materials only resins has a known hash for this build (`game_offsets.md`, "Test mode: material
+crates"); the log names the ones left out. In a two-player game with shared cargo the crates are put down by this
+porter like any other cargo, so they reach the partner too.
+
+**Blood and stamina.** Ten times a second each switched-on gauge of the porter's status block (`game_offsets.md`,
+"Blood and stamina": B+0x28 / B+0x2c blood, B+0x30 / B+0x38 stamina) is set to its maximum when it is below it and
+both read as sane floats (finite, maximum 0 < m <= 10^6, value >= 0). The block is the one whose player entity is this
+porter (`testmode::infoBlock`, the search of `signals.h` readInfo). The third stamina value (B+0x34, the current
+ceiling) is not written.
+
+**The gate** (`testmode::refusal`) for every write and every set: the game thread (the feature ticks only from the
+game-thread callback), the porter readable, no game event (cutscene, private room, the cargo menu's hand-back), his
+state known, and neither down nor caught by BTs (`vitals.h`). The log says when it stops and starts again
+(`TESTMODE gauges not kept: a game event runs`, `TESTMODE gauges kept full`).
+
+**What it tells.** The mod log: `TESTMODE on: materials on U (no crate known yet for ...), stamina on, blood on,
+battery: not kept full (...)`, `TESTMODE materials dropped: N crates, M of yours on the ground`, `TESTMODE materials
+refused: <why>`. The info log (the same queue as the session notices, without needing `notices`): once, in the world,
+"Test mode is on: unlimited stamina and blood; U drops material crates."; for each set "Test mode: materials dropped.".
+`mod_status` has `test_mode` (`sets`, `crates`, `refused`, `on_ground`, `blood_writes`, `stamina_writes`, `gauges`).
+
+**Left out** (cheap ones that are not known yet, or would need new writes): the vehicle's battery (the vehicle
+resource's `+0x130` is the capacity setting, not the charge; the riding vehicle's current charge field is not known,
+and `DSPlayerSystem_sExportedRecoverBattery` refills the porter's own battery, not the vehicle's: `game_offsets.md`,
+"Test mode"), cargo damage (record `+0x30` holds two floats that may be durability, unconfirmed), equipment wear,
+timefall, weight and balance, build restrictions.
+
+**Tests.** `testmode_test.cpp` (in `make -C mod game-thread-test`): where a set goes, one set every 5 s, the cap of 20
+(a partial set at the cap, nothing at 20, a picked-up crate and one never made stop counting, one record for one
+crate, another item or a far crate not his), the refill rule, the gate (each closed: nothing written), only this
+porter's block, only the switched-on gauges; mutants `TESTMODE_SHARED_RECORD`, `TESTMODE_FORGET`, `TESTMODE_RATE`,
+`TESTMODE_CAP`, `TESTMODE_ABOVE`, `TESTMODE_THREAD`, `TESTMODE_EVENT`, `TESTMODE_DEAD`, `TESTMODE_OWNER`. `unit.cpp`:
+the config (defaults, every refused key, malformed objects, the requirements); mutants `CONFIG_TEST_KEYS`,
+`CONFIG_TEST_DEFAULTS`, `CONFIG_TEST_NEEDS`. `test_testmode.py` (the fake world, `fake.so`): the gauges written on the
+game thread, not in a game event, not while down or caught, again after; nothing without `test_mode`; the info-log
+line once; U through the virtual pad asks for a set behind the porter, a second press within 5 s for nothing, one
+after 5 s for a set, told each time; a crate taken stops counting. Its mutant builds `fake-testmode-event.so` and
+`fake-testmode-rate.so` must fail.
+
+### Live checklist (operator; nothing of this has run)
+
+One test copy, `ep3-28h` baseline, a config with `game_thread`, `puppet_probe`, `virtual_pad` and `"test_mode":{}`:
+
+1. In the world: the info log shows "Test mode is on: ..." once; the mod log has `TESTMODE on` and `TESTMODE gauges
+   kept full`.
+2. Sprint 20 s: read B+0x30 / B+0x38 from the process each second (the stamina gauge stays at its maximum; the HUD's
+   stamina bar should not fall). Jump from about 12 m: blood stays full. Open the cargo menu, sit down to rest, enter a
+   private room: `TESTMODE gauges not kept: a game event runs` while it lasts, nothing written (watch B+0x28).
+3. Let BTs catch the porter, or fall to death: `not kept` with the reason; after the respawn, `kept full` again.
+4. `pad.script` `tap U`: a resins crate two metres behind him (`list 5 <stamp>` to `puppet.cargo` logs a record `item=0x782598d` there with
+   state `0x107`); the info log says "Test mode: materials dropped."; a second tap within 5 s: `refused: one set every
+   5 s`. Pick the crate up (E) and walk: `on_ground` in the status goes down.
+5. The other five hashes: put a crate of each material from a terminal's storage on the ground (or find one), stand
+   beside it and send `list 3 <stamp>` to `puppet.cargo`; note `item=0x...` per material (the largest crate size each),
+   enter them in `testmode.cpp` `Materials` and `game_offsets.md`, "Test mode: material crates", rebuild, and repeat step
+   4 (every hash must give that material's crate; a hash the game does not know is silently ignored).
+6. Ride a vehicle: the log line about the battery is the only effect (nothing written).
 
 ## Strand notices (`strand_notices`, off by default; live once, 2026-11-17)
 

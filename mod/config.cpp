@@ -13,15 +13,31 @@ Config parseConfig(const std::string& s) {
     auto take=[&](char c){ws(); if(at==s.size() || s[at++]!=c) throw std::runtime_error("malformed config JSON");};
     auto str=[&](){take('"');std::string v;while(at<s.size() && s[at]!='"') {char c=s[at++];if(c<' ' || c=='\\' || static_cast<unsigned char>(c)>126) throw std::runtime_error("config strings require unescaped printable ASCII");v+=c;}take('"');return v;};
     std::map<std::string,std::string> values; std::set<std::string> strings;
+    // The one nested object, test_mode: a flat object of booleans and numbers, no strings, no deeper nesting.
+    std::map<std::string,std::string> test;bool testGiven=false;
+    auto scalar=[&]{size_t b=at;while(at<s.size() && (std::isalnum(static_cast<unsigned char>(s[at])))) ++at;return s.substr(b,at-b);};
     take('{');ws();
     if(at<s.size() && s[at]!='}') for(;;) {
         auto k=str();take(':');ws();std::string v;
-        if(at<s.size() && s[at]=='"') {v=str();strings.insert(k);} else {size_t b=at;while(at<s.size() && (std::isalnum(static_cast<unsigned char>(s[at])))) ++at;v=s.substr(b,at-b);}
+        if(at<s.size() && s[at]=='"') {v=str();strings.insert(k);}
+        else if(at<s.size() && s[at]=='{') {
+            if(k!="test_mode") throw std::runtime_error("only test_mode may be an object");
+            take('{');ws();testGiven=true;v="{}";
+            if(at<s.size() && s[at]!='}') for(;;) {
+                auto tk=str();take(':');ws();
+                if(at<s.size() && (s[at]=='"'||s[at]=='{')) throw std::runtime_error("test_mode takes booleans and numbers");
+                if(!test.emplace(tk,scalar()).second) throw std::runtime_error("duplicate test_mode key");
+                ws();if(at==s.size() || s[at]!=',') break;++at;
+            }
+            take('}');
+        }
+        else v=scalar();
         if(!values.emplace(k,v).second) throw std::runtime_error("duplicate config key");
         ws();if(at==s.size() || s[at]!=',') break;++at;
     }
     take('}');ws();if(at!=s.size()) throw std::runtime_error("trailing JSON");
-    for(auto& kv:values) if(!std::set<std::string>{"slot","server","relay","relay_key","relay_mode","show_others","host_fights","join_fights","player_id","share_story_orders","share_rewards","story_resync","story_key","share_environment","share_enemies","share_enemy_positions","enemy_position_pull","enemy_position_goal","share_orders","share_order_units","share_order_load","share_roads","share_saved_structures","body_update_link","passenger_key","partner_poses","partner_animation","partner_cart","record_animation","join_move","carry_visual","partner","partner_gear","others_gear","others_carry","partner_marker","partner_vehicle","partner_likes","partner_tag","notices","online_server","strand_notices","strand_token","build_received","offer_strand","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","link","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","max_log_mb","bind","progress_mismatch","join_at_host","partner_shout","partner_shout_voice","partner_scan","partner_vitals","others","route","route_record_key"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
+    if(values.count("test_mode")&&!testGiven) throw std::runtime_error("test_mode must be an object");
+    for(auto& kv:values) if(!std::set<std::string>{"slot","server","relay","relay_key","relay_mode","show_others","host_fights","join_fights","player_id","share_story_orders","share_rewards","story_resync","story_key","share_environment","share_enemies","share_enemy_positions","enemy_position_pull","enemy_position_goal","share_orders","share_order_units","share_order_load","share_roads","share_saved_structures","body_update_link","passenger_key","partner_poses","partner_animation","partner_cart","record_animation","join_move","carry_visual","partner","partner_gear","others_gear","others_carry","partner_marker","partner_vehicle","partner_likes","partner_tag","notices","online_server","strand_notices","strand_token","build_received","offer_strand","peer_slot","role","peer","nickname","provider","session","logging","required","impairment","link","fault","discovery","discovery_sha256","discovery_hz","discovery_max_mib","discovery_animation_slots","discovery_player_rva","discovery_worldnode_rva","discovery_controller_rva","discovery_animation_rva","discovery_vehicle_rva","discovery_bb_rva","discovery_velocity_rva","discovery_angular_velocity_rva","self_tick","game_thread","puppet_probe","virtual_pad","auto_continue","presence_log_max_mib","max_log_mb","bind","progress_mismatch","join_at_host","partner_shout","partner_shout_voice","partner_scan","partner_vitals","others","route","route_record_key","test_mode"}.count(kv.first)) throw std::runtime_error("unknown config key: "+kv.first);
     auto text=[&](const char* k){if(!strings.count(k)) throw std::runtime_error(std::string("missing/string expected: ")+k);return values.at(k);};
     auto number=[&](const char* k){auto v=values[k];if(strings.count(k)||v.empty()||v.size()>15||v.find_first_not_of("0123456789")!=std::string::npos||(v.size()>1&&v[0]=='0')) throw std::runtime_error(std::string("invalid integer: ")+k);return std::stoull(v);};
     auto boolean=[&](const char* k,bool d){if(!values.count(k)) return d;auto v=values[k];if(strings.count(k)||(v!="true"&&v!="false")) throw std::runtime_error("boolean expected");return v=="true";};
@@ -272,7 +288,39 @@ Config parseConfig(const std::string& s) {
         auto key=std::string("discovery_")+name+"_rva";
         if(values.count(key))c.discoveryOptions.roots[name]=number(key.c_str());
     }
+    // Test mode (testmode.h): every switch on unless the object says otherwise; only where the game thread runs (the
+    // gauges are written there), and the material crates only where the game's cargo calls are (puppet_probe).
+    if(testGiven){
+        for(auto& kv:test)if(!std::set<std::string>{"materials","stamina","blood","battery"}.count(kv.first))throw std::runtime_error("unknown test_mode key: "+kv.first);
+        auto flag=[&](const char* k){if(!test.count(k))return true;auto v=test[k];if(v!="true"&&v!="false")throw std::runtime_error(std::string("test_mode ")+k+" must be true or false");return v=="true";};
+        TestMode& t=c.testMode;
+#ifndef MUTANT_CONFIG_TEST_DEFAULTS
+        t.on=true;t.materialsKey=TestMaterialsKey;
+#endif
+        t.stamina=flag("stamina");t.blood=flag("blood");t.battery=flag("battery");
+        if(test.count("materials")){auto v=test["materials"];
+            if(v.empty()||v.size()>3||v.find_first_not_of("0123456789")!=std::string::npos||(v.size()>1&&v[0]=='0')||std::stoul(v)>0xfe)
+                throw std::runtime_error("test_mode materials must be a virtual-key code 0..254 (0: none)");
+            t.materialsKey=unsigned(std::stoul(v));}
+#ifndef MUTANT_CONFIG_TEST_KEYS
+        if(t.materialsKey&&(testKeyRefused(t.materialsKey)||t.materialsKey==c.passengerKey||t.materialsKey==c.storyKey))
+            throw std::runtime_error("test_mode materials: that key is the co-op mod's own (F1, F2, Tab, B, L, the passenger or catch-up key) or a mouse button or modifier");
+#endif
+#ifndef MUTANT_CONFIG_TEST_NEEDS
+        if(c.provider!="game"||!c.gameThread)throw std::runtime_error("test_mode requires the game provider and game_thread");
+        if(t.materialsKey&&!c.puppetProbe)throw std::runtime_error("test_mode materials requires puppet_probe (the game's cargo calls)");
+#endif
+    }
     return c;
+}
+bool testKeyRefused(unsigned vk){
+    for(unsigned k:{0x01u,0x02u,0x04u,0x05u,0x06u,   // mouse buttons
+                    0x09u,0x0du,0x1bu,                // Tab (the player list), Enter, Escape
+                    0x10u,0x11u,0x12u,0xa0u,0xa1u,0xa2u,0xa3u,0xa4u,0xa5u,   // Shift, Ctrl, Alt
+                    0x70u,0x71u,                      // F1 the guide, F2 the bug mark
+                    0x42u,0x4cu})                     // B the ping, L the like
+        if(vk==k)return true;
+    return false;
 }
 std::optional<uint32_t> peerAddress(const std::string& t){
     if(t.empty()||t.size()>15)return std::nullopt;

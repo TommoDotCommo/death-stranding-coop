@@ -40,6 +40,8 @@ std::string settingText(const std::string& key,const std::string& value,size_t p
     if(key=="challenges")return value=="members"?"Only members publish route challenges; everyone may run them.":
                                 value=="owner"?"Only the server's owner publishes route challenges; everyone may run them.":
                                 value=="nobody"?"No route challenges are published here.":"Any player may publish a route challenge for the others to run.";
+    if(key=="test_mode")return value=="on"?"Test mode: unlimited materials (U), stamina and blood for everyone here. For testing: the game does not play as it should.":
+                               "No test mode: the game plays as usual.";
     if(key=="identity")return value=="keys"?"Players are known by the key their launcher made: nobody signs in, builds or withdraws in another player's name (the traffic is not encrypted).":
                               "No player keys: whoever has the group's key can sign in or act as any player. For friends only.";
     if(key=="import")return value=="nobody"?"Nobody imports collections here.":value=="members"?"Members import collections (shared groups of structures) here; others do not.":

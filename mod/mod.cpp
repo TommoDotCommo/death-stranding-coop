@@ -75,6 +75,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "crowd.h"
 #include "fights.h"
 #include "route.h"
+#include "testmode.h"
 #include "../core/relay.h"
 #ifdef MOD_FAKE_NETWORK
 #include "fake_memory.h"
@@ -1280,7 +1281,7 @@ struct Runtime final:ds::Transport {
     std::vector<std::u16string> fakeNotices;   // the fake world's info log: every line shown, in order
 #endif
     void tickNotices(uint64_t now) {
-        if(!config.notices&&!noticeTest&&!config.strandNotices&&!routeTold)return;
+        if(!config.notices&&!noticeTest&&!config.strandNotices&&!routeTold&&!config.testMode.on)return;
 #ifndef MOD_FAKE_NETWORK
         if(!noticeApi&&!noticeTried){
             auto* sp=&*sampler;if(!noticeJob.ready([sp]{return mod::notice::nativeApi(*sp);}))return;   // checked beside the game
@@ -1293,13 +1294,15 @@ struct Runtime final:ds::Transport {
         if(!noticeApi)return;
         if(noticeTest){noticeTest=false;note(noticeApi->show(u"Co-op mod: test notice.",mod::notice::PlainIcon)?"NOTICE test shown\n":"NOTICE test refused: no info log now\n");}
 #ifndef MOD_MUTANT_STRAND_PARTNER
-        if(!config.notices&&!config.strandNotices&&!routeTold)return;
+        if(!config.notices&&!config.strandNotices&&!routeTold&&!config.testMode.on)return;
 #else
-        if(!config.notices)return;   // the mutant: strand lines only beside the partner's notices
+        if(!config.notices&&!config.testMode.on)return;   // the mutant: strand lines only beside the partner's notices
 #endif
         if(!notices){notices=std::make_unique<mod::notice::Notifier>(*noticeApi,[this](const std::string& row){note(row.c_str());});
             if(config.group||!config.notices)notices->partnerless();}   // nobody is expected: no "No partner yet"
         {for(auto& line:routeLines)notices->route(line,now);routeLines.clear();}   // the route challenge's lines (tickRoute)
+        for(auto& line:testLines)notices->test(line,now);   // test mode's lines (tickTestMode), finished like the strand's
+        testLines.clear();
         if(strandPoller&&config.strandNotices){for(auto& row:strandPoller->logs())note(row.c_str());for(auto& line:strandPoller->lines())notices->strand(line,now);}
 #ifdef MOD_MUTANT_OFFER_LINES
         else if(strandPoller){for(auto& line:strandPoller->lines())notices->strand(line,now);}
@@ -1313,6 +1316,68 @@ struct Runtime final:ds::Transport {
         notices->status(now,connected,connected&&(cache.remote.state.flags&ds::Down),connected&&(cache.remote.state.flags&ds::Caught));
         notices->tick(now,poseAvailable&&!inEvent,connected,partnerName,connected&&((cache.remote.state.flags&ds::PrivateRoom)||!cache.remote.visible));
         notices->progress(now,connected,connected&&core->progressStatus()==ds::ProgressStatus::Mismatch);
+    }
+    // --- Test mode (testmode.h, config `test_mode`, README "Test mode"): for alpha testers, off by default. The material
+    // key asks the game for a set of crates beside the porter (one set every 5 s, at most 20 of his on the ground); blood
+    // and stamina are kept full. Every write goes through testmode::refusal: the game thread (this runs only from the
+    // game-thread tick), the porter readable, no game event, not down and not caught. The info log tells the player once
+    // that it is on, and each set dropped. The vehicle's battery is not kept full: its charge field is not known for
+    // this build (game_offsets.md, "Test mode"), and the log says so once.
+    mod::testmode::Dropper testDropper;mod::marker::KeyEdge testEdge;std::vector<std::u16string> testLines;
+    bool testAnnounced=false,testNoted=false;uint64_t testReadAt=0,testFullAt=0,testGaugeAt=0;unsigned testLimit=mod::cargo::FirstRecords;std::string testGaugeWhy="start";
+    unsigned testSets=0,testCrates=0,testRefused=0;uint64_t testBloodWrites=0,testStaminaWrites=0;
+    // The calls behind it, native or the fake world's: make a crate, the porter's status block, his state, the writer.
+    std::function<void(uint32_t,const mod::puppet::Transform&)> testCreate;std::function<std::vector<mod::cargo::Record>(unsigned)> testRecords;
+    std::function<uint64_t(uint64_t)> testBlock;std::function<mod::vitals::State(uint64_t)> porterVitals;
+    mod::testmode::Writable testWritable;mod::testmode::Poke testPoke;
+#ifdef MOD_FAKE_NETWORK
+    std::vector<mod::testmode::Drop> fakeDrops;   // the fake world's crates: every one asked for, until the test takes it
+    mod::vitals::State fakeVitals{true,false,false,false};
+#endif
+    static std::string keyName(unsigned vk){
+        if((vk>='A'&&vk<='Z')||(vk>='0'&&vk<='9'))return std::string(1,char(vk));
+        if(vk>=0x70&&vk<=0x87)return "F"+std::to_string(vk-0x6f);
+        std::ostringstream o;o<<"key 0x"<<std::hex<<vk;return o.str();}
+    static std::u16string wide(const std::string& t){return std::u16string(t.begin(),t.end());}
+    void tickTestMode(uint64_t now){
+        const auto& t=config.testMode;if(!t.on||!sampler)return;
+        auto anchor=anchorNow();const bool readable=anchor.entity&&anchor.pose.available;
+        if(!testNoted){testNoted=true;
+            auto missing=mod::testmode::missingNames();
+            note(("TESTMODE on: materials "+(t.materialsKey?"on "+keyName(t.materialsKey)+(missing.empty()?std::string():" (no crate known yet for "+missing+")"):std::string("off"))
+                  +", stamina "+(t.stamina?"on":"off")+", blood "+(t.blood?"on":"off")
+                  +(t.battery?", battery: not kept full (the vehicle's charge field is not known for this build)":", battery off")+"\n").c_str());}
+        if(!testAnnounced&&readable&&!inEvent){testAnnounced=true;
+            std::string what=t.stamina&&t.blood?"unlimited stamina and blood":t.stamina?"unlimited stamina":t.blood?"unlimited blood":"";
+            std::string keys=t.materialsKey&&testCreate?keyName(t.materialsKey)+" drops material crates":"";
+            testLines.push_back(wide("Test mode is on"+(what.empty()&&keys.empty()?std::string("."):": "+what+(what.empty()||keys.empty()?"":"; ")+keys+".")));}
+        mod::testmode::Gate gate;gate.gameThread=true;gate.porterReadable=readable;gate.inEvent=inEvent;
+        if(readable&&porterVitals)gate.vitals=porterVitals(anchor.entity);
+        // Materials: what of his crates still lies on the ground, twice a second while he has some out (quick scans up to
+        // the mark of a full one, a full scan every 4 s, as the shared cargo reads the table); then the key.
+        if(t.materialsKey&&testCreate){
+            if(testRecords&&testDropper.onGround()&&now>=testReadAt){testReadAt=now+500;const bool full=now>=testFullAt;if(full)testFullAt=now+4000;
+                auto records=testRecords(full?mod::cargo::MaxRecords:testLimit);if(full)testLimit=mod::cargo::scanLimit(records);
+                testDropper.observe(records,now);}
+            if(testEdge.pressed(modKey(t.materialsKey),now)){
+                const char* why=mod::testmode::refusal(gate);mod::testmode::Dropper::Result r;
+                if(*why)r.refused=why;
+                else{auto tr=mod::puppet::transform(anchor.pose);r=testDropper.press(now,tr.position,tr.rotation[3],tr.rotation[4],mod::testmode::knownHashes());}
+                if(r.drops.empty()){++testRefused;note(("TESTMODE materials refused: "+r.refused+"\n").c_str());
+                    if(r.refused.find("on the ground")!=std::string::npos)testLines.push_back(wide("Test mode: "+std::to_string(mod::testmode::Dropper::MaxOnGround)+" of your crates are on the ground already."));}
+                else{
+                    for(auto& d:r.drops){mod::puppet::Transform at;at.position=d.at;at.rotation={1,0,0,0,1,0,0,0,1};testCreate(d.hash,at);}
+                    ++testSets;testCrates+=unsigned(r.drops.size());
+                    note(("TESTMODE materials dropped: "+std::to_string(r.drops.size())+" crates, "+std::to_string(testDropper.onGround())+" of yours on the ground\n").c_str());
+                    testLines.push_back(u"Test mode: materials dropped.");}
+            }
+        }
+        // Blood and stamina, ten times a second.
+        if((t.blood||t.stamina)&&now>=testGaugeAt){testGaugeAt=now+100;
+            auto k=mod::testmode::keepFull(gate,*sampler,readable&&testBlock?testBlock(anchor.entity):0,t.blood,t.stamina,testWritable,testPoke);
+            testBloodWrites+=k.blood;testStaminaWrites+=k.stamina;
+            if(testGaugeWhy!=k.refused){testGaugeWhy=k.refused;note(*k.refused?("TESTMODE gauges not kept: "+testGaugeWhy+"\n").c_str():"TESTMODE gauges kept full\n");}
+        }
     }
     // --- Names over heads (nametag.h): one of the game's hologram-name records above the partner body and above every
     // other player's body (others.h). On with config partner_tag; `puppet.ride` "tag on" / "tag off" test it. The
@@ -2822,6 +2887,23 @@ struct Runtime final:ds::Transport {
         if(sampler)animatorVtable=sampler->base+0x3d09910;   // MorphemeAnimationManager (pinned build)
 #ifndef MOD_FAKE_NETWORK
         if(sampler){cargoManagerSlot=sampler->base+0x7bf4968;cargoManagerVtable=sampler->base+0x3dd9338;}   // DSBaggage2Manager global, vtable
+        if(sampler&&config.testMode.on){   // test mode (tickTestMode): the game's calls and memory
+            testCreate=cargoCreate;
+            testRecords=[this](unsigned limit){uint64_t manager=0;if(!cargoManagerSlot||!sampler->read(cargoManagerSlot,&manager,8))return std::vector<mod::cargo::Record>{};
+                return mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,limit);};
+            testBlock=[this](uint64_t entity){return mod::testmode::infoBlock(*sampler,sampler->base,entity);};
+            porterVitals=[this](uint64_t entity){return mod::vitals::read(*sampler,entity);};
+            testWritable=mod::mulegoal::nativeWritable();testPoke=mod::mulegoal::nativePoke();}
+#else
+        if(sampler&&config.testMode.on){   // the fake world: crates recorded, the status block at 0xf800, the state the test sets
+            testCreate=[this](uint32_t hash,const mod::puppet::Transform& t){fakeDrops.push_back({hash,t.position});};
+            testRecords=[this](unsigned){std::vector<mod::cargo::Record> out;uint32_t i=0;
+                for(auto& d:fakeDrops){mod::cargo::Record r;r.hash=d.hash;r.position=d.at;r.state=uint32_t(mod::cargo::InWorld)<<8|mod::cargo::SharedKind;r.index=i++;out.push_back(r);}
+                return out;};
+            testBlock=[this](uint64_t entity){return entity?fake->base+0xf800:0;};
+            porterVitals=[this](uint64_t){return fakeVitals;};
+            testWritable=[this](uint64_t at,size_t n){return at>=fake->base+0xf800&&at+n<=fake->base+0xf900;};
+            testPoke=[this](uint64_t at,const void* from,size_t n){fake->mutate([&]{std::memcpy(fake->data.data()+(at-fake->base),from,n);});};}
 #endif
         cache.sampledAt=mod::nowMs();
         if(!config.gameThread){cache.available=provider->readLocal(cache.local);cache.gated=provider->isInCutsceneOrLoading();provider->applyRemote({});}
@@ -3421,6 +3503,8 @@ struct Runtime final:ds::Transport {
             if(gameContext)tickReceived();
             stage="offer";stages.enter("offer",mod::nowUs());
             if(gameContext)tickOffer(now);
+            stage="test mode";stages.enter("test mode",mod::nowUs());
+            if(gameContext)tickTestMode(now);
             stage="notices";stages.enter("notices",mod::nowUs());
             if(gameContext)tickNotices(now);
             stage="cargo command";stages.enter("cargo command",mod::nowUs());
@@ -3994,6 +4078,20 @@ MOD_API uint32_t mod_test_thread_id() {return currentThread();}
 MOD_API uint64_t mod_test_frame_caller() {return mod::dispatch::FixtureSites.framePattern+16;}
 MOD_API const char* mod_test_run_stamp() {static std::string stamp=mod::runStamp();return stamp.c_str();}
 MOD_API void mod_test_set_event(int on) {std::lock_guard<std::mutex> lock(lifecycle);if(runtime)runtime->fakeEvent=on!=0;}
+// Test mode in the fake world: the porter's state (dead, caught by BTs), his status block's two gauges (value, maximum)
+// and the crates asked for; take_crate removes one, as a pick-up would.
+MOD_API void mod_test_set_vitals(int dead,int caught) {std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
+    r.fakeVitals=mod::vitals::State{true,dead!=0,caught!=0,false};}
+MOD_API void mod_test_set_gauges(float blood,float bloodMax,float stamina,float staminaMax) {
+    std::lock_guard<std::mutex> lock(lifecycle);if(!runtime||!runtime->fake)return;auto* f=runtime->fake.get();
+    f->mutate([&]{f->put<float>(0xf800+mod::testmode::BloodValue,blood);f->put<float>(0xf800+mod::testmode::BloodMax,bloodMax);
+        f->put<float>(0xf800+mod::testmode::StaminaValue,stamina);f->put<float>(0xf800+mod::testmode::StaminaMax,staminaMax);});}
+MOD_API void mod_test_gauges(float* four) {
+    std::lock_guard<std::mutex> lock(lifecycle);if(!runtime||!runtime->fake||!four)return;auto* f=runtime->fake.get();
+    f->mutate([&]{for(int i=0;i<4;++i){uint64_t at=0xf800+(i==0?mod::testmode::BloodValue:i==1?mod::testmode::BloodMax:i==2?mod::testmode::StaminaValue:mod::testmode::StaminaMax);std::memcpy(&four[i],f->data.data()+at,4);}});}
+MOD_API int mod_test_take_crate(unsigned index) {std::lock_guard<std::mutex> lock(lifecycle);if(!runtime)return 0;auto& r=*runtime;std::lock_guard<std::timed_mutex> guard(r.mutex);
+    if(index>=r.fakeDrops.size())return 0;
+    r.fakeDrops.erase(r.fakeDrops.begin()+index);return 1;}
 // What the fake porter shows of his gear (bit 0 the backpack, bit 1 the wrist cuff) and what he carries (the
 // coop-partner --carry form, "hash[:slot[:count]],..." or "none").
 MOD_API void mod_test_set_gear(unsigned shown) {std::lock_guard<std::mutex> lock(lifecycle);if(runtime)runtime->fakeGear=shown;}
@@ -4170,6 +4268,8 @@ unsigned mod_status(char* out,unsigned cap) {
         o<<",\"route\":{\"on\":"<<(r.routeRun?"true":"false")<<",\"state\":\""<<(r.routeRun?mod::route::phaseName(r.routeRun->phase()):"none")<<"\",\"elapsed_ms\":"<<(r.routeRun?r.routeRun->elapsed():0)
          <<",\"progress_m\":"<<(r.routeRun?r.routeRun->progress():0)<<",\"outside_m\":"<<(r.routeRun?r.routeRun->outside():0)<<",\"reason\":\""<<(r.routeRun?r.routeRun->reason():std::string())
          <<"\",\"recording\":"<<(r.routeRecorder.on()?"true":"false")<<",\"recorded_samples\":"<<r.routeRecorder.samples()<<"}";
+        o<<",\"test_mode\":{\"on\":"<<(r.config.testMode.on?"true":"false")<<",\"sets\":"<<r.testSets<<",\"crates\":"<<r.testCrates<<",\"refused\":"<<r.testRefused
+         <<",\"on_ground\":"<<r.testDropper.onGround()<<",\"blood_writes\":"<<r.testBloodWrites<<",\"stamina_writes\":"<<r.testStaminaWrites<<",\"gauges\":\""<<r.testGaugeWhy<<"\"}";
         o<<",\"received_structures\":{\"on\":"<<(r.receivedOn?"true":"false")<<",\"answers\":\""<<mod::received::label(r.receivedEarly)<<"\",\"built\":"<<r.receivedBuilder.changed()<<",\"skipped\":"<<r.receivedBuilder.skipped()<<"}";
         {mod::strand::Poller::Counters k;if(r.strandPoller)k=r.strandPoller->counters();
          o<<",\"strand\":{\"on\":"<<(r.strandPoller?"true":"false")<<",\"reads\":"<<k.reads<<",\"answers\":"<<k.answers<<",\"failures\":"<<k.failures<<",\"told\":"<<k.told
@@ -4182,6 +4282,7 @@ unsigned mod_status(char* out,unsigned cap) {
         {auto ascii=[](const std::u16string& n){std::string t;for(auto ch:n)t+=(ch>=0x20&&ch<0x7f&&ch!='"'&&ch!='\\')?char(ch):'?';return t;};
          o<<",\"label_names\":[";bool first=true;for(auto& [id,l]:r.fakeLabels){o<<(first?"":",")<<"\""<<ascii(l.name)<<"\"";first=false;}
          o<<"],\"notices_shown\":[";first=true;for(auto& n:r.fakeNotices){o<<(first?"":",")<<"\""<<ascii(n)<<"\"";first=false;}
+         o<<"],\"fake_drops\":[";first=true;for(auto& d:r.fakeDrops){o<<(first?"":",")<<"{\"item\":"<<d.hash<<",\"at\":["<<d.at[0]<<","<<d.at[1]<<","<<d.at[2]<<"]}";first=false;}
          o<<"],\"labels\":[";first=true;for(auto& [id,l]:r.fakeLabels){o<<(first?"":",")<<"{\"name\":\""<<ascii(l.name)<<"\",\"at\":["<<l.at[0]<<","<<l.at[1]<<","<<l.at[2]<<"]}";first=false;}
          o<<"]";
          // The fake engine's tables: every gear piece (the body it hangs on, where that body is) and every case mesh.

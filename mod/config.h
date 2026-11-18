@@ -6,6 +6,14 @@
 namespace mod {
 constexpr unsigned OthersMax=32;   // others.h MaxOthers
 constexpr unsigned OthersCarryMax=8;   // others.h MaxCarriers
+// Test mode for alpha testers (testmode.h, README "Test mode"): the config's one nested object,
+// "test_mode":{"materials":85,"stamina":true,"blood":true,"battery":true}. Absent: off. Present (even {}): on, every
+// switch at its default. materials: the virtual-key code of the key that drops a set of material crates (0: none).
+constexpr unsigned TestMaterialsKey=0x55;   // U: free in the game's default bindings and not one of the mod's keys
+struct TestMode { bool on=false;unsigned materialsKey=0;bool stamina=false,blood=false,battery=false; };
+// Keys test mode may not take: the mod's own (F1 guide, F2 bug mark, Tab, B ping, L like) and the mouse buttons,
+// Escape, Enter and modifiers; the partner's passenger and catch-up keys are checked against the config's own values.
+bool testKeyRefused(unsigned vk);
 struct Config {
     unsigned slot=0, peerSlot=1;
     std::string role="none", progressMismatch="warn", joinMove="log", peer, nickname, provider, fault="none", bind;   // bind: local IPv4 for a non-loopback peer (empty = the route's)
@@ -85,6 +93,7 @@ struct Config {
     unsigned presenceLogMaxMiB=8;
     unsigned maxLogMb=200;
     std::string shareEnvironment="off"; // "host": the host's time and rain; "rain": its rain only (weather.h)
+    TestMode testMode;                  // off unless the config has a test_mode object (game provider and game_thread)
     discovery::Options discoveryOptions;
 };
 // Deliberately small strict flat JSON schema, at most ConfigMax bytes. No paths from JSON are used for writes.

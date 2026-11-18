@@ -194,6 +194,13 @@ bool takePasses(const Target& t,const Transport& send,Passes& out,std::string& w
 }
 void usePasses(Session& s,const Passes& p){s.signInTicket=p.ticket;s.relayToken=p.relayToken;s.playerId=p.relayId;}
 void useNoticeToken(Session& s,const Passes& p){s.noticeToken=p.noticeToken;}
+void usePolicy(Session& s,const Policy& p){
+#ifndef MUTANT_STRAND_TEST_MODE
+    s.serverTestMode=p.value("test_mode")=="on";
+#else
+    s.serverTestMode=!p.settings.empty();
+#endif
+}
 bool takeNoticeToken(const Target& t,const Transport& send,std::string& token,std::string& why){
     token.clear();
     if(t.account.empty()){why="your account on the server is not known.";return false;}
@@ -204,7 +211,7 @@ bool takeNoticeToken(const Target& t,const Transport& send,std::string& token,st
     catch(const std::exception&){why="its answer cannot be read.";return false;}
     return true;
 }
-bool hostPasses(Target& t,const Transport& send,unsigned tries,Passes& out,bool& keyed,std::string& why){
+bool hostPasses(Target& t,const Transport& send,unsigned tries,Passes& out,bool& keyed,std::string& why,Policy* read){
     Policy p;Fetch f=Fetch::Unreachable;
     for(unsigned i=0;i<std::max(1u,tries);++i){
         if(i){
@@ -216,6 +223,7 @@ bool hostPasses(Target& t,const Transport& send,unsigned tries,Passes& out,bool&
         }
         f=fetchPolicy(t,send,p);if(f!=Fetch::Unreachable)break;}
     keyed=false;
+    if(f==Fetch::Ok&&read)*read=p;
     if(f==Fetch::Old)return true;
     if(f!=Fetch::Ok){why=fetchText(f);return false;}
     if(!identify(t,p,int64_t(std::time(nullptr)),why))return false;

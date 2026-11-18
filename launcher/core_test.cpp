@@ -130,6 +130,11 @@ int main(int argc,char** argv) {
         check(c.role==(host?"host":"client")&&c.slot==(host?3:4)&&c.peerSlot==(host?4:3),"role and exact ports");
         check(c.peer==s.peer&&c.session==s.secret&&c.required&&!c.selfTick&&c.gameThread&&c.puppetProbe&&c.partner=="own"&&c.partnerGear&&c.partnerMarker&&c.partnerVehicle&&c.notices&&c.shareEnvironment=="rain"&&c.shareEnemies&&c.shareOrders&&c.shareOrderUnits&&c.shareRoads&&c.shareSavedStructures&&!c.autoContinue&&!c.virtualPad,"session and play defaults");}
     {auto solo=s;solo.solo=true;check(!mod::parseConfig(launcher::config(solo)).notices&&mod::parseConfig(launcher::config(s)).notices,"no session notices in a solo session");}
+    {   // Test mode (alpha) in the player's own games, solo and two-player: his Settings choice, off by default.
+        check(!mod::parseConfig(launcher::config(s)).testMode.on,"no test mode by default");
+        auto t=s;t.testMode=true;check(mod::parseConfig(launcher::config(t)).testMode.on,"Settings: test mode in a two-player game");
+        auto solo=t;solo.solo=true;auto c=mod::parseConfig(launcher::config(solo)).testMode;check(c.on&&c.materialsKey==0x55,"and in a solo game");
+        auto server=s;server.serverTestMode=true;check(!mod::parseConfig(launcher::config(server)).testMode.on,"a server's rules do not reach a two-player game");}
     {   // Shared world (opt-in): the host's game signs in on loopback, the guest's at the host; one secret path for both.
         auto h=s;h.host=true;h.sharedWorld=true;auto g=h;g.host=false;
         check(mod::parseConfig(launcher::config(s)).onlineServer.empty(),"no online server unless asked");
@@ -163,6 +168,11 @@ int main(int argc,char** argv) {
         // Other players' structures built when they arrive: the player's setting, on unless he turned it off.
         check(hc.buildReceived,"a group game builds other players' structures when they arrive");
         {auto off=h;off.buildReceived=false;check(!mod::parseConfig(launcher::config(off)).buildReceived,"unless the player turned it off");}
+        // Test mode in group play: the server's rules, never the player's own Settings choice.
+        check(!hc.testMode.on,"no test mode unless the server's rules say so");
+        {auto own=h;own.testMode=true;check(!mod::parseConfig(launcher::config(own)).testMode.on,"the player's own choice does not put a group game in test mode");
+         auto rules=h;rules.serverTestMode=true;auto t=mod::parseConfig(launcher::config(rules)).testMode;
+         check(t.on&&t.materialsKey==0x55&&t.stamina&&t.blood,"the server's rules put every game there in test mode (U, stamina, blood)");}
         check(hc.onlineServer=="http://127.0.0.1:49103/w305419896/auth/ds","the host's game signs in on loopback, as its own account");
         check(hc.partner=="off"&&!hc.shareOrders&&!hc.shareEnemies&&!hc.shareRoads&&!hc.shareSavedStructures&&hc.shareEnvironment=="off"&&!hc.notices,"nothing of the two-player session in group play");
         auto a=launcher::worldArguments(h,"D");
@@ -251,6 +261,12 @@ int main(int argc,char** argv) {
         auto shown=p.text();check(shown.find("What any player builds here may be shared. (the owner changed this from the preset's members)")!=std::string::npos&&shown.find("2 of 16 players")!=std::string::npos
                                   &&shown.find("act for any player")!=std::string::npos,"the policy in words, with what the owner changed and that there is no identity");
         auto d=st::defaults(p);check(d.offerBuilds=="ask"&&d.offerOld=="no","a player who chose nothing has the server's choices");
+        {   // Test mode: the server's rules decide for its games; a server without the setting (older) is off.
+            launcher::Session g;st::usePolicy(g,p);check(!g.serverTestMode,"no test_mode setting: off");
+            auto on=st::parsePolicy(doc.substr(0,doc.size()-2)+R"(,{"key":"test_mode","value":"on","preset":"off","text":"Test mode: unlimited materials (U), stamina and blood for everyone here."}]})");
+            st::usePolicy(g,on);check(g.serverTestMode&&on.text().find("Test mode: unlimited materials (U)")!=std::string::npos,"test_mode on: the game starts in test mode, and the rules shown say so");
+            auto off=st::parsePolicy(doc.substr(0,doc.size()-2)+R"(,{"key":"test_mode","value":"off","preset":"off","text":"No test mode: the game plays as usual."}]})");
+            st::usePolicy(g,off);check(!g.serverTestMode,"test_mode off: not in test mode");}
         auto edit=[&](const std::string& from,const std::string& to){auto x=doc;auto at=x.find(from);check(at!=std::string::npos,"fixture");return x.replace(at,from.size(),to);};
         for(auto wrong:{edit("\"format\":1","\"format\":2"),edit("a1b2c3d4e5f6a7b8","a1b2]\\nx=y"),edit("a1b2c3d4e5f6a7b8","ab"),edit("\"preset\":\"public\"","\"preset\":\"club\""),
                         edit("\"key\":\"offer_builds\"","\"key\":\"offer_new\""),edit("Open to anyone.","Open\\u0007"),edit("\"value\":\"ask\"","\"value\":\"maybe\""),
