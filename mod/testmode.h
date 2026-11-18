@@ -58,6 +58,9 @@ private:
 // Blood and stamina.
 constexpr uint64_t PlayerManagerSlot=0x7bc7568,PlayerInfo=0x2b0;   // as signals.h readInfo
 constexpr uint64_t BloodValue=0x28,BloodMax=0x2c,StaminaValue=0x30,StaminaMax=0x38;
+// The porter's own battery (not a vehicle's): component E+0x54e0 of his entity; the charge is +0x110 and the full charge
+// +0x104, as the game's own refill (DSPlayerSystem_sExportedRecoverBattery, 0x2738940) brings it there.
+constexpr uint64_t EntityBattery=0x54e0,BatteryValue=0x110,BatteryMax=0x104;
 constexpr float GaugeCeiling=1e6f;   // a maximum above this is not a gauge
 // The value to write, or nothing: the maximum when value < maximum and both are finite, 0 <= value and 0 < maximum <=
 // GaugeCeiling.
@@ -73,4 +76,6 @@ using Poke=std::function<void(uint64_t at,const void* from,size_t n)>;
 struct Kept { const char* refused="";unsigned blood=0,stamina=0; };   // writes made by one call
 // One tick: through the gate, each switched-on gauge of block B set to its maximum when it is below it.
 Kept keepFull(const Gate&,const discovery::Sampler&,uint64_t block,bool blood,bool stamina,const Writable&,const Poke&);
+// The same for the porter's battery. block: as above, nonzero only for this porter, whose entity is `entity`. The writes made (0 or 1).
+unsigned keepBattery(const Gate&,const discovery::Sampler&,uint64_t block,uint64_t entity,const Writable&,const Poke&);
 }

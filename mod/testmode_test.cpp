@@ -104,6 +104,12 @@ static void gauges(){
         // No block, memory that is not writable: nothing.
         {Memory n;world(n);auto t=n.sampler(Image);auto r=keepFull(open(),t,0,true,true,n.writable(),n.poke());CHECK(*r.refused!=0&&n.pokes==0);
          auto none=[](uint64_t,size_t){return false;};auto q=keepFull(open(),t,B,true,true,none,n.poke());CHECK(q.blood==0&&q.stamina==0&&n.pokes==0);}
+        // The porter's battery: raised to its full charge once, only through the gate, only for his own block.
+        {Memory n;world(n);auto t=n.sampler(Image);const uint64_t C=0x400000;n.put<uint64_t>(Porter+EntityBattery,C);n.put<float>(C+BatteryValue,5);n.put<float>(C+BatteryMax,20);n.put<float>(C+0x108,20);
+         Gate shut=open();shut.inEvent=true;CHECK(keepBattery(shut,t,B,Porter,n.writable(),n.poke())==0&&n.get<float>(C+BatteryValue)==5.f);
+         CHECK(keepBattery(open(),t,0,Porter,n.writable(),n.poke())==0&&n.get<float>(C+BatteryValue)==5.f);
+         CHECK(keepBattery(open(),t,B,Porter,n.writable(),n.poke())==1&&n.get<float>(C+BatteryValue)==20.f&&n.get<float>(C+BatteryMax)==20.f&&n.get<float>(C+0x108)==20.f);
+         CHECK(keepBattery(open(),t,B,Porter,n.writable(),n.poke())==0);}
         // Another player's block (his entity is not this porter's): the search refuses it.
         {Memory n;world(n,0x777000);auto t=n.sampler(Image);CHECK(infoBlock(t,Image,Porter)==0);}
     }

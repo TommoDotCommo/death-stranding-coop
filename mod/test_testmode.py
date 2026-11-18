@@ -44,7 +44,7 @@ class Game:
         lib.mod_test_thread_id.restype=c.c_uint32;lib.mod_test_frame_caller.restype=c.c_uint64;lib.mod_test_run_stamp.restype=c.c_char_p
         lib.mod_test_set_pose.argtypes=[c.POINTER(c.c_double),c.POINTER(c.c_float),c.c_int]
         lib.mod_test_set_gauges.argtypes=[c.c_float]*4;lib.mod_test_gauges.argtypes=[c.POINTER(c.c_float)]
-        lib.mod_test_set_vitals.argtypes=[c.c_int,c.c_int];lib.mod_test_set_event.argtypes=[c.c_int]
+        lib.mod_test_dialog_answer.argtypes=[c.c_uint];lib.mod_test_set_vitals.argtypes=[c.c_int,c.c_int];lib.mod_test_set_event.argtypes=[c.c_int]
         config=dict(slot=0,server='127.0.0.1',nickname='Ann',provider='game',session=46,required=True,game_thread=True,puppet_probe=True,
                     virtual_pad=True,discovery_sha256=PIN)
         config.update(extra)
@@ -97,7 +97,7 @@ def gauges(library):
             game.pump(3)   # the notice queue's gap
             oracle(status['notices_shown'].count(ON)==1 or game.status()['notices_shown'].count(ON)==1,('told once',game.status()['notices_shown']))
             oracle(game.status()['notices_shown'].count(ON)==1,('told more than once',game.status()['notices_shown']))
-            log=game.log();oracle('TESTMODE on: materials on U' in log and 'battery: not kept full' in log and 'TESTMODE gauges kept full' in log,log[-1500:])
+            log=game.log();oracle('TESTMODE on: materials on U' in log and 'battery on (the porter' in log and 'TESTMODE gauges kept full' in log,log[-1500:])
         finally:game.close()
     with tempfile.TemporaryDirectory() as folder:
         game=Game(folder,library,{})
@@ -129,8 +129,38 @@ def materials(library):
             oracle(game.status()['test_mode']['on_ground']==len(drops)-1,('a crate picked up still counts',game.status()['test_mode']))
         finally:game.close()
 
-PROPERTIES=dict(gauges=gauges,materials=materials)
-MUTANTS=[('fake-testmode-event.so','gauges'),('fake-testmode-rate.so','materials')]
+def menu(library):
+    """F3 opens the switches where test mode is on; a switch turned off stops that gauge being kept, at once and only that one."""
+    with tempfile.TemporaryDirectory() as folder:
+        game=Game(folder,library,dict(test_mode={}))
+        try:
+            full=(100.0,100.0,90.0,90.0);game.low()
+            oracle(game.pump(5,lambda:game.gauges()==full),('not kept full',game.gauges()))
+            menu=lambda:game.status()['test_mode']['menu']
+            oracle(game.pump(3,lambda:menu()['ready']),('no menu',menu()))
+            game.script('key F3 200\nwait 300\n')
+            oracle(game.pump(3,lambda:menu()['open']),('F3 did not open it',menu()))
+            # Row 0 on the first switch: stamina off. Its gauge is left alone from then on; blood is still kept.
+            game.lib.mod_test_dialog_answer(0)
+            oracle(game.pump(3,lambda:menu()['switches']==1 and menu()['open']),('not switched and reopened',menu()))
+            oracle(game.status()['test_mode']['keep']=={'stamina':False,'blood':True,'battery':True},game.status()['test_mode']['keep'])
+            game.pump(.3);game.low();game.pump(1)
+            g=game.gauges();oracle(g[0]==100.0 and g[2]==30.0,('stamina off, blood on',g))
+            # Close: nothing else changes and the dialogue stays gone.
+            game.lib.mod_test_dialog_answer(2);game.pump(.5)
+            oracle(not menu()['open'] and menu()['opens']==2,('closed',menu()))
+            oracle(game.status()['test_mode']['keep']['stamina'] is False,'the switch went back by itself')
+            log=game.log();oracle('DEBUGMENU on: F3' in log and 'DEBUGMENU opened' in log and 'DEBUGMENU switched 0 off' in log and 'DEBUGMENU closed' in log,log[-1200:])
+        finally:game.close()
+    with tempfile.TemporaryDirectory() as folder:   # no test mode, no menu
+        game=Game(folder,library,{})
+        try:
+            game.script('key F3 200\nwait 300\n');game.pump(1.5)
+            m=game.status()['test_mode']['menu'];oracle(not m['ready'] and not m['opens'],('a menu without test mode',m))
+        finally:game.close()
+
+PROPERTIES=dict(gauges=gauges,materials=materials,menu=menu)
+MUTANTS=[('fake-testmode-event.so','gauges'),('fake-testmode-rate.so','materials'),('fake-testmode-menu.so','menu')]
 if __name__=='__main__':
     if len(sys.argv)==3:
         PROPERTIES[sys.argv[2]](Path(sys.argv[1]).resolve())

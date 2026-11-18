@@ -15,7 +15,8 @@ int main(){
     CHECK(keyName('K')==u"K"&&keyName(0x70)==u"F1"&&keyName(0x78)==u"F9"&&keyName(0x71)==u"F2"&&keyName(0x10)==u"?");
     {   // Always the two keys of the mod itself; the others only when they do something in this session.
         auto t=body({});CHECK(has(t,u"F1 (hold)")&&has(t,u"F2  Mark a bug")&&!has(t,u"Ping")&&!has(t,u"Like")&&!has(t,u"Ride")&&!has(t,u"route")&&!has(t,u"materials")&&!has(t,u"story"));
-        Facts f;f.ping=0x42;f.like=true;f.ride=0x4a;f.route=0x4b;f.materials=0x55;f.story=0x78;t=body(f);
+        CHECK(!has(t,u"switches"));
+        Facts f;f.ping=0x42;f.like=true;f.ride=0x4a;f.route=0x4b;f.materials=0x55;f.story=0x78;f.debug=0x72;t=body(f);CHECK(has(t,u"\nF3  Test mode switches"));
         CHECK(has(t,u"\nB  Ping")&&has(t,u"\nL  Like")&&has(t,u"\nJ  Ride")&&has(t,u"\nK  Record")&&has(t,u"\nU  Drop")&&has(t,u"\nF9  Catch up"));}
     {   // Shown once for a hold, gone on release, and again for the next hold.
         Hud h;auto p=h.page();p.place={2,.5f,.25f};

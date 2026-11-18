@@ -110,4 +110,17 @@ Kept keepFull(const Gate& g,const discovery::Sampler& s,uint64_t block,bool bloo
     if(stamina)k.stamina=one(StaminaValue,StaminaMax);
     return k;
 }
+unsigned keepBattery(const Gate& g,const discovery::Sampler& s,uint64_t block,uint64_t entity,const Writable& writable,const Poke& poke){
+#ifndef MUTANT_TESTMODE_BATTERY_GATE
+    if(*refusal(g))return 0;
+#endif
+#ifndef MUTANT_TESTMODE_BATTERY_OWNER
+    if(!block)return 0;
+#endif
+    if(!entity||!poke||!writable)return 0;
+    uint64_t c=0;float v=0,m=0;
+    if(!s.read(entity+EntityBattery,&c,8)||!c||!s.read(c+BatteryValue,&v,4)||!s.read(c+BatteryMax,&m,4))return 0;
+    auto to=refill(v,m);if(!to||!writable(c+BatteryValue,4))return 0;
+    float w=*to;poke(c+BatteryValue,&w,4);return 1;
+}
 }
