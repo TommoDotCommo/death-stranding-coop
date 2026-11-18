@@ -1051,7 +1051,7 @@ void install_redirect(void* self,bool releaseSession) {
         }
     }
     if(!safe_tree(policy.instance,true)) fatal("redirect: unsafe instance\n");
-    modules.instance=env(L"COOP_MODULE_INSTANCE");modules.windows=env(L"SystemRoot");modules.steam=policy.steam;
+    modules.instance=env(L"COOP_MODULE_INSTANCE");modules.windows=env(L"SystemRoot");modules.steam=policy.steam;modules.local_app_data=env(L"LOCALAPPDATA");
     {   // The game's own folder is admitted on every path, not only for a release ticket: with the data folder
         // outside the game folder (the launcher's direct path) the game's own steam_api64.dll was refused.
         // A release needs it and stops without it; elsewhere a path that cannot be taken in canonical form admits

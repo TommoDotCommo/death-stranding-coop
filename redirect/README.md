@@ -14,12 +14,13 @@ loaded module so that the copy:
   device namespace is refused.
 - **loads only expected code** (`.ds-module-policy.json`: `strict`, `allowlist`, `log-only`). Allowlist admits the
   copy's own folder, System32, the Steam client libraries and Windows Defender's in-process scanner, by exact path
-  rules.
+  rules, and the 64-bit hook of Discord's overlay and clips (`DiscordHook64.dll` and its SDK, only in Discord's own
+  `%LOCALAPPDATA%\\Discord*\\app-*\\modules\\discord_hook-*\\discord_hook\\<hex>` folders).
   Under `allowlist`, a module that is refused when it is asked for is not loaded and the request is answered as a failed load (audit
   records `MODULE_REFUSE` and `MODULE_LOAD_FAILED ... error=5`): the game goes on without it. This is what happens to
   software Windows loads into every process with a window, such as a third-party input method. A module that is only
-  found after it was loaded (a dependency the loader brought in by itself) has already run code, and that still ends
-  the game.
+  found after it was loaded (a dependency the loader brought in by itself, or a DLL another program injects, as most
+  overlays and capture tools do) has already run code, and that still ends the game.
   **Adding a module for one copy:** a player whose PC needs such software inside the game (an input method, a screen
   reader, an overlay) lists it in `extra-modules.txt` in the copy's data folder (the folder that holds
   `redirect-data`): one full path of a `.dll` per line, `#` for comments, at most 32. Each line admits that exact
