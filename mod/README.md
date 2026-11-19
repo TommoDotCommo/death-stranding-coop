@@ -1051,6 +1051,13 @@ before (kept per server in `roads-given-<hash>.txt` beside the config), never pa
 (2026-11-20): the game asks the server once, as the world loads; five pavers were given the stand-in's materials and
 one reached its road.
 
+**Structure levels** (with `group_enemies`, the same events, kind `level`, kept a month on the server): the game tells its
+server nothing when its porter upgrades another player's structure (probe 2026-11-20), so every 2 s the mod compares
+the levels of the structures that have an online id; a rise here is said under the hash of that id, and another
+player's rise raises the structure with the same id here with the game's own routine (`roads.h` raise: the missing
+materials given, the level-up queued). What was raised for another player is not said back; a structure first seen at
+some level is not said. Live once (2026-11-20). Materials short of a level are not shared.
+
 **Story bosses:** a fight that runs while the game's BossBattle state is set (a whale, a titan) is never offered to
 the players near, and a game in one joins nobody's: a visitor's copy would be an ordinary catcher (fights.h, mutant
 FIGHT_BOSS_OFFERED). Playing a story boss together is designed, not built (both start the same Boss Battle replay, the
