@@ -145,6 +145,7 @@ std::string config(const Session& s) {
 #endif
 #ifndef MUTANT_GROUP_NO_VEHICLES
             +",\"others_vehicles\":true"   // other players' trucks and bikes, and riding along (J)
+            +",\"others_carts\":true"      // the floating carriers other players tow
 #endif
 #ifndef MUTANT_GROUP_NOTICE_TOKEN
             // With the token: the notices, and the save's older strand offered while the server says his offer_old is

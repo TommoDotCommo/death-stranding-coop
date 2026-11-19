@@ -460,6 +460,7 @@ struct Runtime final:ds::Transport {
 #endif
         otherBodies->drive(othersPlan.wants,anchor,now);
         tickOtherVehicles(anchor,event,now);
+        tickOtherCarts(event,now);
         std::array<size_t,4> state{{shown.size(),others?others->connected():0,otherBodies->made(),otherBodies->driving()}};
         if(state!=othersNoted&&now-othersNotedAt>=2000){othersNoted=state;othersNotedAt=now;std::ostringstream o;
             o<<"OTHERS near "<<state[0]<<" connected "<<state[1]<<" bodies made "<<state[2]<<" shown "<<state[3]<<"\n";note(o.str().c_str());}
@@ -1280,6 +1281,30 @@ struct Runtime final:ds::Transport {
             seen.push_back(v);}
         fleet->tick(now,!event&&anchor.entity,seen);
         tickGroupPassenger(anchor,event,now);
+    }
+    // The floating carriers other players tow (carts.h): one display per player, from his samples, at his body.
+    std::map<uint64_t,mod::carts::Display> otherCarts;size_t groupCartsNoted=0,otherCartsNoted=0;
+    std::set<uint32_t> otherCartIds() const {std::set<uint32_t> ids;for(auto& d:otherCarts)for(auto id:d.second.ids())ids.insert(id);return ids;}
+    void tickOtherCarts(bool event,uint64_t now){
+        if(!config.othersCarts||!sampler)return;
+#ifdef _WIN32
+        if(!cartTried){cartTried=true;try{cartApi=mod::carts::nativeApi(*sampler);}catch(const std::exception& e){note((std::string("CART unavailable: ")+e.what()+"\n").c_str());}}
+#endif
+        if(!cartApi)return;
+        // A copy this porter attached is the other player's, not his: it goes (made again at its owner).
+        {auto shown=otherCartIds();if(!shown.empty())for(auto& c:mod::carts::read(*sampler,sampler->base))if(c.attached&&shown.count(c.id)){cartApi->remove(c.id);note("CART this porter took another player's cart: removed, made again at him\n");}}
+        std::set<uint64_t> here;
+        for(auto& s:othersShown){
+            std::vector<mod::carts::Place> places;
+            if(!event&&s.visible&&s.render.visible&&s.animation){
+                auto body=mod::puppet::fromState(s.render.state.position,s.render.state.yaw).position;
+                for(size_t i=0;i<s.animation->animation.cartCount;++i)places.push_back(mod::carts::place(s.animation->animation.carts[i],body));}
+            if(places.empty()&&!otherCarts.count(s.id))continue;
+            here.insert(s.id);otherCarts[s.id].show(places,*cartApi,now);}
+        for(auto it=otherCarts.begin();it!=otherCarts.end();){
+            if(!here.count(it->first)||!it->second.count()){it->second.clear(*cartApi);it=otherCarts.erase(it);}else ++it;}
+        size_t n=0;for(auto& d:otherCarts)n+=d.second.count();
+        if(n!=otherCartsNoted){otherCartsNoted=n;note(("CART other players' floating carriers here: "+std::to_string(n)+"\n").c_str());}
     }
     // Riding along on another player's truck or bike (passenger.h), as on the partner's.
     void tickGroupPassenger(const mod::puppet::Anchor& anchor,bool event,uint64_t now){
@@ -3715,6 +3740,11 @@ struct Runtime final:ds::Transport {
                         static const char hex[]="0123456789abcdef";std::string h;h.reserve(pay.size()*2);for(auto b:pay){h+=hex[b>>4];h+=hex[b&15];}
                         writePresence("{\"t_us\":"+std::to_string(mod::nowUs())+",\"animation\":\""+h+"\"}\n");};
                     if(othersUp){othersGather.add(held,floats);auto mine=othersGather.current();
+                        // The carts he tows, as in the partner's sample; the copies shown here for others stay out.
+                        if(config.othersCarts&&a.pose.available){
+                            auto towed=mod::carts::towed(mod::carts::read(*sampler,sampler->base),mod::puppet::transform(a.pose).position,otherCartIds());
+                            mine.cartCount=uint8_t(std::min(towed.size(),mine.carts.size()));for(size_t i=0;i<mine.cartCount;++i)mine.carts[i]=towed[i];
+                            if(towed.size()!=groupCartsNoted){groupCartsNoted=towed.size();note(("CART this porter tows "+std::to_string(groupCartsNoted)+" floating carriers (to the others)\n").c_str());}}
                         if(others->animation(mine,now)&&!core->connected())record(mine);   // with no partner, what the others were sent
                         othersGather.sent();}
                     // What he holds in his hands, relative to his root: it moves with the mirrored arms (carry_visual).

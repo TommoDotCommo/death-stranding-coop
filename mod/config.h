@@ -90,7 +90,8 @@ struct Config {
     // at once instead of held by the game's range test or taken down by its placement check (received.h). Not run live.
     bool buildReceived=false;
     bool groupCargo=false;
-    bool othersVehicles=false;   // others_vehicles: other players' trucks and bikes shown, and ridden along (othervehicles.h)   // group_cargo: cargo set down shared through the server (groupcargo.h)
+    bool othersVehicles=false;
+    bool othersCarts=false;      // others_carts: the floating carriers other players tow, sent and shown (carts.h)   // others_vehicles: other players' trucks and bikes shown, and ridden along (othervehicles.h)   // group_cargo: cargo set down shared through the server (groupcargo.h)
     // With online_server and strand_token: the structures this player's save already holds are offered to that server,
     // one at a time, through the game's own upload, while the server says his older strand may be (offer_strand.h).
     // Off by default; not run live with the mod.
