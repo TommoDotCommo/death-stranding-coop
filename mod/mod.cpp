@@ -2095,13 +2095,17 @@ struct Runtime final:ds::Transport {
                 std::ostringstream o;o<<"ORDER story "<<std::hex<<m.now.id<<std::dec<<" (detail "<<int(m.now.detail)<<") state "<<m.was.state<<"->"<<m.now.state<<" result "<<int(m.was.result)<<"->"<<int(m.now.result)<<"\n";note(o.str().c_str());
             }
         }
-        if(!on){storyIn.clear();return;}
+        // The lab commands below also run without the resync (group play has no partner to resync with) while
+        // puppet_probe is on, as the other puppet command files do: only while a command waits or a watch runs.
+        if(!on&&!(config.puppetProbe&&(storyWatchUntil||std::filesystem::exists(storyCommand)))){storyIn.clear();return;}
         bool host=config.role=="host";
         if(!storyTried){
             storyTried=true;
             try{storyAccount=mod::story::account(storyFolder);}catch(const std::exception& e){note((std::string("STORY saves unavailable: ")+e.what()+"\n").c_str());}
             try{storySave=mod::story::nativeSave(*sampler);}catch(const std::exception& e){note((std::string("STORY save request unavailable: ")+e.what()+"\n").c_str());}
             try{storyLoad=mod::story::nativeLoad(*sampler);}catch(const std::exception& e){note((std::string("STORY load request unavailable: ")+e.what()+"\n").c_str());}
+        }
+        if(on&&!storyHost&&!storyGuest){
             bool automatic=config.storyResync=="auto";
             if(host)storyHost=std::make_unique<mod::story::Host>(automatic);else storyGuest=std::make_unique<mod::story::Guest>(automatic);
             note((std::string("STORY resync on: ")+(host?"host":"guest")+", "+config.storyResync+", key "+std::to_string(config.storyKey)+", save "+(storySave?"armed":"off")+", load "+(storyLoad?"armed":"off")+", account "+(storyAccount?std::to_string(storyAccount->id):std::string("unknown"))+"\n").c_str());
@@ -2135,6 +2139,7 @@ struct Runtime final:ds::Transport {
             if(storyAccount)storyNewest=mod::story::newest(storyAccount->folder);
             note(("STORY watch: porter="+std::to_string(cache.available)+" event="+std::to_string(inEvent)+" "+storyState(state)+"\n").c_str());
         }
+        if(!on){storyIn.clear();return;}
         std::vector<mod::story::News> news;
         for(auto& e:storyIn){if(auto n=mod::story::decode(e))news.push_back(*n);else note("STORY refused: malformed news\n");}
         storyIn.clear();

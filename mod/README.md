@@ -1354,7 +1354,7 @@ folder; the other saves stay) and asks the game to load it as the pause menu's L
   account>`, found from the mod's folder); two account folders there, or none, turn the feature off with a log line.
 
 Log lines start with `STORY`. Lab commands, file `puppet.story` in the mod folder (stamp-guarded like the others;
-they need `story_resync` set, and each makes one call alone): `state 0 <stamp>` (the game's save state and the
+they need `story_resync` set or `puppet_probe` on, as in group play, and each makes one call alone): `state 0 <stamp>` (the game's save state and the
 newest checkpoint), `watch <seconds> <stamp>` (that twice a second), `save 1 <stamp>` (ask the game for a
 checkpoint), `load <type*100+slot> <stamp>` (ask the game to load a save: `100` = `manualsave0`, `400` = `autosave0`),
 `key 1 <stamp>` (the catch-up key).
