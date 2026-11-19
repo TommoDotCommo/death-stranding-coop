@@ -63,6 +63,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "serverinfo.h"
 #include "chat.h"
 #include "mapicons.h"
+#include "hudmarkers.h"
 #include "serverworld.h"
 #include "livebuild.h"
 #include "groupcargo.h"
@@ -1877,12 +1878,34 @@ struct Runtime final:ds::Transport {
             auto text=readConfig(mapCommand);std::filesystem::remove(mapCommand);std::istringstream in(text);std::vector<std::string> w;std::string one;while(in>>one)w.push_back(one);
             if(w.size()<2||w.back()!=mod::runStamp())note("MAP ignored command for another process\n");
             else if(w[0]=="kind"&&w.size()==3){mod::mapicons::setKind(uint8_t(std::strtoul(w[1].c_str(),nullptr,0)));note(("MAP kind "+w[1]+"\n").c_str());}
+            else if(w[0]=="hudkind"&&w.size()==3){const auto k=uint8_t(std::strtoul(w[1].c_str(),nullptr,0));mod::hudmarkers::setKind(k);note(("HUD markers kind "+w[1]+(mod::hudmarkers::safeKind(k)?"":" refused")+"\n").c_str());}
             else if(w[0]=="clear")mapLink->setExtra({});
             else if(w[0]=="ring"&&w.size()==4&&cache.available){
                 const double r=std::atof(w[1].c_str());const int n=std::min(std::atoi(w[2].c_str()),int(mod::mapicons::MaxIcons));std::vector<mod::mapicons::Icon> v;
                 for(int i=0;i<n;++i){const double a=6.283185307*i/std::max(n,1);mod::mapicons::Icon k;k.x=float(cache.local.position[0]+r*std::cos(a));k.y=float(cache.local.position[2]+r*std::sin(a));k.z=float(cache.local.position[1]);k.area=gameArea;k.id=0x4d51000000000000ull+uint64_t(i);mod::mapicons::setName(k,"Test "+std::to_string(i+1));v.push_back(k);}
                 mapLink->setExtra(std::move(v));note(("MAP test ring of "+w[2]+"\n").c_str());}
         }
+    }
+    // Far players on the HUD (hudmarkers.h): the map's players less those drawn here as bodies, published every tick for
+    // the HUD's own job, which adds them to its marker list each frame.
+    bool hudHooked=false;uint64_t hudNotedAt=0,hudNotedFrames=0;
+    void tickHudMarkers(uint64_t now){
+        if(!config.playerHud||!mapBoard||!sampler)return;
+        static mod::hudmarkers::Board board;   // the HUD's job reads it for as long as the game runs
+        if(!hudHooked&&inWorldNow()){hudHooked=true;
+#ifndef MOD_FAKE_NETWORK
+            try{mod::hudmarkers::install(*sampler,board);note("HUD markers on\n");}catch(const std::exception& e){note((std::string("HUD markers unavailable: ")+e.what()+"\n").c_str());config.playerHud=false;return;}
+#else
+            note("HUD markers on\n");
+#endif
+        }
+        mod::mapicons::Board::Picture p;mapBoard->read(p);
+        std::set<uint64_t> drawn;if(otherBodies)for(auto& s:othersShown)if(otherBodies->entity(s.id))drawn.insert(mod::hudmarkers::iconId(s.id));
+        std::optional<std::array<double,3>> here;if(cache.available)here=std::array<double,3>{cache.local.position[0],cache.local.position[2],cache.local.position[1]};
+        auto marks=mod::hudmarkers::marks(p,gameArea,drawn,here?&*here:nullptr,mod::hudmarkers::MaxMarks);board.publish(marks);
+        const auto seen=mod::hudmarkers::stats();
+        if(seen.frames!=hudNotedFrames&&now>=hudNotedAt+10000){hudNotedFrames=seen.frames;hudNotedAt=now;std::ostringstream o;
+            o<<"HUD markers: "<<marks.size()<<" far players ("<<drawn.size()<<" drawn as bodies), HUD frames "<<seen.frames<<" records added "<<seen.added<<"\n";note(o.str().c_str());}
     }
     void tickServerInfo(uint64_t now){
         if(!config.serverInfo||!sampler||!dialogReady())return;
@@ -4154,7 +4177,7 @@ struct Runtime final:ds::Transport {
             stage="server page";stages.enter("server page",mod::nowUs());
             if(gameContext)tickServerInfo(now);
             stage="map";stages.enter("map",mod::nowUs());
-            if(gameContext){tickArea();tickPlayerMap(now);tickServerWorld(now);}
+            if(gameContext){tickArea();tickPlayerMap(now);tickHudMarkers(now);tickServerWorld(now);}
             stage="chat";stages.enter("chat",mod::nowUs());
             if(gameContext)tickChat(now);
             stage="notices";stages.enter("notices",mod::nowUs());

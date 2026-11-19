@@ -49,6 +49,7 @@ struct Config {
     bool helpPage=false;       // hold F1: the co-op keys on the game's common telop (help.h)
     std::string serverWorld;   // this server's id: only its structures stand in the world (serverworld.h); "": the save's stay
     bool freeBuild=false;      // every rule on where a structure may stand is off (freebuild.h); the server's rule
+    bool playerHud=false;      // other players beyond the bodies drawn here as HUD markers (hudmarkers.h); needs player_map
     bool playerMap=false;      // the other players on the game's map (mapicons.h); needs online_server and strand_token
     bool chat=false;           // Y: text chat through the server (chat.h); needs online_server and strand_token
     bool serverInfo=false;     // P: the server, who is on it and its rules, on the game's common dialogue (serverinfo.h)

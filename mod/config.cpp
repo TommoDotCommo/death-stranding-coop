@@ -194,6 +194,8 @@ Config parseConfig(const std::string& s) {
     if(c.freeBuild&&(c.provider!="game"||!c.gameThread))throw std::runtime_error("free_build requires the game provider and game_thread");
     // The other players on the map: the same server and the same token.
     c.playerMap=boolean("player_map",false);
+    c.playerHud=boolean("player_hud",false);
+    if(c.playerHud&&!c.playerMap)throw std::runtime_error("player_hud requires player_map");
 #ifndef MUTANT_CONFIG_MAP
     if(c.playerMap&&(c.onlineServer.empty()||!serverApiBase(c.onlineServer)||!tokenText))throw std::runtime_error("player_map requires online_server and strand_token");
     if(c.playerMap&&(c.provider!="game"||!c.gameThread))throw std::runtime_error("player_map requires the game provider and game_thread");

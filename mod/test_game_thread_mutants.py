@@ -28,6 +28,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('dialog',['CANCEL'],['debugmenu_test.cpp','debugmenu.cpp','dialog.cpp','discovery.cpp']),
           ('freebuild',['NOCHECK','ROLLBACK'],['freebuild_test.cpp','freebuild.cpp']),
           ('roadshare',['BUILT','TWICE','PAST_NEED'],['roadshare_test.cpp','roadshare.cpp','discovery.cpp']),
+          ('hudmarkers',['DRAWN','FARTHEST'],['hudmarkers_test.cpp','hudmarkers.cpp','mapicons.cpp','serverinfo.cpp','dialog.cpp','discovery.cpp']),
           ('othervehicles',['UNCAPPED','NO_REUSE','KEEP_GONE','ANY_DISTANCE'],['othervehicles_test.cpp','othervehicles.cpp','ride.cpp','providers.cpp','pose.cpp','discovery.cpp','../core/core.cpp']),
           ('groupcargo',['LOSE_EARLY_TAKE','KEEP_TAKEN','FAR'],['groupcargo_test.cpp','groupcargo.cpp']),
           ('livebuild',['BRIDGE','ROTATION','FULL_KEEPS','REMOVED_KEPT','REMOVE_OWN','FAR','RETRY_AT_ONCE'],['livebuild_test.cpp','livebuild.cpp']),
