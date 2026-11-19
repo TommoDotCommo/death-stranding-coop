@@ -72,6 +72,7 @@ loopback, a LAN or a VPN.
 | `GET`/`POST …/coop/NAME` | not the game's: the launcher's API ("The launcher's API"), and the owner's calls ("Identity") |
 | `GET …/coop/notices` with `X-Coop-Token` | not the game's: the mod's read of its player's own objects ("What the game is told") |
 | `GET …/coop/built` with `X-Coop-Token` | not the game's: the mod's read of what other players built, while it plays ("What others build, at once") |
+| `GET`/`POST …/coop/cargo` with `X-Coop-Token` | not the game's: cargo set down for the others, and what was taken ("Cargo set down for the others") |
 
 Limits: 65536 accounts a world keeps and 1024 players at once on its relay, 4000 objects built here per player, 20000 objects held from each other server, 4 MiB per body,
 32 connections (`--max-connections`), and the limits per address below.
@@ -772,6 +773,7 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `chat` | `on`, `off` | on | off | off |
 | `map` | `on`, `off` | on | off | off |
 | `world` | `save`, `server` | save | save | server |
+| `cargo` | `on`, `off` | on | off | on |
 | `test_mode` | `off`, `on` | off | off | off |
 
 - `join`: recorded and shown, nothing more yet (there are no invitations).
@@ -805,6 +807,8 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 - `map`: `on` shows every player here to the others wherever they are ("Players on the map", below).
 - `world`: `server` makes this server's structures the only ones that stand in a player's game here ("A world that is the
   server's", below); `save` keeps what each save holds and adds the server's.
+- `cargo`: `on` shares cargo a player sets down here with the others until someone takes it ("Cargo set down for the
+  others"); `off` leaves it in the world of whoever set it down.
 - `test_mode`: `on` puts every player's game here in test mode (`../mod/README.md`, "Test mode": material crates on U,
   blood and stamina kept full), for alpha testers. The server does nothing else with it: the player's launcher reads it
   with the rules before his game starts and writes the mod's `test_mode` into the game's config. Its line in words
@@ -960,6 +964,21 @@ mod reads instead, every few seconds, what changed:
   remembered; a version older than those reads everything again.
 
 Tests: `built_test.cpp`; mutants `BUILT_TOKEN`, `BUILT_OWN`, `BUILT_SINCE`, `BUILT_UNSERVED`, `BUILT_GONE`.
+
+### Cargo set down for the others
+
+The policy setting `cargo` (`on` in the friends and public presets, `off` in solo). The game does not tell its service
+about cargo set down, so the mod does, with the notice token:
+
+| Call | Answer |
+|---|---|
+| `POST …/coop/cargo` `{"op":"place","hash":N,"x":…,"y":…,"z":…,"yaw":…,"area":N}` | `format` 1, `id`: the crate's id on this server (a tagged id starting with `k`). 403 when `cargo` is off, 429 past 200 crates of one player lying here |
+| `POST …/coop/cargo` `{"op":"take","id":ID}` | `format` 1; 409 when someone took it first or it is gone |
+| `GET …/coop/cargo[?since=VERSION]` | `format` 1, `on`, `version`, `full`, `wait_ms` (3 s), `crates` (others' crates: `id`, `hash`, `x`, `y`, `z`, `yaw`, `area`), `removed` (ids taken since), `more` |
+
+The first take wins. A world keeps at most 4000 crates (the oldest goes) and each for a week (a crate delivered or
+destroyed far from every player is never told). The world file keeps them (`cargo`). Tests: `built_test.cpp`; mutants
+`CARGO_FOREVER`, `CARGO_OFF`, `CARGO_UNLIMITED`, `CARGO_TOKEN`, `CARGO_OWN`, `CARGO_SAVE_LOST`.
 
 ### Text chat
 

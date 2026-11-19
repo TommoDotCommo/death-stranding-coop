@@ -198,6 +198,10 @@ int main() {
       assert(!mod::parseConfig(withKeys(online,"\"build_received\":false")).buildReceived);
       assert(refused(withKeys(game,"\"build_received\":true")));                                       // no online server
       assert(!mod::parseConfig(withKeys(game,"\"build_received\":false")).buildReceived);
+      // Cargo through the server (groupcargo.h): group play with the notice token only.
+      auto token=withKeys(online,"\"strand_notices\":true,\"strand_token\":\"abcDEF123\"");
+      assert(!mod::parseConfig(token).groupCargo&&mod::parseConfig(withKeys(token,"\"group_cargo\":true")).groupCargo);
+      assert(refused(withKeys(online,"\"group_cargo\":true"))&&refused(withKeys(game,"\"group_cargo\":true")));
       assert(refused(withKeys(online,"\"build_received\":1"))&&refused(withKeys(online,"\"build_received\":\"true\"")));}
      // Offering the existing strand (offer_strand.h): off by default; with online_server and the notice token only.
      {auto online=withKeys(game,"\"online_server\":\"http://10.1.2.3:49100/w77/auth/ds\"");

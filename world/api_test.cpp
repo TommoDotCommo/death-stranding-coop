@@ -38,13 +38,13 @@ static void policy(){
     CHECK(!p.has("online"));                                   // no relay has spoken: the policy does not guess
     {std::vector<std::string> on={"","Ann"};for(int i=0;i<70;++i)on.push_back("P");s.w.setOnline(on);auto o=s.doc(s.get("policy")).get("online");
      CHECK(o.get("count").integer()==72&&o.get("names").items().size()==64&&o.get("names").items()[0].string()=="Ann");s.w.setOnline({});CHECK(s.doc(s.get("policy")).get("online").get("count").integer()==0);}
-    auto& settings=p.get("settings").items();CHECK(settings.size()==20);
+    auto& settings=p.get("settings").items();CHECK(settings.size()==21);
     for(auto& item:settings)CHECK(item.get("text").string().size()>20&&item.get("value").string()==item.get("preset").string());
-    CHECK(settings.size()==20&&settings[1].get("key").string()=="build"&&settings[1].get("text").string()=="What any player builds here may be shared with the others.");
+    CHECK(settings.size()==21&&settings[1].get("key").string()=="build"&&settings[1].get("text").string()=="What any player builds here may be shared with the others.");
     Server pub("public",{"limit=50"});
     auto q=pub.doc(pub.get("policy"));auto& qs=q.get("settings").items();
-    CHECK(q.get("preset").string()=="public"&&qs.size()==20&&qs[1].get("value").string()=="members"&&qs[3].get("value").string()=="50"&&qs[3].get("preset").string()=="200");
-    CHECK(qs.size()==20&&qs[3].get("text").string().find("At most 50 of your objects")==0&&qs[2].get("text").string().find("owner's review")!=std::string::npos&&qs[4].get("text").string().find("remnant")!=std::string::npos);
+    CHECK(q.get("preset").string()=="public"&&qs.size()==21&&qs[1].get("value").string()=="members"&&qs[3].get("value").string()=="50"&&qs[3].get("preset").string()=="200");
+    CHECK(qs.size()==21&&qs[3].get("text").string().find("At most 50 of your objects")==0&&qs[2].get("text").string().find("owner's review")!=std::string::npos&&qs[4].get("text").string().find("remnant")!=std::string::npos);
     Server solo("solo");solo.signIn("a","A");auto r=solo.doc(solo.get("policy"));
     CHECK(r.get("players").get("count").integer()==1&&r.get("players").get("limit").integer()==1&&r.get("settings").items()[5].get("text").string()=="One player only: a personal archive. It has 1 now.");
     for(const char* k:{"join","build","accept_offers","limit","withdrawal","players","offer_builds","offer_old","order","per_builder","spread","identity","near_cap","challenges","import","import_cost","test_mode"})CHECK(settingText(k,"x",0).size()>20);

@@ -780,6 +780,13 @@ json::Value World::snapshot() const {
             from.set("name",o.second.originName);from.set("likes",o.second.originLikes);if(!o.second.home.empty())from.set("home",o.second.home);v.set("origin",from);}
         objects.push(v);}
     out.set("objects",objects);
+    // Cargo set down for the others; a world without any is written as before.
+#ifndef MUTANT_CARGO_SAVE_LOST
+    Value cargo=Value::array();
+    for(auto& k:crates_){const Crate& c=k.second;Value v=Value::object();v.set("id",c.id);v.set("creator",c.creator);v.set("hash",int64_t(c.hash));
+        v.set("x",c.x);v.set("y",c.y);v.set("z",c.z);v.set("yaw",c.yaw);v.set("area",c.area);v.set("placed",c.placed);cargo.push(v);}
+    if(!cargo.items().empty())out.set("cargo",cargo);
+#endif
     Value likes=Value::array();
     for(auto& l:likes_){Value v=Value::object();v.set("to",l.to);v.set("from",l.from);v.set("object",l.object);v.set("type",l.type);v.set("time",l.time);v.set("points",l.points);v.set("auto",l.autoPoints);likes.push(v);}
     out.set("likes",likes);
@@ -855,6 +862,10 @@ void World::restore(const json::Value& v){
                ||!byOrigin_.emplace(std::make_pair(ob.originServer,ob.originId),ob.id).second)
                 throw std::runtime_error("world file: bad imported object");}
         objects_[ob.id]=ob;}
+    crates_.clear();
+    for(auto& k:v.get("cargo").items()){Crate c;c.id=k.get("id").string();c.creator=k.get("creator").string();c.hash=uint64_t(k.get("hash").integer());
+        c.x=k.get("x").real();c.y=k.get("y").real();c.z=k.get("z").real();c.yaw=k.get("yaw").real();c.area=k.get("area").integer();c.placed=k.get("placed").integer();
+        if(!objectIdText(c.id)||c.creator.empty()||!c.hash||!crates_.emplace(c.id,c).second)throw std::runtime_error("world file: bad cargo");}
     likes_.clear();
     for(auto& l:v.get("likes").items()){Like k;k.to=l.get("to").string();k.from=l.get("from").string();k.object=l.get("object").string();k.type=l.get("type").string();
         k.time=l.get("time").integer();k.points=l.get("points").integer();k.autoPoints=l.get("auto").integer();
@@ -1237,7 +1248,7 @@ void World::remember(const std::string& player,int64_t area,const std::vector<st
 Policy presetPolicy(const std::string& name){
     Policy p;p.preset=name;
     if(name=="friends")return p;
-    if(name=="solo"){p.players=1;p.chat="off";p.map="off";return p;}
+    if(name=="solo"){p.players=1;p.chat="off";p.map="off";p.cargo="off";return p;}
     // Everyone on a public server sees the same world: the server's. Friends and a solo server keep what each save holds.
     if(name=="public"){p.chat="off";p.map="off";p.world="server";p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";p.nearCap=16;p.challenges="members";p.importWho="members";return p;}
     bad("policy: unknown preset '"+name+"' (friends, solo or public)");
@@ -1267,16 +1278,17 @@ void setPolicy(Policy& p,const std::string& keyValue){
     else if(key=="import")pick(p.importWho,{"everyone","members","owner","nobody"});
     else if(key=="import_cost")pick(p.importCost,{"free","materials"});
     else if(key=="chat")pick(p.chat,{"on","off"});
+    else if(key=="cargo")pick(p.cargo,{"on","off"});
     else if(key=="map")pick(p.map,{"on","off"});
     else if(key=="world")pick(p.world,{"save","server"});
     else if(key=="test_mode")pick(p.testMode,{"off","on"});
-    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges, import, import_cost, chat, map, world, test_mode)");
+    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges, import, import_cost, chat, map, world, cargo, test_mode)");
 }
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy& p){
     return {{"join",p.join},{"build",p.build},{"accept_offers",p.acceptOffers},{"limit",std::to_string(p.limit)},{"withdrawal",p.withdrawal},
             {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld},
             {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity},{"near_cap",std::to_string(p.nearCap)},{"challenges",p.challenges},
-            {"import",p.importWho},{"import_cost",p.importCost},{"chat",p.chat},{"map",p.map},{"world",p.world},{"test_mode",p.testMode}};
+            {"import",p.importWho},{"import_cost",p.importCost},{"chat",p.chat},{"map",p.map},{"world",p.world},{"cargo",p.cargo},{"test_mode",p.testMode}};
 }
 void World::setPolicy(const Policy& p){std::lock_guard<std::mutex> g(lock_);policy_=p;dirty_=true;++changes_;}
 bool World::handsBack(const Object& o,const std::string& player) const {

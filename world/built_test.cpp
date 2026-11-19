@@ -80,8 +80,50 @@ static void held(){
     CHECK(ids(s.doc(tb)).empty());
     CHECK(ids(s.doc(ta))==std::vector<std::string>{b1});
 }
+// Cargo set down for the others (world.h cargoSay, cargoRead).
+static void cargo(){
+    Server s;
+    auto ann=s.signIn("ann","Ann"),bob=s.signIn("bob","Bob");auto ta=s.token("ann"),tb=s.token("bob");(void)ann;(void)bob;
+    auto say=[&](const std::string& t,const std::string& body){return s.raw("POST","/s3cret/coop/cargo",body,{{"x-coop-token",t}});};
+    auto read=[&](const std::string& t,const std::string& since=""){auto r=s.raw("GET","/s3cret/coop/cargo"+(since.empty()?std::string():"?since="+since),"",{{"x-coop-token",t}});
+        CHECK(r.status==200);return r.status==200?json::parse(r.body):json::Value();};
+    auto crates=[](const json::Value& d){return ids(d,"crates");};
+    CHECK(s.raw("GET","/s3cret/coop/cargo").status==403&&say("nope","{}").status==403);
+    CHECK(say(ta,"{").status==400&&say(ta,R"({"op":"throw"})").status==400&&say(ta,R"({"op":"place","x":1,"y":2,"z":3})").status==400);
+    auto first=read(tb);CHECK(first.get("on").boolean()&&first.get("full").boolean()&&crates(first).empty()&&first.get("wait_ms").integer()==CargoWaitMs);
+    const std::string v1=first.get("version").string();
+    // Ann sets one down (a 64-bit hash, a place, a heading): an id of this server back; Bob reads it, Ann does not.
+    auto put=say(ta,R"({"op":"place","hash":-6917529027641081856,"x":1030.5,"y":-490.25,"z":156,"yaw":1.5,"area":226})");CHECK(put.status==200);
+    const std::string k1=put.status==200?json::parse(put.body).get("id").string():std::string();
+    CHECK(k1.size()==idtag::IdChars&&k1[0]=='k');
+    auto d=read(tb,v1);CHECK(!d.get("full").boolean(true)&&crates(d)==std::vector<std::string>{k1});
+    if(d.get("crates").items().size()==1){auto& c=d.get("crates").items()[0];
+        CHECK(c.get("hash").integer()==-6917529027641081856LL&&c.get("x").real()==1030.5&&c.get("y").real()==-490.25&&c.get("z").real()==156&&c.get("yaw").real()==1.5&&c.get("area").integer()==226);}
+    CHECK(crates(read(ta)).empty());
+    // Bob takes it first; Ann's take comes too late; Bob's next read lists it as removed, once.
+    const std::string v2=d.get("version").string();
+    CHECK(say(tb,"{\"op\":\"take\",\"id\":\""+k1+"\"}").status==200);
+    CHECK(say(ta,"{\"op\":\"take\",\"id\":\""+k1+"\"}").status==409);
+    auto gone=read(tb,v2);CHECK(crates(gone).empty()&&ids(gone,"removed")==std::vector<std::string>{k1});
+    CHECK(ids(read(tb,gone.get("version").string()),"removed").empty()&&crates(read(tb)).empty());
+    // The world file keeps what lies there.
+    auto k2=json::parse(say(ta,R"({"op":"place","hash":77,"x":1,"y":2,"z":3})").body).get("id").string();
+    World again([]{return std::string("t");});again.restore(s.w.snapshot());
+    CHECK(again.snapshot().get("cargo").items().size()==1&&again.snapshot().get("cargo").items()[0].get("id").string()==k2);
+    // A week later nobody took it: it goes, and readers are told.
+    const std::string v3=read(tb).get("version").string();
+    s.now+=CargoKeepSeconds+1;ta=s.token("ann");tb=s.token("bob");auto old=read(tb,v3);CHECK(crates(old).empty()&&ids(old,"removed")==std::vector<std::string>{k2});
+    // At most 200 lying anywhere from one player.
+    int refused=0;for(size_t i=0;i<=CargoPerPlayer;++i)if(say(ta,R"({"op":"place","hash":5,"x":1,"y":2,"z":3})").status==429)++refused;
+    CHECK(refused==1);
+    // The rule off: nothing set down is taken, nothing is listed.
+    Server off("friends",{"cargo=off"});off.signIn("cid","Cid");auto tc=off.token("cid");
+    CHECK(off.raw("POST","/s3cret/coop/cargo",R"({"op":"place","hash":5,"x":1,"y":2,"z":3})",{{"x-coop-token",tc}}).status==403);
+    auto r=off.raw("GET","/s3cret/coop/cargo","",{{"x-coop-token",tc}});CHECK(r.status==200&&!json::parse(r.body).get("on").boolean(true));
+    CHECK(presetPolicy("solo").cargo=="off"&&presetPolicy("friends").cargo=="on"&&presetPolicy("public").cargo=="on");
+}
 int main(){
-    reads();held();
+    reads();held();cargo();
     if(failures){std::fprintf(stderr,"%u built oracle failures\n",failures);return 1;}
     std::puts("built oracles passed");return 0;
 }

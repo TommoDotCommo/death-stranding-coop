@@ -57,7 +57,9 @@ constexpr int64_t ChatWaitMinMs=2000,ChatWaitMaxMs=10000;   // how often a game 
 constexpr int64_t MapFreshSeconds=5,MapWaitMinMs=2000,MapWaitMaxMs=30000;constexpr size_t MapPlayersMax=128,WorldIdsWaitMs=60000;
 // What other players built, read by each game while it plays (built): how often, how many ids of removed objects are
 // remembered (an older version reads everything again), and how many objects one full read lists.
-constexpr int64_t BuiltWaitMs=3000;constexpr size_t BuiltGoneMax=4096,BuiltFullMax=2000;   // who counts as there for the map, how many it lists, how often to ask
+constexpr int64_t BuiltWaitMs=3000;constexpr size_t BuiltGoneMax=4096,BuiltFullMax=2000;
+// Cargo set down for the others (cargoRead, cargoSay): how often to read, how many a world and one player keep, how long.
+constexpr int64_t CargoWaitMs=3000,CargoKeepSeconds=7*24*3600;constexpr size_t CargoMax=4000,CargoPerPlayer=200,CargoGoneMax=4096;   // who counts as there for the map, how many it lists, how often to ask
 constexpr int64_t SpotFreshSeconds=600,MaxNearMetres=2000,AreaSearchMetres=1500;
 // What may travel between two servers. Text form: "all", "none", or terms separated by ';':
 //   types=l,rope,e   owners=NAME,zygo_...   areas=226,227   max-age=30d (s, m, h, d)   likes=no   imported=yes
@@ -110,7 +112,7 @@ struct ImportResult { size_t added=0,updated=0,unchanged=0,removed=0,filtered=0,
 //   testers); the launcher writes it into the game's config, the server itself does nothing with it
 struct Policy {
     std::string preset="friends",join="invite",build="everyone",acceptOffers="auto",withdrawal="go",offerBuilds="yes",offerOld="no",order="newest",identity="none",challenges="everyone";
-    std::string importWho="everyone",importCost="free",chat="on",map="on",world="save";
+    std::string importWho="everyone",importCost="free",chat="on",map="on",world="save",cargo="on";
 #ifndef MUTANT_POLICY_TEST_DEFAULT
     std::string testMode="off";
 #else
@@ -188,6 +190,11 @@ public:
     // `since`, and the ids of those removed or no longer handed to him since. Read with the notice token, every
     // `wait_ms`, so a game builds what another player built at once instead of at its next load of that area.
     Reply built(const std::string& token,const std::string& since,int64_t now);
+    // Cargo set down for the others (policy `cargo`): a game says what its porter set down ({"op":"place","hash",
+    // "x","y","z","yaw","area"}: the crate's id back) and what he took ({"op":"take","id"}: 409 when someone was first),
+    // and reads, as built does, the crates of others and the ids of those taken since a version.
+    Reply cargoSay(const std::string& token,const std::string& body,int64_t now);
+    Reply cargoRead(const std::string& token,const std::string& since,int64_t now);
     // The owner's account key (identity::account of the host's launcher key; "" none): his signed calls are the
     // owner's actions in the API. Saved with the world.
     void setOwner(const std::string& account);
@@ -334,6 +341,10 @@ private:
     uint64_t stamps_=0;void touch(Object& o){o.stamp=++stamps_;}   // an object's state changed (what notices reads)
     // An object removed (what built reads): its id with a stamp, the oldest forgotten past BuiltGoneMax.
     std::deque<std::pair<std::string,uint64_t>> gone_;uint64_t goneFloor_=0;
+    struct Crate { std::string id,creator;uint64_t hash=0;double x=0,y=0,z=0,yaw=0;int64_t area=0,placed=0;uint64_t stamp=0; };
+    std::map<std::string,Crate> crates_;std::deque<std::pair<std::string,uint64_t>> cargoGone_;uint64_t cargoFloor_=0;
+    void crateGone(const std::string& id){cargoGone_.emplace_back(id,++stamps_);if(cargoGone_.size()>CargoGoneMax){cargoFloor_=cargoGone_.front().second;cargoGone_.pop_front();}}
+    void cargoPrune(int64_t now);
     void dropped(const std::string& id){
 #ifndef MUTANT_BUILT_GONE
         gone_.emplace_back(id,++stamps_);if(gone_.size()>BuiltGoneMax){goneFloor_=gone_.front().second;gone_.pop_front();}

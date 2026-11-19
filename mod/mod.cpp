@@ -65,6 +65,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "mapicons.h"
 #include "serverworld.h"
 #include "livebuild.h"
+#include "groupcargo.h"
 #include "strand_notices.h"
 #include "received.h"
 #include "offer_strand.h"
@@ -1196,6 +1197,53 @@ struct Runtime final:ds::Transport {
         }
         for(auto& id:step.givenUp)note(("LIVEBUILD given up: "+id+" did not stand after "+std::to_string(mod::livebuild::TriesPerPiece)+" asks\n").c_str());
         if(step.twice!=liveTwice){liveTwice=step.twice;note(("LIVEBUILD records with one online id twice: "+std::to_string(step.twice)+"\n").c_str());}
+    }
+    // --- Cargo shared in group play (groupcargo.h): with group_cargo, while signed in to the server. The same detection
+    // as two-player cargo, on a Sync of its own; set-downs and pick-ups go to `…/coop/cargo`, and the others' crates near
+    // the porter are made here (CreateBaggage) and removed when taken (DeleteBaggage).
+    mod::cargo::Sync groupSync;std::unique_ptr<mod::groupcargo::Plan> groupPlan;std::unique_ptr<mod::groupcargo::Courier> courier;
+    uint64_t groupReadAt=0,groupFullAt=0,groupMade=0,groupRemoved=0,groupPlaced=0,groupTook=0;unsigned groupLimit=mod::cargo::FirstRecords;
+    void tickGroupCargo(uint64_t now) {
+        if(!config.groupCargo||!receivedOn||!sampler||!cargoCreate||!cargoManagerSlot)return;
+        if(!courier){
+            auto at=serverAt();if(!at)return;
+            const std::string target=at->base+"/coop/cargo",token=config.strandToken;const uint32_t address=at->address;const uint16_t port=at->port;
+            const uint64_t base=(nonce()>>32)<<20;groupSync.setIdBase(base);groupPlan=std::make_unique<mod::groupcargo::Plan>(base+(uint64_t(1)<<19));
+            courier=std::make_unique<mod::groupcargo::Courier>(
+                [=](const std::string& since){auto r=mod::strand::get(address,port,target+(since.empty()?std::string():"?since="+since),token,mod::strand::ConnectMs);return mod::groupcargo::Result{r.status,r.body};},
+                [=](const std::string& body){auto r=mod::strand::post(address,port,target,token,body,mod::strand::ConnectMs);return mod::groupcargo::Result{r.status,r.body};},
+                [this](const std::string& s){note(s.c_str());});
+            note("CARGOSRV on: cargo set down here is shared through the server\n");
+        }
+        for(auto& a:courier->answered()){
+            courier->send(groupPlan->answered(a.local,a.id));
+            note(("CARGOSRV set-down "+std::to_string(a.local)+(a.id.empty()?" refused by the server: it stays in this world only":" is "+a.id+" on the server")+"\n").c_str());}
+        for(auto& r:courier->reads())groupPlan->take(r);
+        if(now-groupReadAt<250)return;
+        groupReadAt=now;uint64_t manager=0;if(!sampler->read(cargoManagerSlot,&manager,8)||!manager)return;
+        auto anchor=anchorNow();if(!anchor.entity||!anchor.pose.available)return;
+        bool full=!groupFullAt||now-groupFullAt>=4000;
+        auto records=mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,full?mod::cargo::MaxRecords:groupLimit);if(records.empty())return;
+        if(full){groupFullAt=now;groupLimit=mod::cargo::scanLimit(records);}
+        if(!cache.gated&&!inEvent){
+            auto step=groupPlan->step(anchor.pose.position,true);
+            for(auto& p:step.make){
+                mod::puppet::Transform t;t.position=p.position;t.rotation={1,0,0,0,1,0,0,0,1};
+                groupSync.expect(p,now);cargoCreate(p.hash,t);++groupMade;
+                std::ostringstream o;o<<"CARGOSRV made another player's item "<<p.hash<<" at "<<p.position[0]<<","<<p.position[1]<<","<<p.position[2]<<"\n";note(o.str().c_str());}
+            for(auto id:step.gone){
+                auto index=groupSync.partnerTook(id);
+                if(index&&cargoDelete){cargoDelete(*index);++groupRemoved;note(("CARGOSRV another player took it: removed record "+std::to_string(*index)+"\n").c_str());}}
+        }
+        for(auto& p:groupSync.observe(records,anchor.pose.position,now)){
+            if(p.mission)continue;   // an order's case stays this porter's
+            courier->send(groupPlan->placed(p,gameArea));++groupPlaced;
+            std::ostringstream o;o<<"CARGOSRV set down item "<<p.hash<<" at "<<p.position[0]<<","<<p.position[1]<<","<<p.position[2]<<" -> server\n";note(o.str().c_str());}
+        for(auto index:groupSync.takeDoomed())if(cargoDelete){cargoDelete(index);++groupRemoved;}
+        groupSync.takeKept();
+        for(auto& tk:groupSync.takeTaken()){
+            auto says=groupPlan->taken(tk);if(says.empty())continue;
+            courier->send(std::move(says));++groupTook;note(("CARGOSRV took a shared item "+std::to_string(tk.hash)+" -> server\n").c_str());}
     }
     // --- Offering the existing strand (offer_strand.h): opt-in `offer_strand`. While the game is signed in to the server
     // the config names and that server says this player's older strand may be offered (its notices answer, read with
@@ -3777,7 +3825,7 @@ struct Runtime final:ds::Transport {
             stage="online";stages.enter("online",mod::nowUs());
             if(gameContext)tickOnline(now);
             stage="received";stages.enter("received",mod::nowUs());
-            if(gameContext){tickReceived();tickLiveBuild(now);}
+            if(gameContext){tickReceived();tickLiveBuild(now);tickGroupCargo(now);}
             stage="offer";stages.enter("offer",mod::nowUs());
             if(gameContext)tickOffer(now);
             stage="test mode";stages.enter("test mode",mod::nowUs());

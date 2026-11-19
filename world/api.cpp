@@ -12,6 +12,7 @@ constexpr size_t MaxApiBody=4096;
 Reply ok(const Value& v){return Reply{200,v.dump()};}
 Reply answer(int status,const std::string& message){
     Value e=Value::object();e.set("status",std::to_string(status));e.set("code",status);e.set("message",message);return Reply{status,e.dump()};}
+Reply refuse(int status,const char* code,const std::string& message){return answer(status,message+" ("+code+")");}
 bool oneOf(const std::string& s,std::initializer_list<const char*> allowed){for(auto a:allowed)if(s==a)return true;return false;}
 [[noreturn]] void bad(const std::string& why){throw std::runtime_error(why);}
 }
@@ -44,6 +45,7 @@ std::string settingText(const std::string& key,const std::string& value,size_t p
     if(key=="challenges")return value=="members"?"Only members publish route challenges; everyone may run them.":
                                 value=="owner"?"Only the server's owner publishes route challenges; everyone may run them.":
                                 value=="nobody"?"No route challenges are published here.":"Any player may publish a route challenge for the others to run.";
+    if(key=="cargo")return value=="on"?"Cargo one player sets down here lies there for the others, until someone takes it.":"Cargo stays in the world of whoever set it down.";
     if(key=="chat")return value=="on"?"Players can talk here with text chat (Y in the game).":"Text chat is off on this server.";
     if(key=="map")return value=="on"?"Every player here is shown on the others' map, wherever they are.":"Other players are not shown on the map here.";
     if(key=="world")return value=="server"?"Only what is on this server stands in the world here. What your save holds is hidden while you play here, and stays in your save.":
@@ -255,6 +257,75 @@ Reply World::built(const std::string& token,const std::string& since,int64_t now
     if(!full)for(auto& d:gone_)if(d.second>after)removed.push(d.first);
     Value out=Value::object();out.set("format",1);out.set("version",epoch_+"-"+std::to_string(stamps_));out.set("full",full);
     out.set("wait_ms",BuiltWaitMs);out.set("objects",list);out.set("removed",removed);out.set("more",more);
+    return ok(out);
+}
+void World::cargoPrune(int64_t now){
+    // Cargo nobody took in a week goes (an item delivered or destroyed far from every player is never told).
+    for(auto it=crates_.begin();it!=crates_.end();){
+#ifndef MUTANT_CARGO_FOREVER
+        if(now-it->second.placed>CargoKeepSeconds){crateGone(it->first);it=crates_.erase(it);dirty_=true;continue;}
+#endif
+        ++it;}
+}
+Reply World::cargoSay(const std::string& token,const std::string& body,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+    auto* me=chatPlayer(token,now);
+    if(!me)return noticeTokenRefused();
+#ifndef MUTANT_CARGO_OFF
+    if(policy_.cargo!="on")return refuse(403,"cargo-off","cargo is not shared on this server");
+#endif
+    Value d;try{d=json::parse(body);}catch(const std::exception&){return refuse(400,"cargo","not JSON");}
+    const std::string op=d.get("op").string();
+    cargoPrune(now);
+    if(op=="take"){
+        auto found=crates_.find(d.get("id").string());
+        if(found==crates_.end())return refuse(409,"cargo-taken","someone took it first, or it is gone");
+        note("cargo "+found->first+" taken by "+me->name);crateGone(found->first);crates_.erase(found);dirty_=true;++changes_;
+        Value out=Value::object();out.set("format",1);return ok(out);}
+    if(op!="place")return refuse(400,"cargo","op is place or take");
+    auto finite=[&](const char* k,double& out){const Value& v=d.get(k);if(v.isInt()||v.kind()==json::Value::Real)out=v.real();else return false;return std::isfinite(out)&&std::fabs(out)<1e7;};
+    Crate c;c.creator=me->id;c.placed=now;
+    const Value& h=d.get("hash");
+    if(!h.isInt()||h.integer()==0||!finite("x",c.x)||!finite("y",c.y)||!finite("z",c.z))return refuse(400,"cargo","hash and a place (x, y, z) are needed");
+    c.hash=uint64_t(h.integer());finite("yaw",c.yaw);c.area=std::clamp<int64_t>(d.get("area").integer(),0,65535);
+    size_t mine=0;for(auto& k:crates_)if(k.second.creator==me->id)++mine;
+#ifndef MUTANT_CARGO_UNLIMITED
+    if(mine>=CargoPerPlayer)return refuse(429,"cargo-limit","you have 200 crates lying here: take some back first");
+    if(crates_.size()>=CargoMax){   // the oldest goes
+        auto oldest=std::min_element(crates_.begin(),crates_.end(),[](auto& a,auto& b){return a.second.placed!=b.second.placed?a.second.placed<b.second.placed:a.first<b.first;});
+        crateGone(oldest->first);crates_.erase(oldest);}
+#endif
+    c.id=freshId("k",me->id);c.stamp=++stamps_;crates_[c.id]=c;dirty_=true;++changes_;
+    note("cargo "+c.id+" set down by "+me->name);
+    Value out=Value::object();out.set("format",1);out.set("id",c.id);return ok(out);
+}
+Reply World::cargoRead(const std::string& token,const std::string& since,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+    auto* me=chatPlayer(token,now);
+#ifndef MUTANT_CARGO_TOKEN
+    if(!me)return noticeTokenRefused();
+#endif
+    const std::string myId=me?me->id:std::string();
+    cargoPrune(now);
+    uint64_t after=0;bool full=true;const std::string mark=epoch_+"-";
+    if(since.size()>mark.size()&&since.size()<=mark.size()+19&&since.compare(0,mark.size(),mark)==0){
+        uint64_t n=0;bool digits=true;for(size_t i=mark.size();i<since.size();++i){digits=digits&&since[i]>='0'&&since[i]<='9';if(digits)n=n*10+uint64_t(since[i]-'0');}
+        if(digits&&n<=stamps_&&n>=cargoFloor_){after=n;full=false;}}
+    Value list=Value::array(),removed=Value::array();bool more=false;
+    const bool on=policy_.cargo=="on";
+    for(auto& k:crates_){
+        const Crate& c=k.second;
+        if(!on)break;
+#ifndef MUTANT_CARGO_OWN
+        if(c.creator==myId)continue;   // his game has it
+#endif
+        if(!full&&c.stamp<=after)continue;
+        if(list.items().size()>=BuiltFullMax){more=true;continue;}
+        Value v=Value::object();v.set("id",c.id);v.set("hash",int64_t(c.hash));v.set("x",c.x);v.set("y",c.y);v.set("z",c.z);v.set("yaw",c.yaw);v.set("area",c.area);
+        list.push(v);}
+    if(!full)for(auto& d:cargoGone_)if(d.second>after)removed.push(d.first);
+    Value out=Value::object();out.set("format",1);out.set("on",on);out.set("version",epoch_+"-"+std::to_string(stamps_));out.set("full",full);
+    out.set("wait_ms",CargoWaitMs);out.set("crates",list);out.set("removed",removed);out.set("more",more);
     return ok(out);
 }
 Reply World::mapRead(const std::string& token,int64_t now,const std::string& xText,const std::string& yText,const std::string& areaText){

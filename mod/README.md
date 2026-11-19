@@ -984,6 +984,23 @@ name over the copy (the record has no creator), and a second record if the game 
 `findQpidObjects` (counted: `LIVEBUILD records with one online id twice`). `livebuild.h`; tests `livebuild_test.cpp`,
 mutants `BRIDGE`, `ROTATION`, `FULL_KEEPS`, `REMOVED_KEPT`, `REMOVE_OWN`, `FAR`, `RETRY_AT_ONCE`.
 
+## Cargo in group play (`group_cargo`; the server's rule `cargo`; not run in a game yet)
+
+Two-player cargo goes over the partner link; in group play it goes through the server (`../world/README.md`, "Cargo set
+down for the others"). The same detection (`cargo.h` Sync, on a Sync of its own): what this porter sets down is told
+(`op place`, the server's id back), what he picks up or sees vanish of a crate the server knows is told (`op take`; one
+picked up before the server answered is told when it does). The others' crates are read every 3 s and made within 1.5 km
+of the porter, eight at a time (CreateBaggage, registered with the Sync first so they are never told back); one the
+server lists as taken is removed here (DeleteBaggage). An order's case is never told. Messages and reads go through one
+thread of their own (`Courier`), never the game thread. Requires `online_server`, `strand_token`, `game_thread` and
+`puppet_probe`, and no `peer`; the launcher's group play sets it whenever it has the notice token.
+
+The log says `CARGOSRV on`, `CARGOSRV set down item …`, `CARGOSRV set-down N is ID on the server`, `CARGOSRV made another
+player's item …`, `CARGOSRV another player took it: removed record …`. Not covered: two players taking the same crate
+within the 3 s between reads (each keeps one), cargo of a world that is the server's going into the save (no way to
+leave it out is known yet), a crate's heading. `groupcargo.h`; tests `groupcargo_test.cpp`, mutants `LOSE_EARLY_TAKE`,
+`KEEP_TAKEN`, `FAR`; config mutant `CONFIG_GROUP_CARGO`; launcher mutant `GROUP_NO_CARGO`.
+
 ## Strand notices (`strand_notices`, off by default; live once, 2026-11-17)
 
 The rule behind it: no surprises. A game builds in its own world whatever the server does, uploads the structure and
