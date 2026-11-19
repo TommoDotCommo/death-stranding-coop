@@ -141,8 +141,11 @@ static void events(){
     CHECK(say(ta,R"({"kind":"mule","key":4503599627370495,"value":2})")==200);
     auto again=read(tb,v2);CHECK(again.get("events").items().size()==1&&again.get("events").items()[0].get("value").integer()==2);
     CHECK(read(tb).get("events").items().size()==2);
-    // An hour later they are gone.
-    s.now+=EventKeepSeconds+1;tb=s.token("bob");CHECK(read(tb).get("events").items().empty());
+    // A structure's level (key: its online id's hash) stays a month; the rest go after an hour.
+    CHECK(say(ta,R"({"kind":"level","key":123456789,"value":3})")==200);
+    s.now+=EventKeepSeconds+1;tb=s.token("bob");ta=s.token("ann");
+    {auto left=read(tb).get("events").items();CHECK(left.size()==1&&left[0].get("kind").string()=="level"&&left[0].get("value").integer()==3);}
+    s.now+=LevelKeepSeconds;tb=s.token("bob");ta=s.token("ann");CHECK(read(tb).get("events").items().empty());
     // At most EventsMax at once: a new one past that is refused, an old one still changes.
     ta=s.token("ann");
     for(size_t i=0;i<EventsMax;++i)CHECK(say(ta,"{\"kind\":\"gazer\",\"key\":"+std::to_string(i)+",\"value\":1}")==200);
@@ -150,6 +153,7 @@ static void events(){
     // The rule off: refused and nothing listed.
     Server off("friends",{"enemies=off"});off.signIn("cid","Cid");auto tc=off.token("cid");
     CHECK(off.raw("POST","/s3cret/coop/events",R"({"kind":"mule","key":1,"value":0})",{{"x-coop-token",tc}}).status==403);
+    CHECK(off.raw("POST","/s3cret/coop/events",R"({"kind":"level","key":1,"value":2})",{{"x-coop-token",tc}}).status==200);   // levels follow the structures
     CHECK(presetPolicy("solo").enemies=="off"&&presetPolicy("friends").enemies=="on"&&presetPolicy("public").enemies=="on");
 }
 int main(){

@@ -14,6 +14,8 @@ int main(){
     if(a.events.size()==2)CHECK(a.events[0]==(Event{"mule",4503599627370495LL,0})&&a.events[1]==(Event{"camp",7,100}));
     CHECK(!parse("{").read&&!parse(R"({"format":2,"version":"x"})").read&&!parse(R"({"format":1,"version":"x","on":false})").on);
     CHECK(body(Event{"mule",5,2})==R"({"kind":"mule","key":5,"value":2})");
+    CHECK(levelKey("cxnh5KeW9CCpV")==levelKey("cxnh5KeW9CCpV")&&levelKey("cxnh5KeW9CCpV")!=levelKey("cxnh5KeW9CCpW")&&levelKey("x")>=0&&levelKey("x")<(int64_t(1)<<52));
+    CHECK(parse(R"({"format":1,"version":"v","events":[{"kind":"level","key":9,"value":3}]})").events.size()==1);
     unsigned f=0;Answer bad;CHECK(delayAfter(bad,f)==FailWaitMs&&delayAfter(a,f)==2000&&f==0);
     std::vector<std::string> posted,since;std::mutex m;
     {

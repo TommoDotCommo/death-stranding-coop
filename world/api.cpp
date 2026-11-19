@@ -305,14 +305,15 @@ Reply World::eventSay(const std::string& token,const std::string& body,int64_t n
     std::lock_guard<std::mutex> g(lock_);
     auto* me=chatPlayer(token,now);
     if(!me)return noticeTokenRefused();
-#ifndef MUTANT_EVENTS_OFF
-    if(policy_.enemies!="on")return refuse(403,"enemies-off","enemies are each player's own on this server");
-#endif
     Value d;try{d=json::parse(body);}catch(const std::exception&){return refuse(400,"event","not JSON");}
     const std::string kind=d.get("kind").string();
-    if(!oneOf(kind,{"mule","camp","gazer"})||!d.get("key").isInt()||!d.get("value").isInt()||d.get("value").integer()<0||d.get("value").integer()>1000)
-        return refuse(400,"event","kind mule, camp or gazer, an integer key, a value 0..1000");
-    for(auto it=events_.begin();it!=events_.end();){if(now-it->second.at>EventKeepSeconds)it=events_.erase(it);else ++it;}
+    if(!oneOf(kind,{"mule","camp","gazer","level"})||!d.get("key").isInt()||!d.get("value").isInt()||d.get("value").integer()<0||d.get("value").integer()>1000)
+        return refuse(400,"event","kind mule, camp, gazer or level, an integer key, a value 0..1000");
+#ifndef MUTANT_EVENTS_OFF
+    // A structure's level follows the structure (shared as the policy shares it); the others are the enemies' rule.
+    if(kind!="level"&&policy_.enemies!="on")return refuse(403,"enemies-off","enemies are each player's own on this server");
+#endif
+    for(auto it=events_.begin();it!=events_.end();){if(now-it->second.at>eventKeep(it->first.first))it=events_.erase(it);else ++it;}
 #ifndef MUTANT_EVENTS_UNLIMITED
     if(events_.size()>=EventsMax&&!events_.count({kind,d.get("key").integer()}))return refuse(429,"event-limit","too many world events now");
 #endif
@@ -331,12 +332,13 @@ Reply World::eventRead(const std::string& token,const std::string& since,int64_t
         uint64_t n=0;bool digits=true;for(size_t i=mark.size();i<since.size();++i){digits=digits&&since[i]>='0'&&since[i]<='9';if(digits)n=n*10+uint64_t(since[i]-'0');}
         if(digits&&n<=stamps_){after=n;full=false;}}
     const bool on=policy_.enemies=="on";Value list=Value::array();
-    if(on)for(auto& e:events_){
+    for(auto& e:events_){
+        if(!on&&e.first.first!="level")continue;
 #ifndef MUTANT_EVENTS_OWN
         if(e.second.by==myId)continue;
 #endif
 #ifndef MUTANT_EVENTS_FOREVER
-        if(now-e.second.at>EventKeepSeconds)continue;
+        if(now-e.second.at>eventKeep(e.first.first))continue;
 #endif
         if(!full&&e.second.stamp<=after)continue;
         if(list.items().size()>=BuiltFullMax)break;

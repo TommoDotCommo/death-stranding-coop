@@ -2812,6 +2812,35 @@ struct Runtime final:ds::Transport {
     // --- MULEs down and camps alarmed in group play (groupevents.h): with group_enemies, the same detection as the
     // partner's (enemies.h Sync, CampSync), told to `…/coop/events` and read from it; the others' applied with the
     // game's own defeat and alert. After a load, once it has settled, every MULE down here is told once.
+    // Structure levels (group play): a rise in this game is said under the hash of the structure's online id; another
+    // player's rise raises the same structure here with the game's own routine (roads.h raise). A structure first seen
+    // at some level is not said (it may come from the server so); what was raised for another player is not said back.
+    std::map<int64_t,uint32_t> levelSeen,levelApplied;bool levelPrimed=false;uint64_t levelAt=0;   // levelTried, levelApi: the partner's (shared)
+    void levelsStep(const std::vector<mod::groupevents::Answer>& reads,uint64_t now,std::vector<mod::groupevents::Event>& out){
+        bool any=false;for(auto& a:reads)for(auto& e:a.events)if(e.kind=="level")any=true;
+        if(!any&&now<levelAt+2000)return;
+        levelAt=now;
+        if(!cache.available||cache.gated||inEvent)return;
+        if(!levelTried){levelTried=true;try{levelApi=mod::roads::nativeLevels(*sampler);}catch(const std::exception& e){note((std::string("LEVEL unavailable: ")+e.what()+"\n").c_str());}}
+        if(!levelApi.raise)return;
+        if(!imageSize)for(auto& sec:sampler->sections)imageSize=std::max(imageSize,sec.address+sec.size-sampler->base);
+        auto all=mod::own_strand::readStructures(*sampler,sampler->base,imageSize);
+        std::map<int64_t,const mod::own_strand::Structure*> byKey;for(auto& s:all)if(!s.online.empty())byKey[mod::groupevents::levelKey(s.online)]=&s;
+        for(auto& a:reads)for(auto& e:a.events){
+            if(e.kind!="level")continue;
+            auto f=byKey.find(e.key);if(f==byKey.end()||int64_t(f->second->record.level)>=e.value)continue;
+            auto done=levelApi.raise(f->second->record.object,uint32_t(e.value));levelApplied[e.key]=uint32_t(e.value);levelSeen[e.key]=uint32_t(e.value);
+            note(("LEVEL another player raised "+f->second->online+" to level "+std::to_string(e.value)+": "+done+"\n").c_str());}
+        for(auto& [k,s]:byKey){
+            const uint32_t lv=s->record.level;auto it=levelSeen.find(k);
+            if(it==levelSeen.end()){levelSeen[k]=lv;continue;}
+            if(lv>it->second){it->second=lv;
+#ifndef MUTANT_LEVEL_ECHO
+                if(levelApplied.count(k)&&levelApplied[k]>=lv)continue;
+#endif
+                if(levelPrimed){out.push_back({"level",k,int64_t(lv)});note(("LEVEL "+s->online+" rose to level "+std::to_string(lv)+" here -> server\n").c_str());}}}
+        levelPrimed=true;
+    }
     std::unique_ptr<mod::groupevents::Courier> enemyCourier;uint64_t groupEnemyAt=0,groupEnemyPorter=0,groupEnemySettled=0;bool groupEnemyTell=false;
     void tickGroupEnemies(uint64_t now){
         if(!config.groupEnemies||config.strandToken.empty()||!sampler)return;
@@ -2827,6 +2856,8 @@ struct Runtime final:ds::Transport {
                 [this](const std::string& s){note(s.c_str());});
             note("ENEMYSRV on: MULEs down and camps alarmed are shared through the server\n");}
         auto reads=enemyCourier->reads();
+        if(!cache.available||cache.gated||inEvent)reads.clear();
+        {std::vector<mod::groupevents::Event> lv;levelsStep(reads,now,lv);enemyCourier->send(std::move(lv));}
         if(reads.empty()&&now-groupEnemyAt<500)return;
         groupEnemyAt=now;
         if(!cache.available||cache.gated||inEvent)return;

@@ -13,12 +13,13 @@ Answer parse(const std::string& text){
         a.waitMs=uint64_t(std::clamp<int64_t>(d.get("wait_ms").integer(),int64_t(WaitMinMs),int64_t(WaitMaxMs)));
         for(auto& e:d.get("events").items()){
             Event v;v.kind=e.get("kind").string();
-            if((v.kind!="mule"&&v.kind!="camp"&&v.kind!="gazer")||!e.get("key").isInt()||!e.get("value").isInt())continue;
+            if((v.kind!="mule"&&v.kind!="camp"&&v.kind!="gazer"&&v.kind!="level")||!e.get("key").isInt()||!e.get("value").isInt())continue;
             v.key=e.get("key").integer();v.value=e.get("value").integer();a.events.push_back(v);}
         a.read=true;
     }catch(const std::exception&){a=Answer{};}
     return a;
 }
+int64_t levelKey(const std::string& online){uint64_t h=1469598103934665603ull;for(unsigned char c:online){h^=c;h*=1099511628211ull;}return int64_t(h&((uint64_t(1)<<52)-1));}
 std::string body(const Event& e){json::Value v=json::Value::object();v.set("kind",e.kind);v.set("key",e.key);v.set("value",e.value);return v.dump();}
 uint64_t delayAfter(const Answer& a,unsigned& failures){
     if(a.read){failures=0;return a.waitMs;}
