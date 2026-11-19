@@ -221,6 +221,42 @@ Reply World::worldIds(const std::string& token,int64_t now){
         list.push(o.first);}
     out.set("untagged",list);return ok(out);
 }
+Reply World::built(const std::string& token,const std::string& since,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+    auto* me=chatPlayer(token,now);
+#ifndef MUTANT_BUILT_TOKEN
+    if(!me)return noticeTokenRefused();
+#endif
+    const std::string myId=me?me->id:std::string();
+    // `since` as notices takes it: this process's epoch and a stamp; anything else, or a stamp older than the removed
+    // objects remembered, reads everything again.
+    uint64_t after=0;bool full=true;const std::string mark=epoch_+"-";
+    if(since.size()>mark.size()&&since.size()<=mark.size()+19&&since.compare(0,mark.size(),mark)==0){
+        uint64_t n=0;bool digits=true;for(size_t i=mark.size();i<since.size();++i){digits=digits&&since[i]>='0'&&since[i]<='9';if(digits)n=n*10+uint64_t(since[i]-'0');}
+        if(digits&&n<=stamps_&&n>=goneFloor_){after=n;full=false;}}
+#ifdef MUTANT_BUILT_SINCE
+    full=true;
+#endif
+    // The kinds the game's construction manager makes (world.cpp TypeNames): not roads, signs, cairns, bikes or mushrooms.
+    static const std::string Kinds="pcswbnrlgjza";
+    Value list=Value::array(),removed=Value::array();bool more=false;
+    for(auto& o:objects_){
+        const Object& ob=o.second;const std::string& t=ob.post.get("t").string();
+        if(t.size()!=1||Kinds.find(t[0])==std::string::npos)continue;
+#ifndef MUTANT_BUILT_OWN
+        if(ob.creator==myId)continue;   // his own: his game built it
+#endif
+        if(!full&&ob.stamp<=after)continue;
+#ifndef MUTANT_BUILT_UNSERVED
+        if(!servedTo(ob,myId)){if(!full)removed.push(ob.id);continue;}   // held, kept or waiting now: gone from his world
+#endif
+        if(list.items().size()>=BuiltFullMax){more=true;continue;}
+        list.push(objectResponse(ob));}
+    if(!full)for(auto& d:gone_)if(d.second>after)removed.push(d.first);
+    Value out=Value::object();out.set("format",1);out.set("version",epoch_+"-"+std::to_string(stamps_));out.set("full",full);
+    out.set("wait_ms",BuiltWaitMs);out.set("objects",list);out.set("removed",removed);out.set("more",more);
+    return ok(out);
+}
 Reply World::mapRead(const std::string& token,int64_t now,const std::string& xText,const std::string& yText,const std::string& areaText){
     std::lock_guard<std::mutex> g(lock_);
 #ifndef MUTANT_MAP_TOKEN

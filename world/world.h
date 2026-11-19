@@ -54,7 +54,10 @@ struct Refused : std::runtime_error { int status;Refused(int s,const std::string
 struct Spot { double x=0,y=0,z=0;bool haveYaw=false;double yaw=0;int64_t at=0;std::string name;uint32_t area=0; };
 constexpr size_t MaxSpots=1024;
 constexpr int64_t ChatWaitMinMs=2000,ChatWaitMaxMs=10000;   // how often a game reads the chat: every 2 s, up to 10 s in a crowd
-constexpr int64_t MapFreshSeconds=5,MapWaitMinMs=2000,MapWaitMaxMs=30000;constexpr size_t MapPlayersMax=128,WorldIdsWaitMs=60000;   // who counts as there for the map, how many it lists, how often to ask
+constexpr int64_t MapFreshSeconds=5,MapWaitMinMs=2000,MapWaitMaxMs=30000;constexpr size_t MapPlayersMax=128,WorldIdsWaitMs=60000;
+// What other players built, read by each game while it plays (built): how often, how many ids of removed objects are
+// remembered (an older version reads everything again), and how many objects one full read lists.
+constexpr int64_t BuiltWaitMs=3000;constexpr size_t BuiltGoneMax=4096,BuiltFullMax=2000;   // who counts as there for the map, how many it lists, how often to ask
 constexpr int64_t SpotFreshSeconds=600,MaxNearMetres=2000,AreaSearchMetres=1500;
 // What may travel between two servers. Text form: "all", "none", or terms separated by ';':
 //   types=l,rope,e   owners=NAME,zygo_...   areas=226,227   max-age=30d (s, m, h, d)   likes=no   imported=yes
@@ -180,6 +183,11 @@ public:
     // is the key of the ids it gives, and the ids of what this player may be handed that do not carry it (built before the
     // ids did, kept from an upload, or from a linked server). With the notice token.
     Reply worldIds(const std::string& token,int64_t now);
+    // The structures other players built here that this player may be handed, as findQpidObjects answers them: every one
+    // on a first read (or `since` of another process, or older than what is remembered), else only those changed after
+    // `since`, and the ids of those removed or no longer handed to him since. Read with the notice token, every
+    // `wait_ms`, so a game builds what another player built at once instead of at its next load of that area.
+    Reply built(const std::string& token,const std::string& since,int64_t now);
     // The owner's account key (identity::account of the host's launcher key; "" none): his signed calls are the
     // owner's actions in the API. Saved with the world.
     void setOwner(const std::string& account);
@@ -324,6 +332,15 @@ private:
     struct Pass { std::string account;uint64_t relayId=0;int64_t issued=0,used=0; };   // used: first sign-in; a token's last HELLO
     std::string owner_;std::map<std::string,Pass> tickets_,relayTokens_,noticeTokens_;
     uint64_t stamps_=0;void touch(Object& o){o.stamp=++stamps_;}   // an object's state changed (what notices reads)
+    // An object removed (what built reads): its id with a stamp, the oldest forgotten past BuiltGoneMax.
+    std::deque<std::pair<std::string,uint64_t>> gone_;uint64_t goneFloor_=0;
+    void dropped(const std::string& id){
+#ifndef MUTANT_BUILT_GONE
+        gone_.emplace_back(id,++stamps_);if(gone_.size()>BuiltGoneMax){goneFloor_=gone_.front().second;gone_.pop_front();}
+#else
+        (void)id;
+#endif
+    }
     std::string pass(std::map<std::string,Pass>& passes,const std::string& account,uint64_t relayId,int64_t now);
     Player& playerFor(const std::string& account,const char* why);   // made when new, within `players`
     size_t kickLocked(Player&);

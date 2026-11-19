@@ -75,6 +75,11 @@ Reply Front::handle(const Request& r,int64_t now){
         if(r.method!="GET")return notFound();
         auto token=r.headers.find("x-coop-token");
         return world_.worldIds(token==r.headers.end()?std::string():token->second,now);}
+    // What other players built, read while the game plays (world.h built): the same token.
+    if(path=="/coop/built"){
+        if(r.method!="GET")return notFound();
+        auto token=r.headers.find("x-coop-token");
+        return world_.built(token==r.headers.end()?std::string():token->second,query(q,"since"),now);}
     // The launcher's API (api.h): under the prefix, never under /k/NAME, never the game's.
     if(path.compare(0,6,"/coop/")==0){
         // A signed call is checked whole (identity.h) before the API sees it: the signer is the player it may act for.

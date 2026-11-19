@@ -71,6 +71,7 @@ loopback, a LAN or a VPN.
 | `POST …/link/pull` with `Authorization: Link KEY` | not the game's: one page of objects for a linked server ("Linked servers") |
 | `GET`/`POST …/coop/NAME` | not the game's: the launcher's API ("The launcher's API"), and the owner's calls ("Identity") |
 | `GET …/coop/notices` with `X-Coop-Token` | not the game's: the mod's read of its player's own objects ("What the game is told") |
+| `GET …/coop/built` with `X-Coop-Token` | not the game's: the mod's read of what other players built, while it plays ("What others build, at once") |
 
 Limits: 65536 accounts a world keeps and 1024 players at once on its relay, 4000 objects built here per player, 20000 objects held from each other server, 4 MiB per body,
 32 connections (`--max-connections`), and the limits per address below.
@@ -937,6 +938,28 @@ server's id; the rest is the mod's (`../mod/README.md`, "A world that is the ser
 Under `save` none of this happens, and the ids are tagged all the same. Tests: `serverworld_test.cpp`; mutants
 `WORLD_ID_UNTAGGED`, `COLLECTION_ID_UNTAGGED`, `WORLD_NO_HAND_BACK`, `WORLD_BACK_AS_OWN`, `WORLDIDS_TOKEN`, `WORLDIDS_ALL`,
 `WORLDIDS_UNSERVED`.
+
+### What others build, at once
+
+A game asks `findQpidObjects` only when it loads an area, and only for some kinds ("Which objects a game is handed"), so
+what another player builds while you play there would appear at your next load of the area, or never (a generator). The
+mod reads instead, every few seconds, what changed:
+
+| Call | Answer |
+|---|---|
+| `GET …/coop/built[?since=VERSION]` with `X-Coop-Token: TOKEN` (the notice token) | `format` 1, `version`, `full`, `wait_ms` (3 s: when to ask again), `objects`: each as `findQpidObjects` answers it (`id`, `c`, `t`, `l`, `r`, `q`, …), `removed`: ids, and `more` (a full read lists at most 2000). 403 for a bad token |
+
+- **What is listed.** Every object another player built here that this player may be handed (the policy's sharing:
+  never what is held, kept or waiting), of a kind the game's construction manager makes (posts, generators, safe houses,
+  watchtowers, bridges, rain shelters, ropes, ladders, chiral bridges, jump ramps, ziplines, catapults); never his own,
+  never roads, signs, cairns or bikes. Imported ones too.
+- **Versions.** As notices: a version of this process lists only what changed after it; anything else (the first read, a
+  server started again) is a full read, and the mod compares it with what it built.
+- **Removed.** An object removed after the version (taken down by its builder, withdrawn, the owner's removal, a linked
+  server's prune), or no longer handed to this player (held, kept), is listed by id. The last 4096 removals are
+  remembered; a version older than those reads everything again.
+
+Tests: `built_test.cpp`; mutants `BUILT_TOKEN`, `BUILT_OWN`, `BUILT_SINCE`, `BUILT_UNSERVED`, `BUILT_GONE`.
 
 ### Text chat
 

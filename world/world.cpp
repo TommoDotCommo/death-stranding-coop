@@ -535,7 +535,7 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
         if(found->second.remnant){note("refused "+name+": "+found->first+" was withdrawn");return refuse(403,"not-yours","a withdrawn object belongs to nobody");}
 #endif
         dirty_=true;++changes_;
-        if(name=="deleteObject"){note("object "+found->first+" removed by "+me.name);objects_.erase(found);return ok(Value::object());}
+        if(name=="deleteObject"){note("object "+found->first+" removed by "+me.name);dropped(found->first);objects_.erase(found);return ok(Value::object());}
         for(const char* k:{"si","pi","vi","ci","ei"})if(in.get(k).isObject())found->second.post.set(k,in.get(k));
         found->second.updated=now;return ok(objectResponse(found->second));}
     if(name=="findQpidObjects"){
@@ -1088,15 +1088,15 @@ ImportResult World::importShared(const std::string& via,const std::vector<Shared
 #else
                 o.likes=likes;
 #endif
-                o.originLikes=likes;o.creator=s->creator;o.originName=s->name;o.home=s->home;o.updated=s->updated;o.post=s->post;++r.updated;continue;}
-            objects_.erase(found->second);byOrigin_.erase(found);   // another kind now: another id (the id says the kind)
+                o.originLikes=likes;o.creator=s->creator;o.originName=s->name;o.home=s->home;o.updated=s->updated;o.post=s->post;touch(o);++r.updated;continue;}
+            dropped(found->second);objects_.erase(found->second);byOrigin_.erase(found);   // another kind now: another id (the id says the kind)
         }
         Object o;o.id=importedId(s->type()[0],k);o.creator=s->creator;o.post=s->post;o.updated=s->updated;o.likes=o.originLikes=likes;
-        o.originServer=k.first;o.originId=k.second;o.via=via;o.originName=s->name;o.home=s->home;
+        o.originServer=k.first;o.originId=k.second;o.via=via;o.originName=s->name;o.home=s->home;touch(o);
         byOrigin_[k]=o.id;objects_[o.id]=std::move(o);++r.added;}
 #ifndef MUTANT_LINK_NO_PRUNE
     if(prune)for(auto it=objects_.begin();it!=objects_.end();){
-        if(it->second.via==via&&!kept.count({it->second.originServer,it->second.originId})){byOrigin_.erase({it->second.originServer,it->second.originId});it=objects_.erase(it);++r.removed;}
+        if(it->second.via==via&&!kept.count({it->second.originServer,it->second.originId})){byOrigin_.erase({it->second.originServer,it->second.originId});dropped(it->first);it=objects_.erase(it);++r.removed;}
         else ++it;}
 #endif
     if(r.added||r.updated||r.removed){dirty_=true;++changes_;}
@@ -1111,7 +1111,7 @@ size_t World::forget(const std::string& server){
 #else
         bool gone=!o.originServer.empty();
 #endif
-        if(gone){byOrigin_.erase({o.originServer,o.originId});it=objects_.erase(it);++n;}else ++it;}
+        if(gone){byOrigin_.erase({o.originServer,o.originId});dropped(it->first);it=objects_.erase(it);++n;}else ++it;}
     if(n){dirty_=true;++changes_;note("forgot "+std::to_string(n)+" objects of server "+server);}
     return n;
 }
@@ -1497,7 +1497,7 @@ World::Withdrawn World::withdraw(const std::string& player,const std::string& ob
         stay=o.share.empty();
 #endif
         if(stay){o.remnant=true;if(o.name.empty())o.name=p->name;touch(o);++r.remnants;}
-        else{objects_.erase(id);++r.removed;}}
+        else{dropped(id);objects_.erase(id);++r.removed;}}
     if(!ids.empty()){dirty_=true;++changes_;note("withdrawn for "+player+": "+std::to_string(r.remnants)+" stay as remnants, "+std::to_string(r.removed)+" removed");}
     // Taking back everything takes back what he put into pavers too, under either setting: nobody else's road loses
     // what it has (the game never takes materials back), the others only get no more of his. A remnant of it would be
@@ -1515,7 +1515,7 @@ size_t World::removePlayer(const std::string& id){
     for(auto& o:objects_)if(fromServers.count(o.second.originServer))gone.insert(o.first);
 #endif
     if(gone.empty()&&!playerById(id))bad("no player or builder "+id+" here (coop-world players lists them)");
-    for(auto& k:gone){auto& o=objects_[k];if(!o.originServer.empty())byOrigin_.erase({o.originServer,o.originId});objects_.erase(k);}
+    for(auto& k:gone){auto& o=objects_[k];if(!o.originServer.empty())byOrigin_.erase({o.originServer,o.originId});dropped(k);objects_.erase(k);}
     likes_.erase(std::remove_if(likes_.begin(),likes_.end(),[&](const Like& l){return gone.count(l.object)>0;}),likes_.end());
     if(!gone.empty()){dirty_=true;++changes_;note("removed "+std::to_string(gone.size())+" objects of "+id);}
     // And what he put into pavers, with its likes.
