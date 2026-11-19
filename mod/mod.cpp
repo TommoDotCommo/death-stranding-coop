@@ -4172,7 +4172,11 @@ struct Runtime final:ds::Transport {
                     const mod::carts::Cart* best=nullptr;double bestD=1e18;auto all=mod::carts::read(*sampler,sampler->base);auto here=mod::puppet::transform(anchor.pose).position;
                     for(auto& c:all){double d=std::hypot(c.position[0]-here[0],c.position[1]-here[1]);if(c.entity&&d<bestD){bestD=d;best=&c;}}
                     uint64_t target=*link==1?anchor.entity:*link==2?(localVehicle.riding?localVehicle.entity:0):0;
-                    if(!sampler->read(sampler->base+0x265a260,got,14)||std::memcmp(got,want,14))note("CART link refused: the link routine differs\n");
+                    if(*link==3){std::ostringstream o;o<<"CART list "<<all.size()<<" carts";
+                        for(auto& c:all){uint32_t m=0,id=0;if(c.entity){sampler->read(c.entity+0x698,&m,4);sampler->read(c.entity+0x77c,&id,4);}
+                            o<<" | id "<<c.id<<" at "<<int(c.position[0])<<","<<int(c.position[1])<<","<<int(c.position[2])<<" attached "<<c.attached<<" mode "<<m<<" puller 0x"<<std::hex<<id<<std::dec;}
+                        note((o.str()+"\n").c_str());}
+                    else if(!sampler->read(sampler->base+0x265a260,got,14)||std::memcmp(got,want,14))note("CART link refused: the link routine differs\n");
                     else if(!best||bestD>30)note("CART link: no cart within 30 m\n");
                     else if(*link==2&&!target)note("CART link: this porter rides no vehicle\n");
                     else{
