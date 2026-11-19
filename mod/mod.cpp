@@ -66,6 +66,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "serverworld.h"
 #include "livebuild.h"
 #include "groupcargo.h"
+#include "othervehicles.h"
 #include "freebuild.h"
 #include "strand_notices.h"
 #include "received.h"
@@ -458,6 +459,7 @@ struct Runtime final:ds::Transport {
         if(gears)for(auto key:mod::others::undress(shown,gears->keys(),othersPlan))gears->remove(key,anchor.entity);
 #endif
         otherBodies->drive(othersPlan.wants,anchor,now);
+        tickOtherVehicles(anchor,event,now);
         std::array<size_t,4> state{{shown.size(),others?others->connected():0,otherBodies->made(),otherBodies->driving()}};
         if(state!=othersNoted&&now-othersNotedAt>=2000){othersNoted=state;othersNotedAt=now;std::ostringstream o;
             o<<"OTHERS near "<<state[0]<<" connected "<<state[1]<<" bodies made "<<state[2]<<" shown "<<state[3]<<"\n";note(o.str().c_str());}
@@ -1255,6 +1257,79 @@ struct Runtime final:ds::Transport {
         for(auto& tk:groupSync.takeTaken()){
             auto says=groupPlan->taken(tk);if(says.empty())continue;
             courier->send(std::move(says));++groupTook;note(("CARGOSRV took a shared item "+std::to_string(tk.hash)+" -> server\n").c_str());}
+    }
+    // --- Other players' vehicles in group play (othervehicles.h): with others_vehicles, each other player drawn here
+    // who rides has his truck or bike under him; the passenger key gets on and off the nearest one being driven.
+    std::unique_ptr<mod::othervehicles::Fleet> fleet;uint64_t fleetPorter=0,groupRideId=0;bool fleetNoted=false;
+    void tickOtherVehicles(const mod::puppet::Anchor& anchor,bool event,uint64_t now){
+        if(!config.othersVehicles||!sampler)return;
+        if(!fleet){
+            fleet=std::make_unique<mod::othervehicles::Fleet>([this]()->std::optional<mod::ride::Api>{
+#ifdef MOD_FAKE_NETWORK
+                return std::nullopt;
+#else
+                try{return mod::ride::nativeApi(*sampler);}catch(const std::exception& e){note((std::string("VEHICLES pool unavailable: ")+e.what()+"\n").c_str());return std::nullopt;}
+#endif
+            },[this](const std::string& row){note(row.c_str());});
+            note("VEHICLES on: other players' trucks and bikes are shown here\n");}
+        if(anchor.entity!=fleetPorter){if(fleetPorter)fleet->forget("world changed");fleetPorter=anchor.entity;if(rider.riding())rider.forget();groupRideId=0;}
+        std::vector<mod::othervehicles::Seen> seen;
+        for(auto& s:othersShown){
+            mod::othervehicles::Seen v;v.id=s.id;v.visible=s.visible&&s.render.visible;const auto& st=s.render.state;v.kind=st.vehicle;
+            if(v.kind){v.at=mod::ride::vehicleTransform(st.position,st.vehicleOffset,st.vehicleAngles);v.look={st.vehicleVariant,st.vehicleLook};}
+            seen.push_back(v);}
+        fleet->tick(now,!event&&anchor.entity,seen);
+        tickGroupPassenger(anchor,event,now);
+    }
+    // Riding along on another player's truck or bike (passenger.h), as on the partner's.
+    void tickGroupPassenger(const mod::puppet::Anchor& anchor,bool event,uint64_t now){
+        heldPorter=anchor.entity;
+        if(!config.passengerKey||!fleet||!anchor.entity)return;
+        if(!passengerTried){passengerTried=true;
+#ifndef MOD_FAKE_NETWORK
+            try{passengerApi=mod::passenger::nativeApi(*sampler);note("PASSENGER ready: the passenger key gets on and off another player's truck or bike\n");}catch(const std::exception& e){note((std::string("PASSENGER unavailable: ")+e.what()+"\n").c_str());}
+#ifdef _WIN32
+            try{rideTeleport=mod::join::nativeTeleport(*sampler);}catch(const std::exception&){}
+#endif
+#endif
+        }
+        if(!passengerApi.attach)return;
+        auto here=anchor.pose.available?std::optional<mod::puppet::Transform>(mod::puppet::transform(anchor.pose)):std::nullopt;
+        std::vector<mod::othervehicles::Candidate> cs;
+        for(auto& v:fleet->vehicles()){
+            auto p=mod::puppet::readEntityPose(*sampler,v.entity);if(!p.available)continue;
+            auto t=mod::puppet::transform(p);cs.push_back({v.id,v.entity,v.kind,v.driven,t.position});}
+        auto chosen=here?mod::othervehicles::choose(cs,here->position,rider.riding()?1e9:mod::passenger::Reach,rider.riding()?groupRideId:0):std::nullopt;
+        mod::passenger::Look l;
+        l.permitted=!event&&(rider.riding()||!cache.local.vehicle);
+        auto seat=chosen?mod::passenger::seat(chosen->kind):std::nullopt;
+        l.partnerInTruck=chosen&&seat;l.truck=l.partnerInTruck?chosen->entity:0;
+        std::optional<mod::puppet::Transform> at;
+        if(chosen){auto p=mod::puppet::readEntityPose(*sampler,chosen->entity);if(p.available)at=mod::puppet::transform(p);}
+        if(here&&at){double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1],dz=here->position[2]-at->position[2];l.distance=std::sqrt(dx*dx+dy*dy+dz*dz);}
+        l.key=passengerEdge.pressed(modKey(config.passengerKey),now);
+        l.mover=passengerApi.state(anchor.entity);
+        if(l.key&&!rider.riding()&&!(l.permitted&&l.partnerInTruck&&l.distance<=mod::passenger::Reach&&l.mover==mod::passenger::Free)){
+            std::ostringstream o;o<<"PASSENGER key: not now (permitted "<<l.permitted<<", a driven truck or bike near "<<l.partnerInTruck<<", distance "<<l.distance<<" m, mover "<<int(l.mover)<<")\n";note(o.str().c_str());}
+        switch(rider.tick(l)){
+            case mod::passenger::Do::GetOn:
+                if(seat&&(seat->place?(at&&passengerApi.hold(anchor.entity,mod::passenger::seatPlace(*at,*seat))):passengerApi.attach(anchor.entity,rider.truck(),*seat))){if(seat->place)heldSeat=*seat;}
+                if(seat&&passengerApi.state(anchor.entity)!=mod::passenger::Free){groupRideId=chosen->id;note(("PASSENGER on player "+std::to_string(chosen->id)+(chosen->kind==ds::Truck?"'s truck\n":"'s bike\n")).c_str());}
+                else{rider.forget();note("PASSENGER refused by the game\n");}
+                break;
+            case mod::passenger::Do::GetOff:{
+                heldSeat.reset();passengerApi.release(anchor.entity);groupRideId=0;
+                if(here&&at&&rideTeleport){
+                    double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1],n=std::sqrt(dx*dx+dy*dy);
+                    if(n>0.1){mod::puppet::Transform t=*here;t.position[0]+=dx/n*1.5;t.position[1]+=dy/n*1.5;t.position[2]+=1.0;
+                        auto porter=mod::join::readPorter(*sampler);
+                        try{if(porter.readable)rideTeleport(porter.player,t);}catch(const std::exception& e){note((std::string("PASSENGER set-down failed: ")+e.what()+"\n").c_str());}}
+                }
+                note(("PASSENGER off: "+rider.why()+"\n").c_str());break;}
+            default:break;
+        }
+        if(!rider.riding())heldSeat.reset();
+        movePassenger();
     }
     // --- Offering the existing strand (offer_strand.h): opt-in `offer_strand`. While the game is signed in to the server
     // the config names and that server says this player's older strand may be offered (its notices answer, read with

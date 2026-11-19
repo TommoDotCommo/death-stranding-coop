@@ -27,6 +27,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('help',['MATERIALS','EVENT','RELEASE','AGAIN','RETRY'],['help_test.cpp','help.cpp','discovery.cpp']),
           ('dialog',['CANCEL'],['debugmenu_test.cpp','debugmenu.cpp','dialog.cpp','discovery.cpp']),
           ('freebuild',['NOCHECK','ROLLBACK'],['freebuild_test.cpp','freebuild.cpp']),
+          ('othervehicles',['UNCAPPED','NO_REUSE','KEEP_GONE','ANY_DISTANCE'],['othervehicles_test.cpp','othervehicles.cpp','ride.cpp','providers.cpp','pose.cpp','discovery.cpp','../core/core.cpp']),
           ('groupcargo',['LOSE_EARLY_TAKE','KEEP_TAKEN','FAR'],['groupcargo_test.cpp','groupcargo.cpp']),
           ('livebuild',['BRIDGE','ROTATION','FULL_KEEPS','REMOVED_KEPT','REMOVE_OWN','FAR','RETRY_AT_ONCE'],['livebuild_test.cpp','livebuild.cpp']),
           ('serverworld',['GAME','ANY_ID','NO_LIST','NET_COPY','SAVE_OWN','NOCHECK','ROLLBACK','OTHER_SERVER','SAVE_PLAYER','SAVE_ALL'],['serverworld_test.cpp','serverworld.cpp','discovery.cpp']),

@@ -143,6 +143,9 @@ std::string config(const Session& s) {
             +",\"build_received\":true"
 #endif
 #endif
+#ifndef MUTANT_GROUP_NO_VEHICLES
+            +",\"others_vehicles\":true"   // other players' trucks and bikes, and riding along (J)
+#endif
 #ifndef MUTANT_GROUP_NOTICE_TOKEN
             // With the token: the notices, and the save's older strand offered while the server says his offer_old is
             // yes (../mod/README.md, "Offering your existing strand"); the server's word decides, so it is always on.

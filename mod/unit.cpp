@@ -203,6 +203,9 @@ int main() {
       auto token=withKeys(online,"\"strand_notices\":true,\"strand_token\":\"abcDEF123\"");
       assert(!mod::parseConfig(token).groupCargo&&mod::parseConfig(withKeys(token,"\"group_cargo\":true")).groupCargo);
       assert(refused(withKeys(online,"\"group_cargo\":true"))&&refused(withKeys(game,"\"group_cargo\":true")));
+      // Other players' vehicles (othervehicles.h): group play with others drawn.
+      assert(!mod::parseConfig(withKeys(game,"\"others\":8")).othersVehicles&&mod::parseConfig(withKeys(game,"\"others\":8,\"others_vehicles\":true")).othersVehicles);
+      assert(refused(withKeys(game,"\"others_vehicles\":true")));   // no others drawn
       assert(refused(withKeys(online,"\"build_received\":1"))&&refused(withKeys(online,"\"build_received\":\"true\"")));}
      // Offering the existing strand (offer_strand.h): off by default; with online_server and the notice token only.
      {auto online=withKeys(game,"\"online_server\":\"http://10.1.2.3:49100/w77/auth/ds\"");
