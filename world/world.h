@@ -51,7 +51,7 @@ struct Refused : std::runtime_error { int status;Refused(int s,const std::string
 // axes in metres (x, y on the ground, z up); `yaw` the porter's facing in radians (0: +y, pi/2: +x), when known.
 struct Spot { double x=0,y=0,z=0;bool haveYaw=false;double yaw=0;int64_t at=0;std::string name;uint32_t area=0; };
 constexpr size_t MaxSpots=1024;
-constexpr int64_t MapFreshSeconds=5,MapWaitMinMs=2000,MapWaitMaxMs=30000;constexpr size_t MapPlayersMax=128;   // who counts as there for the map, how many it lists, how often to ask
+constexpr int64_t MapFreshSeconds=5,MapWaitMinMs=2000,MapWaitMaxMs=30000;constexpr size_t MapPlayersMax=128,WorldIdsWaitMs=60000;   // who counts as there for the map, how many it lists, how often to ask
 constexpr int64_t SpotFreshSeconds=600,MaxNearMetres=2000,AreaSearchMetres=1500;
 // What may travel between two servers. Text form: "all", "none", or terms separated by ';':
 //   types=l,rope,e   owners=NAME,zygo_...   areas=226,227   max-age=30d (s, m, h, d)   likes=no   imported=yes
@@ -96,13 +96,15 @@ struct ImportResult { size_t added=0,updated=0,unchanged=0,removed=0,filtered=0,
 //   import everyone|members|owner|nobody: who may import a collection (../docs/COLLECTIONS.md); import_cost free|materials
 //   (materials: what an imported structure carried is recorded on it; nothing is taken yet)
 //   chat on|off: players' text chat on this server (World::chatSay); off in the public preset until it has more moderation
+//   world save|server: server: a game shows only what is on this server and hides what its save holds, which stays in
+//     the save (public preset); save: a game keeps its save's structures and adds the server's.
 //   map on|off: every player here is shown on the others' map (World::mapRead); off in the public preset, where strangers
 //   would follow each other across the world
 //   test_mode off|on: every player's co-op mod starts in test mode (unlimited materials, stamina and blood; for alpha
 //   testers); the launcher writes it into the game's config, the server itself does nothing with it
 struct Policy {
     std::string preset="friends",join="invite",build="everyone",acceptOffers="auto",withdrawal="go",offerBuilds="yes",offerOld="no",order="newest",identity="none",challenges="everyone";
-    std::string importWho="everyone",importCost="free",chat="on",map="on";
+    std::string importWho="everyone",importCost="free",chat="on",map="on",world="save";
 #ifndef MUTANT_POLICY_TEST_DEFAULT
     std::string testMode="off";
 #else
@@ -171,6 +173,10 @@ public:
     // `wait_ms`: how long the game should wait before it asks again, longer the more players are placed.
     // Under identity keys his own entry is left out and his choice of who he is shown holds; elsewhere the game knows its id.
     Reply mapRead(const std::string& token,int64_t now,const std::string& x="",const std::string& y="",const std::string& area="");
+    // What a game needs to show only this server's structures (policy `world`; ../mod/serverworld.h): the server's id, which
+    // is the key of the ids it gives, and the ids of what this player may be handed that do not carry it (built before the
+    // ids did, kept from an upload, or from a linked server). With the notice token.
+    Reply worldIds(const std::string& token,int64_t now);
     // The owner's account key (identity::account of the host's launcher key; "" none): his signed calls are the
     // owner's actions in the API. Saved with the world.
     void setOwner(const std::string& account);
@@ -343,6 +349,7 @@ private:
     std::string freshId(const std::string& type,const std::string& creator);
     std::string versionLocked() const {return epoch_+"-"+std::to_string(changes_);}
     bool servedTo(const Object&,const std::string& player) const;          // may this player be handed it
+    bool handsBack(const Object&,const std::string& player) const;         // his own, handed to him because the world is the server's
     std::string shareAfterOffer() const;                                   // what an offered upload becomes
     std::string blocked(const Player&,bool counted) const;                 // why this player may not share one more ("": he may)
     size_t offered(const std::string& player) const;                      // his objects that count for the limit

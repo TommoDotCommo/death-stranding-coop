@@ -12,7 +12,7 @@ struct Server {
     World w;
     explicit Server(const char* preset="friends",std::vector<const char*> settings={}):w([]{return "tok"+std::to_string(++counter);}){
         // The sharing rules only: identity keys (the public preset's) is keys_test.cpp's.
-        Policy p=presetPolicy(preset);p.identity="none";for(auto s:settings)setPolicy(p,s);w.setPolicy(p);}
+        Policy p=presetPolicy(preset);p.identity="none";p.world="save";for(auto s:settings)setPolicy(p,s);w.setPolicy(p);}   // what the others are handed; a player's own coming back is serverworld_test.cpp's
     std::string signIn(const std::string& key,const std::string& name){return json::parse(w.signIn(key,name,"g").body).get("session").get("token").string();}
     unsigned placed=0;   // every object 100 m from the others, so the spread setting leaves them all
     Reply build(const std::string& token,const char* type="l",int area=226,int64_t now=100){
@@ -52,7 +52,7 @@ static void presets(){
     {Policy c=f;CHECK(!throws([&]{setPolicy(c,"test_mode=on");})&&c.testMode=="on"&&policyItems(c).back()==std::make_pair(std::string("test_mode"),std::string("on")));
      for(const char* wrong:{"test_mode=","test_mode=yes","test_mode=On","test_mode=1","test_mode=true"}){Policy before=c;CHECK(throws([&]{setPolicy(c,wrong);}));CHECK(policyItems(c)==policyItems(before));}
      CHECK(!throws([&]{setPolicy(c,"test_mode=off");})&&c.testMode=="off");}
-    auto items=policyItems(p);CHECK(items.size()==19&&items[18]==std::make_pair(std::string("test_mode"),std::string("off"))&&items[0].first=="join"&&items[3]==std::make_pair(std::string("limit"),std::string("200"))&&items[11]==std::make_pair(std::string("identity"),std::string("keys")));
+    auto items=policyItems(p);CHECK(items.size()==20&&items[19]==std::make_pair(std::string("test_mode"),std::string("off"))&&items[0].first=="join"&&items[3]==std::make_pair(std::string("limit"),std::string("200"))&&items[11]==std::make_pair(std::string("identity"),std::string("keys")));
     CHECK(f.identity=="none"&&s.identity=="none"&&p.identity=="keys");
     // How many players near one player he is shown on the relay: generous for friends, 16 for a public server.
     CHECK(f.nearCap==32&&s.nearCap==32&&p.nearCap==16&&items[12]==std::make_pair(std::string("near_cap"),std::string("16")));

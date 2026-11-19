@@ -8,6 +8,7 @@
 #include "front.h"
 #include "api.h"
 #include "collection.h"
+#include "idtag.h"
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -61,6 +62,7 @@ static void original(){
     auto in=t.doc(t.post("import","{\"player\":\"bob\",\"collection\":\""+text+"\",\"place\":\"original\"}"));
     CHECK(in.get("imported").integer()==3&&in.get("shared").integer()==3&&t.w.objects()==before+3&&in.get("source").string()=="Ann's camp"&&in.get("left_out").items().empty());
     std::vector<std::string> made;for(auto& i:in.get("ids").items())made.push_back(i.string());
+    for(auto& i:made)CHECK(idtag::carries(t.w.serverId(),i));   // this server's, as a built object is
     CHECK(made.size()==3);
     if(made.size()==3){
         auto o=t.object(made[0]);auto p=o.get("post");

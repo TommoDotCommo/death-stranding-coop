@@ -1,4 +1,5 @@
 #include "world.h"
+#include "idtag.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -491,6 +492,9 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
 #endif
             uint64_t h=fnv(me.id,nextObject_++*0x9e3779b97f4a7c15ull);
             for(int i=0;i<12;++i){o.id+=digits[h%62];h/=62;if(i==5)h^=fnv(o.id,nextObject_);}
+#ifndef MUTANT_WORLD_ID_UNTAGGED
+            idtag::stamp(serverId_,o.id);
+#endif
         }
         o.creator=me.id;o.post=in;o.post.erase("id");o.updated=now;o.likes=in.get("lp").integer();o.name=me.name;
 #ifndef MUTANT_WORLD_STRIP_STORE
@@ -530,17 +534,29 @@ Reply World::gateway(const Player& me,const std::string& name,const Value& in,in
         found->second.updated=now;return ok(objectResponse(found->second));}
     if(name=="findQpidObjects"){
         // The other players' objects in one area that every player is handed, at most the asked number per type, chosen
-        // as the policy says and the same ones as last time while they are there (curate). Never the asker's own: the
-        // game has those in its save.
+        // as the policy says and the same ones as last time while they are there (curate). Not the asker's own: the game
+        // has those in its save. Where the world is the server's (policy `world`), his own are handed too, told as his
+        // collection builder's: a game whose save has the object does not make it twice, and one whose save lacks it
+        // builds it as another player's, where told as his own it would set it to Fail.
         int64_t area=in.get("q").integer();const Value& counts=in.get("o").get("ct");
         std::map<std::string,int64_t> asked;for(auto& m:counts.members())asked[m.first]=m.second.integer();
-        std::vector<Candidate> here;for(auto& o:objects_)if(o.second.post.get("q").integer()==area)here.push_back(candidateOf(o.second));
+        std::vector<Candidate> here;for(auto& o:objects_)if(o.second.post.get("q").integer()==area){
+            here.push_back(candidateOf(o.second));
+#ifndef MUTANT_WORLD_NO_HAND_BACK
+            if(handsBack(o.second,me.id)){here.back().creator=collectionBuilderId(me.id);here.back().owner=me.id;}
+#endif
+        }
         std::vector<std::string> before;
         if(auto p=picks_.find(me.id);p!=picks_.end())if(auto a=p->second.find(area);a!=p->second.end())before=a->second.ids;
         Curated chosen=curate(me.id,area,counts.isObject()?&asked:nullptr,here,before,policy_,friendsOf(me.id));
         remember(me.id,area,chosen.remember,now);
         Value list=Value::array();
-        for(auto& id:chosen.handed)list.push(objectResponse(objects_.at(id)));
+        for(auto& id:chosen.handed){
+            const Object& o=objects_.at(id);Value r=objectResponse(o);
+#ifndef MUTANT_WORLD_BACK_AS_OWN
+            if(handsBack(o,me.id))r.set("c",collectionBuilderId(me.id));
+#endif
+            list.push(r);}
         Value set=Value::object();set.set("ro",Value::array());set.set("m",Value::array());set.set("oa",list);
         for(const char* k:{"ob","od","oe","op"})set.set(k,Value::array());
         Value out=Value::object();out.set("n",set);return ok(out);}
@@ -1216,7 +1232,8 @@ Policy presetPolicy(const std::string& name){
     Policy p;p.preset=name;
     if(name=="friends")return p;
     if(name=="solo"){p.players=1;p.chat="off";p.map="off";return p;}
-    if(name=="public"){p.chat="off";p.map="off";p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";p.nearCap=16;p.challenges="members";p.importWho="members";return p;}
+    // Everyone on a public server sees the same world: the server's. Friends and a solo server keep what each save holds.
+    if(name=="public"){p.chat="off";p.map="off";p.world="server";p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";p.nearCap=16;p.challenges="members";p.importWho="members";return p;}
     bad("policy: unknown preset '"+name+"' (friends, solo or public)");
 }
 void setPolicy(Policy& p,const std::string& keyValue){
@@ -1245,16 +1262,19 @@ void setPolicy(Policy& p,const std::string& keyValue){
     else if(key=="import_cost")pick(p.importCost,{"free","materials"});
     else if(key=="chat")pick(p.chat,{"on","off"});
     else if(key=="map")pick(p.map,{"on","off"});
+    else if(key=="world")pick(p.world,{"save","server"});
     else if(key=="test_mode")pick(p.testMode,{"off","on"});
-    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges, import, import_cost, chat, map, test_mode)");
+    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges, import, import_cost, chat, map, world, test_mode)");
 }
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy& p){
     return {{"join",p.join},{"build",p.build},{"accept_offers",p.acceptOffers},{"limit",std::to_string(p.limit)},{"withdrawal",p.withdrawal},
             {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld},
             {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity},{"near_cap",std::to_string(p.nearCap)},{"challenges",p.challenges},
-            {"import",p.importWho},{"import_cost",p.importCost},{"chat",p.chat},{"map",p.map},{"test_mode",p.testMode}};
+            {"import",p.importWho},{"import_cost",p.importCost},{"chat",p.chat},{"map",p.map},{"world",p.world},{"test_mode",p.testMode}};
 }
 void World::setPolicy(const Policy& p){std::lock_guard<std::mutex> g(lock_);policy_=p;dirty_=true;++changes_;}
+bool World::handsBack(const Object& o,const std::string& player) const {
+    return policy_.world=="server"&&o.creator==player&&o.collection.empty()&&o.originServer.empty()&&!o.remnant;}
 bool World::servedTo(const Object& o,const std::string& player) const {
     if(o.creator==player)return true;   // his own, whatever its state (the game never asks a list of those)
 #ifndef MUTANT_POLICY_PENDING_SERVED

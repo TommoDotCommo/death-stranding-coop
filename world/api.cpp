@@ -1,4 +1,5 @@
 #include "api.h"
+#include "idtag.h"
 #include "collection.h"
 #include <algorithm>
 #include <algorithm>
@@ -45,6 +46,8 @@ std::string settingText(const std::string& key,const std::string& value,size_t p
                                 value=="nobody"?"No route challenges are published here.":"Any player may publish a route challenge for the others to run.";
     if(key=="chat")return value=="on"?"Players can talk here with text chat (Y in the game).":"Text chat is off on this server.";
     if(key=="map")return value=="on"?"Every player here is shown on the others' map, wherever they are.":"Other players are not shown on the map here.";
+    if(key=="world")return value=="server"?"Only what is on this server stands in the world here. What your save holds is hidden while you play here, and stays in your save.":
+                           "Your save's structures stay in the world here, with this server's added.";
     if(key=="test_mode")return value=="on"?"Test mode: unlimited materials (U), stamina and blood for everyone here. For testing: the game does not play as it should.":
                                "No test mode: the game plays as usual.";
     if(key=="identity")return value=="keys"?"Players are known by the key their launcher made: nobody signs in, builds or withdraws in another player's name (the traffic is not encrypted).":
@@ -200,6 +203,23 @@ void World::apiSetFriends(const std::string& key,const std::vector<std::string>&
     Player& p=found->second;p.friends=std::move(next);
     if(!show.empty())p.showOthers=show=="default"?"":show;
     dirty_=true;++changes_;note("friends of "+p.id+": "+std::to_string(p.friends.size())+", show_others "+(p.showOthers.empty()?"(his game's)":p.showOthers));
+}
+Reply World::worldIds(const std::string& token,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+    auto* me=chatPlayer(token,now);
+#ifndef MUTANT_WORLDIDS_TOKEN
+    if(!me)return noticeTokenRefused();
+#endif
+    Value out=Value::object(),list=Value::array();out.set("format",1);out.set("server",serverId_);out.set("world",policy_.world);out.set("wait_ms",int64_t(WorldIdsWaitMs));
+    for(auto& o:objects_){
+#ifndef MUTANT_WORLDIDS_ALL
+        if(idtag::carries(serverId_,o.first))continue;
+#endif
+#ifndef MUTANT_WORLDIDS_UNSERVED
+        if(!me||!servedTo(o.second,me->id))continue;
+#endif
+        list.push(o.first);}
+    out.set("untagged",list);return ok(out);
 }
 Reply World::mapRead(const std::string& token,int64_t now,const std::string& xText,const std::string& yText,const std::string& areaText){
     std::lock_guard<std::mutex> g(lock_);

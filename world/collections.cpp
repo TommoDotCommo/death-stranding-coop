@@ -1,6 +1,7 @@
 // Collections on the server (../docs/COLLECTIONS.md): a player's own objects made into a DSK string, and a DSK string
 // made into objects of the player who imports it, as his game's uploads would be, under the policy.
 #include "world.h"
+#include "idtag.h"
 #include "collection.h"
 #include <algorithm>
 #include <cmath>
@@ -68,7 +69,11 @@ std::string World::freshId(const std::string& type,const std::string& creator){
     std::string id;
     while(id.empty()||objects_.count(id)){
         id=type;uint64_t h=fnv(creator,nextObject_++*0x9e3779b97f4a7c15ull);
-        for(int i=0;i<12;++i){id+=digits[h%62];h/=62;if(i==5)h^=fnv(id,nextObject_);}}
+        for(int i=0;i<12;++i){id+=digits[h%62];h/=62;if(i==5)h^=fnv(id,nextObject_);}
+#ifndef MUTANT_COLLECTION_ID_UNTAGGED
+        idtag::stamp(serverId_,id);
+#endif
+    }
     return id;}
 void World::noteSpot(uint64_t relayId,const Spot& s){
     std::lock_guard<std::mutex> g(lock_);
