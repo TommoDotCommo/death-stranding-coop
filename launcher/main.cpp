@@ -29,6 +29,7 @@ std::unique_ptr<Network> net;
 LaunchOptions options;
 fs::path settingsFile,executable;
 int selectedTab=0,choice=0;
+unsigned othersDrawn=GroupOthers;   // Settings: other players drawn as full bodies
 bool lan=true,tailscale=true,privacy=false,sharedWorld=false,groupHost=false,buildReceived=true,testMode=false,pasteGroup=false,initializing=true,joinAfterScan=false,joinScanStarted=false,remembered=false;
 std::string joinQuery;
 unsigned port=49000;
@@ -43,7 +44,7 @@ world::identity::Keys keys;                             // this install's key pa
 enum Page {PagePlay=0,PageSaves,PageChallenges,PageSettings,PageAbout,Pages};
 std::vector<HWND> controls[Pages];
 std::string challenge;   // the route challenge the next game runs (../docs/ROUTES.md; launcher.ini challenge=, Session::route)
-enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import,Remove,GroupHost,GroupPolicy,Strand,Owner,BuildReceived,TestList,UseTest,GetTest,TestModeBox,
+enum {Name=101,Host,Join,Solo,Primary,Paste,Rows,Status,Invite,Copy,Leave,Ready,BackUp,OpenSaves,GamePath,Port,Lan,Tailscale,Privacy,Protocol,Guide,Home,Diagnose,World,HostSave,Import,Remove,GroupHost,GroupPolicy,Strand,Owner,BuildReceived,TestList,UseTest,GetTest,TestModeBox,OthersDrawn,
       ChRecorded,ChName,ChWidth,ChStart,ChFinish,ChGrace,ChTime,ChCases,ChVehicles,ChCopy,ChPublish,ChUse,ChPaste,ChServer,ChRefresh,ChRun,ChClear,ChResults,ChSend};
 const char* PolicyNames[]={"friends","solo","public"};
 HWND child(int id){return GetDlgItem(window,id);}
@@ -201,7 +202,7 @@ void writeSettings(){
     std::string name=utf8(player),game=utf8(gameFolder);
     if(name.find_first_of("\r\n")!=std::string::npos||game.find_first_of("\r\n")!=std::string::npos)return;
     atomicWrite(settingsFile,settingsText(readIni(),{{"name",name},{"game",game},{"choice",std::to_string(choice)},{"port",std::to_string(port)},{"lan",std::to_string(lan)},{"tailscale",std::to_string(tailscale)},
-        {"privacy",std::to_string(privacy)},{"world",std::to_string(sharedWorld)},{"group",std::to_string(groupHost)},{"group_secret",std::to_string(groupSecret)},{"player_id",std::to_string(playerNumber)},{"group_policy",groupPolicy},{"build_received",std::to_string(buildReceived)},{"challenge",challenge},{"test_mode",std::to_string(testMode)}}));
+        {"privacy",std::to_string(privacy)},{"others_drawn",std::to_string(othersDrawn)},{"world",std::to_string(sharedWorld)},{"group",std::to_string(groupHost)},{"group_secret",std::to_string(groupSecret)},{"player_id",std::to_string(playerNumber)},{"group_policy",groupPolicy},{"build_received",std::to_string(buildReceived)},{"challenge",challenge},{"test_mode",std::to_string(testMode)}}));
 }
 void saveSettings(){if(!initializing)writeSettings();}
 // A headless report (one line of JSON): to standard output for "-", else to that file.
@@ -232,7 +233,7 @@ uint32_t groupKey(){if(!groupSecret){groupSecret=random32();writeSettings();}ret
 // Windows Firewall's verdict for the game's two UDP ports, read when the launcher starts and when a lobby opens.
 Firewall firewall=Firewall::Unknown;
 void readFirewallNow(){if(!gameFolder.empty())firewall=readFirewall(fs::path(gameFolder)/"ds.exe",{port,port+1});}
-Session chosenSession(){Session s;s.name=utf8(player);s.port=port;s.sharedWorld=sharedWorld;s.playerId=playerNumber;s.policy=groupPolicy;s.buildReceived=buildReceived;s.route=challenge;s.testMode=testMode;return s;}   // a guest's choice is replaced by the host's (net_win.h)
+Session chosenSession(){Session s;s.name=utf8(player);s.port=port;s.sharedWorld=sharedWorld;s.playerId=playerNumber;s.policy=groupPolicy;s.buildReceived=buildReceived;s.othersDrawn=othersDrawn;s.route=challenge;s.testMode=testMode;return s;}   // a guest's choice is replaced by the host's (net_win.h)
 void render();
 // ---- A group server's rules (strand.h): the join screen and "My strand on this server", each a window of its own
 // over the launcher, which is disabled while one is open. Built without being seen on a screen (README).
@@ -763,8 +764,8 @@ void render(){
     }
     if(selectedTab==1){int half=(w-75)/2;place(210,30,115,w-60,45);place(211,30,160,w-60,85);place(OpenSaves,30,250,half,36);place(BackUp,45+half,250,half,36);place(Import,30,292,w-60,36);
         place(212,30,342,w-60,25);place(TestList,30,370,half,150);place(213,45+half,370,half,150);place(UseTest,30,530,half,36);place(GetTest,45+half,530,half,36);}
-    if(selectedTab==PageSettings){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(TestModeBox,440,215,w-470,30);place(Lan,30,265,w-60,30);place(Tailscale,30,300,w-60,30);place(Privacy,30,335,w-60,30);place(World,30,370,w-60,30);place(GroupHost,30,405,w-60,30);place(BuildReceived,30,440,w-60,46);place(223,30,497,330,25);place(GroupPolicy,370,493,w-400,120);place(224,30,535,w-60,40);place(Protocol,30,580,w-60,36);place(222,30,622,w-60,50);
-        bool edit=!net->lobby;for(int id:{GamePath,Port,Lan,Tailscale,Privacy,World,GroupHost,BuildReceived,GroupPolicy,TestModeBox})EnableWindow(child(id),edit);}
+    if(selectedTab==PageSettings){place(220,30,115,w-60,55);place(GamePath,30,170,w-60,30);place(221,30,220,280,25);place(Port,320,215,100,30);place(TestModeBox,440,215,w-470,30);place(Lan,30,265,w-60,30);place(Tailscale,30,300,w-60,30);place(Privacy,30,335,w-60,30);place(World,30,370,w-60,30);place(GroupHost,30,405,w-60,30);place(BuildReceived,30,440,w-60,46);place(223,30,497,330,25);place(GroupPolicy,370,493,w-400,120);place(224,30,535,w-60,40);place(225,30,585,330,25);place(OthersDrawn,370,580,100,30);place(Protocol,30,620,w-60,36);place(222,30,662,w-60,50);
+        bool edit=!net->lobby;for(int id:{GamePath,Port,Lan,Tailscale,Privacy,World,GroupHost,BuildReceived,GroupPolicy,TestModeBox,OthersDrawn})EnableWindow(child(id),edit);}
     if(selectedTab==PageChallenges){int half=(w-75)/2,q=(w-60-3*10)/4;
         place(240,30,110,w-60,22);place(ChRecorded,30,134,w-60,80);
         place(241,30,222,90,22);place(ChName,125,218,w-155,26);
@@ -853,6 +854,7 @@ LRESULT CALLBACK procedure(HWND h,UINT msg,WPARAM wp,LPARAM lp){
             if(id==ChPaste&&event==EN_CHANGE){auto v=utf8(text(child(ChPaste)));set(243,v.empty()?L"":wtext(challenges::describe(v)));}
             if(id==Name&&event==EN_CHANGE){player=text(child(Name));saveSettings();}
             if(id==GamePath&&event==EN_CHANGE){gameFolder=text(child(GamePath));saveSettings();}
+            if(id==OthersDrawn&&event==EN_CHANGE){auto v=utf8(text(child(OthersDrawn)));if(!v.empty()&&v.size()<=2&&v.find_first_not_of("0123456789")==std::string::npos){auto n=unsigned(std::stoul(v));if(n<=32){othersDrawn=n;saveSettings();}}}
             if(id==Port&&event==EN_CHANGE){auto v=utf8(text(child(Port)));if(!v.empty()&&v.find_first_not_of("0123456789")==std::string::npos&&v.size()==5){auto p=std::stoul(v);if(p>=49000&&p<=49014){port=unsigned(p);saveSettings();}}}
             if(id==GroupPolicy&&event==CBN_SELCHANGE){auto i=SendMessageW(child(GroupPolicy),CB_GETCURSEL,0,0);if(i>=0&&i<3){groupPolicy=PolicyNames[i];saveSettings();}}
             if(id==Paste&&event==EN_CHANGE){auto s=utf8(text(child(Paste)));cr_result r{};bool group=false;int kind=recognise(s,r,group);char desc[256];
@@ -928,6 +930,7 @@ void buildControls(){
     label(PageChallenges,251,L"Your runs (a finished run of a server's challenge can go on its board)");control(PageChallenges,ChResults,L"LISTBOX",L"",LBS_NOTIFY|WS_VSCROLL|WS_BORDER);
     control(PageChallenges,ChSend,L"BUTTON",L"Send to server");
     label(PageSettings,220,L"Launcher / game folder (applies next start)\nSteam mode must use the folder registered with Steam.");control(PageSettings,GamePath,L"EDIT",gameFolder.c_str(),ES_AUTOHSCROLL);
+    label(PageSettings,225,L"Other players drawn as full bodies (0..32; more costs frame rate)");control(PageSettings,OthersDrawn,L"EDIT",std::to_wstring(othersDrawn).c_str(),ES_NUMBER|ES_AUTOHSCROLL);
     label(PageSettings,221,L"Network / host UDP port (49000..49014)");control(PageSettings,Port,L"EDIT",std::to_wstring(port).c_str(),ES_NUMBER|ES_AUTOHSCROLL);
     control(PageSettings,Lan,L"BUTTON",L"Find games on my network",BS_AUTOCHECKBOX);control(PageSettings,Tailscale,L"BUTTON",L"Find friends on Tailscale",BS_AUTOCHECKBOX);control(PageSettings,Privacy,L"BUTTON",L"Invite only (host decides)",BS_AUTOCHECKBOX);control(PageSettings,World,L"BUTTON",L"Shared world (experimental; the host decides): each other's ladders and cairns through the game's own online layer",BS_AUTOCHECKBOX);
     SendMessageW(child(Lan),BM_SETCHECK,lan?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Tailscale),BM_SETCHECK,tailscale?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(Privacy),BM_SETCHECK,privacy?BST_CHECKED:BST_UNCHECKED,0);SendMessageW(child(World),BM_SETCHECK,sharedWorld?BST_CHECKED:BST_UNCHECKED,0);
@@ -967,6 +970,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int showCommand){
         port=GetPrivateProfileIntW(L"launcher",L"port",49000,settingsFile.c_str());if(port<49000||port>49014)port=49000;
         lan=GetPrivateProfileIntW(L"launcher",L"lan",1,settingsFile.c_str());tailscale=GetPrivateProfileIntW(L"launcher",L"tailscale",1,settingsFile.c_str());privacy=GetPrivateProfileIntW(L"launcher",L"privacy",0,settingsFile.c_str());sharedWorld=GetPrivateProfileIntW(L"launcher",L"world",0,settingsFile.c_str())!=0;groupHost=GetPrivateProfileIntW(L"launcher",L"group",0,settingsFile.c_str())!=0;
         buildReceived=GetPrivateProfileIntW(L"launcher",L"build_received",1,settingsFile.c_str())!=0;   // on unless turned off
+        othersDrawn=std::min(unsigned(GetPrivateProfileIntW(L"launcher",L"others_drawn",int(GroupOthers),settingsFile.c_str())),32u);
         try{challenge=challenges::chosen(readIni());if(!challenge.empty())challenge=challenges::canonical(challenge);}catch(const std::exception&){challenge.clear();}   // a damaged one is dropped
         testMode=GetPrivateProfileIntW(L"launcher",L"test_mode",0,settingsFile.c_str())!=0;             // off unless turned on
         {auto kept=utf8(read(L"group_policy",L"friends"));for(auto name:PolicyNames)if(kept==name)groupPolicy=name;}

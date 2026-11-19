@@ -163,6 +163,7 @@ int main(int argc,char** argv) {
         launcher::Session h;h.name="Porter";h.port=49003;h.secret=0x12345678;h.group=Group::Host;h.playerId=123456789012345ull;
         auto hc=mod::parseConfig(launcher::config(h));
         check(hc.group&&hc.peer.empty()&&hc.role=="none"&&hc.server=="127.0.0.1"&&hc.slot==3,"a group player has no partner");
+        {auto few=h;few.othersDrawn=4;auto many=h;many.othersDrawn=40;check(mod::parseConfig(launcher::config(few)).others==4&&mod::parseConfig(launcher::config(many)).others==32,"the player's choice of bodies, at most 32");}
         check(hc.others==launcher::GroupOthers&&hc.relay=="127.0.0.1:49103"&&hc.relayKey=="w305419896"&&hc.playerId==h.playerId&&hc.partnerTag&&hc.session==h.secret&&hc.gameThread&&hc.puppetProbe&&hc.required,"group host config");
         check(hc.relayMode=="broadcast","group play uses the relay's broadcast mode");
         check(hc.othersGear&&hc.othersCarry==launcher::GroupCarried,"a group game shows what other players wear and carry");

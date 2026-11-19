@@ -57,6 +57,9 @@ struct Session {
     // Group play: other players' structures the server hands this game are built at once (`build_received`), skipping
     // the game's spacing and area checks for them. The player's setting, on unless he turns it off.
     bool buildReceived=true;
+    // Other players drawn as full bodies at once (the nearest), the player's choice in Settings: each costs the game frame
+    // time; the rest show on the map. At most the mod's 32.
+    unsigned othersDrawn=GroupOthers;
     // A route challenge the player chose in Challenges (../docs/ROUTES.md): "DSR1-..." written into the game's config as
     // `route`, in every kind of session; "" none.
     std::string route;

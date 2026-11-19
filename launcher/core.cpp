@@ -121,7 +121,7 @@ std::string config(const Session& s) {
         if(!s.relayToken.empty())key=s.relayToken;   // a server that takes keys: this player's relay token, not the group's key
 #endif
         std::string json="{\"server\":\""+server+"\",\"slot\":"+std::to_string(slot)+",\"nickname\":\""+s.name+"\",\"provider\":\"game\",\"session\":"+std::to_string(s.secret)
-            +",\"required\":true,\"logging\":true,\"game_thread\":true,\"puppet_probe\":true,\"partner_tag\":true,\"others\":"+std::to_string(GroupOthers)
+            +",\"required\":true,\"logging\":true,\"game_thread\":true,\"puppet_probe\":true,\"partner_tag\":true,\"others\":"+std::to_string(std::min(s.othersDrawn,32u))
 #ifndef MUTANT_GROUP_NO_HELP
             +",\"help_page\":true,\"server_info\":true"   // hold F1, and P for the server page (../mod/README.md)
 #endif
