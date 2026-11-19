@@ -1345,7 +1345,10 @@ struct Runtime final:ds::Transport {
         l.key=passengerEdge.pressed(modKey(config.passengerKey),now);
         l.mover=passengerApi.state(anchor.entity);
         if(l.key&&!rider.riding()&&!(l.permitted&&l.partnerInTruck&&l.distance<=mod::passenger::Reach&&l.mover==mod::passenger::Free)){
-            std::ostringstream o;o<<"PASSENGER key: not now (permitted "<<l.permitted<<", a driven truck or bike near "<<l.partnerInTruck<<", distance "<<l.distance<<" m, mover "<<int(l.mover)<<")\n";note(o.str().c_str());}
+            std::ostringstream o;o<<"PASSENGER key: not now (permitted "<<l.permitted<<", a driven truck or bike near "<<l.partnerInTruck<<", distance "<<l.distance<<" m, mover "<<int(l.mover)<<"; "<<cs.size()<<" candidates";
+            for(auto& c:cs)o<<" | "<<c.id<<" kind "<<int(c.kind)<<" driven "<<c.driven<<" at "<<int(c.at[0])<<","<<int(c.at[1])<<","<<int(c.at[2]);
+            if(here)o<<"; porter at "<<int(here->position[0])<<","<<int(here->position[1])<<","<<int(here->position[2]);else o<<"; porter not read";
+            o<<")\n";note(o.str().c_str());}
         switch(rider.tick(l)){
             case mod::passenger::Do::GetOn:
                 if(seat&&(seat->place?(at&&passengerApi.hold(anchor.entity,mod::passenger::seatPlace(*at,*seat))):passengerApi.attach(anchor.entity,rider.truck(),*seat))){if(seat->place)heldSeat=*seat;}
