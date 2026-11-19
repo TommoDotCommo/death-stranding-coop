@@ -371,7 +371,7 @@ game-thread-test: build/roadshare-test build/groupevents-test build/othervehicle
 	./build/offer-strand-test
 	./build/bts-test
 	./build/carts-test
-	for m in CARTS_VTABLE CARTS_ANY CARTS_ECHO CARTS_MANY; do $(CXX) $(FLAGS) -DMUTANT_$$m carts_test.cpp carts.cpp carry_place.cpp discovery.cpp -o build/carts-mutant && if ./build/carts-mutant >/dev/null 2>&1; then echo SURVIVED $$m; exit 1; else echo KILLED MUTANT_$$m; fi; done
+	for m in CARTS_VTABLE CARTS_ANY CARTS_ECHO CARTS_MANY CARTS_PLACE_KEPT_OLD; do $(CXX) $(FLAGS) -DMUTANT_$$m carts_test.cpp carts.cpp carry_place.cpp discovery.cpp -o build/carts-mutant && if ./build/carts-mutant >/dev/null 2>&1; then echo SURVIVED $$m; exit 1; else echo KILLED MUTANT_$$m; fi; done
 	./build/enemies-test
 	./build/enemy-poses-test
 	python3 -B mutants.py --sources "$(ENEMYPOS_SRC)" --prefix build/mutant-enemypos- ENEMYPOS_AWAKE ENEMYPOS_RANGE ENEMYPOS_KEEP ENEMYPOS_NEAREST ENEMYPOS_KEYS ENEMYPOS_STALE ENEMYPOS_DOWN ENEMYPOS_FAST ENEMYPOS_REACH ENEMYPOS_LAND ENEMYPOS_FARCAP ENEMYPOS_DEADBAND ENEMYPOS_COOLDOWN ENEMYPOS_HOLD ENEMYPOS_BUDGET ENEMYPOS_VTABLE ENEMYPOS_LIVE ENEMYPOS_STEERHOLD ENEMYPOS_STEERROOM ENEMYPOS_STEERSNAP ENEMYPOS_STEERPULL ENEMYPOS_STEERBUDGET ENEMYPOS_STUCK ENEMYPOS_RIDES_HOST ENEMYPOS_RIDES_GUEST ENEMIES_RIDES && echo KILLED 25 enemy position mutants

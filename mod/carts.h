@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <set>
 #include <vector>
 namespace mod::carts {
@@ -46,10 +47,13 @@ public:
     void show(const std::vector<Place>&,Api&,uint64_t now);
     void clear(Api&);
     std::set<uint32_t> ids() const;
+    // Where the cart was last put (its entity's own pose lags the teleports by metres while it is moved: live): none
+    // until a move of it has been taken.
+    std::optional<Place> placed(uint32_t id) const {for(auto& c:carts_)if(c.id==id&&c.moved)return c.at;return std::nullopt;}
     uint32_t idAt(size_t i) const {return i<carts_.size()&&carts_[i].seen?carts_[i].id:0;}   // the one shown for the partner's cart i
     size_t count() const {return carts_.size();}
 private:
-    struct Shown { uint32_t id=0; uint64_t asked=0; bool seen=false; };
+    struct Shown { uint32_t id=0; uint64_t asked=0; bool seen=false,moved=false; Place at; };
     std::vector<Shown> carts_;
 };
 #ifdef _WIN32

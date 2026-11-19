@@ -50,6 +50,11 @@ int main(){
     shown.show({p,p},api,1200+Display::MakeWaitMs+1);CHECK(removed==1&&made==3&&shown.count()==2);   // 101 never came: removed, asked again
     exists[102]=1;shown.show({p},api,9000);CHECK(shown.count()==1&&removed==2&&shown.ids()==std::set<uint32_t>{100});
     exists.erase(100);shown.show({p},api,9100);CHECK(removed==3&&made==4&&shown.count()==1);   // gone in the game: made again
+    {   // Where each was put last, for a rider standing on it (the entity's own pose lags): none before a move is taken.
+        Display d;std::map<uint32_t,int> live;Api a2;a2.make=[&](const Place&){return 500u;};a2.move=[&](uint32_t id,const Place&){return live.count(id)>0;};a2.remove=[](uint32_t){};
+        Place one,two;one.position={1,2,3};two.position={4,5,6};
+        d.show({one},a2,0);CHECK(!d.placed(500));
+        live[500]=1;d.show({one},a2,10);d.show({two},a2,20);CHECK(d.placed(500)&&d.placed(500)->position==two.position&&!d.placed(501));}
     shown.clear(api);CHECK(shown.count()==0&&removed==4);
     if(!failures)std::puts("carts read, towed, place and display checks passed");
     return failures?1:0;

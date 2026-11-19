@@ -751,7 +751,9 @@ struct Runtime final:ds::Transport {
         // put it (the entities' own poses lag both: live), else the entity's pose.
         std::optional<mod::puppet::Transform> at;
         if(fleet)for(auto& v:fleet->vehicles())if(v.entity==rider.truck()){mod::puppet::Transform t;t.position=v.at.position;t.rotation=v.at.rotation;at=t;}
-        if(!at&&!otherCarts.empty())for(auto& c:mod::carts::read(*sampler,sampler->base))if(c.entity==rider.truck()){mod::puppet::Transform t;t.position=c.position;t.rotation=c.rotation;at=t;}
+        if(!at&&!otherCarts.empty())for(auto& c:mod::carts::read(*sampler,sampler->base))if(c.entity==rider.truck()){mod::puppet::Transform t;t.position=c.position;t.rotation=c.rotation;
+            for(auto& d:otherCarts)if(auto p=d.second.placed(c.id)){t.position=p->position;t.rotation=p->rotation;}   // where the mod put it last (the pose lags)
+            at=t;}
         if(!at){auto p=mod::puppet::readEntityPose(*sampler,rider.truck());if(p.available)at=mod::puppet::transform(p);}
         if(at)passengerApi.move(heldPorter,mod::passenger::seatPlace(*at,*heldSeat));
     }
@@ -774,6 +776,7 @@ struct Runtime final:ds::Transport {
         if(truck){auto p=mod::puppet::readEntityPose(*sampler,truck);if(p.available)at=mod::puppet::transform(p);}
         if(here&&at){double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1],dz=here->position[2]-at->position[2];l.distance=std::sqrt(dx*dx+dy*dy+dz*dz);}
         l.key=passengerEdge.pressed(modKey(config.passengerKey),now);
+        if(l.key&&!rider.riding()&&towWhileDriving())l.key=false;   // driving: the key tows instead
         l.mover=passengerApi.state(anchor.entity);
         if(l.key&&!rider.riding()&&!(l.permitted&&l.partnerInTruck&&l.distance<=mod::passenger::Reach&&l.mover==mod::passenger::Free)){
             std::ostringstream o;o<<"PASSENGER key: not now (permitted "<<l.permitted<<", partner in a truck or on a bike "<<l.partnerInTruck<<", distance "<<l.distance<<" m, mover "<<int(l.mover)<<")\n";note(o.str().c_str());}
@@ -1338,6 +1341,30 @@ struct Runtime final:ds::Transport {
     }
     // The floating carriers other players tow (carts.h): one display per player, from his samples, at his body.
     std::map<uint64_t,mod::carts::Display> otherCarts;size_t groupCartsNoted=0,otherCartsNoted=0;uint64_t otherCartsSummaryAt=0;
+    // Towing: the passenger key while this porter drives a truck or bike hooks his nearest floating carrier within
+    // TowReach of the vehicle to it, with the game's one link routine (0x265a260(cart, puller, false), as Attach Carrier
+    // calls it; live 2026-11-20: linked to the truck it reads mode 2 and the truck's id as puller, and follows it as
+    // driven); pressed again by a towed one (mode 2), it is let go (puller 0). Never a cart drawn for another player.
+    static constexpr double TowReach=8;
+    bool towWhileDriving(){
+        if(!localVehicle.riding||!localVehicle.entity||!sampler)return false;
+#ifdef _WIN32
+        static const uint8_t want[14]={0x40,0x55,0x56,0x57,0x48,0x83,0xec,0x20,0x48,0x8b,0xfa,0x48,0x8b,0xf1};uint8_t got[14]{};
+        if(!sampler->read(sampler->base+0x265a260,got,14)||std::memcmp(got,want,14)){note("TOW unavailable: the link routine differs\n");return true;}
+        auto shown=otherCartIds();for(auto id:cartDisplay.ids())shown.insert(id);
+        const mod::carts::Cart* best=nullptr;double bestD=TowReach;auto all=mod::carts::read(*sampler,sampler->base);const auto& v=localVehicle.position;
+        for(auto& c:all){if(!c.entity||shown.count(c.id))continue;double d=std::hypot(c.position[0]-v[0],c.position[1]-v[1],c.position[2]-v[2]);if(d<=bestD){bestD=d;best=&c;}}
+        if(!best){note("TOW no floating carrier of yours within 8 m of the vehicle\n");return true;}
+        uint32_t mode=0;sampler->read(best->entity+0x698,&mode,4);
+        const bool letGo=mode==2;
+        reinterpret_cast<void(*)(uint64_t,uint64_t,bool)>(sampler->base+0x265a260)(best->entity,letGo?0:localVehicle.entity,false);
+        uint32_t after=0,puller=0;sampler->read(best->entity+0x698,&after,4);sampler->read(best->entity+0x77c,&puller,4);
+        std::ostringstream o;o<<"TOW "<<(letGo?"let go":"hooked")<<" floating carrier "<<best->id<<" at "<<std::fixed<<std::setprecision(1)<<bestD<<" m: mode "<<mode<<" -> "<<after<<" puller 0x"<<std::hex<<puller<<"\n";note(o.str().c_str());
+        return true;
+#else
+        return false;
+#endif
+    }
     std::set<uint32_t> otherCartIds() const {std::set<uint32_t> ids;for(auto& d:otherCarts)for(auto id:d.second.ids())ids.insert(id);return ids;}
     void tickOtherCarts(bool event,uint64_t now){
         if(!config.othersCarts||!sampler)return;
@@ -1386,7 +1413,8 @@ struct Runtime final:ds::Transport {
             placed[v.entity]=t;cs.push_back({v.id*16+v.kind,v.entity,v.kind,v.driven,t.position});}
         // The floating carriers other players tow, shown here: each one a place to stand on while he pulls it.
         if(!otherCarts.empty())for(auto& c:mod::carts::read(*sampler,sampler->base))for(auto& d:otherCarts)if(d.second.ids().count(c.id)&&c.entity)
-            cs.push_back({d.first*16+mod::passenger::CartKind,c.entity,mod::passenger::CartKind,true,c.position});
+            {auto p=d.second.placed(c.id);mod::puppet::Transform t;t.position=p?p->position:c.position;t.rotation=p?p->rotation:c.rotation;placed[c.entity]=t;
+             cs.push_back({d.first*16+mod::passenger::CartKind,c.entity,mod::passenger::CartKind,true,t.position});}
         auto chosen=here?mod::othervehicles::choose(cs,here->position,rider.riding()?1e9:mod::passenger::Reach,rider.riding()?groupRideId:0):std::nullopt;
         mod::passenger::Look l;
         l.permitted=!event&&(rider.riding()||!cache.local.vehicle);
@@ -1396,6 +1424,7 @@ struct Runtime final:ds::Transport {
         if(chosen){if(placed.count(chosen->entity))at=placed[chosen->entity];else{auto p=mod::puppet::readEntityPose(*sampler,chosen->entity);if(p.available)at=mod::puppet::transform(p);}}
         if(here&&at){double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1];l.distance=std::sqrt(dx*dx+dy*dy);}   // across the ground, as the choice is: the hold brings a porter above down onto it
         l.key=passengerEdge.pressed(modKey(config.passengerKey),now);
+        if(l.key&&!rider.riding()&&towWhileDriving())l.key=false;   // driving: the key tows instead
         l.mover=passengerApi.state(anchor.entity);
         if(l.key&&!rider.riding()&&!(l.permitted&&l.partnerInTruck&&l.distance<=mod::passenger::Reach&&l.mover==mod::passenger::Free)){
             std::ostringstream o;o<<"PASSENGER key: not now (permitted "<<l.permitted<<", a driven truck or bike near "<<l.partnerInTruck<<", distance "<<l.distance<<" m, mover "<<int(l.mover)<<"; "<<cs.size()<<" candidates";

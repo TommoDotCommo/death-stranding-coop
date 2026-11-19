@@ -87,6 +87,7 @@ int main(){
         Filter f(Key);std::atomic<int> gets{0};std::atomic<bool> right{false};
         {Link l([&]{++gets;std::string who=right?Key:"another";return Result{200,"{\"format\":1,\"server\":\""+who+"\",\"world\":\"server\",\"wait_ms\":1,\"untagged\":[\"lPUBLISHER123\"]}"};},f,Key,[](const std::string&){});
          for(int i=0;i<200&&!gets;++i){std::this_thread::sleep_for(std::chrono::milliseconds(5));}
+         std::this_thread::sleep_for(std::chrono::milliseconds(200));   // the answer is taken after the request returns
          CHECK(gets>=1&&f.listed()==0);}
         right=true;{Link l([&]{return Result{200,"{\"format\":1,\"server\":\""+Key+"\",\"world\":\"server\",\"wait_ms\":1,\"untagged\":[\"lPUBLISHER123\"]}"};},f,Key,[](const std::string&){});
          for(int i=0;i<200&&!f.listed();++i){std::this_thread::sleep_for(std::chrono::milliseconds(5));}

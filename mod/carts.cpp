@@ -60,7 +60,11 @@ void Display::show(const std::vector<Place>& wanted,Api& api,uint64_t now){
     while(carts_.size()>wanted.size()){api.remove(carts_.back().id);carts_.pop_back();}
     bool pending=false;
     for(size_t i=0;i<carts_.size();){
-        if(api.move(carts_[i].id,wanted[i])){carts_[i].seen=true;++i;continue;}
+#ifndef MUTANT_CARTS_PLACE_KEPT_OLD
+        if(api.move(carts_[i].id,wanted[i])){carts_[i].seen=true;carts_[i].moved=true;carts_[i].at=wanted[i];++i;continue;}
+#else
+        if(api.move(carts_[i].id,wanted[i])){if(!carts_[i].moved)carts_[i].at=wanted[i];carts_[i].seen=true;carts_[i].moved=true;++i;continue;}
+#endif
         if(!carts_[i].seen&&now-carts_[i].asked<MakeWaitMs){pending=true;++i;continue;}
         api.remove(carts_[i].id);carts_.erase(carts_.begin()+std::ptrdiff_t(i));   // gone, or never came: made again below
     }
