@@ -69,6 +69,10 @@ void Fights::host(const Local& l,bc::Client& client,uint64_t now){
     if(role_!=Role::None||copy_)return;
 #endif
     if(!rose_||!l.available)return;
+#ifndef MUTANT_FIGHT_BOSS_OFFERED
+    // A story boss runs on the catcher records too (whale, titans), but a visitor's copy would be an ordinary catcher.
+    if(l.boss){if(!bossNoted_){bossNoted_=true;log_("FIGHT a story boss fight runs here: not offered to the players near\n");}return;}
+#endif
     if(role_==Role::Visitor)release(client,now,"this game owns a fight now",true);
     if(++nextFight_==0)nextFight_=1;
     info_=bc::FightInfo{};info_.fight=nextFight_;info_.kind=Catcher;info_.most=settings_.most;info_.radius=uint16_t(bts::FightRange);info_.place=l.at;
@@ -109,7 +113,7 @@ void Fights::report(const bc::FightNews& n,const Local& l){
 }
 // ---- The visitor -----------------------------------------------------------------------------------------------------
 void Fights::visit(const Local& l,bc::Client& client,uint64_t now){
-    if(!settings_.join||copy_||!l.available||l.dead)return;
+    if(!settings_.join||copy_||!l.available||l.dead||l.boss)return;
     const bc::Offer* best=nullptr;double bestD=0;auto offers=client.fightOffers(now);
     for(auto& o:offers){
         auto left=leftAt_.find({o.owner,o.info.fight});if(left!=leftAt_.end()&&now<left->second+RejoinQuietMs)continue;
@@ -243,7 +247,7 @@ Local Sandbox::local(const std::array<double,3>& at,bool available) const {
     Local l;l.fights.readable=true;l.fights.active=active_?1:0;l.fights.cleared=cleared_;
     for(size_t i=0;i<lives_.size();++i){bts::Catcher c;c.life=0x1000+i;c.percent=lives_[i];l.catchers.push_back(c);}
     for(auto& [k,life]:gazers_){bts::Gazer g;g.address=0x100000+k;std::memcpy(g.uuid.data(),&k,8);g.life=life;l.gazers.push_back(g);}
-    l.available=available;l.at=at;l.dead=dead;l.caught=caught;return l;}
+    l.available=available;l.at=at;l.dead=dead;l.caught=caught;l.boss=boss;return l;}
 Api Sandbox::api(){
     Api a;
     a.command=[this](uint8_t c){commands.push_back(c);if(c==0)start(1);else if(c==1)end(true);};

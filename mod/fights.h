@@ -56,6 +56,7 @@ struct Local {
     bool available=false;            // the porter is read and in play (not loading, no cutscene)
     std::array<double,3> at{};       // this porter, in the core's axes (the relay's)
     bool dead=false,caught=false;    // vitals.h
+    bool boss=false;                 // a story boss fight runs here (the game's BossBattle state, ui.h): never offered, never joined
 };
 // What the fights do to this game: the catcher command (0 starts a fight here, 1 ends it with the area cleared), a
 // catcher's life in percent, a gazer destroyed (bts.h natives).
@@ -94,6 +95,7 @@ private:
     Settings settings_;Api api_;std::function<void(const std::string&)> log_;Counters counters_;
     Role role_=Role::None;uint64_t owner_=0;uint32_t fight_=0,nextFight_=0;
     // This game's fight as last seen, and what changed at this look: it started, it stopped, a sphere was cleared.
+    bool bossNoted_=false;
     bool primed_=false,active_=false;int32_t cleared_=0;bool rose_=false,fell_=false,won_=false;
     std::vector<bts::Catcher> catchers_;   // this look's catchers, with what this side wrote since
     bool ownTold_=false,offTold_=false;uint8_t visitorsTold_=0;
@@ -119,7 +121,7 @@ public:
     void end(bool cleared);                        // the fight ends by itself: cleared, or lost (got away, voided out)
     void gazer(uint64_t key,float life);           // a gazer of this world (its key as bts::key gives it)
     void kill(uint64_t key);                       // this porter destroys a gazer
-    bool caught=false,dead=false;
+    bool caught=false,dead=false,boss=false;
     Local local(const std::array<double,3>& at,bool available=true) const;
     Api api();
     // What the mod did: commands in order, catcher life writes, gazers destroyed.

@@ -2686,6 +2686,7 @@ struct Runtime final:ds::Transport {
         auto l=fakeBts.local(at,available);
 #else
         mod::fights::Local l;l.fights=mod::bts::readFights(*sampler,sampler->base);l.at=at;l.available=available;l.dead=vitalsSeen.dead;l.caught=vitalsSeen.caught;
+        {auto u=mod::ui::read(*sampler,sampler->base,cache.available);l.boss=u.flagsKnown&&(u.flags&(uint64_t(1)<<15));}   // BossBattle (ui.h)
         if(l.fights.active>0)l.catchers=mod::bts::readCatchers(*sampler,sampler->base);
         if(fights->role()!=mod::fights::Role::None)l.gazers=mod::bts::readGazers(*sampler,sampler->base);
 #endif

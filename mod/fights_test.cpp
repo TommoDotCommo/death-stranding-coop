@@ -177,6 +177,16 @@ static void ownFirst(){
     a.game.end(true);s.run(2500);CHECK(a.fights->joined()&&a.game.commands==std::vector<uint8_t>{0});
 }
 
+// A story boss: never offered, and a game in one joins nobody's fight.
+static void boss(){
+    Sim s;auto& o=s.add(1,{0,0,0},true,false);auto& a=s.add(2,{5,0,0},false,true);
+    s.run(1500);o.game.boss=true;o.game.start(1);s.run(2500);
+    CHECK(o.fights->role()==fights::Role::None&&o.fights->counters().hosted==0&&a.game.commands.empty());
+    Sim t;auto& p=t.add(1,{0,0,0},true,false);auto& q=t.add(2,{5,0,0},false,true);
+    t.run(1500);q.game.boss=true;p.game.start(1);t.run(2500);
+    CHECK(p.fights->role()==fights::Role::Owner&&!q.fights->joined()&&q.game.commands.empty());
+}
+
 // The wire formats: whole or nothing.
 static void formats(){
     fights::State st;st.phase=fights::Phase::Cleared;st.lives={100,0.05f,55.5f};
@@ -214,7 +224,7 @@ static void rejoin(){
 }
 
 int main(){
-    formats();ten();ownerLeaves();ownFirst();floor();rejoin();
+    formats();ten();ownerLeaves();ownFirst();floor();rejoin();boss();
     if(failures)return 1;
     std::puts("fights ok");return 0;
 }
