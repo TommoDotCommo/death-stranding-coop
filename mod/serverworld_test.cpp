@@ -21,9 +21,9 @@ struct Memory {
 constexpr uint64_t Base=0x140000000;
 static void call(Memory& m,uint32_t site,uint32_t target){uint8_t c[5]={0xe8};int32_t r=int32_t(int64_t(target)-int64_t(site)-5);std::memcpy(c+1,&r,4);m.put(Base+site,c,5);}
 static Memory game(){
-    Memory m;for(uint32_t s:GateSites)call(m,s,Gate);call(m,LoadSite,Load);
+    Memory m;for(uint32_t s:GateSites)call(m,s,Gate);call(m,LoadSite,Load);call(m,SaveSite,Save);
     const uint8_t head[12]={0x48,0x89,0x5c,0x24,0x10,0x48,0x89,0x74,0x24,0x20,0x57,0x48};m.put(Base+Gate,head,12);
-    uint8_t pad[12];std::memset(pad,0xcc,12);m.put(Base+GateStub,pad,12);m.put(Base+LoadStub,pad,12);return m;}
+    uint8_t pad[12];std::memset(pad,0xcc,12);m.put(Base+GateStub,pad,12);m.put(Base+LoadStub,pad,12);m.put(Base+SaveStub,pad,12);return m;}
 static int64_t target(const Memory& m,uint32_t site){int32_t r=0;uint8_t b[4];for(int i=0;i<4;++i)b[i]=m.bytes.at(Base+site+1+i);std::memcpy(&r,b,4);return int64_t(site)+5+r;}
 int main(){
     {   // The bytes this build holds, as read from its code: every call is to the test the record has to pass.
@@ -51,8 +51,18 @@ int main(){
         const char* p=s.text;std::memcpy(object+OnlineIdAt,&p,8);object[OwnerAt]=OwnerNet;CHECK(f.allowsObject(object));
         s.text[1]^=1;CHECK(!f.allowsObject(object));
         p=nullptr;std::memcpy(object+OnlineIdAt,&p,8);CHECK(f.allowsObject(object));object[OwnerAt]=OwnerPlayer;uint32_t rec=OwnIdsFrom+2;std::memcpy(object+RecordIdAt,&rec,4);f.loadEnded(1);CHECK(f.allowsObject(object));f.loadEnded(2);CHECK(!f.allowsObject(object));}
+    {   // Left out of the save: what the server handed, by its id; never the player's own, the game's, or a copy without an id.
+        Filter f(Key);const auto mine=tagged("lABCDEFGH");std::string foreign="lPUBLISHER123";
+        CHECK(f.fromServer(OwnerNet,mine.data(),uint32_t(mine.size())));
+        CHECK(!f.fromServer(OwnerPlayer,mine.data(),uint32_t(mine.size()))&&!f.fromServer(OwnerGame,mine.data(),uint32_t(mine.size())));
+        CHECK(!f.fromServer(OwnerNet,foreign.data(),uint32_t(foreign.size()))&&!f.fromServer(OwnerNet,nullptr,0));
+        f.publish({foreign});CHECK(f.fromServer(OwnerNet,foreign.data(),uint32_t(foreign.size()))&&!f.fromServer(OwnerPlayer,foreign.data(),uint32_t(foreign.size())));
+        uint8_t object[0x100]{};struct {uint64_t pad;char text[14];} s{};uint32_t n=13;std::memcpy(s.text,mine.data(),13);std::memcpy(&s.pad,&n,4);
+        const char* p=s.text;std::memcpy(object+OnlineIdAt,&p,8);object[OwnerAt]=OwnerNet;CHECK(f.fromServerObject(object));
+        object[OwnerAt]=OwnerPlayer;CHECK(!f.fromServerObject(object));}
     {   // The code: all the calls lead to the stubs, the stubs to the hooks; each mismatch changes nothing.
-        auto m=game();CHECK(apply(Base,0x1111,0x2222,m.reader(),m.writer())==State::On);
+        auto m=game();CHECK(apply(Base,0x1111,0x2222,0x3333,m.reader(),m.writer())==State::On);
+        CHECK(target(m,SaveSite)==int64_t(SaveStub));
         for(uint32_t s:GateSites){CHECK(target(m,s)==int64_t(GateStub));}
         CHECK(target(m,LoadSite)==int64_t(LoadStub));
         uint64_t hook=0;uint8_t b[8];
@@ -60,11 +70,13 @@ int main(){
         std::memcpy(&hook,b,8);CHECK(hook==0x1111&&m.bytes.at(Base+GateStub)==0x48&&m.bytes.at(Base+GateStub+11)==0xe0);
         for(int i=0;i<8;++i){b[i]=m.bytes.at(Base+LoadStub+2+i);}
         std::memcpy(&hook,b,8);CHECK(hook==0x2222);
-        CHECK(apply(Base,1,2,m.reader(),m.writer())==State::Differs);   // once is enough: it is not done over itself
-        auto bad=[&](uint64_t at){auto g=game();const auto clean=g.bytes;g.bytes[at]^=0x40;auto was=g.bytes;CHECK(apply(Base,1,2,g.reader(),g.writer())==State::Differs&&g.bytes==was&&g.writes==0);(void)clean;};
+        for(int i=0;i<8;++i){b[i]=m.bytes.at(Base+SaveStub+2+i);}
+        std::memcpy(&hook,b,8);CHECK(hook==0x3333);
+        CHECK(apply(Base,1,2,3,m.reader(),m.writer())==State::Differs);   // once is enough: it is not done over itself
+        auto bad=[&](uint64_t at){auto g=game();const auto clean=g.bytes;g.bytes[at]^=0x40;auto was=g.bytes;CHECK(apply(Base,1,2,3,g.reader(),g.writer())==State::Differs&&g.bytes==was&&g.writes==0);(void)clean;};
         for(uint32_t s:GateSites){bad(Base+s+2);}
-        bad(Base+LoadSite+2);bad(Base+Gate+3);bad(Base+GateStub+5);bad(Base+LoadStub+5);
-        for(int fail=0;fail<9;++fail){auto g=game();const auto was=g.bytes;g.failAt=fail;CHECK(apply(Base,1,2,g.reader(),g.writer())==State::Failed);g.failAt=-1;CHECK(g.bytes==was);}}
+        bad(Base+LoadSite+2);bad(Base+SaveSite+2);bad(Base+Gate+3);bad(Base+GateStub+5);bad(Base+LoadStub+5);bad(Base+SaveStub+5);
+        for(int fail=0;fail<11;++fail){auto g=game();const auto was=g.bytes;g.failAt=fail;CHECK(apply(Base,1,2,3,g.reader(),g.writer())==State::Failed);g.failAt=-1;CHECK(g.bytes==was);}}
     {   // The server's answer, and how soon to ask again.
         auto a=parse(R"({"format":1,"server":"abcd1234","world":"server","wait_ms":60000,"untagged":["lPUBLISHER123","x",7]})");
         CHECK(a.read&&a.server==Key&&a.world=="server"&&a.waitMs==60000&&a.untagged==std::vector<std::string>{"lPUBLISHER123"});

@@ -6574,9 +6574,14 @@ State 1 is not "not there": it keeps its collision.
 Every way out of state 0 asks `bool 0x2c35fb0(object, u8 needPlaced, boxes)`, from six calls (`0x2c65993` spacing, `0x2c8653b`
 queue, `0x2c87fee` and `0x2c88142` walker, `0x2c8a8b1` last stranding, `0x2c923d1` load pass), except the record being accessed.
 A refused record stays or goes to state 0. The save writer `0x2ccec10` does not store the state, so nothing of this reaches the
-save. Do not use `+0xad` bit 3 (the writer then drops the record), and do not call the `SetActive*Constructions` exports (they end
-in `0x2c45600`, which discards every queued construction request). `serverworld.cpp` leads the six calls through a stub in the
-padding at `0x2c362f0`.
+save. Do not set `+0xad` bit 3 (value 8) for long: the gate refuses the record and the writer drops it. Do not call the
+`SetActive*Constructions` exports (they end in `0x2c45600`, which discards every queued construction request). `serverworld.cpp`
+leads the six calls through a stub in the padding at `0x2c362f0`.
+
+Leaving records out of a save: `0x2ccef00` calls the records' writer `0x2ccec10(M, stream)` once (`0x2ccef1f`, `e8`). The writer
+skips a record with `+0xad & 8` (also owner 0 with `+0xb1 & 2`). `serverworld.cpp` leads that call through a stub in the padding at
+`0x2c92480` (20 bytes of `cc` from `0x2c9247c`), sets the bit on the server's records, calls the writer and clears the bit.
+Static; to be confirmed live (the loader with a save written so, and no record of the server's after it).
 
 The load wrapper `0x2c9bc70(rcx, rdx, r8)`, called at `0x2e11b75`, is followed through a stub at `0x2c35420`: the player's own
 records are numbered `10000 + ++[M+0x572d34]`, and the count is saved, so its value after the load separates the save's records

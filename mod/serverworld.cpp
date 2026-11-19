@@ -71,6 +71,23 @@ bool Filter::allowsObject(const uint8_t* o) const {
     std::memcpy(&record,o+RecordIdAt,4);
     return allows(o[OwnerAt],id,chars,record);
 }
+bool Filter::fromServer(uint8_t owner,const char* id,uint32_t idChars) const {
+#ifndef MUTANT_SERVERWORLD_SAVE_PLAYER
+    if(owner!=OwnerNet)return false;
+#else
+    if(owner==OwnerGame)return false;
+#endif
+    if(!id||!idChars)return false;
+#ifdef MUTANT_SERVERWORLD_SAVE_ALL
+    return false;
+#endif
+    return idtag::carries(key_.data(),key_.size(),id,idChars)||(idChars==idtag::IdChars&&listedHas(id));
+}
+bool Filter::fromServerObject(const uint8_t* o) const {
+    const char* id=nullptr;std::memcpy(&id,o+OnlineIdAt,sizeof id);uint32_t chars=0;
+    if(id)std::memcpy(&chars,id-8,4);
+    return fromServer(o[OwnerAt],id,chars);
+}
 const char* label(State s){return s==State::On?"on":s==State::Differs?"differs":"failed";}
 namespace {
 constexpr std::array<uint8_t,12> GateHead={0x48,0x89,0x5c,0x24,0x10,0x48,0x89,0x74,0x24,0x20,0x57,0x48};
@@ -83,12 +100,12 @@ bool isPadding(const Read& read,uint64_t base,uint32_t at){
     std::array<uint8_t,12> got{};if(!read(base+at,got.data(),12))return false;
     return std::all_of(got.begin(),got.end(),[](uint8_t c){return c==0xcc;});}
 }
-State apply(uint64_t base,uint64_t gateHook,uint64_t loadHook,const Read& read,const Write& write){
+State apply(uint64_t base,uint64_t gateHook,uint64_t loadHook,uint64_t saveHook,const Read& read,const Write& write){
 #ifndef MUTANT_SERVERWORLD_NOCHECK
     for(uint32_t s:GateSites)if(!callsTo(read,base,s,Gate))return State::Differs;
-    if(!callsTo(read,base,LoadSite,Load))return State::Differs;
+    if(!callsTo(read,base,LoadSite,Load)||!callsTo(read,base,SaveSite,Save))return State::Differs;
     std::array<uint8_t,12> head{};if(!read(base+Gate,head.data(),12)||head!=GateHead)return State::Differs;
-    if(!isPadding(read,base,GateStub)||!isPadding(read,base,LoadStub))return State::Differs;
+    if(!isPadding(read,base,GateStub)||!isPadding(read,base,LoadStub)||!isPadding(read,base,SaveStub))return State::Differs;
 #endif
     struct Done {uint64_t at;std::array<uint8_t,12> was;size_t size;};std::vector<Done> done;
     auto put=[&](uint64_t at,const uint8_t* bytes,size_t size){
@@ -99,10 +116,11 @@ State apply(uint64_t base,uint64_t gateHook,uint64_t loadHook,const Read& read,c
         for(auto d=done.rbegin();d!=done.rend();++d)write(d->at,d->was.data(),d->size);
 #endif
         return State::Failed;};
-    const auto a=stubTo(gateHook),b=stubTo(loadHook);
-    if(!put(base+GateStub,a.data(),a.size())||!put(base+LoadStub,b.data(),b.size()))return undo();
+    const auto a=stubTo(gateHook),b=stubTo(loadHook),v=stubTo(saveHook);
+    if(!put(base+GateStub,a.data(),a.size())||!put(base+LoadStub,b.data(),b.size())||!put(base+SaveStub,v.data(),v.size()))return undo();
     for(uint32_t s:GateSites){const int32_t r=rel(s,GateStub);if(!put(base+s+1,reinterpret_cast<const uint8_t*>(&r),4))return undo();}
     const int32_t r=rel(LoadSite,LoadStub);if(!put(base+LoadSite+1,reinterpret_cast<const uint8_t*>(&r),4))return undo();
+    const int32_t w=rel(SaveSite,SaveStub);if(!put(base+SaveSite+1,reinterpret_cast<const uint8_t*>(&w),4))return undo();
     return State::On;
 }
 uint64_t delayAfter(const Answer& a,const std::string& key,unsigned& failures){
@@ -133,9 +151,9 @@ void Link::run(){
 }
 #ifdef _WIN32
 namespace {
-using GateFn=bool(*)(void*,uint8_t,void*);using LoadFn=uint64_t(*)(void*,void*,uint64_t);
-GateFn gateOriginal=nullptr;LoadFn loadOriginal=nullptr;uint64_t gameBase=0;
-std::atomic<Filter*> active{nullptr};std::atomic<uint64_t> asked{0},refused{0},loads{0};
+using GateFn=bool(*)(void*,uint8_t,void*);using LoadFn=uint64_t(*)(void*,void*,uint64_t);using SaveFn=uint64_t(*)(void*,void*,void*,void*);
+GateFn gateOriginal=nullptr;LoadFn loadOriginal=nullptr;SaveFn saveOriginal=nullptr;uint64_t gameBase=0;
+std::atomic<Filter*> active{nullptr};std::atomic<uint64_t> asked{0},refused{0},loads{0},saves{0},leftOut{0};
 bool gateHook(void* object,uint8_t needPlaced,void* boxes){
     asked.fetch_add(1,std::memory_order_relaxed);
     if(auto* f=active.load(std::memory_order_acquire);f&&object&&!f->allowsObject(static_cast<const uint8_t*>(object))){refused.fetch_add(1,std::memory_order_relaxed);return false;}
@@ -148,18 +166,31 @@ uint64_t loadHook(void* a,void* b,uint64_t c){
     if(f){uint32_t counter=0;if(auto m=*reinterpret_cast<uint8_t**>(gameBase+ManagerSlot))std::memcpy(&counter,m+OwnCounterAt,4);f->loadEnded(counter);}
     return r;
 }
+// The records' save writer (manager, stream): the server's records carry the writer's skip bit only while it runs.
+uint64_t saveHook(void* manager,void* stream,void* r8,void* r9){
+    std::vector<uint8_t*> marked;
+    auto* f=active.load(std::memory_order_acquire);auto* m=static_cast<uint8_t*>(manager);
+    if(f&&m){
+        uint32_t count=0;uint8_t** list=nullptr;std::memcpy(&count,m+ObjectsCountAt,4);std::memcpy(&list,m+ObjectsAt,8);
+        if(list)for(uint32_t i=0;i<count&&i<0x10000;++i){uint8_t* o=list[i];if(o&&!(o[SkipAt]&SkipBit)&&f->fromServerObject(o)){o[SkipAt]|=SkipBit;marked.push_back(o);}}
+    }
+    const uint64_t r=saveOriginal(manager,stream,r8,r9);
+    for(auto* o:marked)o[SkipAt]&=uint8_t(~SkipBit);
+    saves.fetch_add(1,std::memory_order_relaxed);leftOut.store(marked.size(),std::memory_order_relaxed);
+    return r;
+}
 }
 void install(discovery::Sampler& s,Filter& f){
-    gateOriginal=reinterpret_cast<GateFn>(s.base+Gate);loadOriginal=reinterpret_cast<LoadFn>(s.base+Load);gameBase=s.base;active.store(&f,std::memory_order_release);
+    gateOriginal=reinterpret_cast<GateFn>(s.base+Gate);loadOriginal=reinterpret_cast<LoadFn>(s.base+Load);saveOriginal=reinterpret_cast<SaveFn>(s.base+Save);gameBase=s.base;active.store(&f,std::memory_order_release);
     auto* sp=&s;
-    const State st=apply(s.base,reinterpret_cast<uint64_t>(&gateHook),reinterpret_cast<uint64_t>(&loadHook),
+    const State st=apply(s.base,reinterpret_cast<uint64_t>(&gateHook),reinterpret_cast<uint64_t>(&loadHook),reinterpret_cast<uint64_t>(&saveHook),
         [sp](uint64_t at,uint8_t* out,size_t n){return sp->read(at,out,n);},
         [](uint64_t at,const uint8_t* bytes,size_t n){
             DWORD old=0,ignored=0;if(!VirtualProtect(reinterpret_cast<void*>(at),n,PAGE_EXECUTE_READWRITE,&old))return false;
             std::memcpy(reinterpret_cast<void*>(at),bytes,n);VirtualProtect(reinterpret_cast<void*>(at),n,old,&ignored);FlushInstructionCache(GetCurrentProcess(),reinterpret_cast<void*>(at),n);return true;});
     if(st!=State::On){active.store(nullptr,std::memory_order_release);throw std::runtime_error(std::string("the game's code ")+label(st));}
 }
-Stats stats(){return {asked.load(std::memory_order_relaxed),refused.load(std::memory_order_relaxed),loads.load(std::memory_order_relaxed)};}
+Stats stats(){return {asked.load(std::memory_order_relaxed),refused.load(std::memory_order_relaxed),loads.load(std::memory_order_relaxed),saves.load(std::memory_order_relaxed),leftOut.load(std::memory_order_relaxed)};}
 #else
 void install(discovery::Sampler&,Filter&){throw std::runtime_error("needs the game");}
 Stats stats(){return {};}

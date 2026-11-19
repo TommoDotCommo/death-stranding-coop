@@ -945,8 +945,17 @@ marker, from the first frame of a load. If the code is not what the mod expects 
 
 The list is read from `GET .../coop/world-ids` on a thread of its own, at the pace the server asks. A structure built on this
 server but saved before the server answered has no id; it stays hidden at the next load. Roads, signs, cairns, shared vehicles
-and cargo are other systems and are not covered yet. `serverworld.h`; `mod_status` has `server_world` (`on`, `listed`, `reads`,
-`asked`, `refused`, `loads`); the log says `SERVERWORLD on` and, each minute it changed, how many were kept out.
+and cargo are other systems and are not covered yet.
+
+What the server handed stays out of the save the other way round: a record of another player (owner Net) with an id of this
+server, or one it lists, is left out of every save written while the game is here, so the save played alone later does not
+hold the server's world. The player's own records are saved whole, whatever their id. The game's records' save writer
+(`0x2ccec10`, one call) skips a record with bit 8 of `+0xad`; the mod sets that bit on those records only while the writer
+runs and clears it after (`game_offsets.md`). Built and tested without a game; not run live yet.
+
+`serverworld.h`; `mod_status` has `server_world` (`on`, `listed`, `reads`, `asked`, `refused`, `loads`, `saves`,
+`left_out`: records left out of the last save); the log says `SERVERWORLD on` and, each minute it changed, how many were kept
+out.
 
 ## Strand notices (`strand_notices`, off by default; live once, 2026-11-17)
 

@@ -1132,7 +1132,7 @@ struct Runtime final:ds::Transport {
             serverWorldLink=std::make_unique<mod::serverworld::Link>([=]{auto r=mod::strand::get(address,port,target,token,mod::strand::ConnectMs);return mod::serverworld::Result{r.status,r.body};},*serverWorld,config.serverWorld,[this](const std::string& s){note(s.c_str());});
         }
         const auto seen=mod::serverworld::stats();
-        if(now>=serverWorldNotedAt+60000&&seen.refused!=serverWorldRefused){serverWorldNotedAt=now;serverWorldRefused=seen.refused;std::ostringstream o;o<<"SERVERWORLD kept out: asked "<<seen.asked<<" refused "<<seen.refused<<" loads "<<seen.loads<<" listed "<<serverWorld->listed()<<"\n";note(o.str().c_str());}
+        if(now>=serverWorldNotedAt+60000&&seen.refused!=serverWorldRefused){serverWorldNotedAt=now;serverWorldRefused=seen.refused;std::ostringstream o;o<<"SERVERWORLD kept out: asked "<<seen.asked<<" refused "<<seen.refused<<" loads "<<seen.loads<<" saves "<<seen.saves<<" left out of the last "<<seen.leftOut<<" listed "<<serverWorld->listed()<<"\n";note(o.str().c_str());}
     }
     void receivedPatch() {
         if(!sampler||!mod::received::early(config.buildReceived,!config.onlineServer.empty()))return;
@@ -4521,7 +4521,7 @@ unsigned mod_status(char* out,unsigned cap) {
          o<<",\"chat\":{\"ready\":"<<(r.chatBox?"true":"false")<<",\"on\":"<<(k.on?"true":"false")<<",\"typing\":"<<(r.chatBox&&r.chatBox->typing()?"true":"false")<<",\"reads\":"<<k.reads<<",\"sent\":"<<k.sent<<",\"refused\":"<<k.refused<<",\"received\":"<<k.received<<"}";}
         {mod::mapicons::Link::Counters k;if(r.mapLink)k=r.mapLink->counters();auto s=mod::mapicons::stats();
          o<<",\"player_map\":{\"ready\":"<<(r.mapLink?"true":"false")<<",\"on\":"<<(k.on?"true":"false")<<",\"reads\":"<<k.reads<<",\"shown\":"<<k.shown<<",\"area\":"<<r.gameArea<<",\"updates\":"<<s.updates<<",\"taken\":"<<s.taken<<",\"refused\":"<<s.refused<<",\"shown_area\":"<<s.shownArea<<",\"mode\":"<<s.mode<<"}";}
-        {auto s=mod::serverworld::stats();o<<",\"server_world\":{\"on\":"<<(r.serverWorld?"true":"false")<<",\"listed\":"<<(r.serverWorld?r.serverWorld->listed():0)<<",\"reads\":"<<(r.serverWorldLink?r.serverWorldLink->reads():0)<<",\"asked\":"<<s.asked<<",\"refused\":"<<s.refused<<",\"loads\":"<<s.loads<<"}";}
+        {auto s=mod::serverworld::stats();o<<",\"server_world\":{\"on\":"<<(r.serverWorld?"true":"false")<<",\"listed\":"<<(r.serverWorld?r.serverWorld->listed():0)<<",\"reads\":"<<(r.serverWorldLink?r.serverWorldLink->reads():0)<<",\"asked\":"<<s.asked<<",\"refused\":"<<s.refused<<",\"loads\":"<<s.loads<<",\"saves\":"<<s.saves<<",\"left_out\":"<<s.leftOut<<"}";}
         o<<",\"server_info\":{\"ready\":"<<(r.infoScreen?"true":"false")<<",\"open\":"<<(r.infoScreen&&r.infoScreen->open()?"true":"false")<<",\"opens\":"<<(r.infoScreen?r.infoScreen->opens():0)
          <<",\"page\":"<<(r.infoScreen?r.infoScreen->page():0)<<",\"pages\":"<<(r.infoScreen?r.infoScreen->pageCount():0)<<",\"answered\":"<<(r.infoScreen&&r.infoScreen->answered()?"true":"false")<<"}";
         o<<",\"received_structures\":{\"on\":"<<(r.receivedOn?"true":"false")<<",\"answers\":\""<<mod::received::label(r.receivedEarly)<<"\",\"built\":"<<r.receivedBuilder.changed()<<",\"skipped\":"<<r.receivedBuilder.skipped()<<"}";
