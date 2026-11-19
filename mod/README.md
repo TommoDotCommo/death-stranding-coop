@@ -1021,7 +1021,8 @@ bike while he drives, J (`passenger_key`) holds this porter on it, as on the par
 driven within 4.5 m; he is let go when the driver gets out or leaves. Log lines `VEHICLES`, `PASSENGER`.
 `othervehicles.h`; tests `othervehicles_test.cpp` (mutants UNCAPPED, NO_REUSE, KEEP_GONE, ANY_DISTANCE), config
 mutant CONFIG_OTHERS_VEHICLES, launcher mutant GROUP_NO_VEHICLES. Live: the host's truck was shown in the visitor's
-game and followed the real one within 0.1 m (2026-11-20); riding along not yet seen live.
+game and followed the real one (2026-11-20); riding along live the same day: held on the host's truck with J and
+carried 24 m. The copy is placed where the mod last put it: its entity's own pose lags tens of metres while driven.
 
 ## Floating carriers in group play (`others_carts`; on in the launcher's group play)
 
