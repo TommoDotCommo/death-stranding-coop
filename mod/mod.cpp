@@ -450,6 +450,44 @@ struct Runtime final:ds::Transport {
     // The other players' bodies (game thread, after the partner's): each goes to its own player's interpolated pose with
     // that player's animation sample; hidden while the player is stale, away or in a private room and during a local
     // game event; removed when the player has left.
+    // Cheaper bodies (lab, puppet.cargo `perfrate R` 0..6 = 10/15/30/60/120/144/240 Hz and 9 = the game's own, `perfshadow
+    // 0|1` and 9 = the game's own, `perfhide M` metres and 0 = none, `perffar M` metres: rate and shadow only beyond it,
+    // 0 = every body): the game's per-entity update rate (0x235f5a0, entity+0x204) and shadow casting (0x234cfa0,
+    // Entity_ExportedSetShadowCastingEnabled, children included), and bodies beyond M hidden and asleep (Want without a goal).
+    uint8_t perfRate=9,perfShadow=9;double perfHideMetres=0,perfFarMetres=0;
+    struct PerfApplied{uint8_t rate=9,shadow=9,ownRate=0;};std::map<uint64_t,PerfApplied> perfApplied;size_t perfHidden=0;uint64_t perfNotedAt=0;
+    bool perfChecked=false,perfUsable=false;
+    bool perfCallsUsable(){
+        if(perfChecked)return perfUsable;perfChecked=true;
+#ifdef _WIN32
+        static const uint8_t rate[13]={0x48,0x89,0x5c,0x24,0x08,0x57,0x48,0x83,0xec,0x20,0x0f,0xb6,0xfa};
+        static const uint8_t shadow[9]={0x48,0x85,0xc9,0x0f,0x84,0x91,0x00,0x00,0x00};
+        uint8_t a[13]{},b[9]{};
+        perfUsable=sampler&&sampler->read(sampler->base+0x235f5a0,a,13)&&sampler->read(sampler->base+0x234cfa0,b,9)&&!std::memcmp(a,rate,13)&&!std::memcmp(b,shadow,9);
+#endif
+        if(!perfUsable)note("PERF body rate and shadow calls unavailable: the functions differ\n");
+        return perfUsable;}
+    void perfBodies(const mod::puppet::Anchor& anchor,uint64_t now){
+        const bool any=perfRate!=9||perfShadow!=9||!perfApplied.empty();if(!any||!otherBodies||!perfCallsUsable())return;
+#ifdef _WIN32
+        std::optional<std::array<double,3>> here;if(anchor.pose.available)here=mod::puppet::transform(anchor.pose).position;
+        std::set<uint64_t> seen;size_t slowed=0;
+        for(auto& w:othersPlan.wants){
+            const uint64_t e=otherBodies->entity(w.key);if(!e)continue;seen.insert(e);if(!w.goal)continue;   // hidden: kept as it is, own rate remembered
+            bool distant=perfFarMetres<=0;if(!distant&&here){double dx=w.goal->position[0]-(*here)[0],dy=w.goal->position[1]-(*here)[1],dz=w.goal->position[2]-(*here)[2];distant=dx*dx+dy*dy+dz*dz>perfFarMetres*perfFarMetres;}
+            auto [it,fresh]=perfApplied.try_emplace(e);auto& a=it->second;
+            if(fresh){uint8_t r=0;if(!sampler->read(e+0x204,&r,1)||r>6){perfApplied.erase(it);continue;}a.ownRate=r;}
+            const uint8_t rate=distant&&perfRate<=6?perfRate:a.ownRate,shadow=distant&&perfShadow<=1?perfShadow:1;
+            if(rate!=a.rate){reinterpret_cast<void(*)(uint64_t,uint8_t)>(sampler->base+0x235f5a0)(e,rate);a.rate=rate;}
+            if(shadow!=a.shadow&&!(fresh&&shadow==1)){reinterpret_cast<void(*)(uint64_t,bool,bool)>(sampler->base+0x234cfa0)(e,shadow!=0,true);}
+            a.shadow=shadow;if(rate!=a.ownRate)++slowed;}
+        for(auto it=perfApplied.begin();it!=perfApplied.end();)if(seen.count(it->first))++it;else it=perfApplied.erase(it);
+        if(now-perfNotedAt>=10000){perfNotedAt=now;std::ostringstream o;o<<"PERF bodies "<<seen.size()<<" slowed "<<slowed<<" rate "<<int(perfRate)<<" shadow "<<int(perfShadow)
+            <<" far "<<perfFarMetres<<" m hidden beyond "<<perfHideMetres<<" m: "<<perfHidden<<"\n";note(o.str().c_str());}
+#else
+        (void)anchor;(void)now;
+#endif
+    }
     void tickOthers(const mod::puppet::Anchor& anchor,bool event,uint64_t now){
         othersShown.clear();
         if(!otherBodies||(!others&&!otherBodies->size()))return;
@@ -460,7 +498,12 @@ struct Runtime final:ds::Transport {
 #ifndef MOD_MUTANT_OTHERS_UNDRESSED
         if(gears)for(auto key:mod::others::undress(shown,gears->keys(),othersPlan))gears->remove(key,anchor.entity);
 #endif
+        perfHidden=0;
+        if(perfHideMetres>0&&anchor.pose.available){const auto here=mod::puppet::transform(anchor.pose).position;
+            for(auto& w:othersPlan.wants)if(w.goal){double dx=w.goal->position[0]-here[0],dy=w.goal->position[1]-here[1],dz=w.goal->position[2]-here[2];
+                if(dx*dx+dy*dy+dz*dz>perfHideMetres*perfHideMetres){w.goal=nullptr;w.sample=nullptr;++perfHidden;}}}
         otherBodies->drive(othersPlan.wants,anchor,now);
+        perfBodies(anchor,now);
         tickOtherVehicles(anchor,event,now);
         tickOtherCarts(event,now);
         std::array<size_t,4> state{{shown.size(),others?others->connected():0,otherBodies->made(),otherBodies->driving()}};
@@ -4097,6 +4140,10 @@ struct Runtime final:ds::Transport {
                 auto give=mod::puppet::parseCargoCommand(text,mod::runStamp(),"give");
                 auto erase=mod::puppet::parseCargoCommand(text,mod::runStamp(),"delete");
                 auto list=mod::puppet::parseCargoCommand(text,mod::runStamp(),"list");
+                if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfrate"))perfRate=uint8_t(std::min<uint32_t>(*v,9));
+                if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfshadow"))perfShadow=uint8_t(std::min<uint32_t>(*v,9));
+                if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfhide"))perfHideMetres=double(*v);
+                if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perffar"))perfFarMetres=double(*v);
                 if(give&&cargoGive){cargoGive(*give);note(("CARGO give id="+std::to_string(*give)+"\n").c_str());}
                 else if(auto hand=mod::puppet::parseCargoCommand(text,mod::runStamp(),"hand");hand&&(*hand==6||*hand==7)&&anchor.entity) {
                     // Lab: the top case of the porter's back into a hand slot (6 left, 7 right) with the game's own calls,

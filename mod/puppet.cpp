@@ -1,4 +1,5 @@
 #include "puppet.h"
+#include <atomic>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -125,6 +126,10 @@ Api nativeApi(discovery::Sampler& s){
         {0x23806a0,{0x48,0x83,0xec,0x58,0x48,0x8b,0x84,0x24,0x98,0,0,0,0x4c,0x8b,0x94,0x24,0x90,0,0,0,0x4c,0x8b,0x9c,0x24,0x88,0,0,0,0xc5,0xf8,0x10,0}},
         {0x2361ea0,{0x48,0x85,0xc9,0x74,0x1c,0x53,0x48,0x83,0xec,0x20,0x48,0x8b,0xd9,0xe8,0xce,0xe0,0xf7,0xff,0x33,0xd2,0x48,0x8b,0xcb,0xe8,0xa4,0xa0,0xff,0xff}},
         {0x2361c20,{0xe9,0x7b,0xae,0xfe,0xff}}}};
+    // The signatures are checked once per image (the code does not change while the game runs): a scan copies the whole
+    // code section (~62 MB) and searches it, 170..380 ms on the game thread, which every new body paid (live 2026-11-20).
+    static std::atomic<uint64_t> checkedFor{0};
+    if(checkedFor.load(std::memory_order_acquire)!=s.base){
     std::array<unsigned,4> counts{};
     for(auto section:s.sections)if(section.executable){
         require(section.size<=128*1024*1024,"puppet code size cap");std::vector<uint8_t> code(section.size);
@@ -134,6 +139,7 @@ Api nativeApi(discovery::Sampler& s){
         }}
     }
     for(auto n:counts)require(n==1,"puppet function signature missing/ambiguous");
+    checkedFor.store(s.base,std::memory_order_release);}
     auto get=reinterpret_cast<GetResourceFn>(s.base+entries[0].rva);auto create=reinterpret_cast<CreateFn>(s.base+entries[1].rva);
     auto place=reinterpret_cast<PlaceFn>(s.base+entries[2].rva);auto remove=reinterpret_cast<RemoveFn>(s.base+entries[3].rva);
     struct Identity{uint64_t actor=0,vtable=0,resourceRef=0;};auto identity=std::make_shared<Identity>();

@@ -1,4 +1,5 @@
 #include "double.h"
+#include <atomic>
 #include "controls.h"
 #include <algorithm>
 #include <cctype>
@@ -916,6 +917,10 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s,bool ownBody){
         {0x23a2fc0,{0x48,0x89,0x5c,0x24,0x18,0x55,0x48,0x8d,0x6c,0x24,0xc0,0x48,0x81,0xec,0x40,0x01,0,0,0xc5,0xf8,0x29,0xb4,0x24,0x30}},
         // AnimationManager_ExportedTriggerBoolAnimationVariable (manager, handle, seconds): true now, false when it expires.
         {0x2397310,{0x48,0x83,0xec,0x38,0x48,0x85,0xc9,0x74,0x17,0xc5,0xea,0x5f,0x1d,0xef,0xf4,0x82,0x05,0x4c,0x8d,0x44}}}};
+    // The signatures are checked once per image (the code does not change while the game runs): a scan copies the whole
+    // code section (~62 MB) and searches it, 170..380 ms on the game thread, which every new body paid (live 2026-11-20).
+    static std::atomic<uint64_t> checkedFor{0};
+    if(checkedFor.load(std::memory_order_acquire)!=s.base){
     std::array<unsigned,9> counts{};
     for(auto section:s.sections)if(section.executable){
         require(section.size<=128*1024*1024,"double code size cap");std::vector<uint8_t> code(section.size);
@@ -924,6 +929,7 @@ DoubleApi nativeDoubleApi(discovery::Sampler& s,bool ownBody){
             ++counts[k];require(section.address+size_t(at-code.begin())==s.base+e.rva,"double function signature moved/duplicated");++at;}}
     }
     for(auto n:counts)require(n==1,"double function signature missing/ambiguous");
+    checkedFor.store(s.base,std::memory_order_release);}
     // Slot 0 of each class vtable is its type getter; both must match the pinned image.
     const uint64_t camera=s.base+0x3d198e8,twin=s.base+0x3d7de48,mover=s.base+0x3d0d270;uint64_t g=0;
     require(q(s,camera,g)&&g==s.base+0x242daf0&&q(s,twin,g)&&g==s.base+0x2711a80&&q(s,mover,g)&&g==s.base+0x23b3e40,"double vtables differ from pinned image");
