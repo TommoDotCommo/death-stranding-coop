@@ -906,7 +906,7 @@ linked servers are not listed. Under identity keys the asker's own entry is left
 so the game leaves itself out. That choice is about who he sees: nobody can hide from the map but through the `map` setting.
 Places are not encrypted and are not kept: only the latest one of each player is held, in memory.
 
-Tests: `map_test.cpp`; mutants `MAP_TOKEN`, `MAP_OFF`, `MAP_STALE`, `MAP_SELF`, `MAP_CHOICE`.
+Tests: `map_test.cpp`; mutants `MAP_TOKEN`, `MAP_OFF`, `MAP_STALE`, `MAP_SELF`, `MAP_CHOICE`, `MAP_AREA`, `MAP_NEAREST`.
 
 ### Text chat
 

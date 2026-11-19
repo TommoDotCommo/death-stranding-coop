@@ -53,7 +53,8 @@ player.
 
 Hold **F1** in the world for a list of the co-op keys that work in your session. Press **P** to see which server you are on,
 who is online and the server's rules. Where the server's rules allow text chat, press **Y**: type, **Enter** sends to
-everyone on the server, **Esc** cancels. The server's owner can read what is said.
+everyone on the server, **Esc** cancels. The server's owner can read what is said. Where the rules allow it, the game's map
+shows the other players on the same part of the world, with their nicknames.
 
 ## Test mode
 
@@ -123,6 +124,8 @@ inside the game. If the game misbehaves with one of them, try without it and men
   everyone on that server reads what you type, the server's owner can read it too and keeps it in the server's log, and
   there are no private messages. Keep personal information out of it. If someone asks you to talk somewhere else (Discord,
   Steam, social media) because of the game, you do not have to, and you can tell the organiser.
+- **Players on the map are off on the organiser's test server** unless the organiser turns them on (P shows the rules).
+  Where they are on, everyone on that server can see where you are in the game while you play, and you cannot hide from it.
 - Tell the organiser about anyone who makes you uncomfortable (an offensive nickname, following you around). The
   organiser can remove a player from the server and ban them.
 - Do not pass the invite on. Whoever has it can join the server.

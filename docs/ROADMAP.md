@@ -74,6 +74,8 @@ In the game's own UI wherever it can carry them, rather than a display of our ow
 - [x] **Debug menu in the game**: F3, in the game's own dialogue: stamina, blood and the porter's battery, where test mode is
       on. A vehicle's battery is still to come.
 - [x] **Hold F1 for a help page**: the co-op keys of this session, in the game's own caption.
+- [x] **Other players on the game's map**, with their names, where the server's rules allow it. Off by default on public
+      servers, where strangers could follow each other across the world.
 
 ## Later features
 
