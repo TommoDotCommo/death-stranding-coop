@@ -178,6 +178,8 @@ int main() {
      {auto online=withKeys(game,"\"online_server\":\"http://10.1.2.3:49100/w77/t/T1/auth/ds\"");
       {auto seen=mod::parseConfig(withKeys(online,"\"player_map\":true,\"strand_token\":\"abcDEF123\""));assert(seen.playerMap&&!seen.chat);
        assert(refused(withKeys(online,"\"player_map\":true"))&&refused(withKeys(game,"\"player_map\":true,\"strand_token\":\"abc\"")));}
+      {auto kept=mod::parseConfig(withKeys(online,"\"server_world\":\"a1b2c3d4\",\"strand_token\":\"abcDEF123\""));assert(kept.serverWorld=="a1b2c3d4");
+       assert(refused(withKeys(online,"\"server_world\":\"a1b2c3d4\""))&&refused(withKeys(game,"\"server_world\":\"a1b2c3d4\",\"strand_token\":\"abc\""))&&refused(withKeys(online,"\"server_world\":\"a1\",\"strand_token\":\"abc\""))&&refused(withKeys(online,"\"server_world\":\"a b c d\",\"strand_token\":\"abc\"")));}
       {auto said=mod::parseConfig(withKeys(online,"\"chat\":true,\"strand_token\":\"abcDEF123\""));assert(said.chat&&!said.strandNotices);
        assert(refused(withKeys(online,"\"chat\":true"))&&refused(withKeys(game,"\"chat\":true,\"strand_token\":\"abc\"")));}
       auto told=mod::parseConfig(withKeys(online,"\"strand_notices\":true,\"strand_token\":\"abcDEF123\""));

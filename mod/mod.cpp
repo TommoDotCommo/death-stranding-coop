@@ -63,6 +63,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "serverinfo.h"
 #include "chat.h"
 #include "mapicons.h"
+#include "serverworld.h"
 #include "strand_notices.h"
 #include "received.h"
 #include "offer_strand.h"
@@ -1093,7 +1094,7 @@ struct Runtime final:ds::Transport {
             onlinePointed=true;
             if(!onlineApi->plain()||!onlineApi->point(config.onlineServer)){note("ONLINE unavailable: address or body functions not set\n");onlineApi.reset();return;}
             note(("ONLINE server "+config.onlineServer+"\n").c_str());
-            receivedPatch();}                                // before the game can sign in: no answer has arrived yet
+            receivedPatch();serverWorldPatch();}             // before the game can sign in or load a save
         auto st=onlineApi->state();
         if(!(st==onlineSeen)){
             onlineSeen=st;
@@ -1111,6 +1112,28 @@ struct Runtime final:ds::Transport {
     // is made (a rain shelter is refused in that same frame). The scan stays: it has nothing to do then, and does the
     // work alone when the code differs.
     mod::received::Early receivedEarly=mod::received::Early::Off;
+    // A world that is the server's (serverworld.h): set up before any save loads, so no record of it ever stands.
+    mod::serverworld::Filter* serverWorld=nullptr;std::unique_ptr<mod::serverworld::Link> serverWorldLink;uint64_t serverWorldNotedAt=0,serverWorldRefused=0;
+    void serverWorldPatch() {
+        if(config.serverWorld.empty()||!sampler||serverWorld)return;
+#ifdef _WIN32
+        static mod::serverworld::Filter filter(config.serverWorld);   // the game's code calls it for as long as it runs
+        try{mod::serverworld::install(*sampler,filter);serverWorld=&filter;note("SERVERWORLD on: only this server's structures stand in the world\n");}
+        catch(const std::exception& e){note((std::string("SERVERWORLD unavailable: ")+e.what()+"\n").c_str());config.serverWorld.clear();}
+#else
+        static mod::serverworld::Filter filter(config.serverWorld);serverWorld=&filter;note("SERVERWORLD on: only this server's structures stand in the world\n");
+#endif
+    }
+    void tickServerWorld(uint64_t now) {
+        if(!serverWorld)return;
+        if(!serverWorldLink){
+            auto at=serverAt();if(!at){note("SERVERWORLD: no server address, its older structures stay hidden\n");serverWorld=nullptr;return;}
+            const std::string target=at->base+"/coop/world-ids",token=config.strandToken;const uint32_t address=at->address;const uint16_t port=at->port;
+            serverWorldLink=std::make_unique<mod::serverworld::Link>([=]{auto r=mod::strand::get(address,port,target,token,mod::strand::ConnectMs);return mod::serverworld::Result{r.status,r.body};},*serverWorld,config.serverWorld,[this](const std::string& s){note(s.c_str());});
+        }
+        const auto seen=mod::serverworld::stats();
+        if(now>=serverWorldNotedAt+60000&&seen.refused!=serverWorldRefused){serverWorldNotedAt=now;serverWorldRefused=seen.refused;std::ostringstream o;o<<"SERVERWORLD kept out: asked "<<seen.asked<<" refused "<<seen.refused<<" loads "<<seen.loads<<" listed "<<serverWorld->listed()<<"\n";note(o.str().c_str());}
+    }
     void receivedPatch() {
         if(!sampler||!mod::received::early(config.buildReceived,!config.onlineServer.empty()))return;
         receivedEarly=mod::received::patchAnswers(*sampler,sampler->base,mod::received::nativeCodeWrite());
@@ -3711,7 +3734,7 @@ struct Runtime final:ds::Transport {
             stage="server page";stages.enter("server page",mod::nowUs());
             if(gameContext)tickServerInfo(now);
             stage="map";stages.enter("map",mod::nowUs());
-            if(gameContext){tickArea();tickPlayerMap(now);}
+            if(gameContext){tickArea();tickPlayerMap(now);tickServerWorld(now);}
             stage="chat";stages.enter("chat",mod::nowUs());
             if(gameContext)tickChat(now);
             stage="notices";stages.enter("notices",mod::nowUs());
@@ -4498,6 +4521,7 @@ unsigned mod_status(char* out,unsigned cap) {
          o<<",\"chat\":{\"ready\":"<<(r.chatBox?"true":"false")<<",\"on\":"<<(k.on?"true":"false")<<",\"typing\":"<<(r.chatBox&&r.chatBox->typing()?"true":"false")<<",\"reads\":"<<k.reads<<",\"sent\":"<<k.sent<<",\"refused\":"<<k.refused<<",\"received\":"<<k.received<<"}";}
         {mod::mapicons::Link::Counters k;if(r.mapLink)k=r.mapLink->counters();auto s=mod::mapicons::stats();
          o<<",\"player_map\":{\"ready\":"<<(r.mapLink?"true":"false")<<",\"on\":"<<(k.on?"true":"false")<<",\"reads\":"<<k.reads<<",\"shown\":"<<k.shown<<",\"area\":"<<r.gameArea<<",\"updates\":"<<s.updates<<",\"taken\":"<<s.taken<<",\"refused\":"<<s.refused<<",\"shown_area\":"<<s.shownArea<<",\"mode\":"<<s.mode<<"}";}
+        {auto s=mod::serverworld::stats();o<<",\"server_world\":{\"on\":"<<(r.serverWorld?"true":"false")<<",\"listed\":"<<(r.serverWorld?r.serverWorld->listed():0)<<",\"reads\":"<<(r.serverWorldLink?r.serverWorldLink->reads():0)<<",\"asked\":"<<s.asked<<",\"refused\":"<<s.refused<<",\"loads\":"<<s.loads<<"}";}
         o<<",\"server_info\":{\"ready\":"<<(r.infoScreen?"true":"false")<<",\"open\":"<<(r.infoScreen&&r.infoScreen->open()?"true":"false")<<",\"opens\":"<<(r.infoScreen?r.infoScreen->opens():0)
          <<",\"page\":"<<(r.infoScreen?r.infoScreen->page():0)<<",\"pages\":"<<(r.infoScreen?r.infoScreen->pageCount():0)<<",\"answered\":"<<(r.infoScreen&&r.infoScreen->answered()?"true":"false")<<"}";
         o<<",\"received_structures\":{\"on\":"<<(r.receivedOn?"true":"false")<<",\"answers\":\""<<mod::received::label(r.receivedEarly)<<"\",\"built\":"<<r.receivedBuilder.changed()<<",\"skipped\":"<<r.receivedBuilder.skipped()<<"}";

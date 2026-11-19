@@ -47,6 +47,7 @@ struct Config {
     bool partnerVehicle=false; // the partner's vehicle drawn under him while he rides (ride.h)
     bool partnerTag=false;     // the partner's name (their nickname) over the partner body (nametag.h)
     bool helpPage=false;       // hold F1: the co-op keys on the game's common telop (help.h)
+    std::string serverWorld;   // this server's id: only its structures stand in the world (serverworld.h); "": the save's stay
     bool playerMap=false;      // the other players on the game's map (mapicons.h); needs online_server and strand_token
     bool chat=false;           // Y: text chat through the server (chat.h); needs online_server and strand_token
     bool serverInfo=false;     // P: the server, who is on it and its rules, on the game's common dialogue (serverinfo.h)

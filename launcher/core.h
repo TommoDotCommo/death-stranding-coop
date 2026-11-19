@@ -65,6 +65,9 @@ struct Session {
     // server's rules decide (the policy setting test_mode, read before the game starts: strand::usePolicy); the
     // player's own choice does not count there.
     bool testMode=false,serverTestMode=false;
+    // The server's id where its rule `world` says server: its game shows only that server's structures
+    // (../mod/README.md, "A world that is the server's"); "" keeps the save's.
+    std::string serverWorld;
 };
 // The mod config's test_mode object: every switch at its default (U drops crates; stamina and blood kept full).
 inline constexpr const char* TestModeConfig=",\"test_mode\":{}";

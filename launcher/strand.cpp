@@ -200,6 +200,11 @@ void usePolicy(Session& s,const Policy& p){
 #else
     s.serverTestMode=!p.settings.empty();
 #endif
+#ifndef MUTANT_STRAND_SERVER_WORLD
+    s.serverWorld=p.value("world")=="server"?p.server:std::string();
+#else
+    s.serverWorld.clear();
+#endif
 }
 bool takeNoticeToken(const Target& t,const Transport& send,std::string& token,std::string& why){
     token.clear();

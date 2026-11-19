@@ -268,7 +268,13 @@ int main(int argc,char** argv) {
             auto on=st::parsePolicy(doc.substr(0,doc.size()-2)+R"(,{"key":"test_mode","value":"on","preset":"off","text":"Test mode: unlimited materials (U), stamina and blood for everyone here."}]})");
             st::usePolicy(g,on);check(g.serverTestMode&&on.text().find("Test mode: unlimited materials (U)")!=std::string::npos,"test_mode on: the game starts in test mode, and the rules shown say so");
             auto off=st::parsePolicy(doc.substr(0,doc.size()-2)+R"(,{"key":"test_mode","value":"off","preset":"off","text":"No test mode: the game plays as usual."}]})");
-            st::usePolicy(g,off);check(!g.serverTestMode,"test_mode off: not in test mode");}
+            st::usePolicy(g,off);check(!g.serverTestMode,"test_mode off: not in test mode");
+            // The world: the server's id goes to the game only where the rule says server.
+            check(g.serverWorld.empty(),"no world setting: the save's structures stay");
+            auto own=st::parsePolicy(doc.substr(0,doc.size()-2)+R"(,{"key":"world","value":"server","preset":"server","text":"Only what is on this server stands."}]})");
+            st::usePolicy(g,own);check(g.serverWorld=="a1b2c3d4e5f6a7b8","world server: the game is told which server's structures stand");
+            auto saves=st::parsePolicy(doc.substr(0,doc.size()-2)+R"(,{"key":"world","value":"save","preset":"server","text":"The save's stay."}]})");
+            st::usePolicy(g,saves);check(g.serverWorld.empty(),"world save: it is not");}
         auto edit=[&](const std::string& from,const std::string& to){auto x=doc;auto at=x.find(from);check(at!=std::string::npos,"fixture");return x.replace(at,from.size(),to);};
         for(auto wrong:{edit("\"format\":1","\"format\":2"),edit("a1b2c3d4e5f6a7b8","a1b2]\\nx=y"),edit("a1b2c3d4e5f6a7b8","ab"),edit("\"preset\":\"public\"","\"preset\":\"club\""),
                         edit("\"key\":\"offer_builds\"","\"key\":\"offer_new\""),edit("Open to anyone.","Open\\u0007"),edit("\"value\":\"ask\"","\"value\":\"maybe\""),
@@ -301,6 +307,8 @@ int main(int argc,char** argv) {
          {launcher::Session g=launcher::groupJoin(v,0,me);st::useNoticeToken(g,j.passes);auto gc=mod::parseConfig(launcher::config(g));
           check(gc.strandNotices&&gc.strandToken=="n0t1ce5"&&!gc.notices,"the game's config reads its builds' states with it");check(gc.playerMap,"and shows the others on the map, through the server");check(gc.chat,"and has text chat, through the same token");
           check(gc.offerStrand,"and offers the save's older strand while the server says yes to it");
+          check(gc.serverWorld.empty(),"the save's structures stay unless the server's rules say otherwise");
+          {auto own=g;own.serverWorld="a1b2c3d4e5f6a7b8";check(mod::parseConfig(launcher::config(own)).serverWorld=="a1b2c3d4e5f6a7b8","the server's world reaches its game");}
           auto bare=mod::parseConfig(launcher::config(launcher::groupJoin(v,0,me)));check(!bare.chat&&!bare.strandNotices&&!bare.offerStrand&&bare.strandToken.empty(),"without a token: no strand notices, nothing offered");
           auto host=h;st::useNoticeToken(host,j.passes);auto hc2=mod::parseConfig(launcher::config(host));check(hc2.offerStrand&&hc2.strandNotices&&hc2.buildReceived,"the host's game the same");}
          // A server that gives none (an older one, or one that refuses): the game starts all the same, without them.
