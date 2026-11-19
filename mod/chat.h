@@ -16,7 +16,7 @@
 namespace mod::chat {
 constexpr unsigned Key=0x59;            // Y: free in the supported build's recorded default bindings
 constexpr size_t MaxChars=160;          // the server's limit on a line
-constexpr uint64_t PollMs=2000,BackoffMs=15000;
+constexpr uint64_t PollMs=2000,BackoffMs=15000,MaxWaitMs=10000;
 inline const char16_t* const Title=u"Say (Enter sends, Esc cancels)";
 struct Press {enum Kind:uint8_t {Char,Back,Enter,Escape} kind=Char;char16_t ch=0;};
 // What is being typed. UTF-16 units; a surrogate pair is removed whole.
@@ -31,8 +31,9 @@ private:
     std::u16string text_;
 };
 struct Line {std::string name,text;};
-struct Answer {bool read=false,on=false;std::string next;std::vector<Line> lines;};
+struct Answer {bool read=false,on=false;std::string next;uint64_t waitMs=0;std::vector<Line> lines;};   // waitMs: how long the server asks a game to leave between reads
 Answer parse(const std::string& body);  // never throws
+uint64_t pollAfter(uint64_t own,uint64_t server);   // the longer of the two, the server's at most MaxWaitMs
 std::string sayBody(const std::string& utf8);   // the JSON of one line
 std::u16string shown(const Line&);      // "Name: text" for the info log
 // What a refused line tells the player ("" when it went through). status 0: no answer.

@@ -34,7 +34,7 @@ static void policy(){
     CHECK(s.raw("POST","/s3cret/coop/policy","{}").status==404&&s.get("nothing").status==404&&s.raw("GET","/s3cret/coop/").status==404);
     auto p=s.doc(s.get("policy"));
     CHECK(p.get("format").integer()==1&&p.get("server").string()==s.w.serverId()&&p.get("preset").string()=="friends");
-    CHECK(p.get("players").get("count").integer()==0&&p.get("players").get("limit").integer()==16);
+    CHECK(p.get("players").get("count").integer()==0&&p.get("players").get("limit").integer()==int64_t(MaxPlayers));
     CHECK(!p.has("online"));                                   // no relay has spoken: the policy does not guess
     {std::vector<std::string> on={"","Ann"};for(int i=0;i<70;++i)on.push_back("P");s.w.setOnline(on);auto o=s.doc(s.get("policy")).get("online");
      CHECK(o.get("count").integer()==72&&o.get("names").items().size()==64&&o.get("names").items()[0].string()=="Ann");s.w.setOnline({});CHECK(s.doc(s.get("policy")).get("online").get("count").integer()==0);}

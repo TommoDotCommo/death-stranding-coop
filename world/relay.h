@@ -105,7 +105,7 @@ struct RelayConfig {
     std::function<std::vector<uint64_t>()> evicted;
     double enterMetres=150,leaveMetres=200;  // 1..65535, leave >= enter
     uint32_t timeoutMs=10000;
-    size_t maxPlayers=64;                    // 1..RelayPlayersMax
+    size_t maxPlayers=RelayPlayersMax;       // 1..RelayPlayersMax
     uint32_t ratePerPeer=200;                // datagrams a second, for each player near the sender
     uint32_t seed=1;                         // roster stream numbers start here: random in the server, fixed in tests
     // Broadcast mode.

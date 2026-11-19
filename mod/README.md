@@ -106,6 +106,7 @@ config names the server instead:
 | `help_page` | hold F1: the co-op keys on the game's common telop ("The F1 page", below). The launcher turns it on |
 | `chat` | Y: text chat through the server ("Text chat", below); requires `online_server` and `strand_token`. The launcher turns it on with the notice token |
 | `server_info` | P: the server, who is online and its rules on the game's common dialogue ("The server page", below). The launcher turns it on |
+| `player_map` | the other players on the game's map ("Players on the map", below); requires `online_server`, `strand_token`, the game provider and `game_thread`. The launcher turns it on with the notice token |
 | `test_mode` | the launcher writes `{}` when the server's rules say `test_mode` on ("Test mode", below): material crates on U; blood, stamina and battery kept full, switched with F3 |
 | `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
 | `show_others` | `"everyone"` (default), `"friends"` or `"nobody"`: who of the players near this player the server shows him (broadcast only, sent in every HELLO; `world/README.md`, "How many players one player sees"). The server's own record of his choice, set from the launcher, comes first; `friends` needs a server with player keys. Requires `relay_mode` `"broadcast"`. A server from before this refuses a HELLO with anything but everyone |
@@ -911,11 +912,28 @@ the game and turns it into text with the player's keyboard layout; dead keys are
 game, so a key held when typing began does not stay down. The mod's own keys do nothing while typing.
 
 The lines travel over HTTP on a thread of their own: `GET`/`POST .../coop/chat` with the `strand_token`
-(`../world/README.md`, "Text chat"), read every 2 s. A line refused is told in the info log (too many lines, chat off). On a
+(`../world/README.md`, "Text chat"), read every 2 s, or up to every 10 s when the server asks in a crowd. A line refused is told in the info log (too many lines, chat off). On a
 server whose rules say `chat` off, Y only says so. Requires `online_server` and `strand_token`. `chat.h`; `mod_status` has `chat`
 (`ready`, `on`, `typing`, `reads`, `sent`, `refused`, `received`). Each change of the line hides the caption and shows it
 again in one tick; shown over itself the game would fade the old one out first. The lab's `puppet.chat` takes `open`, `type WORD` (`_` for a
 space), `enter` and `esc`, each with the run stamp.
+
+## Players on the map (`player_map`, off by default; the launcher turns it on for group play)
+
+On a server whose rules say `map` on, the game's own map shows the other players with its "Porter" icon, and the icon's
+label under the cursor is the player's name. The list comes from `GET .../coop/map` with the `strand_token`
+(`../world/README.md`, "Players on the map"), on a thread of its own. The request gives this porter's place and map, so a
+crowded server answers with the nearest 128 on that map. The game asks every 2 s, or after the longer wait the server gives
+(at most 30 s); after three failed reads in a row it waits 15 s. Under `map` off nobody is listed.
+
+The icons are added to the list the map menu builds at each update, through one retargeted call, and read from a lock-free
+copy, so the menu never waits for the network. Each carries a place, a kind and an id of the mod's; no marker, entity or
+mission is made, so nothing reaches the save or the world and walking to the place triggers nothing. If the game's code
+differs from what is expected the mod logs `MAP unavailable` and the map stays as it was. Selecting an icon does nothing.
+
+`mapicons.h`; `game_offsets.md`, "Icons on the device map". `mod_status` has `player_map` (`ready`, `on`, `reads`, `shown`,
+`area`, `updates`, `taken`, `refused`, `shown_area`, `mode`). The lab's `puppet.map` takes `kind N`, `ring METRES COUNT` and
+`clear`, each with the run stamp. The mod also tells the relay which map its porter is on, which is what lets a server filter.
 
 ## Strand notices (`strand_notices`, off by default; live once, 2026-11-17)
 

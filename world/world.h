@@ -17,7 +17,7 @@
 #include <vector>
 namespace world {
 constexpr int VersionMajor=0,VersionMinor=12;      // what this game build requires of getVersion
-constexpr size_t MaxObjectsPerPlayer=4000,MaxPlayers=16,MaxNameBytes=64,MaxKeyBytes=96,MaxLikes=2000;
+constexpr size_t MaxObjectsPerPlayer=4000,MaxPlayers=1024,MaxNameBytes=64,MaxKeyBytes=96,MaxLikes=2000;
 // Linked servers (README, "Linked servers"): at most this many objects held from one other server, this many bytes
 // for one object's data on the way, and this much for one page and one request of a live link.
 constexpr size_t MaxImportedPerServer=20000,MaxSharedPostBytes=64*1024,LinkPageObjects=500,LinkPageBytes=1024*1024,MaxLinkRequestBytes=4096;
@@ -51,7 +51,8 @@ struct Refused : std::runtime_error { int status;Refused(int s,const std::string
 // axes in metres (x, y on the ground, z up); `yaw` the porter's facing in radians (0: +y, pi/2: +x), when known.
 struct Spot { double x=0,y=0,z=0;bool haveYaw=false;double yaw=0;int64_t at=0;std::string name;uint32_t area=0; };
 constexpr size_t MaxSpots=1024;
-constexpr int64_t MapFreshSeconds=5;constexpr size_t MapPlayersMax=64;   // who counts as there for the map, and how many it lists
+constexpr int64_t ChatWaitMinMs=2000,ChatWaitMaxMs=10000;   // how often a game reads the chat: every 2 s, up to 10 s in a crowd
+constexpr int64_t MapFreshSeconds=5,MapWaitMinMs=2000,MapWaitMaxMs=30000;constexpr size_t MapPlayersMax=128;   // who counts as there for the map, how many it lists, how often to ask
 constexpr int64_t SpotFreshSeconds=600,MaxNearMetres=2000,AreaSearchMetres=1500;
 // What may travel between two servers. Text form: "all", "none", or terms separated by ';':
 //   types=l,rope,e   owners=NAME,zygo_...   areas=226,227   max-age=30d (s, m, h, d)   likes=no   imported=yes
@@ -167,9 +168,11 @@ public:
     Reply chatRead(const std::string& token,const std::string& since,int64_t now);
     Reply chatSay(const std::string& token,const std::string& body,int64_t now);
     // The other players for this player's map (README, "Players on the map"): with a notice token, `on` and, while the policy
-    // says on, each player the relay placed in the last MapFreshSeconds: `id`, `name`, x, y, z (game axes), `yaw` and `area` when known.
+    // says on, the players the relay placed in the last MapFreshSeconds: `id`, `name`, x, y, z (game axes), `yaw` and `area` when
+    // known; the MapPlayersMax nearest to (x, y) when the game says where it is, only those of its `area` when it says that.
+    // `wait_ms`: how long the game should wait before it asks again, longer the more players are placed.
     // Under identity keys his own entry is left out and his choice of who he is shown holds; elsewhere the game knows its id.
-    Reply mapRead(const std::string& token,int64_t now);
+    Reply mapRead(const std::string& token,int64_t now,const std::string& x="",const std::string& y="",const std::string& area="");
     // The owner's account key (identity::account of the host's launcher key; "" none): his signed calls are the
     // owner's actions in the API. Saved with the world.
     void setOwner(const std::string& account);

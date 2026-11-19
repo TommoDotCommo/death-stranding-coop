@@ -1,6 +1,9 @@
 #include "api.h"
 #include "collection.h"
 #include <algorithm>
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
 namespace world {
 namespace {
 using json::Value;
@@ -199,12 +202,14 @@ void World::apiSetFriends(const std::string& key,const std::vector<std::string>&
     if(!show.empty())p.showOthers=show=="default"?"":show;
     dirty_=true;++changes_;note("friends of "+p.id+": "+std::to_string(p.friends.size())+", show_others "+(p.showOthers.empty()?"(his game's)":p.showOthers));
 }
-Reply World::mapRead(const std::string& token,int64_t now){
+Reply World::mapRead(const std::string& token,int64_t now,const std::string& xText,const std::string& yText,const std::string& areaText){
     std::lock_guard<std::mutex> g(lock_);
 #ifndef MUTANT_MAP_TOKEN
     if(!chatPlayer(token,now))return noticeTokenRefused();
 #endif
-    Value out=Value::object(),list=Value::array();out.set("format",1);out.set("on",policy_.map=="on");
+    auto number=[](const std::string& s,double& out){if(s.empty()||s.size()>24)return false;char* end=nullptr;out=std::strtod(s.c_str(),&end);return end&&!*end&&std::isfinite(out);};
+    double x=0,y=0,wanted=0;const bool placed=number(xText,x)&&number(yText,y);const uint32_t area=number(areaText,wanted)&&wanted>=1&&wanted<=65535?uint32_t(wanted):0;
+    Value out=Value::object(),list=Value::array();out.set("format",1);out.set("on",policy_.map=="on");size_t seen=0;
 #ifndef MUTANT_MAP_OFF
     if(policy_.map=="on"){
 #else
@@ -212,25 +217,34 @@ Reply World::mapRead(const std::string& token,int64_t now){
 #endif
         uint64_t me=0;Viewer choice;
         if(policy_.identity=="keys"){auto t=noticeTokens_.find(token);if(t!=noticeTokens_.end())me=relayIdOf(t->second.account);if(me)choice=viewerOf(me);}
-        size_t listed=0;
+        std::vector<std::pair<double,std::map<uint64_t,Spot>::const_iterator>> found;
 #ifndef MUTANT_MAP_CHOICE
         if(choice.show!="nobody")
 #endif
-        for(auto& e:spots_){
-            auto& s=e.second;if(listed==MapPlayersMax)break;
+        for(auto e=spots_.cbegin();e!=spots_.cend();++e){
+            auto& s=e->second;
 #ifndef MUTANT_MAP_STALE
             if(s.at+MapFreshSeconds<now)continue;
 #endif
+            ++seen;
 #ifndef MUTANT_MAP_SELF
-            if(e.first==me)continue;
+            if(e->first==me)continue;
 #endif
 #ifndef MUTANT_MAP_CHOICE
-            if(choice.show=="friends"&&!choice.friends.count(e.first))continue;
+            if(choice.show=="friends"&&!choice.friends.count(e->first))continue;
 #endif
+#ifndef MUTANT_MAP_AREA
+            if(area&&s.area&&s.area!=area)continue;
+#endif
+            found.emplace_back(placed?(s.x-x)*(s.x-x)+(s.y-y)*(s.y-y):0.0,e);}
+#ifndef MUTANT_MAP_NEAREST
+        if(placed)std::stable_sort(found.begin(),found.end(),[](auto& a,auto& b){return a.first<b.first;});
+#endif
+        for(size_t i=0;i<found.size()&&i<MapPlayersMax;++i){auto& e=*found[i].second;auto& s=e.second;
             Value v=Value::object();v.set("id",std::to_string(e.first));v.set("name",s.name);v.set("x",s.x);v.set("y",s.y);v.set("z",s.z);if(s.haveYaw)v.set("yaw",s.yaw);if(s.area)v.set("area",int64_t(s.area));
-            list.push(v);++listed;}
+            list.push(v);}
     }
-    out.set("players",list);Reply r;r.body=out.dump();return r;
+    out.set("players",list);out.set("wait_ms",std::min<int64_t>(MapWaitMaxMs,std::max<int64_t>(MapWaitMinMs,int64_t(seen)*20)));Reply r;r.body=out.dump();return r;
 }
 uint64_t World::relayIdOf(const std::string& account) const {
     auto it=relayIds_.find(account);if(it!=relayIds_.end())return it->second;

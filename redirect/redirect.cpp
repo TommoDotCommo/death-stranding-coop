@@ -636,9 +636,10 @@ void drain_modules() {
         auto& e=pending[drained%256];std::wstring path=e.path;
         auto canonical_path=redirect::canonical(path);
         bool trusted=canonical_path==modules.instance+L"\\d3dcompiler_47_original.dll" || canonical_path==policy.instance+L"\\mod\\mod.dll";
-        auto audit=[&](bool allowed){note(allowed?L"MODULE_ALLOW":L"MODULE_REFUSE",path,
+        const bool tolerated=redirect::refusal(modules.mode,redirect::ModulePhase::noticed)==redirect::Refusal::tolerate;
+        auto audit=[&](bool allowed){note(allowed?L"MODULE_ALLOW":tolerated?L"MODULE_FOREIGN":L"MODULE_REFUSE",path,
             std::wstring(L"notification; initializer already ran; correlate request by tid; native/transitive/delay unknown; tid=")+std::to_wstring(e.thread));};
-        bool ok=redirect::module_event(modules,path,module_evidence(path),trusted,redirect::ModulePhase::loaded,audit,[&]{
+        bool ok=redirect::module_event(modules,path,module_evidence(path),trusted,redirect::ModulePhase::noticed,audit,[&]{
             HMODULE m=nullptr;
             if(GetModuleHandleExW(0,path.c_str(),&m)) {
                 note(L"MODULE_PATCH",path,L"iat="+std::to_wstring(patch(m))+L" tid="+std::to_wstring(e.thread));
@@ -646,7 +647,7 @@ void drain_modules() {
             }
             else note(L"MODULE_UNLOADED",path,L"no live IAT");
         });
-        if(!ok && redirect::refusal(modules.mode,redirect::ModulePhase::loaded)==redirect::Refusal::end_process) fatal("redirect: dependency/native module refused after initialization; see MODULE_REFUSE\n");
+        if(!ok) fatal("redirect: module not on the list found in the process; see MODULE_REFUSE\n");
         e.ready.store(false,std::memory_order_release);
         consumed.store(++drained,std::memory_order_release);
     }
@@ -1059,6 +1060,16 @@ void install_redirect(void* self,bool releaseSession) {
         if(!path.empty()&&slash!=std::wstring::npos){
             auto real=path.substr(0,slash)+L"\\settings.cfg",target=policy.instance+L"\\settings.cfg";policy.files.push_back({real,target});
             if(safe_tree(real,false)&&safe_tree(target,true))::CopyFileW(real.c_str(),target.c_str(),TRUE);   // only when this copy has none yet
+            // A value the game wrote but refuses at start would return every setting to its default (redirect.h).
+            HANDLE f=safe_tree(target,true)?::CreateFileW(target.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr):INVALID_HANDLE_VALUE;
+            if(f!=INVALID_HANDLE_VALUE){
+                static char bytes[16385];DWORD n=0;bool ok=ReadFile(f,bytes,sizeof(bytes),&n,nullptr);CloseHandle(f);
+                std::string text(bytes,ok&&n<sizeof(bytes)?n:0),fixed=redirect::repair_settings(text);
+                if(fixed!=text){
+                    HANDLE w=::CreateFileW(target.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);DWORD put=0;
+                    if(w!=INVALID_HANDLE_VALUE){WriteFile(w,fixed.data(),(DWORD)fixed.size(),&put,nullptr);CloseHandle(w);}
+                }
+            }
         }
     }
     {   // The game's own folder is admitted on every path, not only for a release ticket: with the data folder
@@ -1089,6 +1100,7 @@ void install_redirect(void* self,bool releaseSession) {
     if(!mode_n) modules.mode=redirect::ModuleMode::strict;
     else if(mode_n<32 && !wcscmp(mode,L"strict")) modules.mode=redirect::ModuleMode::strict;
     else if(mode_n<32 && !wcscmp(mode,L"allowlist")) modules.mode=redirect::ModuleMode::allowlist;
+    else if(mode_n<32 && !wcscmp(mode,L"allowlist-closed")) modules.mode=redirect::ModuleMode::allowlist_closed;
     else if(mode_n<32 && !wcscmp(mode,L"log-only")) modules.mode=redirect::ModuleMode::log_only;
     else fatal("redirect: invalid module policy\n");
     {   // Named-object isolation for this slot (objects.h). Absent list = observe only.

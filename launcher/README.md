@@ -110,7 +110,7 @@ a game shows the group invite and **Start group server and play** instead of a l
    after the last player.
 3. It writes the host's `mod.json`: no `peer`, `server` `127.0.0.1`, `relay` `127.0.0.1:P`, `relay_key` `wKEY`,
    `session` KEY, `player_id`, `relay_mode` `broadcast` (since 2026-11-17: each game publishes once and the server
-   copies to everyone near; `../mod/README.md`, "The broadcast mode"), `others` 15, `others_gear`, `others_carry` 4, `partner_tag`, `help_page`, `server_info`, `chat` with a notice token, `online_server` `http://127.0.0.1:P/wKEY/auth/ds`,
+   copies to everyone near; `../mod/README.md`, "The broadcast mode"), `others` 15, `others_gear`, `others_carry` 4, `partner_tag`, `help_page`, `server_info`, `chat` and `player_map` with a notice token, `online_server` `http://127.0.0.1:P/wKEY/auth/ds`,
    `build_received` (below, "Other players' structures"), and the play setup's `game_thread`, `puppet_probe`,
    `required`; with a notice token also `strand_notices`, `offer_strand` and `strand_token` (below, "What the game is
    told"). The proxy's peer list is `127.0.0.1`. On a server that
@@ -335,7 +335,7 @@ loopback with public rules and the launcher's key as the owner's: no server (exi
 (`--owner-set limit=7`, report in a file), a member call for a player that does not exist (refused in the server's
 words, exit 3), and two refused flag combinations (exit 3, no dialog).
 
-Limits today: 15 other players shown per game and 16 players in the shared world (`../world/README.md`); the
+Limits today: 15 other players drawn per game (the nearest) and 1024 players in the shared world (`../world/README.md`); the
 two-player features (cargo, structures made in the session, vehicles, enemies, orders, rain) are not part of group
 play; no list of who is in the group, no way to leave except closing the game, no check of the host's firewall; the
 owner's window does not refresh by itself (Refresh), and it has no kick or ban (the server has them as owner calls:

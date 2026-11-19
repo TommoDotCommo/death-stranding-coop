@@ -14,7 +14,9 @@ static std::vector<Icon> onBoard(const Board& b){Board::Picture p;b.read(p);retu
 int main(){
     {   auto a=parse(Doc);CHECK(a.read&&a.on&&a.players.size()==2&&a.players[0].name=="Ann"&&a.players[0].x==12.5&&a.players[0].y==-3&&a.players[0].area==200&&a.players[1].area==0);
         for(auto bad:{"","x","[1]","{\"format\":2}"})CHECK(!parse(bad).read);
-        CHECK(!parse(R"({"format":1,"on":false,"players":[]})").on);}
+        CHECK(!parse(R"({"format":1,"on":false,"players":[]})").on);
+        CHECK(parse(R"({"format":1,"on":true,"wait_ms":5000,"players":[]})").waitMs==5000&&parse(Doc).waitMs==0);
+        CHECK(pollAfter(2000,0)==2000&&pollAfter(2000,5000)==5000&&pollAfter(2000,999999)==MaxWaitMs&&pollAfter(40000,5000)==40000);}
     {   // His own entry is left out; off or unread: nobody; ids stable, different, never a marker's.
         auto a=parse(Doc);auto v=icons(a,"7");CHECK(v.size()==1&&v[0].x==1&&v[0].z==3);auto w=icons(a,"");CHECK(w.size()==2&&w[0].x==12.5f&&w[0].area==200&&w[0].id!=w[1].id&&w[1].id==v[0].id&&(w[0].id>>48)==0x4d50);
         auto off=a;off.on=false;CHECK(icons(off,"").empty());auto un=a;un.read=false;CHECK(icons(un,"").empty());

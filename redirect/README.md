@@ -19,8 +19,11 @@ loaded module so that the copy:
   Under `allowlist`, a module that is refused when it is asked for is not loaded and the request is answered as a failed load (audit
   records `MODULE_REFUSE` and `MODULE_LOAD_FAILED ... error=5`): the game goes on without it. This is what happens to
   software Windows loads into every process with a window, such as a third-party input method. A module that is only
-  found after it was loaded (a dependency the loader brought in by itself, or a DLL another program injects, as most
-  overlays and capture tools do) has already run code, and that still ends the game.
+  noticed after it was loaded (a DLL another program injects, as antivirus, overlays and capture tools do, or a
+  dependency the loader brought in by itself) has already run, so ending the game would protect nothing: it is recorded
+  (`MODULE_FOREIGN`), its imports get the proxy's file and network rules, and the game goes on. What such a module then
+  asks to load is still held to the list. `allowlist-closed` is the same list for test copies, where a noticed module
+  ends the game (`MODULE_REFUSE`).
   **Adding a module for one copy:** a player whose PC needs such software inside the game (an input method, a screen
   reader, an overlay) lists it in `extra-modules.txt` in the copy's data folder (the folder that holds
   `redirect-data`): one full path of a `.dll` per line, `#` for comments, at most 32. Each line admits that exact
@@ -30,7 +33,9 @@ loaded module so that the copy:
   game's rights; the network policy still applies to it.
 - **keeps the graphics settings with the copy.** The game writes `settings.cfg` beside `ds.exe`, which nothing may change, so
   they were lost at every exit. That one file now lives at `redirect-data\\settings.cfg`, read and written there; the first
-  run starts from the one beside `ds.exe`, if there is one.
+  run starts from the one beside `ds.exe`, if there is one. At each start an upscaler value below zero in that file
+  (`amd_fsr*`, `nvidia_*`, `intel_xess*`) becomes `0`: the game writes `"nvidia_dlss_quality" "-1"` when DLSS was never set,
+  then refuses the whole file for it at the next start and uses its defaults (`repair_settings` in `redirect.h`).
 - **can run next to another copy.** Named kernel objects listed per copy (the game's single-instance mutex) get a
   per-copy suffix (`objects.h`).
 - **stays off the online service** (`network_policy.h`, default `enforce`). Only loopback and the listed IPv4

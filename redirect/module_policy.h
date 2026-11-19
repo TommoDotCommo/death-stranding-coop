@@ -4,7 +4,9 @@
 #include <string>
 #include <vector>
 namespace redirect {
-enum class ModuleMode { strict, allowlist, log_only };
+// allowlist: what a player runs. allowlist_closed: the same list, and a module not on it that turns up in the process ends
+// the game (for test copies, where a surprise should be seen at once).
+enum class ModuleMode { strict, allowlist, allowlist_closed, log_only };
 struct ModulePolicy {
     ModuleMode mode=ModuleMode::strict;
     std::wstring instance, windows, steam, program_data;
@@ -40,15 +42,18 @@ RequestAction classify_request(const ModulePolicy&, const std::wstring& requeste
 // mappings execute nothing; in allowlist mode they pass the same path rules as any module.
 // DONT_RESOLVE_DLL_REFERENCES (0x1) hands out an unresolved image and stays refused outside log-only.
 bool loader_flags_allowed(const ModulePolicy&, unsigned long flags);
-enum class ModulePhase { request, mapped, loaded };
-// What a refused module means for the process. A refused request is answered like a load that failed: the module
-// never enters the process and the game goes on without it (a third-party input method's DLL, loaded by Windows into
-// every process with a window, used to end the game). A module that is found loaded after the fact has already run
-// code here, so that still ends the process.
-// Under `strict` every refusal ends the process, as it always did.
-enum class Refusal { fail_load, end_process };
+// request: the game asks to load it. loaded: what such a request brought in. noticed: the loader reports a module nobody
+// asked this proxy for: another program injected it (an antivirus, an overlay, a capture tool) or the loader pulled it in.
+enum class ModulePhase { request, mapped, loaded, noticed };
+// What a refused module means for the process. A refused request is answered like a load that failed: the module never
+// enters the process and the game goes on without it. A module refused after a request of the game's own has been loaded
+// from somewhere it should not, and ends the process. A module that is only noticed has already run, so ending the game
+// protects nothing and only punishes the player for what else runs on the PC: under `allowlist` it is recorded, the
+// proxy's file and network rules are put on its imports, and the game goes on. Under `strict` every refusal ends the
+// process, under `allowlist_closed` a noticed module does.
+enum class Refusal { fail_load, end_process, tolerate };
 Refusal refusal(ModuleMode mode,ModulePhase phase);
-// Shared orchestration seam: audit BEFORE refusal; patch AFTER successful load.
+// Shared orchestration seam: audit BEFORE refusal; patch AFTER successful load, and for a tolerated module (true is returned).
 bool module_event(const ModulePolicy&, const std::wstring&, bool evidence,
                   bool existing, ModulePhase,
                   const std::function<void(bool)>& audit,
