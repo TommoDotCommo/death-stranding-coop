@@ -267,4 +267,27 @@ Result map_query(const Policy& c,const std::wstring& raw,bool wildcard) {
     if(lp.find(L'~')!=std::wstring::npos) return {Action::deny,L"alias"};
     return {Action::allow,raw};
 }
+std::string repair_settings(const std::string& text) {
+    std::string out;out.reserve(text.size());size_t at=0;
+    while(at<text.size()) {
+        auto end=text.find('\n',at);end=end==std::string::npos?text.size():end+1;std::string line=text.substr(at,end-at);at=end;
+        // One line is "key" "value": the key's quotes first, then the value's.
+        auto k0=line.find('"'),k1=k0==std::string::npos?k0:line.find('"',k0+1),v0=k1==std::string::npos?k1:line.find('"',k1+1);
+        if(v0!=std::string::npos && v0+1<line.size() && line[v0+1]=='-') {
+            auto key=line.substr(k0+1,k1-k0-1);auto v1=line.find('"',v0+1);
+#ifdef MUTANT_SETTINGS_ANY_KEY
+            bool upscaler=true;
+#else
+            bool upscaler=key.rfind("amd_fsr",0)==0||key.rfind("nvidia_",0)==0||key.rfind("intel_xess",0)==0;
+#endif
+#ifndef MUTANT_SETTINGS_KEPT
+            if(upscaler && v1!=std::string::npos) line=line.substr(0,v0+1)+"0"+line.substr(v1);
+#else
+            (void)upscaler;(void)v1;
+#endif
+        }
+        out+=line;
+    }
+    return out;
+}
 }

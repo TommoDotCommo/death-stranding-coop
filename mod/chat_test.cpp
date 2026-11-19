@@ -23,6 +23,8 @@ int main(){
         for(auto bad:{"","x","{\"format\":2}"})CHECK(!parse(bad).read);
         CHECK(shown({"A\nB","x\ty"})==u"AB: xy");CHECK(sayBody("a\"b")=="{\"text\":\"a\\\"b\"}");
         CHECK(refusal(200,"").empty()&&refusal(429,"").find(u"too many")!=std::u16string::npos&&refusal(403,"chat-off").find(u"off")!=std::u16string::npos&&refusal(0,"").find(u"did not reach")!=std::u16string::npos);
+        CHECK(pollAfter(PollMs,0)==PollMs&&pollAfter(PollMs,5000)==5000&&pollAfter(PollMs,UINT64_MAX)==MaxWaitMs&&pollAfter(BackoffMs,5000)==BackoffMs);
+        CHECK(parse(R"({"format":1,"on":true,"next":1,"wait_ms":4000,"lines":[]})").waitMs==4000);
         unsigned f=0;CHECK(delayAfter(false,f)==PollMs&&delayAfter(false,f)==PollMs&&delayAfter(false,f)==BackoffMs&&delayAfter(true,f)==PollMs&&f==0);}
     {   // Y opens it and takes the keyboard; the Y itself is not typed; letters draw; Backspace; Enter sends and gives the keys back.
         Game g;auto b=g.box();b.tick(false,false,true);CHECK(!b.typing()&&!g.takes);b.tick(true,true,false);CHECK(!b.typing());

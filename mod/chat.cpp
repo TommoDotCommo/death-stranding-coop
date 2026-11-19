@@ -40,7 +40,7 @@ std::string Composer::utf8() const {
 Answer parse(const std::string& body){
     Answer a;
     try{auto d=json::parse(body);if(d.get("format").integer()!=1)return a;
-        a.on=d.get("on").boolean();a.next=std::to_string(d.get("next").integer());
+        a.on=d.get("on").boolean();a.next=std::to_string(d.get("next").integer());a.waitMs=uint64_t(std::max<int64_t>(0,d.get("wait_ms").integer()));
         for(auto& l:d.get("lines").items())a.lines.push_back({l.get("name").string(),l.get("text").string()});
         a.read=true;
     }catch(const std::exception&){a=Answer{};}
@@ -54,6 +54,13 @@ std::u16string refusal(int status,const std::string& body){
     if(status==403&&body.find("chat-off")!=std::string::npos)return u"Text chat is off on this server.";
     if(status==400)return u"Chat: that line cannot be sent.";
     return u"Chat: the line did not reach the server.";
+}
+uint64_t pollAfter(uint64_t own,uint64_t server){
+#ifndef MUTANT_CHAT_WAIT
+    return std::max(own,std::min(server,MaxWaitMs));
+#else
+    return own;
+#endif
 }
 uint64_t delayAfter(bool good,unsigned& failures){
     if(good){failures=0;return PollMs;}
@@ -88,7 +95,7 @@ void Link::run(){
             next_=a.next;
 #endif
             for(auto& l:a.lines){++counters_.received;in_.push_back(shown(l));while(in_.size()>64)in_.pop_front();}}
-        const uint64_t wait=schedule_(a.read,failures);
+        const uint64_t wait=pollAfter(schedule_(a.read,failures),a.waitMs);
         wake_.wait_for(g,std::chrono::milliseconds(wait),[this]{return stop_||!out_.empty();});
     }
 }

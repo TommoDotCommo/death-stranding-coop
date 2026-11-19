@@ -33,7 +33,9 @@ loaded module so that the copy:
   game's rights; the network policy still applies to it.
 - **keeps the graphics settings with the copy.** The game writes `settings.cfg` beside `ds.exe`, which nothing may change, so
   they were lost at every exit. That one file now lives at `redirect-data\\settings.cfg`, read and written there; the first
-  run starts from the one beside `ds.exe`, if there is one.
+  run starts from the one beside `ds.exe`, if there is one. At each start an upscaler value below zero in that file
+  (`amd_fsr*`, `nvidia_*`, `intel_xess*`) becomes `0`: the game writes `"nvidia_dlss_quality" "-1"` when DLSS was never set,
+  then refuses the whole file for it at the next start and uses its defaults (`repair_settings` in `redirect.h`).
 - **can run next to another copy.** Named kernel objects listed per copy (the game's single-instance mutex) get a
   per-copy suffix (`objects.h`).
 - **stays off the online service** (`network_policy.h`, default `enforce`). Only loopback and the listed IPv4

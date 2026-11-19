@@ -256,7 +256,13 @@ Reply World::chatRead(const std::string& token,const std::string& since,int64_t 
         size_t given=0;
         for(auto& l:chat_){if(l.n<from)continue;if(given==ChatBatch){next=l.n;break;}
             Value v=Value::object();v.set("n",int64_t(l.n));v.set("name",l.name);v.set("text",l.text);lines.push(v);++given;}}
-    out.set("next",int64_t(next));out.set("lines",lines);Reply r;r.body=out.dump();return r;
+    out.set("next",int64_t(next));out.set("lines",lines);
+#ifndef MUTANT_CHAT_WAIT
+    out.set("wait_ms",std::min(ChatWaitMaxMs,std::max(ChatWaitMinMs,int64_t(online_.size())*10)));
+#else
+    out.set("wait_ms",ChatWaitMinMs);
+#endif
+    Reply r;r.body=out.dump();return r;
 }
 Reply World::chatSay(const std::string& token,const std::string& body,int64_t now){
     std::lock_guard<std::mutex> g(lock_);

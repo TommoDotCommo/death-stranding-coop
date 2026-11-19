@@ -39,6 +39,11 @@ Result map(const Policy&, const std::wstring&, bool write, bool unsafe=false);
 // L"alias" means the path has a short (8.3, `~`) component: the caller may expand it with GetLongPathName and
 // ask again; any other path that normalises into a real root but is not clean is denied, never passed through.
 Result map_query(const Policy&, const std::wstring&, bool wildcard=false);
+// The graphics settings as the game reads them at start. The game writes an upscaler value it never set as "-1"
+// (seen: "nvidia_dlss_quality" "-1" on a PC that never turned DLSS on) and at the next start refuses the whole file
+// for it, so every setting returns to its default. Such a value of an upscaler (amd_fsr*, nvidia_*, intel_xess*)
+// becomes "0", which the game accepts; every other line, its order and its line ends stay as they were.
+std::string repair_settings(const std::string&);
 // Loader flags in the audit log: the value in hex WITHOUT a prefix (callers add "0x").
 std::wstring hex_flags(unsigned long);
 }
