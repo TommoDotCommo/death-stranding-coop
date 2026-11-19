@@ -684,7 +684,9 @@ struct Runtime final:ds::Transport {
     // seen. Reads only; the porter of the last tick (readPorter checks the manager still belongs to it).
     // Its own lock (the runtime's is held by the network thread every few milliseconds); the tick says whether it is wanted.
     std::mutex controlsLock;std::atomic<bool> controlsWanted{false};
+    std::atomic<uint64_t> gameFrames{0},gameFramesAt{0};
     bool sampleControls(){
+        ++gameFrames;   // every game frame (the frame rate, logged each minute: FRAMES)
         if(!controlsWanted.load(std::memory_order_acquire)||!sampler)return false;
         std::unique_lock<std::mutex> g(controlsLock,std::try_to_lock);if(!g||!controlEntity)return false;
         std::array<uint8_t,ds::AnimationBoolBytes> held{};std::array<float,ds::AnimationFloats> floats{};
@@ -4628,7 +4630,8 @@ struct Runtime final:ds::Transport {
             stage="idle";stages.enter("idle",mod::nowUs());
             if(unappliedReceive) {receiveApply.add(clock-unappliedReceive);unappliedReceive=0;}
             if(gameContext){auto line=stages.report(mod::nowUs());if(!line.empty()){note(line.c_str());
-                note(("CONTROLS read between ticks: "+std::to_string(frameSamples.exchange(0))+" frames in the last minute\n").c_str());}}
+                note(("CONTROLS read between ticks: "+std::to_string(frameSamples.exchange(0))+" frames in the last minute\n").c_str());}
+             if(now>=gameFramesAt+60000){const uint64_t frames=gameFrames.exchange(0);if(gameFramesAt)note(("FRAMES "+std::to_string(frames)+" game frames in the last minute ("+std::to_string(frames/60)+" a second)\n").c_str());gameFramesAt=now;}}
             if(!cache.available && !game) {err="provider unavailable during tick";note(err.c_str());return false;}
             if(now-startedAt>1000 && config.provider=="synthetic" && cache.remote.visible && core->connected()) {
                 uint64_t behind=core->presentationDelayMs();auto truth=mod::trajectory(now>behind?now-behind:0,config.peerSlot);double e=0;
