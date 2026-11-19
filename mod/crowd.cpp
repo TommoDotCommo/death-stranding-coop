@@ -127,8 +127,12 @@ void Crowd::take(uint64_t id,Member& m,uint64_t nowMs){
 bool Crowd::animation(const ds::Animation& a,uint64_t nowMs){
     if(!client_.online()){rose_={};return false;}
     for(size_t k=0;k<rose_.size();++k)rose_[k]|=a.rose[k];
-    // The controls only: what he holds, his vehicle's wheels and his carts are not shown for others.
+    // The controls and the carts he tows (shown at his body: others_carts); what he holds and his vehicle's wheels are not
+    // shown for others.
     ds::Animation x;x.held=a.held;x.floats=a.floats;x.rose=rose_;
+#ifndef MUTANT_CROWD_NO_CARTS
+    x.cartCount=a.cartCount;x.carts=a.carts;
+#endif
     bool taken=client_.offerAnimation(x,nowMs);
 #ifndef MUTANT_CROWD_ROSE
     if(taken)rose_={};   // pulses of a sample not taken go with the next

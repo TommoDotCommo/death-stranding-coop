@@ -23,7 +23,7 @@ struct Player {
     uint64_t id=0;world::RelayAddress address;uint64_t offset=0;std::array<double,3> at{};bool frozen=false,gated=false;
     std::unique_ptr<crowd::Crowd> crowd;std::unique_ptr<bc::Client> bare;
     std::optional<gear::WornSet> worn;std::optional<carry::Summary> carried;std::optional<std::vector<carryplace::Placed>> placed;
-    std::map<uint64_t,others::Shown> seen;std::map<uint64_t,unsigned> pulsesFrom;
+    std::map<uint64_t,others::Shown> seen;std::map<uint64_t,unsigned> pulsesFrom,cartsFrom;
 };
 struct Sim {
     struct Datagram {bool up=false;world::RelayAddress address;std::vector<uint8_t> bytes;};
@@ -65,6 +65,7 @@ struct Sim {
             p->seen.clear();
             for(auto& v:p->crowd->frame(clock(*p))){
                 if(v.animation&&v.animation->fresh&&controls::bit(v.animation->animation.rose,Pulse))++p->pulsesFrom[v.id];
+                if(v.animation)p->cartsFrom[v.id]=std::max<unsigned>(p->cartsFrom[v.id],v.animation->animation.cartCount);
                 p->seen[v.id]=v;}
         }
     }
@@ -174,6 +175,10 @@ void pulses(){
     sim.step();sim.step();sim.step();CHECK(a.crowd->animation(later,sim.clock(a)));
     sim.run(1500);
     CHECK(b.pulsesFrom[1]==1);
+    // The carts he tows travel with his controls (others_carts shows them at his body).
+    ds::Animation towing;towing.floats[0]=0.25f;towing.cartCount=1;towing.carts[0].offset={1500,0,0};
+    sim.step();sim.step();sim.step();CHECK(a.crowd->animation(towing,sim.clock(a)));
+    sim.run(1500);CHECK(b.cartsFrom[1]==1);
 }
 
 // A blob is one complete sender output: two names in one are refused; one name alone is taken.

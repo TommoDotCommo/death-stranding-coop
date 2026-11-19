@@ -382,7 +382,7 @@ game-thread-test: build/roadshare-test build/groupevents-test build/othervehicle
 	./build/crowd-test
 	./build/fights-test
 	python3 -B mutants.py --sources "$(FIGHTS_SRC)" --prefix build/mutant-fights- FIGHT_VISITOR_HOSTS FIGHT_OWN FIGHT_HEAL FIGHT_KILL FIGHT_ECHO FIGHT_DOUBLE FIGHT_KILL_CLAIM FIGHT_RELEASE FIGHT_GONE_CLEARS FIGHT_BOSS_OFFERED && echo KILLED 10 fights mutants
-	python3 -B mutants.py --sources "$(CROWD_SRC)" --prefix build/mutant-crowd- CROWD_BLOB_LENGTH CROWD_BLOB_TYPE CROWD_BLOB_RANGE CROWD_WHOLE CROWD_EVENTS_OFF CROWD_SEND_OFF CROWD_MIX CROWD_CAP CROWD_LEFT CROWD_CARRY_LOST CROWD_CARRY_BACK CROWD_ROSE CROWD_GATED && echo KILLED 13 crowd mutants
+	python3 -B mutants.py --sources "$(CROWD_SRC)" --prefix build/mutant-crowd- CROWD_NO_CARTS CROWD_BLOB_LENGTH CROWD_BLOB_TYPE CROWD_BLOB_RANGE CROWD_WHOLE CROWD_EVENTS_OFF CROWD_SEND_OFF CROWD_MIX CROWD_CAP CROWD_LEFT CROWD_CARRY_LOST CROWD_CARRY_BACK CROWD_ROSE CROWD_GATED && echo KILLED 13 crowd mutants
 	./build/guard-test
 	./build/orders-test
 	./build/link-test
