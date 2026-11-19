@@ -176,6 +176,7 @@ int main() {
      assert(mod::parseConfig(withKeys(game,"\"online_server\":\"http://127.0.0.1:49100/w77/auth/ds\"")).group);
      // What the game is told (strand_notices.h): with online_server and the notice token the launcher took; nothing alone.
      {auto online=withKeys(game,"\"online_server\":\"http://10.1.2.3:49100/w77/t/T1/auth/ds\"");
+      assert(mod::parseConfig(withKeys(game,"\"free_build\":true")).freeBuild);
       {auto seen=mod::parseConfig(withKeys(online,"\"player_map\":true,\"strand_token\":\"abcDEF123\""));assert(seen.playerMap&&!seen.chat);
        assert(refused(withKeys(online,"\"player_map\":true"))&&refused(withKeys(game,"\"player_map\":true,\"strand_token\":\"abc\"")));}
       {auto kept=mod::parseConfig(withKeys(online,"\"server_world\":\"a1b2c3d4\",\"strand_token\":\"abcDEF123\""));assert(kept.serverWorld=="a1b2c3d4");

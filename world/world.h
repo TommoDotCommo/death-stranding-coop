@@ -108,11 +108,12 @@ struct ImportResult { size_t added=0,updated=0,unchanged=0,removed=0,filtered=0,
 //     the save (public preset); save: a game keeps its save's structures and adds the server's.
 //   map on|off: every player here is shown on the others' map (World::mapRead); off in the public preset, where strangers
 //   would follow each other across the world
+//   free_build off|on: the games here switch off the rules on where a structure may stand (../mod/freebuild.h)
 //   test_mode off|on: every player's co-op mod starts in test mode (unlimited materials, stamina and blood; for alpha
 //   testers); the launcher writes it into the game's config, the server itself does nothing with it
 struct Policy {
     std::string preset="friends",join="invite",build="everyone",acceptOffers="auto",withdrawal="go",offerBuilds="yes",offerOld="no",order="newest",identity="none",challenges="everyone";
-    std::string importWho="everyone",importCost="free",chat="on",map="on",world="save",cargo="on";
+    std::string importWho="everyone",importCost="free",chat="on",map="on",world="save",cargo="on",freeBuild="off";
 #ifndef MUTANT_POLICY_TEST_DEFAULT
     std::string testMode="off";
 #else

@@ -68,6 +68,7 @@ struct Session {
     // The server's id where its rule `world` says server: its game shows only that server's structures
     // (../mod/README.md, "A world that is the server's"); "" keeps the save's.
     std::string serverWorld;
+    bool serverFreeBuild=false;   // group play: the server's rule free_build (../mod/README.md, "Free build")
 };
 // The mod config's test_mode object: every switch at its default (U drops crates; stamina and blood kept full).
 inline constexpr const char* TestModeConfig=",\"test_mode\":{}";

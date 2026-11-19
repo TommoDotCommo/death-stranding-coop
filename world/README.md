@@ -774,6 +774,7 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `map` | `on`, `off` | on | off | off |
 | `world` | `save`, `server` | save | save | server |
 | `cargo` | `on`, `off` | on | off | on |
+| `free_build` | `off`, `on` | off | off | off |
 | `test_mode` | `off`, `on` | off | off | off |
 
 - `join`: recorded and shown, nothing more yet (there are no invitations).
@@ -809,6 +810,8 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
   server's", below); `save` keeps what each save holds and adds the server's.
 - `cargo`: `on` shares cargo a player sets down here with the others until someone takes it ("Cargo set down for the
   others"); `off` leaves it in the world of whoever set it down.
+- `free_build`: `on` makes every game that joins here through the launcher switch off the game's rules on where a structure may
+  stand (`../mod/README.md`, "Free build").
 - `test_mode`: `on` puts every player's game here in test mode (`../mod/README.md`, "Test mode": material crates on U,
   blood and stamina kept full), for alpha testers. The server does nothing else with it: the player's launcher reads it
   with the rules before his game starts and writes the mod's `test_mode` into the game's config. Its line in words

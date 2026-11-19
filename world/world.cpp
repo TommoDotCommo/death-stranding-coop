@@ -1281,14 +1281,15 @@ void setPolicy(Policy& p,const std::string& keyValue){
     else if(key=="cargo")pick(p.cargo,{"on","off"});
     else if(key=="map")pick(p.map,{"on","off"});
     else if(key=="world")pick(p.world,{"save","server"});
+    else if(key=="free_build")pick(p.freeBuild,{"off","on"});
     else if(key=="test_mode")pick(p.testMode,{"off","on"});
-    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges, import, import_cost, chat, map, world, cargo, test_mode)");
+    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges, import, import_cost, chat, map, world, cargo, free_build, test_mode)");
 }
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy& p){
     return {{"join",p.join},{"build",p.build},{"accept_offers",p.acceptOffers},{"limit",std::to_string(p.limit)},{"withdrawal",p.withdrawal},
             {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld},
             {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity},{"near_cap",std::to_string(p.nearCap)},{"challenges",p.challenges},
-            {"import",p.importWho},{"import_cost",p.importCost},{"chat",p.chat},{"map",p.map},{"world",p.world},{"cargo",p.cargo},{"test_mode",p.testMode}};
+            {"import",p.importWho},{"import_cost",p.importCost},{"chat",p.chat},{"map",p.map},{"world",p.world},{"cargo",p.cargo},{"free_build",p.freeBuild},{"test_mode",p.testMode}};
 }
 void World::setPolicy(const Policy& p){std::lock_guard<std::mutex> g(lock_);policy_=p;dirty_=true;++changes_;}
 bool World::handsBack(const Object& o,const std::string& player) const {
