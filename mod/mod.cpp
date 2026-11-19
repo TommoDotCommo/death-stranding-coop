@@ -2799,7 +2799,11 @@ struct Runtime final:ds::Transport {
         if(reads.empty()&&now-groupEnemyAt<500)return;
         groupEnemyAt=now;
         if(!cache.available||cache.gated||inEvent)return;
-        auto mules=mod::enemies::readMules(*sampler,sampler->base);if(mules.empty())return;
+        if(!btTried){btTried=true;try{btDestroy=mod::bts::nativeDestroy(*sampler);btHurt=mod::bts::nativeHurt(*sampler);btCatcher=mod::bts::nativeCatcher(*sampler);}catch(const std::exception& e){note((std::string("BT unavailable: ")+e.what()+"\n").c_str());}}
+        auto gazers=btDestroy?mod::bts::readGazers(*sampler,sampler->base):std::vector<mod::bts::Gazer>{};
+        for(auto& a:reads)for(auto& e:a.events)if(e.kind=="gazer"&&btDestroy)
+            if(auto* g=mod::bts::GazerSync::wanted(gazers,uint64_t(e.key))){gazerSync.applied(uint64_t(e.key));btDestroy(g->address);++btApplied;note("BT another player destroyed a gazer: gone here too\n");}
+        auto mules=mod::enemies::readMules(*sampler,sampler->base);
         auto camps=campAlert?mod::enemies::readCamps(*sampler,sampler->base):std::vector<mod::enemies::Camp>{};
         for(auto& a:reads)for(auto& e:a.events){
             if(e.kind=="camp"){if(auto* c=campSync.wanted(camps,uint64_t(e.key))){campSync.applied(uint64_t(e.key));campAlert(c->uuid);++enemyApplied;note("ENEMY another player's camp alarm: this game's camp is put on alert\n");}continue;}
@@ -2819,8 +2823,10 @@ struct Runtime final:ds::Transport {
         if(anchor.entity!=groupEnemyPorter){groupEnemyPorter=anchor.entity;groupEnemySettled=now+10000;groupEnemyTell=true;}
         if(groupEnemyTell&&groupEnemyPorter&&now>=groupEnemySettled){groupEnemyTell=false;
             for(auto& d:mod::enemies::Sync::everything(mules))out.push_back({"mule",int64_t(d.key),d.kind});
+            for(auto k:mod::bts::GazerSync::everything(gazers))out.push_back({"gazer",int64_t(k),1});
             if(!out.empty())note(("ENEMY "+std::to_string(out.size())+" MULEs are down in this world -> server\n").c_str());}
         for(auto k:campSync.observe(camps)){out.push_back({"camp",int64_t(k),mod::enemies::CampAlert});note("ENEMY a camp went on alert here -> server\n");}
+        if(btDestroy)for(auto k:gazerSync.observe(gazers)){out.push_back({"gazer",int64_t(k),1});note("BT a gazer was destroyed here -> server\n");}
         for(auto& d:enemySync.observe(mules)){out.push_back({"mule",int64_t(d.key),d.kind});std::ostringstream o;o<<"ENEMY a MULE went down here: kind "<<int(d.kind)<<" -> server\n";note(o.str().c_str());}
         enemyCourier->send(std::move(out));
     }
