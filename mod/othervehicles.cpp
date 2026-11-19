@@ -22,7 +22,7 @@ void Fleet::tick(uint64_t now,bool permitted,const std::vector<Seen>& seen){
             it=rides_.emplace(s.id,std::move(e)).first;
             log_("VEHICLES player "+std::to_string(s.id)+" rides: his vehicle is shown here\n");
         }
-        it->second.seen=now;it->second.driven=s.kind!=0;
+        it->second.seen=now;it->second.driven=s.kind!=0;if(s.kind)it->second.at=s.at;
         if(s.kind)it->second.vehicle->tick(now,permitted,s.kind,&s.at,s.look);
         else it->second.vehicle->tick(now,permitted,0,nullptr);   // he got off: it stays parked where it is
     }
@@ -45,7 +45,7 @@ void Fleet::forget(const char* why){
 }
 std::vector<Fleet::Vehicle> Fleet::vehicles() const {
     std::vector<Vehicle> out;
-    for(auto& r:rides_)if(r.second.vehicle->entity())out.push_back({r.first,r.second.vehicle->entity(),r.second.vehicle->kind(),r.second.driven});
+    for(auto& r:rides_)if(r.second.vehicle->entity())out.push_back({r.first,r.second.vehicle->entity(),r.second.vehicle->kind(),r.second.driven,r.second.at});
     return out;
 }
 std::optional<Candidate> choose(const std::vector<Candidate>& cs,const std::array<double,3>& porter,double reach,uint64_t sticky){

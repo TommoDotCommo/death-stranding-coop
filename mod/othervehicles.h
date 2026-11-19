@@ -30,13 +30,13 @@ public:
     void tick(uint64_t now,bool permitted,const std::vector<Seen>& seen);
     // The world was replaced: the entities went with it; forget them without calling the game.
     void forget(const char* why);
-    struct Vehicle { uint64_t id=0,entity=0; uint8_t kind=0; bool driven=false; };
+    struct Vehicle { uint64_t id=0,entity=0; uint8_t kind=0; bool driven=false; ride::Transform at; };   // at: where it was last put
     std::vector<Vehicle> vehicles() const;
     size_t size() const {return rides_.size();}
     size_t pools() const {return made_;}
     bool unavailable() const {return unavailable_;}
 private:
-    struct Entry { std::unique_ptr<ride::PartnerVehicle> vehicle; ride::Api api; uint64_t seen=0; bool driven=false; };
+    struct Entry { std::unique_ptr<ride::PartnerVehicle> vehicle; ride::Api api; uint64_t seen=0; bool driven=false; ride::Transform at; };
     Make make_;std::function<void(const std::string&)> log_;std::map<uint64_t,Entry> rides_;std::vector<ride::Api> spare_;
     size_t made_=0;bool unavailable_=false;
 };

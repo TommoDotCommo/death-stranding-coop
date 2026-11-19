@@ -28,7 +28,8 @@ static void fleet(){
     f.tick(0,true,{rider(1,0)});CHECK(f.size()==0&&g.spawns==0);
     f.tick(100,true,{rider(1,2)});CHECK(f.size()==1&&g.spawns==1&&g.pools==1);
     f.tick(200,true,{rider(1,2),rider(2,1)});CHECK(f.size()==2&&g.spawns==2&&g.pools==2&&g.vehicles.size()==2);
-    auto vs=f.vehicles();CHECK(vs.size()==2&&vs[0].id==1&&vs[0].kind==2&&vs[0].driven&&vs[1].kind==1);
+    auto vs=f.vehicles();CHECK(vs.size()==2&&vs[0].id==1&&vs[0].kind==2&&vs[0].driven&&vs[1].kind==1&&vs[1].at.position[0]==0);
+    f.tick(250,true,{rider(1,2,7),rider(2,1)});CHECK(f.vehicles()[0].at.position[0]==7);   // where it was last put
     // He gets off: it stays where it is, not driven.
     f.tick(300,true,{rider(1,0),rider(2,1)});CHECK(f.size()==2&&g.vehicles.size()==2&&!f.vehicles()[0].driven);
     // Player 2 not seen: his vehicle stays a moment, then goes with him; its pool is used for the next one.

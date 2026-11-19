@@ -1285,7 +1285,7 @@ struct Runtime final:ds::Transport {
         tickGroupPassenger(anchor,event,now);
     }
     // The floating carriers other players tow (carts.h): one display per player, from his samples, at his body.
-    std::map<uint64_t,mod::carts::Display> otherCarts;size_t groupCartsNoted=0,otherCartsNoted=0;
+    std::map<uint64_t,mod::carts::Display> otherCarts;size_t groupCartsNoted=0,otherCartsNoted=0;uint64_t otherCartsSummaryAt=0;
     std::set<uint32_t> otherCartIds() const {std::set<uint32_t> ids;for(auto& d:otherCarts)for(auto id:d.second.ids())ids.insert(id);return ids;}
     void tickOtherCarts(bool event,uint64_t now){
         if(!config.othersCarts||!sampler)return;
@@ -1295,9 +1295,10 @@ struct Runtime final:ds::Transport {
         if(!cartApi)return;
         // A copy this porter attached is the other player's, not his: it goes (made again at its owner).
         {auto shown=otherCartIds();if(!shown.empty())for(auto& c:mod::carts::read(*sampler,sampler->base))if(c.attached&&shown.count(c.id)){cartApi->remove(c.id);note("CART this porter took another player's cart: removed, made again at him\n");}}
-        std::set<uint64_t> here;
+        std::set<uint64_t> here;size_t withAnimation=0,cartsSent=0;
         for(auto& s:othersShown){
             std::vector<mod::carts::Place> places;
+            if(s.animation){++withAnimation;cartsSent+=s.animation->animation.cartCount;}
             if(!event&&s.visible&&s.render.visible&&s.animation){
                 auto body=mod::puppet::fromState(s.render.state.position,s.render.state.yaw).position;
                 for(size_t i=0;i<s.animation->animation.cartCount;++i)places.push_back(mod::carts::place(s.animation->animation.carts[i],body));}
@@ -1305,6 +1306,7 @@ struct Runtime final:ds::Transport {
             here.insert(s.id);otherCarts[s.id].show(places,*cartApi,now);}
         for(auto it=otherCarts.begin();it!=otherCarts.end();){
             if(!here.count(it->first)||!it->second.count()){it->second.clear(*cartApi);it=otherCarts.erase(it);}else ++it;}
+        if(now>=otherCartsSummaryAt+60000){otherCartsSummaryAt=now;std::ostringstream o;o<<"CART others: "<<othersShown.size()<<" drawn, "<<withAnimation<<" with animation, "<<cartsSent<<" carts in their samples\n";note(o.str().c_str());}
         size_t n=0;for(auto& d:otherCarts)n+=d.second.count();
         if(n!=otherCartsNoted){otherCartsNoted=n;note(("CART other players' floating carriers here: "+std::to_string(n)+"\n").c_str());}
     }
@@ -1323,9 +1325,12 @@ struct Runtime final:ds::Transport {
         if(!passengerApi.attach)return;
         auto here=anchor.pose.available?std::optional<mod::puppet::Transform>(mod::puppet::transform(anchor.pose)):std::nullopt;
         std::vector<mod::othervehicles::Candidate> cs;
+        // Where each one is: its entity's pose, or where it was last put (a vehicle the mover drives may read as unavailable).
+        std::map<uint64_t,mod::puppet::Transform> placed;
         for(auto& v:fleet->vehicles()){
-            auto p=mod::puppet::readEntityPose(*sampler,v.entity);if(!p.available)continue;
-            auto t=mod::puppet::transform(p);cs.push_back({v.id*16+v.kind,v.entity,v.kind,v.driven,t.position});}
+            auto p=mod::puppet::readEntityPose(*sampler,v.entity);mod::puppet::Transform t;
+            if(p.available)t=mod::puppet::transform(p);else{t.position=v.at.position;t.rotation=v.at.rotation;}
+            placed[v.entity]=t;cs.push_back({v.id*16+v.kind,v.entity,v.kind,v.driven,t.position});}
         // The floating carriers other players tow, shown here: each one a place to stand on while he pulls it.
         if(!otherCarts.empty())for(auto& c:mod::carts::read(*sampler,sampler->base))for(auto& d:otherCarts)if(d.second.ids().count(c.id)&&c.entity)
             cs.push_back({d.first*16+mod::passenger::CartKind,c.entity,mod::passenger::CartKind,true,c.position});
@@ -1335,8 +1340,8 @@ struct Runtime final:ds::Transport {
         auto seat=chosen?mod::passenger::seat(chosen->kind):std::nullopt;
         l.partnerInTruck=chosen&&seat;l.truck=l.partnerInTruck?chosen->entity:0;
         std::optional<mod::puppet::Transform> at;
-        if(chosen){auto p=mod::puppet::readEntityPose(*sampler,chosen->entity);if(p.available)at=mod::puppet::transform(p);}
-        if(here&&at){double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1],dz=here->position[2]-at->position[2];l.distance=std::sqrt(dx*dx+dy*dy+dz*dz);}
+        if(chosen){auto p=mod::puppet::readEntityPose(*sampler,chosen->entity);if(p.available)at=mod::puppet::transform(p);else if(placed.count(chosen->entity))at=placed[chosen->entity];}
+        if(here&&at){double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1];l.distance=std::sqrt(dx*dx+dy*dy);}   // across the ground, as the choice is: the hold brings a porter above down onto it
         l.key=passengerEdge.pressed(modKey(config.passengerKey),now);
         l.mover=passengerApi.state(anchor.entity);
         if(l.key&&!rider.riding()&&!(l.permitted&&l.partnerInTruck&&l.distance<=mod::passenger::Reach&&l.mover==mod::passenger::Free)){
