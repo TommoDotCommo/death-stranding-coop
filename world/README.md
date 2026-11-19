@@ -774,6 +774,7 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `map` | `on`, `off` | on | off | off |
 | `world` | `save`, `server` | save | save | server |
 | `cargo` | `on`, `off` | on | off | on |
+| `enemies` | `on`, `off` | on | off | on |
 | `free_build` | `off`, `on` | off | off | off |
 | `test_mode` | `off`, `on` | off | off | off |
 
@@ -967,6 +968,19 @@ mod reads instead, every few seconds, what changed:
   remembered; a version older than those reads everything again.
 
 Tests: `built_test.cpp`; mutants `BUILT_TOKEN`, `BUILT_OWN`, `BUILT_SINCE`, `BUILT_UNSERVED`, `BUILT_GONE`.
+
+### What happens to the world's enemies
+
+The policy setting `enemies` (`on` in the friends and public presets, `off` in solo). Each game runs its own MULEs and
+BTs; what is shared is who is down:
+
+| Call | Answer |
+|---|---|
+| `POST …/coop/events` `{"kind":"mule\|camp\|gazer","key":N,"value":V}` with `X-Coop-Token` | `format` 1. 403 when `enemies` is off, 429 past 20000 events at once |
+| `GET …/coop/events[?since=VERSION]` | `format` 1, `on`, `version`, `full`, `wait_ms` (2 s), `events` (others' only: `kind`, `key`, `value`) |
+
+One entry per kind and key (the newest wins), kept an hour. Tests: `built_test.cpp`; mutants `EVENTS_OFF`,
+`EVENTS_UNLIMITED`, `EVENTS_TOKEN`, `EVENTS_OWN`, `EVENTS_FOREVER`.
 
 ### Cargo set down for the others
 

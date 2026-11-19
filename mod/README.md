@@ -1011,6 +1011,42 @@ within the 3 s between reads (each keeps one), cargo of a world that is the serv
 leave it out is known yet), a crate's heading. `groupcargo.h`; tests `groupcargo_test.cpp`, mutants `LOSE_EARLY_TAKE`,
 `KEEP_TAKEN`, `FAR`; config mutant `CONFIG_GROUP_CARGO`; launcher mutant `GROUP_NO_CARGO`.
 
+## Vehicles in group play (`others_vehicles`; on in the launcher's group play)
+
+Every presence sample through the relay carries the vehicle its player sits on (kind, offset, angles, variant, paint).
+For each other player drawn here who rides, this world shows a truck or bike of that kind under him, made and moved as
+the partner's is in two-player play (`ride.h`): one per player, each with a pool of its own, at most 16 at once; it
+stays parked where he got off and goes with him when he leaves. **Riding along:** next to another player's truck or
+bike while he drives, J (`passenger_key`) holds this porter on it, as on the partner's truck; the nearest one being
+driven within 4.5 m; he is let go when the driver gets out or leaves. Log lines `VEHICLES`, `PASSENGER`.
+`othervehicles.h`; tests `othervehicles_test.cpp` (mutants UNCAPPED, NO_REUSE, KEEP_GONE, ANY_DISTANCE), config
+mutant CONFIG_OTHERS_VEHICLES, launcher mutant GROUP_NO_VEHICLES. Live: the host's truck was shown in the visitor's
+game and followed the real one within 0.1 m (2026-11-20); riding along not yet seen live.
+
+## Floating carriers in group play (`others_carts`; on in the launcher's group play)
+
+The carts a player tows (at most two) go in his animation samples to the others, as to the partner in two-player
+play, and each other player's are made here at his body and moved with him (`carts.h`: one display per player). A
+copy this porter attaches is taken back and made again at its owner. **Riding on one:** J next to another player's
+cart while he pulls it holds this porter standing on it (a place seat 0.85 m up, `passenger.h` CartKind), and
+carries him. Lab: `cartlink 0|1|2|3` (the game's link routine 0x265a260 on the nearest cart: let go, to this porter,
+to the vehicle he rides; 3 lists the carts with mode and puller), the start of towing a cart behind a vehicle. Not
+run live yet.
+
+## The world's enemies in group play (`group_enemies`; the server's rule `enemies`)
+
+What two-player play shares about MULEs and BTs goes through the server in group play (`../world/README.md`, "What
+happens to the world's enemies"): a MULE one player puts down (by its locator UUID, the same in every game) is put
+down in the others' games with the game's own defeat; a camp he alarms is put on alert in theirs; a gazer he destroys
+is destroyed in theirs. After a load, once it has settled, what is down in this world is told once. `groupevents.h`
+(the server's answer, a courier thread); tests `groupevents_test.cpp`; config mutant CONFIG_GROUP_ENEMIES; launcher
+mutant GROUP_NO_ENEMIES. Not run live yet.
+
+**Story bosses:** a fight that runs while the game's BossBattle state is set (a whale, a titan) is never offered to
+the players near, and a game in one joins nobody's: a visitor's copy would be an ordinary catcher (fights.h, mutant
+FIGHT_BOSS_OFFERED). Playing a story boss together is designed, not built (both start the same Boss Battle replay, the
+owner's boss life the one that counts).
+
 ## Strand notices (`strand_notices`, off by default; live once, 2026-11-17)
 
 The rule behind it: no surprises. A game builds in its own world whatever the server does, uploads the structure and
