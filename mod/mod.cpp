@@ -4162,6 +4162,28 @@ struct Runtime final:ds::Transport {
                             reinterpret_cast<void(*)(uint64_t,uint8_t*,uint32_t)>(sampler->base+0x235c990)(e,msg,0);++moved;}}
                     note(("CART test: moved "+std::to_string(moved)+" carts\n").c_str());
                 }
+                else if(auto link=mod::puppet::parseCargoCommand(text,mod::runStamp(),"cartlink");link&&anchor.entity&&anchor.pose.available) {
+                    // Research (game_offsets.md, floating carriers): the game's one link routine 0x265a260(cart, entity or 0,
+                    // bool), as Attach and Detach Carrier call it. "cartlink 0": the nearest cart let go; 1: linked to this
+                    // porter; 2: linked to the vehicle he rides. The cart's mode (+0x698: 1 ridden, 2 pulled) and puller id
+                    // (+0x77c) are logged before and after.
+#ifdef _WIN32
+                    uint8_t got[14]{};static const uint8_t want[14]={0x40,0x55,0x56,0x57,0x48,0x83,0xec,0x20,0x48,0x8b,0xfa,0x48,0x8b,0xf1};
+                    const mod::carts::Cart* best=nullptr;double bestD=1e18;auto all=mod::carts::read(*sampler,sampler->base);auto here=mod::puppet::transform(anchor.pose).position;
+                    for(auto& c:all){double d=std::hypot(c.position[0]-here[0],c.position[1]-here[1]);if(c.entity&&d<bestD){bestD=d;best=&c;}}
+                    uint64_t target=*link==1?anchor.entity:*link==2?(localVehicle.riding?localVehicle.entity:0):0;
+                    if(!sampler->read(sampler->base+0x265a260,got,14)||std::memcmp(got,want,14))note("CART link refused: the link routine differs\n");
+                    else if(!best||bestD>30)note("CART link: no cart within 30 m\n");
+                    else if(*link==2&&!target)note("CART link: this porter rides no vehicle\n");
+                    else{
+                        auto mode=[&]{uint32_t m=0,id=0;sampler->read(best->entity+0x698,&m,4);sampler->read(best->entity+0x77c,&id,4);std::ostringstream o;o<<"mode "<<m<<" puller 0x"<<std::hex<<id;return o.str();};
+                        std::string before=mode();
+                        reinterpret_cast<void(*)(uint64_t,uint64_t,bool)>(sampler->base+0x265a260)(best->entity,target,false);
+                        std::ostringstream o;o<<"CART link "<<*link<<" cart "<<best->id<<" at "<<int(bestD)<<" m: "<<before<<" -> "<<mode()<<"\n";note(o.str().c_str());}
+#else
+                    note("CART link needs the game\n");
+#endif
+                }
                 else if(auto cart=mod::puppet::parseCargoCommand(text,mod::runStamp(),"cart");cart&&anchor.pose.available) {
                     // Research: the game's floating-carrier creation (0x2669710(&id, request)): a 0x70-byte request that it
                     // hands to the GameActor manager as actor type 9. Request: +0 position (3 f64), +0x18 rotation
