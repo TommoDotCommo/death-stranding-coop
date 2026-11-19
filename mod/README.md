@@ -993,7 +993,7 @@ name over the copy (the record has no creator), and a second record if the game 
 `findQpidObjects` (counted: `LIVEBUILD records with one online id twice`). `livebuild.h`; tests `livebuild_test.cpp`,
 mutants `BRIDGE`, `ROTATION`, `FULL_KEEPS`, `REMOVED_KEPT`, `REMOVE_OWN`, `FAR`, `RETRY_AT_ONCE`.
 
-## Cargo in group play (`group_cargo`; the server's rule `cargo`; not run in a game yet)
+## Cargo in group play (`group_cargo`; the server's rule `cargo`; live once, 2026-11-20)
 
 Two-player cargo goes over the partner link; in group play it goes through the server (`../world/README.md`, "Cargo set
 down for the others"). The same detection (`cargo.h` Sync, on a Sync of its own): what this porter sets down is told

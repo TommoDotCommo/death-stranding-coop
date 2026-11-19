@@ -35,6 +35,7 @@ the game, and it never will. You need your own copy of the game.
 | 🌉 | **Other players' bridges** built as soon as they arrive (option `build_received`) | ✅ |
 | ⛺ | **Other players' rain shelters** built and kept (option `build_received`) | ✅ |
 | ⚡ | **Others' builds appear at once** while you play (any kind, generators too), and go when taken down | ✅ |
+| 📦 | **Cargo set down for the others** through the server, until someone takes it (rule `cargo`) | ✅ |
 | 🏝️ | **Only the server's world** (rule `world`, on under public rules): the structures in your save stay hidden while you play there and are all back without it; your own builds there come back from the server; nothing of the server's goes into your save | ✅ |
 | 📤 | **Offering what you built before** (option `offer_strand`): the structures already in your save go to the server, one at a time, when you and the server say so | ✅ |
 | 🙋 | **The builder's name and likes** over a structure, as the server names them | ✅ |
