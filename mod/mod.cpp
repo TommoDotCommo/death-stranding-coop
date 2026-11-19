@@ -1270,7 +1270,7 @@ struct Runtime final:ds::Transport {
     }
     // --- Other players' vehicles in group play (othervehicles.h): with others_vehicles, each other player drawn here
     // who rides has his truck or bike under him; the passenger key gets on and off the nearest one being driven.
-    std::unique_ptr<mod::othervehicles::Fleet> fleet;uint64_t fleetPorter=0,groupRideId=0;bool fleetNoted=false;
+    std::unique_ptr<mod::othervehicles::Fleet> fleet;uint64_t fleetPorter=0,groupRideId=0,riderNotedAt=0;bool fleetNoted=false;
     void tickOtherVehicles(const mod::puppet::Anchor& anchor,bool event,uint64_t now){
         if(!config.othersVehicles||!sampler)return;
         if(!fleet){
@@ -1375,6 +1375,7 @@ struct Runtime final:ds::Transport {
             default:break;
         }
         if(!rider.riding())heldSeat.reset();
+        if(rider.riding()&&here&&now>=riderNotedAt+2000){riderNotedAt=now;std::ostringstream o;o<<"PASSENGER riding at "<<here->position[0]<<","<<here->position[1]<<","<<here->position[2]<<"\n";note(o.str().c_str());}
         movePassenger();
     }
     // --- Offering the existing strand (offer_strand.h): opt-in `offer_strand`. While the game is signed in to the server
