@@ -1040,7 +1040,14 @@ happens to the world's enemies"): a MULE one player puts down (by its locator UU
 down in the others' games with the game's own defeat; a camp he alarms is put on alert in theirs; a gazer he destroys
 is destroyed in theirs. After a load, once it has settled, what is down in this world is told once. `groupevents.h`
 (the server's answer, a courier thread); tests `groupevents_test.cpp`; config mutant CONFIG_GROUP_ENEMIES; launcher
-mutant GROUP_NO_ENEMIES. Not run live yet.
+mutant GROUP_NO_ENEMIES. Live once (2026-11-20): camps alarmed and a MULE down reached the other game; gazers not yet seen live.
+
+**Roads paved together** (`group_roads`, on in the launcher's group play): the game takes only a share of what the server
+says the others put into a paver, counting this player's own deliveries, and nothing for some pavers (`roadshare.h`).
+Every 10 s the mod reads the server's totals the game keeps (the highway ledger's map), and gives each paver still
+without its road the rest with the game's own routine (`roads.h` give): less what the game took, less what the mod gave
+before (kept per server in `roads-given-<hash>.txt` beside the config), never past what the paver misses. Log lines
+`ROADSRV`. Tests `roadshare_test.cpp` (mutants BUILT, TWICE, PAST_NEED); config mutant CONFIG_GROUP_ROADS. Not run live yet.
 
 **Story bosses:** a fight that runs while the game's BossBattle state is set (a whale, a titan) is never offered to
 the players near, and a game in one joins nobody's: a visitor's copy would be an ordinary catcher (fights.h, mutant
