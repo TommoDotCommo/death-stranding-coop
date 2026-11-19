@@ -770,6 +770,7 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `import_cost` | `free`, `materials` | free | free | free |
 | `chat` | `on`, `off` | on | off | off |
 | `map` | `on`, `off` | on | off | off |
+| `world` | `save`, `server` | save | save | server |
 | `test_mode` | `off`, `on` | off | off | off |
 
 - `join`: recorded and shown, nothing more yet (there are no invitations).
@@ -798,6 +799,8 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
   `coop-world` from before it refuses a world file that has it (unknown setting).
 - `chat`: `on` lets the players here talk with text chat ("Text chat", below).
 - `map`: `on` shows every player here to the others wherever they are ("Players on the map", below).
+- `world`: `server` makes this server's structures the only ones that stand in a player's game here ("A world that is the
+  server's", below); `save` keeps what each save holds and adds the server's.
 - `test_mode`: `on` puts every player's game here in test mode (`../mod/README.md`, "Test mode": material crates on U,
   blood and stamina kept full), for alpha testers. The server does nothing else with it: the player's launcher reads it
   with the rules before his game starts and writes the mod's `test_mode` into the game's config. Its line in words
@@ -907,6 +910,28 @@ so the game leaves itself out. That choice is about who he sees: nobody can hide
 Places are not encrypted and are not kept: only the latest one of each player is held, in memory.
 
 Tests: `map_test.cpp`; mutants `MAP_TOKEN`, `MAP_OFF`, `MAP_STALE`, `MAP_SELF`, `MAP_CHOICE`, `MAP_AREA`, `MAP_NEAREST`.
+
+### A world that is the server's
+
+The policy setting `world`. Under `server` (the public preset) a game shows what is on this server and nothing else: the
+structures its save holds, the player's own and those of other players, stay out of the world for as long as it plays here.
+They are not removed, and the save keeps them. The launcher reads the setting before the game starts and gives the game this
+server's id; the rest is the mod's (`../mod/README.md`, "A world that is the server's").
+
+- **Ids.** Every object id this server makes is the type letter and 12 letters or digits, as the game needs, and the last
+  four are a keyed hash of the rest, keyed with the server's id (`idtag.h`). A game tells them from any other server's without
+  asking. It is a label, not a proof: the server's id is public.
+- **Other ids.** Objects kept under an id they came with (an offered old structure, an object from before tags, an import from
+  a linked server) do not carry the tag. `GET …/coop/world-ids`, with the notice token in `X-Coop-Token`, answers `format` 1,
+  `server`, `world`, `wait_ms` (60 s) and `untagged`: those of them this player may be handed.
+- **A player's own builds.** They come back to him in `findQpidObjects`, told as his collection builder's. A game whose save
+  has the object does not make it twice; a game whose save lacks it (an older save, another computer) builds it as another
+  player's, where told as his own it would set it to Fail. It stands there, but he cannot change or remove it from that game.
+  Asked by id, the answer still names him: that is the game's question about its own object.
+
+Under `save` none of this happens, and the ids are tagged all the same. Tests: `serverworld_test.cpp`; mutants
+`WORLD_ID_UNTAGGED`, `COLLECTION_ID_UNTAGGED`, `WORLD_NO_HAND_BACK`, `WORLD_BACK_AS_OWN`, `WORLDIDS_TOKEN`, `WORLDIDS_ALL`,
+`WORLDIDS_UNSERVED`.
 
 ### Text chat
 

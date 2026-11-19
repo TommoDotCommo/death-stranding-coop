@@ -107,6 +107,7 @@ config names the server instead:
 | `chat` | Y: text chat through the server ("Text chat", below); requires `online_server` and `strand_token`. The launcher turns it on with the notice token |
 | `server_info` | P: the server, who is online and its rules on the game's common dialogue ("The server page", below). The launcher turns it on |
 | `player_map` | the other players on the game's map ("Players on the map", below); requires `online_server`, `strand_token`, the game provider and `game_thread`. The launcher turns it on with the notice token |
+| `server_world` | the server's id: only that server's structures stand in the world ("A world that is the server's", below); requires `online_server`, `strand_token`, the game provider and `game_thread`. The launcher sets it from the server's rule `world` |
 | `test_mode` | the launcher writes `{}` when the server's rules say `test_mode` on ("Test mode", below): material crates on U; blood, stamina and battery kept full, switched with F3 |
 | `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
 | `show_others` | `"everyone"` (default), `"friends"` or `"nobody"`: who of the players near this player the server shows him (broadcast only, sent in every HELLO; `world/README.md`, "How many players one player sees"). The server's own record of his choice, set from the launcher, comes first; `friends` needs a server with player keys. Requires `relay_mode` `"broadcast"`. A server from before this refuses a HELLO with anything but everyone |
@@ -925,6 +926,27 @@ differs from what is expected the mod logs `MAP unavailable` and the map stays a
 `mapicons.h`; `game_offsets.md`, "Icons on the device map". `mod_status` has `player_map` (`ready`, `on`, `reads`, `shown`,
 `area`, `updates`, `taken`, `refused`, `shown_area`, `mode`). The lab's `puppet.map` takes `kind N`, `ring METRES COUNT` and
 `clear`, each with the run stamp. The mod also tells the relay which map its porter is on, which is what lets a server filter.
+
+## A world that is the server's (`server_world`, off by default; the server's rule `world` sets it)
+
+The structures a save holds, the player's and other players', stay out of the world while the game is on such a server. Nothing
+is deleted or marked: each stays a record in the game's table, so the game saves it whole, and without the setting it stands
+again. The six calls of the test a record must pass to leave the game's Inactive state are led through the mod
+(`game_offsets.md`, "Keeping structures out of the world"), so a refused record never gets a body, a collision shape or a map
+marker, from the first frame of a load. If the code is not what the mod expects it says `SERVERWORLD unavailable` and changes nothing.
+
+| Record | Stands |
+|---|---|
+| The game's own (owner 0: delivery terminals, road rebuilders) | always |
+| With an id that carries this server's tag (`../world/idtag.h`), or one the server lists | yes |
+| Any other with an id: the save's, another server's | no |
+| Another player's, no id (the mod's copies in two-player play) | yes |
+| The player's, no id | only if built since the save was loaded |
+
+The list is read from `GET .../coop/world-ids` on a thread of its own, at the pace the server asks. A structure built on this
+server but saved before the server answered has no id; it stays hidden at the next load. Roads, signs, cairns, shared vehicles
+and cargo are other systems and are not covered yet. `serverworld.h`; `mod_status` has `server_world` (`on`, `listed`, `reads`,
+`asked`, `refused`, `loads`); the log says `SERVERWORLD on` and, each minute it changed, how many were kept out.
 
 ## Strand notices (`strand_notices`, off by default; live once, 2026-11-17)
 

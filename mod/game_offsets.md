@@ -6564,6 +6564,24 @@ The label under the cursor comes from the call at `0x319c5e6` to `0x31c5fd0(item
 to set the title of its own icons (id top byte `0x4d`). `mapicons.cpp` retargets both calls through stubs in the padding at
 `0x31ba24b` and `0x31b9cfb`. No marker is made, so none of this is saved.
 
+## Keeping structures out of the world (static 2026-11-19; to be confirmed live)
+
+Manager `M = [image+0x7bf4960]`; objects: count `M+0x56a258`, pointers `M+0x56a260`. In an object: id `+0x30`, type `+0x34`, state
+`+0x36` (0 Inactive, 1 Unrealized, 2 Realized, 3 Removing, 4 being realized), body `+0x88`, owner `+0xb2`, online id `+0xb8`,
+collision of an unrealized record `+0x368`, map marker `+0x4a8`. Only state 0 has none of the three, and no per-record update.
+State 1 is not "not there": it keeps its collision.
+
+Every way out of state 0 asks `bool 0x2c35fb0(object, u8 needPlaced, boxes)`, from six calls (`0x2c65993` spacing, `0x2c8653b`
+queue, `0x2c87fee` and `0x2c88142` walker, `0x2c8a8b1` last stranding, `0x2c923d1` load pass), except the record being accessed.
+A refused record stays or goes to state 0. The save writer `0x2ccec10` does not store the state, so nothing of this reaches the
+save. Do not use `+0xad` bit 3 (the writer then drops the record), and do not call the `SetActive*Constructions` exports (they end
+in `0x2c45600`, which discards every queued construction request). `serverworld.cpp` leads the six calls through a stub in the
+padding at `0x2c362f0`.
+
+The load wrapper `0x2c9bc70(rcx, rdx, r8)`, called at `0x2e11b75`, is followed through a stub at `0x2c35420`: the player's own
+records are numbered `10000 + ++[M+0x572d34]`, and the count is saved, so its value after the load separates the save's records
+from what is built later.
+
 ## Common telop: a caption of any text (live, 2026-11-19)
 
 `DSUINodeGraphBindings_sShowCommonTelop` `0x3055f40(int pivot, float x, float y, const char16_t* title, const char16_t* text,
