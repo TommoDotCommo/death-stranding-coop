@@ -64,6 +64,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "chat.h"
 #include "mapicons.h"
 #include "serverworld.h"
+#include "livebuild.h"
 #include "strand_notices.h"
 #include "received.h"
 #include "offer_strand.h"
@@ -1149,6 +1150,52 @@ struct Runtime final:ds::Transport {
         auto t0=mod::nowUs();
         for(auto& c:receivedBuilder.step(*sampler,sampler->base,imageSize,receivedWrite))note(mod::received::Builder::line(c).c_str());
         if(!receivedTimed){receivedTimed=true;std::ostringstream o;o<<"RECEIVED first scan: "<<(mod::nowUs()-t0)/1000.<<" ms\n";note(o.str().c_str());}
+    }
+    // --- What other players build, at once (livebuild.h): with build_received, while signed in to the server, its
+    // `…/coop/built` is read on a thread of its own and, once a second on the game thread, what is missing near the
+    // porter is asked of the game's construction queue with the server's online id; what was removed is taken down.
+    std::unique_ptr<mod::livebuild::Reader> liveReader;mod::livebuild::Plan livePlan;
+    std::function<uint32_t(uint8_t,const mod::puppet::Transform&,const std::string&)> constructServed;bool liveTried=false;
+    uint64_t liveStepAt=0,liveBuilt=0,liveRemoved=0;unsigned liveTwice=0;
+    void tickLiveBuild(uint64_t now) {
+        if(!config.buildReceived||config.strandToken.empty()||!receivedOn||!sampler)return;
+        if(!liveReader){
+            auto at=serverAt();if(!at)return;
+            const std::string target=at->base+"/coop/built",token=config.strandToken;const uint32_t address=at->address;const uint16_t port=at->port;
+            liveReader=std::make_unique<mod::livebuild::Reader>([=](const std::string& since){
+                auto r=mod::strand::get(address,port,target+(since.empty()?std::string():"?since="+since),token,mod::strand::ConnectMs);
+                return mod::livebuild::Result{r.status,r.body};},[this](const std::string& s){note(s.c_str());});
+            note("LIVEBUILD on: what other players build here is built at once\n");
+        }
+        for(auto& a:liveReader->take()){
+            livePlan.take(a);
+            if(!a.pieces.empty()||!a.removed.empty()||a.skipped){std::ostringstream o;o<<"LIVEBUILD read "<<(a.full?"all":"changes")<<": "<<a.pieces.size()<<" structures, "<<a.removed.size()<<" removed"<<(a.skipped?", "+std::to_string(a.skipped)+" not understood":"")<<(a.more?" (more on the server)":"")<<"\n";note(o.str().c_str());}
+        }
+        if(now<liveStepAt+1000||livePlan.idle())return;
+        liveStepAt=now;
+        if(!cache.available||cache.gated||inEvent)return;
+        if(!constructServed&&!liveTried){liveTried=true;
+            try{constructServed=mod::puppet::nativeConstructServed(*sampler);}catch(const std::exception& e){note((std::string("LIVEBUILD unavailable: ")+e.what()+"\n").c_str());}}
+        if(!constructServed)return;
+        if(!imageSize)for(auto& sec:sampler->sections)imageSize=std::max(imageSize,sec.address+sec.size-sampler->base);
+        std::vector<mod::livebuild::Seen> seen;
+        for(auto& s:mod::own_strand::readStructures(*sampler,sampler->base,imageSize)){
+            mod::livebuild::Seen v;v.online=s.online;v.owner=s.owner;v.state=s.record.state;v.position=s.record.at.position;seen.push_back(std::move(v));}
+        auto anchor=anchorNow();
+        auto step=livePlan.step(seen,anchor.pose.position,anchor.entity&&anchor.pose.available,now);
+        for(auto& p:step.build){
+            mod::puppet::Transform t;t.position=p.at.position;t.rotation=p.at.rotation;
+            uint32_t id=constructServed(p.type,t,p.id);++liveBuilt;
+            std::ostringstream o;o<<"LIVEBUILD built "<<p.id<<" type "<<int(p.type)<<" record "<<id<<" at "<<p.at.position[0]<<","<<p.at.position[1]<<","<<p.at.position[2]<<"\n";note(o.str().c_str());
+        }
+        for(auto& r:step.remove){
+            if(!unconstruct)break;
+            mod::puppet::Transform t;t.position=r.position;t.rotation={1,0,0,0,1,0,0,0,1};
+            unconstruct({-1.5f,-1.5f,-3,0},{1.5f,1.5f,3,0},t,false,false,true);++liveRemoved;   // Net only, a 3 m box
+            std::ostringstream o;o<<"LIVEBUILD removed "<<r.online<<" at "<<r.position[0]<<","<<r.position[1]<<","<<r.position[2]<<"\n";note(o.str().c_str());
+        }
+        for(auto& id:step.givenUp)note(("LIVEBUILD given up: "+id+" did not stand after "+std::to_string(mod::livebuild::TriesPerPiece)+" asks\n").c_str());
+        if(step.twice!=liveTwice){liveTwice=step.twice;note(("LIVEBUILD records with one online id twice: "+std::to_string(step.twice)+"\n").c_str());}
     }
     // --- Offering the existing strand (offer_strand.h): opt-in `offer_strand`. While the game is signed in to the server
     // the config names and that server says this player's older strand may be offered (its notices answer, read with
@@ -3730,7 +3777,7 @@ struct Runtime final:ds::Transport {
             stage="online";stages.enter("online",mod::nowUs());
             if(gameContext)tickOnline(now);
             stage="received";stages.enter("received",mod::nowUs());
-            if(gameContext)tickReceived();
+            if(gameContext){tickReceived();tickLiveBuild(now);}
             stage="offer";stages.enter("offer",mod::nowUs());
             if(gameContext)tickOffer(now);
             stage="test mode";stages.enter("test mode",mod::nowUs());

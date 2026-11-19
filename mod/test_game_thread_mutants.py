@@ -26,6 +26,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('nametag',['MARKUP','STILL','ORDER','TAGS_KEEP','TAGS_MIX','TAGS_BODY','TAGS_EVENT','TAGS_FORGET','TAGS_LIMIT','TAGS_NEAREST','TAGS_FLAP','TAGS_FIRST'],['nametag_test.cpp','nametag.cpp','discovery.cpp','../core/core.cpp']),
           ('help',['MATERIALS','EVENT','RELEASE','AGAIN','RETRY'],['help_test.cpp','help.cpp','discovery.cpp']),
           ('dialog',['CANCEL'],['debugmenu_test.cpp','debugmenu.cpp','dialog.cpp','discovery.cpp']),
+          ('livebuild',['BRIDGE','ROTATION','FULL_KEEPS','REMOVED_KEPT','REMOVE_OWN','FAR','RETRY_AT_ONCE'],['livebuild_test.cpp','livebuild.cpp']),
           ('serverworld',['GAME','ANY_ID','NO_LIST','NET_COPY','SAVE_OWN','NOCHECK','ROLLBACK','OTHER_SERVER','SAVE_PLAYER','SAVE_ALL'],['serverworld_test.cpp','serverworld.cpp','discovery.cpp']),
           ('mapicons',['AREA','OFF','SELF','PLACE','MANY','STUCK','NAME','SPLIT','WAIT'],['mapicons_test.cpp','mapicons.cpp','serverinfo.cpp','dialog.cpp','discovery.cpp']),
           ('chat',['CONTROL','LONG','SURROGATE','BACKOFF','WAIT','REPEAT','NO_CURSOR','REDRAW','EVENT'],['chat_test.cpp','chat.cpp','serverinfo.cpp','dialog.cpp','discovery.cpp']),

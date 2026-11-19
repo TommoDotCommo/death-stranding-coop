@@ -964,6 +964,26 @@ objects a game is handed"): a generator never does.
 `left_out`: records left out of the last save); the log says `SERVERWORLD on`, after each save how many records were left out
 (`SERVERWORLD save: left out N`), and, each minute it changed, how many were kept out.
 
+## What others build, at once (with `build_received`; not run in a game yet)
+
+The game asks the server for other players' structures only when it loads an area, and only for some kinds, so in group
+play what another player builds would appear at your next load of that area, or never (a generator). With
+`build_received`, while the game is signed in to the server, the mod reads `…/coop/built` (`../world/README.md`, "What
+others build, at once") with the notice token on a thread of its own, at the server's pace (3 s), and once a second on
+the game thread asks the game's construction queue for each structure it lacks within 2 km of the porter, nearest
+first, four at a time: the Net variant at the server's place and rotation, with the server's online id on the record and
+the area check counted as done, as received structures are made (`received.h`). A structure already there with that
+online id (the game's own copy, or the player's) is left alone. One that does not appear within 10 s is asked again,
+and given up after three asks. What the server lists as removed, or what a full read no longer lists, is taken down:
+the Net copies only, a 3 m box around it. Under a world that is the server's the copies carry this server's id, so they
+stand, the save leaves them out, and the next load builds them again.
+
+The log says `LIVEBUILD on`, `LIVEBUILD read …`, `LIVEBUILD built ID type T record R at …`, `LIVEBUILD removed …` and
+`LIVEBUILD given up: …`. Not covered: upgrades and materials put into another player's structure, likes, the builder's
+name over the copy (the record has no creator), and a second record if the game later makes its own from
+`findQpidObjects` (counted: `LIVEBUILD records with one online id twice`). `livebuild.h`; tests `livebuild_test.cpp`,
+mutants `BRIDGE`, `ROTATION`, `FULL_KEEPS`, `REMOVED_KEPT`, `REMOVE_OWN`, `FAR`, `RETRY_AT_ONCE`.
+
 ## Strand notices (`strand_notices`, off by default; live once, 2026-11-17)
 
 The rule behind it: no surprises. A game builds in its own world whatever the server does, uploads the structure and

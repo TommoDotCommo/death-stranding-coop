@@ -123,6 +123,9 @@ std::function<void(uint8_t,const Transform&,bool)> nativeConstruct(discovery::Sa
 // can be set (offsets into the 0x6c8-byte request, 0x600..0x67f; game_offsets.md "Why it stays pending"). Returns the
 // new construction id. Game thread only.
 std::function<uint32_t(uint8_t,const Transform&,const std::vector<uint16_t>&)> nativeConstructRequest(discovery::Sampler&);
+// The same request for a structure another player built (livebuild.h): the Net type, the server's online id on the
+// record, the area check counted as done.
+std::function<uint32_t(uint8_t,const Transform&,const std::string&)> nativeConstructServed(discovery::Sampler&);
 // ArtPartsData (component vtable 3cf2b18, entity+180) get-or-create accessors for the cover (22b2010, cached at +60),
 // cover+animation (22b1f80, +68) and facial-rig (22b20a0, +70) model components. Game thread. False when the body's
 // ArtPartsData is missing or not its own, or a component did not appear.
