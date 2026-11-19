@@ -706,6 +706,8 @@ struct Runtime final:ds::Transport {
         if(p.available)passengerApi.move(heldPorter,mod::passenger::seatPlace(mod::puppet::transform(p),*heldSeat));
     }
     void tickPassenger(const mod::puppet::Anchor& anchor,bool connected,uint64_t now){
+        // In group play the rider is tickGroupPassenger's: this partner path, with no partner, would let him go.
+        if(config.othersVehicles&&!partnerMode())return;
         heldPorter=anchor.entity;
         if(!config.passengerKey||!ride||!anchor.entity)return;
         if(!passengerTried){passengerTried=true;try{passengerApi=mod::passenger::nativeApi(*sampler);note("PASSENGER ready: the passenger key gets on and off the partner's truck or bike\n");}catch(const std::exception& e){note((std::string("PASSENGER unavailable: ")+e.what()+"\n").c_str());}}
@@ -1325,11 +1327,12 @@ struct Runtime final:ds::Transport {
         if(!passengerApi.attach)return;
         auto here=anchor.pose.available?std::optional<mod::puppet::Transform>(mod::puppet::transform(anchor.pose)):std::nullopt;
         std::vector<mod::othervehicles::Candidate> cs;
-        // Where each one is: its entity's pose, or where it was last put (a vehicle the mover drives may read as unavailable).
+        // Where each one is: where it was last put (the mover's playback target; the entity's own pose lags it by tens of
+        // metres while it is driven: live), else its entity's pose.
         std::map<uint64_t,mod::puppet::Transform> placed;
         for(auto& v:fleet->vehicles()){
-            auto p=mod::puppet::readEntityPose(*sampler,v.entity);mod::puppet::Transform t;
-            if(p.available)t=mod::puppet::transform(p);else{t.position=v.at.position;t.rotation=v.at.rotation;}
+            mod::puppet::Transform t;t.position=v.at.position;t.rotation=v.at.rotation;
+            if(t.position==std::array<double,3>{}){auto p=mod::puppet::readEntityPose(*sampler,v.entity);if(!p.available)continue;t=mod::puppet::transform(p);}
             placed[v.entity]=t;cs.push_back({v.id*16+v.kind,v.entity,v.kind,v.driven,t.position});}
         // The floating carriers other players tow, shown here: each one a place to stand on while he pulls it.
         if(!otherCarts.empty())for(auto& c:mod::carts::read(*sampler,sampler->base))for(auto& d:otherCarts)if(d.second.ids().count(c.id)&&c.entity)
@@ -1340,7 +1343,7 @@ struct Runtime final:ds::Transport {
         auto seat=chosen?mod::passenger::seat(chosen->kind):std::nullopt;
         l.partnerInTruck=chosen&&seat;l.truck=l.partnerInTruck?chosen->entity:0;
         std::optional<mod::puppet::Transform> at;
-        if(chosen){auto p=mod::puppet::readEntityPose(*sampler,chosen->entity);if(p.available)at=mod::puppet::transform(p);else if(placed.count(chosen->entity))at=placed[chosen->entity];}
+        if(chosen){if(placed.count(chosen->entity))at=placed[chosen->entity];else{auto p=mod::puppet::readEntityPose(*sampler,chosen->entity);if(p.available)at=mod::puppet::transform(p);}}
         if(here&&at){double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1];l.distance=std::sqrt(dx*dx+dy*dy);}   // across the ground, as the choice is: the hold brings a porter above down onto it
         l.key=passengerEdge.pressed(modKey(config.passengerKey),now);
         l.mover=passengerApi.state(anchor.entity);
