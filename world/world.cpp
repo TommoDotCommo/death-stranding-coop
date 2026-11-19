@@ -1248,7 +1248,7 @@ void World::remember(const std::string& player,int64_t area,const std::vector<st
 Policy presetPolicy(const std::string& name){
     Policy p;p.preset=name;
     if(name=="friends")return p;
-    if(name=="solo"){p.players=1;p.chat="off";p.map="off";p.cargo="off";return p;}
+    if(name=="solo"){p.players=1;p.chat="off";p.map="off";p.cargo="off";p.enemies="off";return p;}
     // Everyone on a public server sees the same world: the server's. Friends and a solo server keep what each save holds.
     if(name=="public"){p.chat="off";p.map="off";p.world="server";p.join="open";p.build="members";p.acceptOffers="review";p.limit=200;p.withdrawal="stay";p.order="liked";p.perBuilder=3;p.identity="keys";p.nearCap=16;p.challenges="members";p.importWho="members";return p;}
     bad("policy: unknown preset '"+name+"' (friends, solo or public)");
@@ -1279,17 +1279,18 @@ void setPolicy(Policy& p,const std::string& keyValue){
     else if(key=="import_cost")pick(p.importCost,{"free","materials"});
     else if(key=="chat")pick(p.chat,{"on","off"});
     else if(key=="cargo")pick(p.cargo,{"on","off"});
+    else if(key=="enemies")pick(p.enemies,{"on","off"});
     else if(key=="map")pick(p.map,{"on","off"});
     else if(key=="world")pick(p.world,{"save","server"});
     else if(key=="free_build")pick(p.freeBuild,{"off","on"});
     else if(key=="test_mode")pick(p.testMode,{"off","on"});
-    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges, import, import_cost, chat, map, world, cargo, free_build, test_mode)");
+    else bad("policy: unknown setting '"+key+"' (join, build, accept_offers, limit, withdrawal, players, offer_builds, offer_old, order, per_builder, spread, identity, near_cap, challenges, import, import_cost, chat, map, world, cargo, free_build, enemies, test_mode)");
 }
 std::vector<std::pair<std::string,std::string>> policyItems(const Policy& p){
     return {{"join",p.join},{"build",p.build},{"accept_offers",p.acceptOffers},{"limit",std::to_string(p.limit)},{"withdrawal",p.withdrawal},
             {"players",std::to_string(p.players)},{"offer_builds",p.offerBuilds},{"offer_old",p.offerOld},
             {"order",p.order},{"per_builder",std::to_string(p.perBuilder)},{"spread",std::to_string(p.spread)},{"identity",p.identity},{"near_cap",std::to_string(p.nearCap)},{"challenges",p.challenges},
-            {"import",p.importWho},{"import_cost",p.importCost},{"chat",p.chat},{"map",p.map},{"world",p.world},{"cargo",p.cargo},{"free_build",p.freeBuild},{"test_mode",p.testMode}};
+            {"import",p.importWho},{"import_cost",p.importCost},{"chat",p.chat},{"map",p.map},{"world",p.world},{"cargo",p.cargo},{"free_build",p.freeBuild},{"enemies",p.enemies},{"test_mode",p.testMode}};
 }
 void World::setPolicy(const Policy& p){std::lock_guard<std::mutex> g(lock_);policy_=p;dirty_=true;++changes_;}
 bool World::handsBack(const Object& o,const std::string& player) const {

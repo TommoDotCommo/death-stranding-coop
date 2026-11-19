@@ -45,6 +45,7 @@ std::string settingText(const std::string& key,const std::string& value,size_t p
     if(key=="challenges")return value=="members"?"Only members publish route challenges; everyone may run them.":
                                 value=="owner"?"Only the server's owner publishes route challenges; everyone may run them.":
                                 value=="nobody"?"No route challenges are published here.":"Any player may publish a route challenge for the others to run.";
+    if(key=="enemies")return value=="on"?"Enemies one player puts down here, and camps he alarms, are down and alarmed for the others too.":"Each player's enemies are his own.";
     if(key=="cargo")return value=="on"?"Cargo one player sets down here lies there for the others, until someone takes it.":"Cargo stays in the world of whoever set it down.";
     if(key=="chat")return value=="on"?"Players can talk here with text chat (Y in the game).":"Text chat is off on this server.";
     if(key=="map")return value=="on"?"Every player here is shown on the others' map, wherever they are.":"Other players are not shown on the map here.";
@@ -299,6 +300,49 @@ Reply World::cargoSay(const std::string& token,const std::string& body,int64_t n
     c.id=freshId("k",me->id);c.stamp=++stamps_;crates_[c.id]=c;dirty_=true;++changes_;
     note("cargo "+c.id+" set down by "+me->name);
     Value out=Value::object();out.set("format",1);out.set("id",c.id);return ok(out);
+}
+Reply World::eventSay(const std::string& token,const std::string& body,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+    auto* me=chatPlayer(token,now);
+    if(!me)return noticeTokenRefused();
+#ifndef MUTANT_EVENTS_OFF
+    if(policy_.enemies!="on")return refuse(403,"enemies-off","enemies are each player's own on this server");
+#endif
+    Value d;try{d=json::parse(body);}catch(const std::exception&){return refuse(400,"event","not JSON");}
+    const std::string kind=d.get("kind").string();
+    if(!oneOf(kind,{"mule","camp","gazer"})||!d.get("key").isInt()||!d.get("value").isInt()||d.get("value").integer()<0||d.get("value").integer()>1000)
+        return refuse(400,"event","kind mule, camp or gazer, an integer key, a value 0..1000");
+    for(auto it=events_.begin();it!=events_.end();){if(now-it->second.at>EventKeepSeconds)it=events_.erase(it);else ++it;}
+#ifndef MUTANT_EVENTS_UNLIMITED
+    if(events_.size()>=EventsMax&&!events_.count({kind,d.get("key").integer()}))return refuse(429,"event-limit","too many world events now");
+#endif
+    auto& e=events_[{kind,d.get("key").integer()}];e.by=me->id;e.value=d.get("value").integer();e.at=now;e.stamp=++stamps_;
+    Value out=Value::object();out.set("format",1);return ok(out);
+}
+Reply World::eventRead(const std::string& token,const std::string& since,int64_t now){
+    std::lock_guard<std::mutex> g(lock_);
+    auto* me=chatPlayer(token,now);
+#ifndef MUTANT_EVENTS_TOKEN
+    if(!me)return noticeTokenRefused();
+#endif
+    const std::string myId=me?me->id:std::string();
+    uint64_t after=0;bool full=true;const std::string mark=epoch_+"-";
+    if(since.size()>mark.size()&&since.size()<=mark.size()+19&&since.compare(0,mark.size(),mark)==0){
+        uint64_t n=0;bool digits=true;for(size_t i=mark.size();i<since.size();++i){digits=digits&&since[i]>='0'&&since[i]<='9';if(digits)n=n*10+uint64_t(since[i]-'0');}
+        if(digits&&n<=stamps_){after=n;full=false;}}
+    const bool on=policy_.enemies=="on";Value list=Value::array();
+    if(on)for(auto& e:events_){
+#ifndef MUTANT_EVENTS_OWN
+        if(e.second.by==myId)continue;
+#endif
+#ifndef MUTANT_EVENTS_FOREVER
+        if(now-e.second.at>EventKeepSeconds)continue;
+#endif
+        if(!full&&e.second.stamp<=after)continue;
+        if(list.items().size()>=BuiltFullMax)break;
+        Value v=Value::object();v.set("kind",e.first.first);v.set("key",e.first.second);v.set("value",e.second.value);list.push(v);}
+    Value out=Value::object();out.set("format",1);out.set("on",on);out.set("version",epoch_+"-"+std::to_string(stamps_));out.set("full",full);out.set("wait_ms",EventWaitMs);out.set("events",list);
+    return ok(out);
 }
 Reply World::cargoRead(const std::string& token,const std::string& since,int64_t now){
     std::lock_guard<std::mutex> g(lock_);

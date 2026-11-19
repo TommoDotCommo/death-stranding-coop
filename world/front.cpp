@@ -75,6 +75,12 @@ Reply Front::handle(const Request& r,int64_t now){
         if(r.method!="GET")return notFound();
         auto token=r.headers.find("x-coop-token");
         return world_.worldIds(token==r.headers.end()?std::string():token->second,now);}
+    // What happens to the world's enemies (world.h eventSay, eventRead): the same token.
+    if(path=="/coop/events"){
+        auto token=r.headers.find("x-coop-token");const std::string t=token==r.headers.end()?std::string():token->second;
+        if(r.method=="GET")return world_.eventRead(t,query(q,"since"),now);
+        if(r.method=="POST")return world_.eventSay(t,r.body,now);
+        return notFound();}
     // Cargo set down for the others (world.h cargoSay, cargoRead): the same token.
     if(path=="/coop/cargo"){
         auto token=r.headers.find("x-coop-token");const std::string t=token==r.headers.end()?std::string():token->second;

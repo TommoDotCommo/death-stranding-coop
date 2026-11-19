@@ -40,7 +40,7 @@ struct Server {
 static std::string body(const id::Keys& k,const std::string& more=""){return "{\"player\":\""+id::account(k.pub)+"\""+more+"}";}
 static void signIns(){
     Server s;auto p=json::parse(s.api(nullptr,"GET","policy").body);
-    CHECK(p.get("settings").items().size()==22&&p.get("settings").items()[11].get("key").string()=="identity"&&p.get("settings").items()[11].get("value").string()=="keys");
+    CHECK(p.get("settings").items().size()==23&&p.get("settings").items()[11].get("key").string()=="identity"&&p.get("settings").items()[11].get("value").string()=="keys");
     CHECK(p.get("time").integer()==Now&&!p.get("owner").boolean());
     // No sign-in but a launcher's ticket: not by a name in the address, not by a Steam ticket, not by a key's name.
     const std::string steam="?provider=steam&display_name=Ann&code=14000000aabbccddeeff00117856341201001001"+std::string(40,'0');

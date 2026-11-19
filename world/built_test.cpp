@@ -122,8 +122,38 @@ static void cargo(){
     auto r=off.raw("GET","/s3cret/coop/cargo","",{{"x-coop-token",tc}});CHECK(r.status==200&&!json::parse(r.body).get("on").boolean(true));
     CHECK(presetPolicy("solo").cargo=="off"&&presetPolicy("friends").cargo=="on"&&presetPolicy("public").cargo=="on");
 }
+// What happens to the world's enemies (world.h eventSay, eventRead).
+static void events(){
+    Server s;s.signIn("ann","Ann");s.signIn("bob","Bob");auto ta=s.token("ann"),tb=s.token("bob");
+    auto say=[&](const std::string& t,const std::string& body){return s.raw("POST","/s3cret/coop/events",body,{{"x-coop-token",t}}).status;};
+    auto read=[&](const std::string& t,const std::string& since=""){auto r=s.raw("GET","/s3cret/coop/events"+(since.empty()?std::string():"?since="+since),"",{{"x-coop-token",t}});
+        CHECK(r.status==200);return r.status==200?json::parse(r.body):json::Value();};
+    CHECK(s.raw("GET","/s3cret/coop/events").status==403&&say("nope","{}")==403);
+    CHECK(say(ta,R"({"kind":"tank","key":1,"value":0})")==400&&say(ta,R"({"kind":"mule","key":1,"value":2000})")==400&&say(ta,"{")==400);
+    auto first=read(tb);CHECK(first.get("on").boolean()&&first.get("events").items().empty()&&first.get("wait_ms").integer()==EventWaitMs);
+    const std::string v1=first.get("version").string();
+    CHECK(say(ta,R"({"kind":"mule","key":4503599627370495,"value":0})")==200&&say(ta,R"({"kind":"camp","key":77,"value":100})")==200);
+    auto d=read(tb,v1);CHECK(d.get("events").items().size()==2&&!d.get("full").boolean(true));
+    if(d.get("events").items().size()==2){auto& m=d.get("events").items()[1];CHECK(m.get("kind").string()=="mule"&&m.get("key").integer()==4503599627370495LL&&m.get("value").integer()==0);}
+    CHECK(read(ta).get("events").items().empty());                          // never his own
+    // The same MULE again (now asleep): one entry, the newest; listed again after the version.
+    const std::string v2=d.get("version").string();
+    CHECK(say(ta,R"({"kind":"mule","key":4503599627370495,"value":2})")==200);
+    auto again=read(tb,v2);CHECK(again.get("events").items().size()==1&&again.get("events").items()[0].get("value").integer()==2);
+    CHECK(read(tb).get("events").items().size()==2);
+    // An hour later they are gone.
+    s.now+=EventKeepSeconds+1;tb=s.token("bob");CHECK(read(tb).get("events").items().empty());
+    // At most EventsMax at once: a new one past that is refused, an old one still changes.
+    ta=s.token("ann");
+    for(size_t i=0;i<EventsMax;++i)CHECK(say(ta,"{\"kind\":\"gazer\",\"key\":"+std::to_string(i)+",\"value\":1}")==200);
+    CHECK(say(ta,"{\"kind\":\"gazer\",\"key\":-5,\"value\":1}")==429&&say(ta,"{\"kind\":\"gazer\",\"key\":7,\"value\":2}")==200);
+    // The rule off: refused and nothing listed.
+    Server off("friends",{"enemies=off"});off.signIn("cid","Cid");auto tc=off.token("cid");
+    CHECK(off.raw("POST","/s3cret/coop/events",R"({"kind":"mule","key":1,"value":0})",{{"x-coop-token",tc}}).status==403);
+    CHECK(presetPolicy("solo").enemies=="off"&&presetPolicy("friends").enemies=="on"&&presetPolicy("public").enemies=="on");
+}
 int main(){
-    reads();held();cargo();
+    reads();held();cargo();events();
     if(failures){std::fprintf(stderr,"%u built oracle failures\n",failures);return 1;}
     std::puts("built oracles passed");return 0;
 }
