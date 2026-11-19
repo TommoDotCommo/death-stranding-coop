@@ -36,7 +36,7 @@ public:
     size_t pools() const {return made_;}
     bool unavailable() const {return unavailable_;}
 private:
-    struct Entry { std::unique_ptr<ride::PartnerVehicle> vehicle; ride::Api api; uint64_t seen=0; bool driven=false; ride::Transform at; };
+    struct Entry { std::unique_ptr<ride::PartnerVehicle> vehicle; ride::Api api; uint64_t seen=0,notedAt=0; bool driven=false; ride::Transform at; };
     Make make_;std::function<void(const std::string&)> log_;std::map<uint64_t,Entry> rides_;std::vector<ride::Api> spare_;
     size_t made_=0;bool unavailable_=false;
 };

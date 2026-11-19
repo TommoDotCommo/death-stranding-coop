@@ -1,11 +1,15 @@
 #include "othervehicles.h"
 #include <cmath>
 #include <set>
+#include <sstream>
 namespace mod::othervehicles {
 void Fleet::tick(uint64_t now,bool permitted,const std::vector<Seen>& seen){
     std::set<uint64_t> here;
     for(auto& s:seen){
-        if(!s.visible)continue;
+        if(!s.visible){
+            auto r=rides_.find(s.id);   // shown and not visible now: said every 2 s (a driver's samples may go stale)
+            if(r!=rides_.end()&&now>=r->second.notedAt+2000){r->second.notedAt=now;log_("VEHICLES player "+std::to_string(s.id)+" not visible now\n");}
+            continue;}
         here.insert(s.id);
         auto it=rides_.find(s.id);
         if(it==rides_.end()){
@@ -23,6 +27,7 @@ void Fleet::tick(uint64_t now,bool permitted,const std::vector<Seen>& seen){
             log_("VEHICLES player "+std::to_string(s.id)+" rides: his vehicle is shown here\n");
         }
         it->second.seen=now;it->second.driven=s.kind!=0;if(s.kind)it->second.at=s.at;
+        if(now>=it->second.notedAt+2000){it->second.notedAt=now;std::ostringstream o;o<<"VEHICLES player "<<s.id<<" kind "<<int(s.kind)<<" at "<<int(s.at.position[0])<<","<<int(s.at.position[1])<<","<<int(s.at.position[2])<<"\n";log_(o.str());}
         if(s.kind)it->second.vehicle->tick(now,permitted,s.kind,&s.at,s.look);
         else it->second.vehicle->tick(now,permitted,0,nullptr);   // he got off: it stays parked where it is
     }

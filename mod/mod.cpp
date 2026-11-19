@@ -702,8 +702,13 @@ struct Runtime final:ds::Transport {
     uint64_t heldPorter=0;
     void movePassenger(){
         if(!heldSeat||!rider.riding()||!heldPorter||!passengerApi.move||!sampler)return;
-        auto p=mod::puppet::readEntityPose(*sampler,rider.truck());
-        if(p.available)passengerApi.move(heldPorter,mod::passenger::seatPlace(mod::puppet::transform(p),*heldSeat));
+        // Where the ridden thing is now: a cart by its carrier record, another player's vehicle by where the mod last
+        // put it (the entities' own poses lag both: live), else the entity's pose.
+        std::optional<mod::puppet::Transform> at;
+        if(fleet)for(auto& v:fleet->vehicles())if(v.entity==rider.truck()){mod::puppet::Transform t;t.position=v.at.position;t.rotation=v.at.rotation;at=t;}
+        if(!at&&!otherCarts.empty())for(auto& c:mod::carts::read(*sampler,sampler->base))if(c.entity==rider.truck()){mod::puppet::Transform t;t.position=c.position;t.rotation=c.rotation;at=t;}
+        if(!at){auto p=mod::puppet::readEntityPose(*sampler,rider.truck());if(p.available)at=mod::puppet::transform(p);}
+        if(at)passengerApi.move(heldPorter,mod::passenger::seatPlace(*at,*heldSeat));
     }
     void tickPassenger(const mod::puppet::Anchor& anchor,bool connected,uint64_t now){
         // In group play the rider is tickGroupPassenger's: this partner path, with no partner, would let him go.
