@@ -2,7 +2,8 @@
 --owner-... flags and its Server owner window use) against the built coop-world on loopback, started with the command
 line the launcher makes for public rules and the host's key as the owner's. Two joiners build (held: only members'
 builds are shared); the owner lists the players (key short, counts, likes) and what waits (builder, kind, area), makes
-one a member, accepts all of his, rejects all of the other's and nobody else's, accepts one object, changes a rule on
+one a member, accepts all of his, rejects all of the other's and nobody else's, accepts one object (the other is
+handed three of them, and his own rejected one back, as the world is the server's), changes a rule on
 the running server (the words of /coop/policy), and removes all of a player's objects (his account stays). A joiner's
 key is refused as the owner, and an owner call sent twice (the same nonce) is refused. Arguments: the launcher's test
 program, coop-world."""
@@ -73,8 +74,11 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-owner-') as d:
         r=owner('accept',a4);check(r['ok'] and r['waiting']==[] and {x['id']:x for x in r['players']}[ids['Ann'][0]]['shared']==4,'one object accepted: %r'%r)
         # Bob's game is handed Ann's (three of four: per_builder), and likes one: the likes in the owner's list.
         status,found=call('POST','/%s/gate/e/findQpidObjects'%prefix,json.dumps({'q':226}),{'Authorization':'Bearer '+ids['Bob'][1]})
-        handed={o['id'] for o in found['n']['oa']}
-        check(status==200 and len(handed)==3 and handed<={a1,a2,a3,a4},'what Bob is handed (public: at most three of one builder): %r'%handed)
+        handed={o['id'] for o in found['n']['oa']};told={o['id']:o['c'] for o in found['n']['oa']}
+        check(status==200 and len(handed&{a1,a2,a3,a4})==3 and handed<={a1,a2,a3,a4,b1},'what Bob is handed (public: at most three of one builder): %r'%handed)
+        # Public rules make the world the server's (policy world=server): Bob's own ladder, though rejected for the
+        # others, stands in his world, handed back told as another builder's (neither his id nor Ann's).
+        check(b1 in handed and told[b1] not in (ids['Bob'][0],ids['Ann'][0]),'Bob\'s own handed back, not as his: %r'%told)
         call('POST','/%s/gate/e/sendLike'%prefix,json.dumps({'oid':a1,'lp':2,'lp2':0,'lt':''}),{'Authorization':'Bearer '+ids['Bob'][1]})
         check({x['id']:x for x in owner('list')['players']}[ids['Ann'][0]]['likes']==2,'likes in the owner\'s list')
         # The rules on the running server: a setting changed, the preset's value beside it, the server's words.
@@ -85,7 +89,7 @@ with tempfile.TemporaryDirectory(prefix='ds-launcher-owner-') as d:
         r=owner('remove',ids['Ann'][0]);rows={x['id']:x for x in r['players']}
         check(r['ok'] and 'Removed 4 objects' in r['message'] and ids['Ann'][0] in rows and rows[ids['Ann'][0]]['shared']==0,'all of Ann\'s removed, her account kept: %r'%r)
         status,found=call('POST','/%s/gate/e/findQpidObjects'%prefix,json.dumps({'q':226}),{'Authorization':'Bearer '+ids['Bob'][1]})
-        check(found['n']['oa']==[],'Bob is handed none of them now')
+        check([o['id'] for o in found['n']['oa']]==[b1],'Bob is handed none of them now, only his own: %r'%found['n']['oa'])
         # An owner call sent again with the same nonce is refused, and so is one signed by a joiner.
         body=json.dumps({'player':ids['Bob'][0],'member':'yes'},separators=(',',':'))
         s=run('--keyed-signed',str(port),prefix,'POST','owner/member',body,hostKey);target,headers=one(s,'target'),dict(x.split(' ',1) for x in s['header'])

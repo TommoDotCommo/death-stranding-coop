@@ -930,7 +930,9 @@ server's id; the rest is the mod's (`../mod/README.md`, "A world that is the ser
 - **A player's own builds.** They come back to him in `findQpidObjects`, told as his collection builder's. A game whose save
   has the object does not make it twice; a game whose save lacks it (an older save, another computer) builds it as another
   player's, where told as his own it would set it to Fail. It stands there, but he cannot change or remove it from that game.
-  Asked by id, the answer still names him: that is the game's question about its own object.
+  Asked by id, the answer still names him: that is the game's question about its own object. This holds for what is kept
+  or held for him alone too (`build` members, a rejected offer): it is not shared with the others, but it stands in his own
+  world.
 
 Under `save` none of this happens, and the ids are tagged all the same. Tests: `serverworld_test.cpp`; mutants
 `WORLD_ID_UNTAGGED`, `COLLECTION_ID_UNTAGGED`, `WORLD_NO_HAND_BACK`, `WORLD_BACK_AS_OWN`, `WORLDIDS_TOKEN`, `WORLDIDS_ALL`,
