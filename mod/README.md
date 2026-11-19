@@ -964,11 +964,11 @@ objects a game is handed"): a generator never does.
 `left_out`: records left out of the last save); the log says `SERVERWORLD on`, after each save how many records were left out
 (`SERVERWORLD save: left out N`), and, each minute it changed, how many were kept out.
 
-## What others build, at once (with `build_received`; not run in a game yet)
+## What others build, at once (with `build_received`; live once, 2026-11-19)
 
 The game asks the server for other players' structures only when it loads an area, and only for some kinds, so in group
 play what another player builds would appear at your next load of that area, or never (a generator). With
-`build_received`, while the game is signed in to the server, the mod reads `…/coop/built` (`../world/README.md`, "What
+`build_received`, with the notice token (whether or not the game's own sign-in holds), the mod reads `…/coop/built` (`../world/README.md`, "What
 others build, at once") with the notice token on a thread of its own, at the server's pace (3 s), and once a second on
 the game thread asks the game's construction queue for each structure it lacks within 2 km of the porter, nearest
 first, four at a time: the Net variant at the server's place and rotation, with the server's online id on the record and
@@ -993,7 +993,8 @@ picked up before the server answered is told when it does). The others' crates a
 of the porter, eight at a time (CreateBaggage, registered with the Sync first so they are never told back); one the
 server lists as taken is removed here (DeleteBaggage). An order's case is never told. Messages and reads go through one
 thread of their own (`Courier`), never the game thread. Requires `online_server`, `strand_token`, `game_thread` and
-`puppet_probe`, and no `peer`; the launcher's group play sets it whenever it has the notice token.
+`puppet_probe`, and no `peer`; the launcher's group play sets it whenever it has the notice token. It needs that token only,
+not the game's own sign-in.
 
 The log says `CARGOSRV on`, `CARGOSRV set down item …`, `CARGOSRV set-down N is ID on the server`, `CARGOSRV made another
 player's item …`, `CARGOSRV another player took it: removed record …`. Not covered: two players taking the same crate
