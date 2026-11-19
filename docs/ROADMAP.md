@@ -46,7 +46,7 @@ Service:
 - [ ] Launcher: a "Public servers" list from the directory, with its own ping to each server.
 - [ ] Official servers in three regions (Asia-Pacific, Americas, Europe), linked with `--link` so structures travel
       worldwide while real-time presence stays regional.
-- [ ] Several servers per region when one fills (a world holds up to 1024 players): the directory points new players
+- [ ] Several servers per region when one fills (a relay takes up to 1024 players at once): the directory points new players
       at the least full one; linked presence between a region's servers.
 - [ ] Automatic updates (the launcher checks the release page; MDK2 and Witness have the pattern).
 - [ ] Router port mapping (UPnP / NAT-PMP) for players who host their own server; Steam friends discovery.

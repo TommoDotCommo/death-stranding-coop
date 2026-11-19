@@ -72,7 +72,7 @@ loopback, a LAN or a VPN.
 | `GET`/`POST …/coop/NAME` | not the game's: the launcher's API ("The launcher's API"), and the owner's calls ("Identity") |
 | `GET …/coop/notices` with `X-Coop-Token` | not the game's: the mod's read of its player's own objects ("What the game is told") |
 
-Limits: 1024 players, 4000 objects built here per player, 20000 objects held from each other server, 4 MiB per body,
+Limits: 65536 accounts a world keeps and 1024 players at once on its relay, 4000 objects built here per player, 20000 objects held from each other server, 4 MiB per body,
 32 connections (`--max-connections`), and the limits per address below.
 
 ### Limits per address
@@ -758,7 +758,7 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
 | `accept_offers` | `auto`, `review`, `never` | auto | auto | review |
 | `limit` | objects per player, 0 for none (up to 4000) | 0 | 0 | 200 |
 | `withdrawal` | `stay`, `go` | go | go | stay |
-| `players` | 1 to 16 | 16 | 1 | 16 |
+| `players` | accounts the world takes, 1 to 65536 | 65536 | 1 | 65536 |
 | `offer_builds` | `yes`, `no`, `ask` | yes | yes | yes |
 | `offer_old` | `yes`, `no` | no | no | no |
 | `order` | `newest`, `liked` | newest | newest | liked |
@@ -783,7 +783,10 @@ coop-world policy --data world.json [--preset friends|solo|public] [--set KEY=VA
   him, and remnants, do not count. The hard cap of 4000 objects of every kind a player stores here stays a refusal
   (403): it protects the server's memory and disk.
 - `withdrawal`: what a player's withdrawal does to what he shared (below).
-- `players`: accounts beyond it are refused at sign-in; the ones the world has still sign in. Solo is a friends
+- `players`: how many accounts the world takes, every player who has ever joined it; a new one beyond it is refused at
+  sign-in, the ones the world has still sign in. A player who left keeps his place (`remove-player` takes his objects,
+  not his place). How many play at once is the relay's `--relay-players` (at most 1024). The game's page says "Any
+  number of players" at the most. Solo is a friends
   server for one player: a personal archive.
 - `offer_builds`, `offer_old`: what a player who has chosen nothing has chosen (below).
 - `order`, `per_builder`, `spread`: which of an area's objects a game is handed when there are more than it asks for

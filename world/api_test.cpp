@@ -34,7 +34,7 @@ static void policy(){
     CHECK(s.raw("POST","/s3cret/coop/policy","{}").status==404&&s.get("nothing").status==404&&s.raw("GET","/s3cret/coop/").status==404);
     auto p=s.doc(s.get("policy"));
     CHECK(p.get("format").integer()==1&&p.get("server").string()==s.w.serverId()&&p.get("preset").string()=="friends");
-    CHECK(p.get("players").get("count").integer()==0&&p.get("players").get("limit").integer()==int64_t(MaxPlayers));
+    CHECK(p.get("players").get("count").integer()==0&&p.get("players").get("limit").integer()==int64_t(MaxAccounts));
     CHECK(!p.has("online"));                                   // no relay has spoken: the policy does not guess
     {std::vector<std::string> on={"","Ann"};for(int i=0;i<70;++i)on.push_back("P");s.w.setOnline(on);auto o=s.doc(s.get("policy")).get("online");
      CHECK(o.get("count").integer()==72&&o.get("names").items().size()==64&&o.get("names").items()[0].string()=="Ann");s.w.setOnline({});CHECK(s.doc(s.get("policy")).get("online").get("count").integer()==0);}
@@ -48,6 +48,7 @@ static void policy(){
     Server solo("solo");solo.signIn("a","A");auto r=solo.doc(solo.get("policy"));
     CHECK(r.get("players").get("count").integer()==1&&r.get("players").get("limit").integer()==1&&r.get("settings").items()[5].get("text").string()=="One player only: a personal archive. It has 1 now.");
     for(const char* k:{"join","build","accept_offers","limit","withdrawal","players","offer_builds","offer_old","order","per_builder","spread","identity","near_cap","challenges","import","import_cost","test_mode"})CHECK(settingText(k,"x",0).size()>20);
+    CHECK(settingText("players",std::to_string(MaxAccounts),3)=="Any number of players. It has 3 now."&&settingText("players","40",3)=="At most 40 players. It has 3 now."&&settingText("players","1",1)=="One player only: a personal archive. It has 1 now.");
     CHECK(settingText("test_mode","on",0)=="Test mode: unlimited materials (U), stamina and blood for everyone here. For testing: the game does not play as it should."&&settingText("test_mode","off",0).find("No test mode")==0);
     CHECK(qs[8].get("text").string().find("most liked")!=std::string::npos&&qs[9].get("text").string().find("At most 3 ")==0&&settings[10].get("text").string().find("20 m")!=std::string::npos);
 }

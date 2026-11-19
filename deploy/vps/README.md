@@ -73,7 +73,7 @@ calls, and writes them into the game's config (`../../launcher/README.md`, "A gr
 - the owner can kick and ban (below), which means something only when players cannot change who they are.
 
 The Public preset's other settings: only members' builds are shared, and those wait for the owner's review; at most
-200 objects per player; a withdrawn build stays as a remnant; up to 1024 players; each player is shown at most 16 others near
+200 objects per player; a withdrawn build stays as a remnant; any number of players (65536 accounts, 1024 at once); each player is shown at most 16 others near
 him. For a test where everything should be shared without review:
 
 ```
@@ -151,7 +151,7 @@ answered.
 
 With the invite (a tester, or whoever a tester passed it to):
 
-- **can** join under a key of his own (up to the world's 1024 players), choose any nickname, walk up to other players
+- **can** join under a key of his own (the world keeps up to 65536 accounts), choose any nickname, walk up to other players
   and be seen by them, build (shared after the owner's review), like structures;
 - **cannot** act or appear as another player, read another player's address, reach a player who is not near him,
   message anyone while the rules keep text chat off (the public preset does; with `policy-set chat=on` everyone on the
@@ -162,7 +162,7 @@ The owner (whoever holds SSH to the server) sees every player's address and nick
 
 ### Limits per address
 
-On top of the server's own caps (1024 players, 4000 objects a player, 4 MiB a request, relay rates): per address at most
+On top of the server's own caps (65536 accounts, 1024 players at once on the relay, 4000 objects a player, 4 MiB a request, relay rates): per address at most
 8 connections at once and 20 requests a second (200 saved up), 64 connections in all, a request must arrive within
 30 s (a sender who drips bytes keeps no connection), and the 404 block above. Loopback is exempt (the admin's calls).
 (`../../world/README.md`, "Limits per address".)
@@ -176,7 +176,7 @@ On top of the server's own caps (1024 players, 4000 objects a player, 4 MiB a re
   identity keys (a token read on the path is short-lived and for one player), no Steam id stored or answered.
   Encryption needs the game's traffic wrapped by the mod or the proxy (the game speaks plain HTTP to the address
   the mod gives it): a follow-up, not done.
-- **Accounts fill the world.** Each new key becomes one of the 1024 players on its first signed call, and `remove` and
+- **Accounts fill the world.** Each new key becomes one of the world's 65536 accounts on its first signed call, and `remove` and
   `ban` do not free its place. Someone with the invite and many keys can fill the world. Mitigation: `ban` the keys,
   `rotate-key`, send the new invite only to the testers.
 - **Nicknames are free text.** Nothing filters them; the owner bans a key that uses an offensive one.

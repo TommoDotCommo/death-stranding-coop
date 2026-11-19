@@ -17,7 +17,9 @@
 #include <vector>
 namespace world {
 constexpr int VersionMajor=0,VersionMinor=12;      // what this game build requires of getVersion
-constexpr size_t MaxObjectsPerPlayer=4000,MaxPlayers=1024,MaxNameBytes=64,MaxKeyBytes=96,MaxLikes=2000;
+constexpr size_t MaxObjectsPerPlayer=4000,MaxAccounts=65536,MaxNameBytes=64,MaxKeyBytes=96,MaxLikes=2000;
+// MaxAccounts: the most accounts one world keeps, every player who ever joined it (the policy's `players` is at most
+// this). How many play at once is the relay's limit (RelayPlayersMax, 1024).
 // Linked servers (README, "Linked servers"): at most this many objects held from one other server, this many bytes
 // for one object's data on the way, and this much for one page and one request of a live link.
 constexpr size_t MaxImportedPerServer=20000,MaxSharedPostBytes=64*1024,LinkPageObjects=500,LinkPageBytes=1024*1024,MaxLinkRequestBytes=4096;
@@ -88,7 +90,7 @@ bool objectIdText(const std::string&);              // 2..64 letters and digits
 struct ImportResult { size_t added=0,updated=0,unchanged=0,removed=0,filtered=0,own=0; };
 // The server's policy (README, "Server policy"): a preset and single settings, saved with the world. Values:
 //   join invite|open (recorded only)   build everyone|members|nobody   accept_offers auto|review|never
-//   limit N (objects per player, 0 = none)   withdrawal stay|go   players N (1..MaxPlayers)
+//   limit N (objects per player, 0 = none)   withdrawal stay|go   players N (1..MaxAccounts)
 //   offer_builds yes|no|ask, offer_old yes|no: what a player who chose nothing has chosen
 //   order newest|liked, per_builder N (0 = none), spread METRES (0 = off): which objects a game is handed (curate)
 //   identity none|keys: keys refuses every sign-in but a launcher's ticket, and every API call that is not signed
@@ -111,7 +113,7 @@ struct Policy {
 #else
     std::string testMode="on";
 #endif
-    int64_t limit=0,players=int64_t(MaxPlayers),perBuilder=0,spread=20,nearCap=32;
+    int64_t limit=0,players=int64_t(MaxAccounts),perBuilder=0,spread=20,nearCap=32;
 };
 Policy presetPolicy(const std::string& name);       // friends, solo or public; throws for anything else
 void setPolicy(Policy&,const std::string& keyValue); // "KEY=VALUE"; throws with the reason and leaves it as it was

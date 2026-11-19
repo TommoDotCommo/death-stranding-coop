@@ -28,7 +28,7 @@ std::string settingText(const std::string& key,const std::string& value,size_t p
     if(key=="limit")return value=="0"?"No limit on how many of your objects are shared.":"At most "+value+" of your objects are shared or waiting; past that they are held for you.";
     if(key=="withdrawal")return value=="stay"?"If you take back what you shared, it stays for the others as a remnant under your name that nobody owns.":
                                 "If you take back what you built, it is removed for everyone.";
-    if(key=="players")return (value=="1"?std::string("One player only: a personal archive."):"At most "+value+" players.")+" It has "+std::to_string(players)+" now.";
+    if(key=="players")return (value=="1"?std::string("One player only: a personal archive."):value==std::to_string(MaxAccounts)?std::string("Any number of players."):"At most "+value+" players.")+" It has "+std::to_string(players)+" now.";
     if(key=="offer_builds")return value=="no"?"Unless you choose otherwise, what you build here is kept for you alone.":
                                   value=="ask"?"Unless you choose otherwise, what you build here waits for your answer.":"Unless you choose otherwise, what you build here is shared.";
     if(key=="offer_old")return value=="yes"?"Unless you choose otherwise, your older strand may be offered here: a game whose co-op mod has offer_strand on uploads the structures its save already holds.":
@@ -63,7 +63,7 @@ json::Value World::apiPolicy(int64_t now) const {
     Value out=Value::object();out.set("format",1);out.set("server",serverId_);out.set("preset",policy_.preset);
     out.set("time",now);out.set("owner",!owner_.empty());   // the server's clock, for a launcher whose clock is off
     out.set("name",name_);                                    // this world's display name ("" none; README "Builder names")
-    Value players=Value::object();players.set("count",int64_t(players_.size()));players.set("limit",int64_t(std::min<int64_t>(int64_t(MaxPlayers),policy_.players)));out.set("players",players);
+    Value players=Value::object();players.set("count",int64_t(players_.size()));players.set("limit",int64_t(std::min<int64_t>(int64_t(MaxAccounts),policy_.players)));out.set("players",players);
 #ifndef MUTANT_API_ONLINE_ALWAYS
     if(onlineKnown_){
 #else
@@ -144,7 +144,7 @@ void World::apiChoices(const std::string& key,const std::string& offerBuilds,con
     if(found==players_.end()){
         // A new account, as at a sign-in: within the hard cap and the policy's number of players.
 #ifndef MUTANT_API_CHOICES_ROOM
-        size_t room=std::min(MaxPlayers,size_t(policy_.players));
+        size_t room=std::min(MaxAccounts,size_t(policy_.players));
         if(players_.size()>=room){note("choices refused: world is full ("+std::to_string(room)+" players)");bad("this world has all its players");}
 #endif
         Player p;p.key=key;p.id=playerId(key);p.name="Porter";found=players_.emplace(key,p).first;note("new player "+p.id+" (choices from the launcher)");}
@@ -197,7 +197,7 @@ void World::apiSetFriends(const std::string& key,const std::vector<std::string>&
     next.insert(adding.begin(),adding.end());
     if(next.size()>MaxFriends)bad("at most "+std::to_string(MaxFriends)+" friends");
     if(found==players_.end()){
-        size_t room=std::min(MaxPlayers,size_t(policy_.players));
+        size_t room=std::min(MaxAccounts,size_t(policy_.players));
         if(players_.size()>=room){note("friends refused: world is full ("+std::to_string(room)+" players)");bad("this world has all its players");}
         Player p;p.key=key;p.id=playerId(key);p.name="Porter";found=players_.emplace(key,p).first;note("new player "+p.id+" (friends from the launcher)");}
     Player& p=found->second;p.friends=std::move(next);

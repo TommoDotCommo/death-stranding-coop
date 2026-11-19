@@ -179,7 +179,7 @@ World::Player& World::playerFor(const std::string& account,const char* why){
     if(found!=players_.end()&&found->second.banned){note(std::string(why)+" refused: "+found->second.id+" is banned");bad("this player is banned from this server");}
 #endif
     if(found!=players_.end())return found->second;
-    size_t room=std::min(MaxPlayers,size_t(policy_.players));
+    size_t room=std::min(MaxAccounts,size_t(policy_.players));
     if(players_.size()>=room){note(std::string(why)+" refused: world is full ("+std::to_string(room)+" players)");bad("this world has all its players");}
     Player p;p.key=account;p.id=playerId(account);p.name="Porter";note("new player "+p.id+" ("+why+")");
     dirty_=true;++changes_;return players_.emplace(account,p).first->second;
@@ -369,9 +369,9 @@ Reply World::signInLocked(const std::string& key,const std::string& displayName,
     if(found==players_.end()){
         // The hard cap, or fewer when the policy says so (solo: one).
 #ifndef MUTANT_POLICY_PLAYERS
-        size_t room=std::min(MaxPlayers,size_t(policy_.players));
+        size_t room=std::min(MaxAccounts,size_t(policy_.players));
 #else
-        size_t room=MaxPlayers;
+        size_t room=MaxAccounts;
 #endif
 #ifndef MUTANT_WORLD_PLAYER_CAP
         if(players_.size()>=room){note("sign-in refused: world is full ("+std::to_string(room)+" players)");return refuse(403,"full","this world has all its players");}
@@ -1257,7 +1257,7 @@ void setPolicy(Policy& p,const std::string& keyValue){
     else if(key=="offer_builds")pick(p.offerBuilds,{"yes","no","ask"});
     else if(key=="offer_old")pick(p.offerOld,{"yes","no"});
     else if(key=="limit")number(p.limit,0,int64_t(MaxObjectsPerPlayer));
-    else if(key=="players")number(p.players,1,int64_t(MaxPlayers));
+    else if(key=="players")number(p.players,1,int64_t(MaxAccounts));
     else if(key=="order")pick(p.order,{"newest","liked"});
     else if(key=="per_builder")number(p.perBuilder,0,1000);
     else if(key=="spread")number(p.spread,0,1000);

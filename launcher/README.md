@@ -335,7 +335,7 @@ loopback with public rules and the launcher's key as the owner's: no server (exi
 (`--owner-set limit=7`, report in a file), a member call for a player that does not exist (refused in the server's
 words, exit 3), and two refused flag combinations (exit 3, no dialog).
 
-Limits today: 15 other players drawn per game (the nearest) and 1024 players in the shared world (`../world/README.md`); the
+Limits today: 15 other players drawn per game (the nearest) and 1024 players at once in the shared world (`../world/README.md`); the
 two-player features (cargo, structures made in the session, vehicles, enemies, orders, rain) are not part of group
 play; no list of who is in the group, no way to leave except closing the game, no check of the host's firewall; the
 owner's window does not refresh by itself (Refresh), and it has no kick or ban (the server has them as owner calls:

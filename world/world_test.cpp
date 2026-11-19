@@ -88,7 +88,10 @@ int main(){
          CHECK(again.items().size()==1&&again.items()[0].get("rmt").items()[0].get("c").string()==""&&back.snapshot().dump().find("acct-older")!=std::string::npos);}}
     // Caps: players and objects per player.
     World full([&n]{return "t"+std::to_string(++n);});
-    for(size_t i=0;i<MaxPlayers;++i)CHECK(full.signIn("k"+std::to_string(i),"p","g").status==200);
+    // The cap is the policy's `players`, at most MaxAccounts (too many to fill here, 65536 sign-ins); the setting refuses more.
+    {Policy p=presetPolicy("friends");CHECK(p.players==int64_t(MaxAccounts));bool refused=false;try{setPolicy(p,"players="+std::to_string(MaxAccounts+1));}catch(const std::exception&){refused=true;}
+     CHECK(refused&&p.players==int64_t(MaxAccounts));setPolicy(p,"players=3");full.setPolicy(p);}
+    for(size_t i=0;i<3;++i)CHECK(full.signIn("k"+std::to_string(i),"p","g").status==200);
     CHECK(full.signIn("one-more","p","g").status==403);CHECK(full.signIn("k0","p","g").status==200);
     World big([&n]{return "u"+std::to_string(++n);});auto tk=tokenOf(big.signIn("k","p","g"));
     for(size_t i=0;i<MaxObjectsPerPlayer;++i)big.call(tk,"createObject","{\"t\":\"l\",\"q\":1}",1);
