@@ -27,7 +27,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('help',['MATERIALS','EVENT','RELEASE','AGAIN','RETRY'],['help_test.cpp','help.cpp','discovery.cpp']),
           ('dialog',['CANCEL'],['debugmenu_test.cpp','debugmenu.cpp','dialog.cpp','discovery.cpp']),
           ('mapicons',['AREA','OFF','SELF','PLACE','MANY','STUCK','NAME','SPLIT','WAIT'],['mapicons_test.cpp','mapicons.cpp','serverinfo.cpp','dialog.cpp','discovery.cpp']),
-          ('chat',['CONTROL','LONG','SURROGATE','BACKOFF','REPEAT','NO_CURSOR','REDRAW','EVENT'],['chat_test.cpp','chat.cpp','serverinfo.cpp','dialog.cpp','discovery.cpp']),
+          ('chat',['CONTROL','LONG','SURROGATE','BACKOFF','WAIT','REPEAT','NO_CURSOR','REDRAW','EVENT'],['chat_test.cpp','chat.cpp','serverinfo.cpp','dialog.cpp','discovery.cpp']),
           ('serverinfo',['CONTROL','NAMES','EVENT','WAIT','PAGE'],['serverinfo_test.cpp','serverinfo.cpp','dialog.cpp','discovery.cpp']),
           ('debugmenu',['STUCK','NO_SWITCH','NEXT','FOREVER','EVENT'],['debugmenu_test.cpp','debugmenu.cpp','dialog.cpp','discovery.cpp']),
           ('notice',['BOUND','GROUP_ALONE','LEFT','ALONE_ONCE','NAME_WAIT','WORLD','GAP','AWAY_SETTLE','BACK_PAIRED','LIKE_ICON','JOIN_HOLD','DOWN_ONCE','FREE_DOWN','CALL_GAP','LINK_HOLD','LINK_ONCE','EPISODE_ONCE','SCAN_GAP'],['notice_test.cpp','notice.cpp','nametag.cpp','discovery.cpp','../core/core.cpp']),

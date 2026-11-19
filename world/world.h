@@ -51,6 +51,7 @@ struct Refused : std::runtime_error { int status;Refused(int s,const std::string
 // axes in metres (x, y on the ground, z up); `yaw` the porter's facing in radians (0: +y, pi/2: +x), when known.
 struct Spot { double x=0,y=0,z=0;bool haveYaw=false;double yaw=0;int64_t at=0;std::string name;uint32_t area=0; };
 constexpr size_t MaxSpots=1024;
+constexpr int64_t ChatWaitMinMs=2000,ChatWaitMaxMs=10000;   // how often a game reads the chat: every 2 s, up to 10 s in a crowd
 constexpr int64_t MapFreshSeconds=5,MapWaitMinMs=2000,MapWaitMaxMs=30000;constexpr size_t MapPlayersMax=128;   // who counts as there for the map, how many it lists, how often to ask
 constexpr int64_t SpotFreshSeconds=600,MaxNearMetres=2000,AreaSearchMetres=1500;
 // What may travel between two servers. Text form: "all", "none", or terms separated by ';':

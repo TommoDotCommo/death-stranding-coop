@@ -903,7 +903,7 @@ the game and turns it into text with the player's keyboard layout; dead keys are
 game, so a key held when typing began does not stay down. The mod's own keys do nothing while typing.
 
 The lines travel over HTTP on a thread of their own: `GET`/`POST .../coop/chat` with the `strand_token`
-(`../world/README.md`, "Text chat"), read every 2 s. A line refused is told in the info log (too many lines, chat off). On a
+(`../world/README.md`, "Text chat"), read every 2 s, or up to every 10 s when the server asks in a crowd. A line refused is told in the info log (too many lines, chat off). On a
 server whose rules say `chat` off, Y only says so. Requires `online_server` and `strand_token`. `chat.h`; `mod_status` has `chat`
 (`ready`, `on`, `typing`, `reads`, `sent`, `refused`, `received`). Each change of the line hides the caption and shows it
 again in one tick; shown over itself the game would fade the old one out first. The lab's `puppet.chat` takes `open`, `type WORD` (`_` for a

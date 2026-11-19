@@ -915,7 +915,7 @@ ban). A game talks with the notice token its launcher took for the player, in th
 
 | Call | Answer |
 |---|---|
-| `GET …/coop/chat[?since=N]` | `format` 1, `on`, `next` (what to give as `since` next time) and `lines` (`n`, `name`, `text`), at most 50, from `since` on. Without `since`: no lines, so a game that joins sees no history |
+| `GET …/coop/chat[?since=N]` | `format` 1, `on`, `wait_ms` (how long a game should leave between reads: 2 s, up to 10 s for a crowd), `next` (what to give as `since` next time) and `lines` (`n`, `name`, `text`), at most 50, from `since` on. Without `since`: no lines, so a game that joins sees no history |
 | `POST …/coop/chat` `{"text":...}` | `format` 1 and the line's `n`. 403 `chat-off` or a bad token, 400 `chat-text`, 429 `chat-rate` |
 
 A line is 1 to 160 characters of well-formed UTF-8 without control characters, trimmed of spaces, under the name the player

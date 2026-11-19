@@ -55,6 +55,9 @@ int main(){
         CHECK(presetPolicy("friends").chat=="on"&&presetPolicy("solo").chat=="off"&&presetPolicy("public").chat=="off");
         Server off("friends",{"chat=off"});auto t=off.token("ann","Ann");auto r=off.say(t,"x");CHECK(r.status==403&&r.body.find("chat-off")!=std::string::npos&&!off.read(t).get("on").boolean());
         Server s;auto ann=s.token("ann","Ann");CHECK(s.say(ann,"x").status==200);s.w.setPlayer(playerId("ann"),"banned=yes");CHECK(s.say(ann,"y").status==403&&s.raw("GET","/s3cret/coop/chat","",{{"x-coop-token",ann}}).status==403);}
+    {   // A crowd reads less often, within limits: nobody waits long for a line.
+        Server s;auto t=s.token("ann","Ann");auto wait=[&](size_t on){s.w.setOnline(std::vector<std::string>(on,"P"));return s.read(t).get("wait_ms").integer();};
+        CHECK(wait(0)==ChatWaitMinMs&&wait(100)==ChatWaitMinMs&&wait(500)==5000&&wait(1024)==ChatWaitMaxMs&&wait(5000)==ChatWaitMaxMs);}
     if(failures){std::fprintf(stderr,"%u chat failures\n",failures);return 1;}
     std::puts("chat tests passed");
 }
