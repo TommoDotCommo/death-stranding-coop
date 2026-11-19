@@ -1047,7 +1047,9 @@ says the others put into a paver, counting this player's own deliveries, and not
 Every 10 s the mod reads the server's totals the game keeps (the highway ledger's map), and gives each paver still
 without its road the rest with the game's own routine (`roads.h` give): less what the game took, less what the mod gave
 before (kept per server in `roads-given-<hash>.txt` beside the config), never past what the paver misses. Log lines
-`ROADSRV`. Tests `roadshare_test.cpp` (mutants BUILT, TWICE, PAST_NEED); config mutant CONFIG_GROUP_ROADS. Not run live yet.
+`ROADSRV`. Tests `roadshare_test.cpp` (mutants BUILT, TWICE, PAST_NEED); config mutant CONFIG_GROUP_ROADS. Live once
+(2026-11-20): the game asks the server once, as the world loads; five pavers were given the stand-in's materials and
+one reached its road.
 
 **Story bosses:** a fight that runs while the game's BossBattle state is set (a whale, a titan) is never offered to
 the players near, and a game in one joins nobody's: a visitor's copy would be an ordinary catcher (fights.h, mutant
