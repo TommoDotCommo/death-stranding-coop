@@ -6564,7 +6564,7 @@ The label under the cursor comes from the call at `0x319c5e6` to `0x31c5fd0(item
 to set the title of its own icons (id top byte `0x4d`). `mapicons.cpp` retargets both calls through stubs in the padding at
 `0x31ba24b` and `0x31b9cfb`. No marker is made, so none of this is saved.
 
-## Keeping structures out of the world (static 2026-11-19; to be confirmed live)
+## Keeping structures out of the world (static 2026-11-19; live the same day)
 
 Manager `M = [image+0x7bf4960]`; objects: count `M+0x56a258`, pointers `M+0x56a260`. In an object: id `+0x30`, type `+0x34`, state
 `+0x36` (0 Inactive, 1 Unrealized, 2 Realized, 3 Removing, 4 being realized), body `+0x88`, owner `+0xb2`, online id `+0xb8`,
@@ -6581,7 +6581,8 @@ leads the six calls through a stub in the padding at `0x2c362f0`.
 Leaving records out of a save: `0x2ccef00` calls the records' writer `0x2ccec10(M, stream)` once (`0x2ccef1f`, `e8`). The writer
 skips a record with `+0xad & 8` (also owner 0 with `+0xb1 & 2`). `serverworld.cpp` leads that call through a stub in the padding at
 `0x2c92480` (20 bytes of `cc` from `0x2c9247c`), sets the bit on the server's records, calls the writer and clears the bit.
-Static; to be confirmed live (the loader with a save written so, and no record of the server's after it).
+Live (2026-11-19): a save written so left out the server's two records, and the game that loaded it later, away from the
+server, had neither and every record of its own.
 
 The load wrapper `0x2c9bc70(rcx, rdx, r8)`, called at `0x2e11b75`, is followed through a stub at `0x2c35420`: the player's own
 records are numbered `10000 + ++[M+0x572d34]`, and the count is saved, so its value after the load separates the save's records

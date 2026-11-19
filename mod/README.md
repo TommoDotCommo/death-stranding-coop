@@ -951,7 +951,14 @@ What the server handed stays out of the save the other way round: a record of an
 server, or one it lists, is left out of every save written while the game is here, so the save played alone later does not
 hold the server's world. The player's own records are saved whole, whatever their id. The game's records' save writer
 (`0x2ccec10`, one call) skips a record with bit 8 of `+0xad`; the mod sets that bit on those records only while the writer
-runs and clears it after (`game_offsets.md`). Built and tested without a game; not run live yet.
+runs and clears it after (`game_offsets.md`).
+
+Live once (2026-11-19, two games on one server under public rules, Episode 3 save): the save's 76 structures stayed Inactive
+and the game's 144 places stood; the server's bridge and rain shelter stood in both games; a save asked in each game left
+exactly those two out (`SERVERWORLD save: left out 2`), and the visitor's game opened later with the server out of reach held
+neither; a generator built there was saved with this server's id and stood once at the next load. What another player builds
+reaches a game only when it loads that area, and only for the kinds the game asks for there (`../world/README.md`, "Which
+objects a game is handed"): a generator never does.
 
 `serverworld.h`; `mod_status` has `server_world` (`on`, `listed`, `reads`, `asked`, `refused`, `loads`, `saves`,
 `left_out`: records left out of the last save); the log says `SERVERWORLD on`, after each save how many records were left out

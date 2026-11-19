@@ -34,6 +34,7 @@ the game, and it never will. You need your own copy of the game.
 | 🪜 | **Ladders and cairns** one player builds appear in the others' worlds | ✅ |
 | 🌉 | **Other players' bridges** built as soon as they arrive (option `build_received`) | ✅ |
 | ⛺ | **Other players' rain shelters** built and kept (option `build_received`) | ✅ |
+| 🏝️ | **Only the server's world** (rule `world`, on under public rules): the structures in your save stay hidden while you play there and are all back without it; your own builds there come back from the server; nothing of the server's goes into your save | ✅ |
 | 📤 | **Offering what you built before** (option `offer_strand`): the structures already in your save go to the server, one at a time, when you and the server say so | ✅ |
 | 🙋 | **The builder's name and likes** over a structure, as the server names them | ✅ |
 | 🧳 | **Collections**: select what you built, share it as one line of text (`DSK1-...`), and import someone's here or at its original place ([docs/COLLECTIONS.md](docs/COLLECTIONS.md)) | 🧪 |

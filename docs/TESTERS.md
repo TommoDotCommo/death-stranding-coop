@@ -34,7 +34,9 @@ bugs, crashes and features that do not work yet.
 3. The launcher shows the server's rules and asks two things: whether to share what you build there, and whether the
    server may take the structures already in your save. Choose, then **Join with these choices**. The game starts.
 4. Play as usual. Players you meet near you appear in your world with their nicknames; structures other testers built
-   (once the organiser has accepted them) appear in yours.
+   (once the organiser has accepted them) appear in yours. On a server with public rules you see only the server's
+   structures: the ones in your save are hidden while you play there and are all back when you play without it. What
+   another tester builds appears the next time your game loads that area, and some kinds (generators) not at all yet.
 
 **Meeting the others.** Everyone plays their own save, and you see only the players near you in the game. For a
 test session the organiser names one test save (for example *Episode 3: Lake Knot distribution centre*): before you
