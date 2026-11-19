@@ -151,6 +151,9 @@ std::string config(const Session& s) {
             // With the token: the notices, and the save's older strand offered while the server says his offer_old is
             // yes (../mod/README.md, "Offering your existing strand"); the server's word decides, so it is always on.
             +(s.noticeToken.empty()?std::string():std::string(",\"strand_notices\":true")
+#ifndef MUTANT_GROUP_NO_ENEMIES
+                +",\"group_enemies\":true"   // MULEs down and camps alarmed through the server; its rule `enemies` decides
+#endif
 #ifndef MUTANT_GROUP_NO_CARGO
                 +",\"group_cargo\":true"   // cargo set down shared through the server; its rule `cargo` decides
 #endif

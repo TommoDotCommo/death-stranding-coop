@@ -67,6 +67,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "livebuild.h"
 #include "groupcargo.h"
 #include "othervehicles.h"
+#include "groupevents.h"
 #include "freebuild.h"
 #include "strand_notices.h"
 #include "received.h"
@@ -2777,6 +2778,52 @@ struct Runtime final:ds::Transport {
             std::ostringstream o;o<<"ENEMY a MULE went down here: kind "<<int(d.kind)<<" -> partner\n";note(o.str().c_str());
         }
     }
+    // --- MULEs down and camps alarmed in group play (groupevents.h): with group_enemies, the same detection as the
+    // partner's (enemies.h Sync, CampSync), told to `…/coop/events` and read from it; the others' applied with the
+    // game's own defeat and alert. After a load, once it has settled, every MULE down here is told once.
+    std::unique_ptr<mod::groupevents::Courier> enemyCourier;uint64_t groupEnemyAt=0,groupEnemyPorter=0,groupEnemySettled=0;bool groupEnemyTell=false;
+    void tickGroupEnemies(uint64_t now){
+        if(!config.groupEnemies||config.strandToken.empty()||!sampler)return;
+        if(!enemyTried){try{campAlert=mod::enemies::nativeAlert(*sampler);}catch(const std::exception&){}}
+        if(!enemyTried){enemyTried=true;try{enemyDefeat=mod::enemies::nativeDefeat(*sampler);}catch(const std::exception& e){note((std::string("ENEMY unavailable: ")+e.what()+"\n").c_str());}}
+        if(!enemyDefeat)return;
+        if(!enemyCourier){
+            auto at=serverAt();if(!at)return;
+            const std::string target=at->base+"/coop/events",token=config.strandToken;const uint32_t address=at->address;const uint16_t port=at->port;
+            enemyCourier=std::make_unique<mod::groupevents::Courier>(
+                [=](const std::string& since){auto r=mod::strand::get(address,port,target+(since.empty()?std::string():"?since="+since),token,mod::strand::ConnectMs);return mod::groupevents::Result{r.status,r.body};},
+                [=](const std::string& body){auto r=mod::strand::post(address,port,target,token,body,mod::strand::ConnectMs);return mod::groupevents::Result{r.status,r.body};},
+                [this](const std::string& s){note(s.c_str());});
+            note("ENEMYSRV on: MULEs down and camps alarmed are shared through the server\n");}
+        auto reads=enemyCourier->reads();
+        if(reads.empty()&&now-groupEnemyAt<500)return;
+        groupEnemyAt=now;
+        if(!cache.available||cache.gated||inEvent)return;
+        auto mules=mod::enemies::readMules(*sampler,sampler->base);if(mules.empty())return;
+        auto camps=campAlert?mod::enemies::readCamps(*sampler,sampler->base):std::vector<mod::enemies::Camp>{};
+        for(auto& a:reads)for(auto& e:a.events){
+            if(e.kind=="camp"){if(auto* c=campSync.wanted(camps,uint64_t(e.key))){campSync.applied(uint64_t(e.key));campAlert(c->uuid);++enemyApplied;note("ENEMY another player's camp alarm: this game's camp is put on alert\n");}continue;}
+            if(e.kind!="mule")continue;
+            mod::enemies::Down d{uint64_t(e.key),uint8_t(e.value)};
+            if(auto* m=enemySync.wanted(mules,d)){
+                enemySync.applied(d.key);enemyDefeat(m->address,d.kind);++enemyApplied;
+                if(d.kind!=mod::enemies::Fainted&&d.kind!=mod::enemies::Dead)enemyRetry[d.key]=now;
+                std::ostringstream o;o<<"ENEMY another player put a MULE down: id "<<std::hex<<m->id<<std::dec<<" kind "<<int(d.kind)<<"\n";note(o.str().c_str());}}
+        for(auto it=enemyRetry.begin();it!=enemyRetry.end();){
+            if(now-it->second<1000){++it;continue;}
+            for(auto& m:mules)if(mod::enemies::key(m.uuid)==it->first&&mod::enemies::condition(m.state,m.flags)==mod::enemies::Up&&m.state!=5){
+                enemyDefeat(m.address,mod::enemies::Fainted);note("ENEMY another player's MULE still stood here: made to faint instead\n");}
+            it=enemyRetry.erase(it);}
+        std::vector<mod::groupevents::Event> out;
+        auto anchor=anchorNow();
+        if(anchor.entity!=groupEnemyPorter){groupEnemyPorter=anchor.entity;groupEnemySettled=now+10000;groupEnemyTell=true;}
+        if(groupEnemyTell&&groupEnemyPorter&&now>=groupEnemySettled){groupEnemyTell=false;
+            for(auto& d:mod::enemies::Sync::everything(mules))out.push_back({"mule",int64_t(d.key),d.kind});
+            if(!out.empty())note(("ENEMY "+std::to_string(out.size())+" MULEs are down in this world -> server\n").c_str());}
+        for(auto k:campSync.observe(camps)){out.push_back({"camp",int64_t(k),mod::enemies::CampAlert});note("ENEMY a camp went on alert here -> server\n");}
+        for(auto& d:enemySync.observe(mules)){out.push_back({"mule",int64_t(d.key),d.kind});std::ostringstream o;o<<"ENEMY a MULE went down here: kind "<<int(d.kind)<<" -> server\n";note(o.str().c_str());}
+        enemyCourier->send(std::move(out));
+    }
     // MULE positions (enemy_poses.h): opt-in share_enemy_positions, with share_enemies. The host's game says where the
     // MULEs near either player stand (the core's unreliable ENEMIES sample, five a second); the guest moves its own
     // MULEs there with the MULE actor's own teleport, except the ones its porter is fighting hand to hand.
@@ -3922,6 +3969,7 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickStructures(now);
             stage="enemies";stages.enter("enemies",mod::nowUs());
             if(twin&&gameContext)tickEnemies(now);
+            if(gameContext)tickGroupEnemies(now);
             if(twin&&gameContext)tickEnemyPositions(now);
             if(gameContext)tickMuleGoto(now);
             stage="bts";stages.enter("bts",mod::nowUs());

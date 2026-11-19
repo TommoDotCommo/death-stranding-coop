@@ -203,6 +203,7 @@ int main() {
       auto token=withKeys(online,"\"strand_notices\":true,\"strand_token\":\"abcDEF123\"");
       assert(!mod::parseConfig(token).groupCargo&&mod::parseConfig(withKeys(token,"\"group_cargo\":true")).groupCargo);
       assert(refused(withKeys(online,"\"group_cargo\":true"))&&refused(withKeys(game,"\"group_cargo\":true")));
+      assert(mod::parseConfig(withKeys(token,"\"group_enemies\":true")).groupEnemies&&refused(withKeys(online,"\"group_enemies\":true")));
       // Other players' vehicles (othervehicles.h): group play with others drawn.
       assert(!mod::parseConfig(withKeys(game,"\"others\":8")).othersVehicles&&mod::parseConfig(withKeys(game,"\"others\":8,\"others_vehicles\":true")).othersVehicles);
       assert(refused(withKeys(game,"\"others_vehicles\":true")));   // no others drawn
