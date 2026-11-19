@@ -777,7 +777,7 @@ struct Runtime final:ds::Transport {
         if(truck){auto p=mod::puppet::readEntityPose(*sampler,truck);if(p.available)at=mod::puppet::transform(p);}
         if(here&&at){double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1],dz=here->position[2]-at->position[2];l.distance=std::sqrt(dx*dx+dy*dy+dz*dz);}
         l.key=passengerEdge.pressed(modKey(config.passengerKey),now);
-        if(l.key&&!rider.riding()&&towWhileDriving())l.key=false;   // driving: the key tows instead
+        if(l.key&&localVehicle.riding)l.key=false;   // driving: the key tows (tickTow)
         l.mover=passengerApi.state(anchor.entity);
         if(l.key&&!rider.riding()&&!(l.permitted&&l.partnerInTruck&&l.distance<=mod::passenger::Reach&&l.mover==mod::passenger::Free)){
             std::ostringstream o;o<<"PASSENGER key: not now (permitted "<<l.permitted<<", partner in a truck or on a bike "<<l.partnerInTruck<<", distance "<<l.distance<<" m, mover "<<int(l.mover)<<")\n";note(o.str().c_str());}
@@ -1347,6 +1347,11 @@ struct Runtime final:ds::Transport {
     // calls it; live 2026-11-20: linked to the truck it reads mode 2 and the truck's id as puller, and follows it as
     // driven); pressed again by a towed one (mode 2), it is let go (puller 0). Never a cart drawn for another player.
     static constexpr double TowReach=8;
+    mod::marker::KeyEdge towEdge;
+    void tickTow(uint64_t now){
+        if(!config.passengerKey||!localVehicle.riding)return;   // only while this porter drives: on foot the key is the passenger's
+        if(towEdge.pressed(modKey(config.passengerKey),now))towWhileDriving();
+    }
     bool towWhileDriving(){
         if(!localVehicle.riding||!localVehicle.entity||!sampler)return false;
 #ifdef _WIN32
@@ -1425,7 +1430,7 @@ struct Runtime final:ds::Transport {
         if(chosen){if(placed.count(chosen->entity))at=placed[chosen->entity];else{auto p=mod::puppet::readEntityPose(*sampler,chosen->entity);if(p.available)at=mod::puppet::transform(p);}}
         if(here&&at){double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1];l.distance=std::sqrt(dx*dx+dy*dy);}   // across the ground, as the choice is: the hold brings a porter above down onto it
         l.key=passengerEdge.pressed(modKey(config.passengerKey),now);
-        if(l.key&&!rider.riding()&&towWhileDriving())l.key=false;   // driving: the key tows instead
+        if(l.key&&localVehicle.riding)l.key=false;   // driving: the key tows (tickTow)
         l.mover=passengerApi.state(anchor.entity);
         if(l.key&&!rider.riding()&&!(l.permitted&&l.partnerInTruck&&l.distance<=mod::passenger::Reach&&l.mover==mod::passenger::Free)){
             std::ostringstream o;o<<"PASSENGER key: not now (permitted "<<l.permitted<<", a driven truck or bike near "<<l.partnerInTruck<<", distance "<<l.distance<<" m, mover "<<int(l.mover)<<"; "<<cs.size()<<" candidates";
@@ -4177,7 +4182,7 @@ struct Runtime final:ds::Transport {
             stage="server page";stages.enter("server page",mod::nowUs());
             if(gameContext)tickServerInfo(now);
             stage="map";stages.enter("map",mod::nowUs());
-            if(gameContext){tickArea();tickPlayerMap(now);tickHudMarkers(now);tickServerWorld(now);}
+            if(gameContext){tickArea();tickPlayerMap(now);tickHudMarkers(now);tickServerWorld(now);tickTow(now);}
             stage="chat";stages.enter("chat",mod::nowUs());
             if(gameContext)tickChat(now);
             stage="notices";stages.enter("notices",mod::nowUs());
