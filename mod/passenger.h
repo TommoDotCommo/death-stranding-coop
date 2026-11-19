@@ -50,6 +50,8 @@ struct Box { double halfRight=1.5,halfForward=3.8,height=3.3,margin=0.15; };
 struct Seat { const char* helper;float right,forward,up;bool place=false; };
 // The rider's transform for a `place` seat: the vehicle's, moved by the seat's offsets along its own axes.
 Transform seatPlace(const Transform& vehicle,const Seat&);
+// CartKind: a floating carrier another player tows (group play): the rider stands on it, held at its place.
+constexpr uint8_t CartKind=9;
 std::optional<Seat> seat(uint8_t vehicleKind);
 // The keep-out box of a kind (the truck's, a bike's much smaller one); nothing for other kinds.
 std::optional<Box> box(uint8_t vehicleKind);

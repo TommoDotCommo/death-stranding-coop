@@ -41,7 +41,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('wheels',['ROOT','LONG_WAY'],['wheels_test.cpp','wheels.cpp']),
           ('controls',['ROSE','PULSE_HELD','SHORT','BLEND_KINDS','BLEND_WRAP','AGGREGATE'],['controls_test.cpp','controls.cpp','discovery.cpp']),
           ('voidout',['LOAD','ECHO','TWICE','CLASS','WRITABLE'],['voidout_test.cpp','voidout.cpp','discovery.cpp']),
-          ('passenger',['TALL','FAR','STAY','BIKE'],['passenger_test.cpp','passenger.cpp','discovery.cpp']),
+          ('passenger',['TALL','FAR','STAY','BIKE','CART'],['passenger_test.cpp','passenger.cpp','discovery.cpp']),
           ('place',['ORDER','RESTLESS'],['carry_place_test.cpp','carry_place.cpp','structures.cpp','discovery.cpp']),
           ('road',['TOTAL_ADDS','LOAD','LESS','ECHO','TWICE','AMOUNT'],['roads_test.cpp','roads.cpp','discovery.cpp']),
           ('own',['IDBOUND','LIST','PENDING','OWNER','ROAD','OTHERS','FAILED','LETTER','AREA','TWICE','LIKES'],['own_strand_test.cpp','own_strand.cpp','structures.cpp','discovery.cpp']),

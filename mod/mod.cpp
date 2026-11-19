@@ -1323,7 +1323,10 @@ struct Runtime final:ds::Transport {
         std::vector<mod::othervehicles::Candidate> cs;
         for(auto& v:fleet->vehicles()){
             auto p=mod::puppet::readEntityPose(*sampler,v.entity);if(!p.available)continue;
-            auto t=mod::puppet::transform(p);cs.push_back({v.id,v.entity,v.kind,v.driven,t.position});}
+            auto t=mod::puppet::transform(p);cs.push_back({v.id*16+v.kind,v.entity,v.kind,v.driven,t.position});}
+        // The floating carriers other players tow, shown here: each one a place to stand on while he pulls it.
+        if(!otherCarts.empty())for(auto& c:mod::carts::read(*sampler,sampler->base))for(auto& d:otherCarts)if(d.second.ids().count(c.id)&&c.entity)
+            cs.push_back({d.first*16+mod::passenger::CartKind,c.entity,mod::passenger::CartKind,true,c.position});
         auto chosen=here?mod::othervehicles::choose(cs,here->position,rider.riding()?1e9:mod::passenger::Reach,rider.riding()?groupRideId:0):std::nullopt;
         mod::passenger::Look l;
         l.permitted=!event&&(rider.riding()||!cache.local.vehicle);
@@ -1339,7 +1342,7 @@ struct Runtime final:ds::Transport {
         switch(rider.tick(l)){
             case mod::passenger::Do::GetOn:
                 if(seat&&(seat->place?(at&&passengerApi.hold(anchor.entity,mod::passenger::seatPlace(*at,*seat))):passengerApi.attach(anchor.entity,rider.truck(),*seat))){if(seat->place)heldSeat=*seat;}
-                if(seat&&passengerApi.state(anchor.entity)!=mod::passenger::Free){groupRideId=chosen->id;note(("PASSENGER on player "+std::to_string(chosen->id)+(chosen->kind==ds::Truck?"'s truck\n":"'s bike\n")).c_str());}
+                if(seat&&passengerApi.state(anchor.entity)!=mod::passenger::Free){groupRideId=chosen->id;note(("PASSENGER on player "+std::to_string(chosen->id/16)+(chosen->kind==ds::Truck?"'s truck\n":chosen->kind==mod::passenger::CartKind?"'s floating carrier\n":"'s bike\n")).c_str());}
                 else{rider.forget();note("PASSENGER refused by the game\n");}
                 break;
             case mod::passenger::Do::GetOff:{

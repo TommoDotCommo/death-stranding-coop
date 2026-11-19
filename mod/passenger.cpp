@@ -32,6 +32,9 @@ std::optional<Seat> seat(uint8_t kind){
 #ifndef MUTANT_PASSENGER_BIKE
     if(kind==1)return Seat{"",0,float(-(BikeDriverBehind+BikeBehind)),0.1f,true};
 #endif
+#ifndef MUTANT_PASSENGER_CART
+    if(kind==CartKind)return Seat{"",0,0,0.85f,true};
+#endif
     return std::nullopt;
 }
 Transform seatPlace(const Transform& v,const Seat& s){

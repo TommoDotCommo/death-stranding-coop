@@ -40,6 +40,7 @@ int main(){
       {Transform v;v.position={10,20,30};v.rotation={0,1,0, -1,0,0, 0,0,1};   // facing -x
        auto p=seatPlace(v,*bike);CHECK(std::fabs(p.position[0]-(10-double(bike->forward)))<1e-6&&std::fabs(p.position[1]-20)<1e-6&&std::fabs(p.position[2]-(30+double(bike->up)))<1e-6&&p.rotation==v.rotation);}
       CHECK(!seat(0)&&!seat(3)&&!box(0)&&!box(3));
+      {auto cart=seat(CartKind);CHECK(cart&&cart->place&&cart->up>0.5f&&cart->forward==0&&cart->right==0&&!box(CartKind));}   // standing on another player's carrier
       CHECK(box(2)&&box(1)&&box(1)->halfRight<box(2)->halfRight&&box(1)->halfForward<box(2)->halfForward);
       Transform t;t.position={100,200,10};t.rotation={1,0,0, 0,1,0, 0,0,1};
       CHECK(pushOut(t,{100.2,200.5,10.2},*box(1)));CHECK(!pushOut(t,{100.6,200.5,10.2},*box(1)));CHECK(pushOut(t,{100.6,200.5,10.2},*box(2)));
