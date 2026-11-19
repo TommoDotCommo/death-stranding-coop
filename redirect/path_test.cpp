@@ -153,5 +153,14 @@ int main() {
         Policy bad_root{L"c:\\users\\player\\appdata\\local\\inst",L"c:\\steam",{{L"c:\\users\\player\\appdata\\local",L"c:\\users\\player\\appdata\\local\\inst\\local"}}};
         if(map_query(bad_root,L"c:\\users\\player\\appdata\\local\\x").action!=Action::deny) {++bad;std::wcerr<<L"failed: instance inside a real root\n";}
     }
+    {   // The game's own settings file refused for a DLSS value it never set: only upscaler values below zero change.
+        std::string own="\"rendering_width\" \"2560\"\r\n\"window_left\" \"-8\"\r\n\"postprocess_dof\" \"0\"\r\n\"amd_fsr2_mode\" \"-1\"\r\n"
+                        "\"nvidia_dlss_sharpness\" \"50\"\r\n\"nvidia_dlss_quality\" \"-1\"\r\n\"intel_xess_mode\" \"-2\"\r\n\"intel_xess\" \"0\"";
+        std::string fixed="\"rendering_width\" \"2560\"\r\n\"window_left\" \"-8\"\r\n\"postprocess_dof\" \"0\"\r\n\"amd_fsr2_mode\" \"0\"\r\n"
+                          "\"nvidia_dlss_sharpness\" \"50\"\r\n\"nvidia_dlss_quality\" \"0\"\r\n\"intel_xess_mode\" \"0\"\r\n\"intel_xess\" \"0\"";
+        if(repair_settings(own)!=fixed){++bad;std::wcerr<<L"failed: settings repair\n";}
+        if(repair_settings(fixed)!=fixed){++bad;std::wcerr<<L"failed: settings repair changes a good file\n";}
+        if(repair_settings("")!=""||repair_settings("\"nvidia_dlss_quality\" \"-")!="\"nvidia_dlss_quality\" \"-"){++bad;std::wcerr<<L"failed: settings repair of a cut file\n";}
+    }
     std::cout<<"failures="<<bad<<"\n"; return bad?1:0;
 }

@@ -1060,6 +1060,16 @@ void install_redirect(void* self,bool releaseSession) {
         if(!path.empty()&&slash!=std::wstring::npos){
             auto real=path.substr(0,slash)+L"\\settings.cfg",target=policy.instance+L"\\settings.cfg";policy.files.push_back({real,target});
             if(safe_tree(real,false)&&safe_tree(target,true))::CopyFileW(real.c_str(),target.c_str(),TRUE);   // only when this copy has none yet
+            // A value the game wrote but refuses at start would return every setting to its default (redirect.h).
+            HANDLE f=safe_tree(target,true)?::CreateFileW(target.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr):INVALID_HANDLE_VALUE;
+            if(f!=INVALID_HANDLE_VALUE){
+                static char bytes[16385];DWORD n=0;bool ok=ReadFile(f,bytes,sizeof(bytes),&n,nullptr);CloseHandle(f);
+                std::string text(bytes,ok&&n<sizeof(bytes)?n:0),fixed=redirect::repair_settings(text);
+                if(fixed!=text){
+                    HANDLE w=::CreateFileW(target.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);DWORD put=0;
+                    if(w!=INVALID_HANDLE_VALUE){WriteFile(w,fixed.data(),(DWORD)fixed.size(),&put,nullptr);CloseHandle(w);}
+                }
+            }
         }
     }
     {   // The game's own folder is admitted on every path, not only for a release ticket: with the data folder
