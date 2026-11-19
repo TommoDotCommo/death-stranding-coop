@@ -1113,7 +1113,7 @@ struct Runtime final:ds::Transport {
     // work alone when the code differs.
     mod::received::Early receivedEarly=mod::received::Early::Off;
     // A world that is the server's (serverworld.h): set up before any save loads, so no record of it ever stands.
-    mod::serverworld::Filter* serverWorld=nullptr;std::unique_ptr<mod::serverworld::Link> serverWorldLink;uint64_t serverWorldNotedAt=0,serverWorldRefused=0;
+    mod::serverworld::Filter* serverWorld=nullptr;std::unique_ptr<mod::serverworld::Link> serverWorldLink;uint64_t serverWorldNotedAt=0,serverWorldRefused=0,serverWorldSaves=0;
     void serverWorldPatch() {
         if(config.serverWorld.empty()||!sampler||serverWorld)return;
 #ifdef _WIN32
@@ -1132,6 +1132,7 @@ struct Runtime final:ds::Transport {
             serverWorldLink=std::make_unique<mod::serverworld::Link>([=]{auto r=mod::strand::get(address,port,target,token,mod::strand::ConnectMs);return mod::serverworld::Result{r.status,r.body};},*serverWorld,config.serverWorld,[this](const std::string& s){note(s.c_str());});
         }
         const auto seen=mod::serverworld::stats();
+        if(seen.saves!=serverWorldSaves){serverWorldSaves=seen.saves;note(("SERVERWORLD save: left out "+std::to_string(seen.leftOut)+" of the server's records\n").c_str());}
         if(now>=serverWorldNotedAt+60000&&seen.refused!=serverWorldRefused){serverWorldNotedAt=now;serverWorldRefused=seen.refused;std::ostringstream o;o<<"SERVERWORLD kept out: asked "<<seen.asked<<" refused "<<seen.refused<<" loads "<<seen.loads<<" saves "<<seen.saves<<" left out of the last "<<seen.leftOut<<" listed "<<serverWorld->listed()<<"\n";note(o.str().c_str());}
     }
     void receivedPatch() {

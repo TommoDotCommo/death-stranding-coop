@@ -954,8 +954,8 @@ hold the server's world. The player's own records are saved whole, whatever thei
 runs and clears it after (`game_offsets.md`). Built and tested without a game; not run live yet.
 
 `serverworld.h`; `mod_status` has `server_world` (`on`, `listed`, `reads`, `asked`, `refused`, `loads`, `saves`,
-`left_out`: records left out of the last save); the log says `SERVERWORLD on` and, each minute it changed, how many were kept
-out.
+`left_out`: records left out of the last save); the log says `SERVERWORLD on`, after each save how many records were left out
+(`SERVERWORLD save: left out N`), and, each minute it changed, how many were kept out.
 
 ## Strand notices (`strand_notices`, off by default; live once, 2026-11-17)
 
