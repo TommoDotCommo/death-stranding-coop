@@ -68,6 +68,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "groupcargo.h"
 #include "othervehicles.h"
 #include "groupevents.h"
+#include "roadshare.h"
 #include "freebuild.h"
 #include "strand_notices.h"
 #include "received.h"
@@ -2778,6 +2779,28 @@ struct Runtime final:ds::Transport {
             std::ostringstream o;o<<"ENEMY a MULE went down here: kind "<<int(d.kind)<<" -> partner\n";note(o.str().c_str());
         }
     }
+    // --- Roads paved together in group play (roadshare.h): every 10 s, what the server told the game the others put into
+    // its pavers, less what the game took and what the mod gave before, given into the pavers still without their road.
+    mod::roadshare::Ledger roadLedger;bool roadLedgerRead=false;uint64_t groupRoadAt=0;size_t roadAskedNoted=size_t(-1);
+    std::filesystem::path roadLedgerPath() const {
+        uint64_t h=1469598103934665603ull;for(unsigned char c:config.onlineServer){h^=c;h*=1099511628211ull;}
+        std::ostringstream n;n<<"roads-given-"<<std::hex<<h<<".txt";return modFolder.empty()?std::filesystem::path():modFolder/n.str();}
+    void tickGroupRoads(uint64_t now){
+        if(!config.groupRoads||!sampler||now<groupRoadAt+10000)return;
+        groupRoadAt=now;
+        if(!cache.available||cache.gated||inEvent)return;
+        if(!roadTried){roadTried=true;try{roadApi=mod::roads::nativeApi(*sampler);}catch(const std::exception& e){note((std::string("ROAD unavailable: ")+e.what()+"\n").c_str());}}
+        if(!roadApi.give||!roadApi.missing)return;
+        if(!roadLedgerRead){roadLedgerRead=true;auto p=roadLedgerPath();if(!p.empty()){std::ifstream f(p);std::stringstream b;b<<f.rdbuf();roadLedger=mod::roadshare::Ledger::load(b.str());}}
+        auto asked=mod::roadshare::readAsked(*sampler,sampler->base);
+        if(asked.size()!=roadAskedNoted){roadAskedNoted=asked.size();note(("ROADSRV the game holds "+std::to_string(asked.size())+" totals from the server\n").c_str());}
+        if(asked.empty())return;
+        auto gives=mod::roadshare::plan(asked,mod::roads::readPavers(*sampler,sampler->base),roadApi.missing,roadLedger);
+        for(auto& g:gives){
+            roadApi.give(g.paver,g.set);
+            std::ostringstream o;o<<"ROADSRV gave paver "<<g.id<<" the others' materials:";for(auto n:g.set)o<<" "<<n;o<<"\n";note(o.str().c_str());}
+        if(!gives.empty()){auto p=roadLedgerPath();if(!p.empty()){std::ofstream f(p,std::ios::trunc);f<<roadLedger.dump();}}
+    }
     // --- MULEs down and camps alarmed in group play (groupevents.h): with group_enemies, the same detection as the
     // partner's (enemies.h Sync, CampSync), told to `…/coop/events` and read from it; the others' applied with the
     // game's own defeat and alert. After a load, once it has settled, every MULE down here is told once.
@@ -3975,7 +3998,7 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickStructures(now);
             stage="enemies";stages.enter("enemies",mod::nowUs());
             if(twin&&gameContext)tickEnemies(now);
-            if(gameContext)tickGroupEnemies(now);
+            if(gameContext){tickGroupEnemies(now);tickGroupRoads(now);}
             if(twin&&gameContext)tickEnemyPositions(now);
             if(gameContext)tickMuleGoto(now);
             stage="bts";stages.enter("bts",mod::nowUs());
