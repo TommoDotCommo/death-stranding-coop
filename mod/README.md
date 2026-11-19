@@ -964,7 +964,7 @@ objects a game is handed"): a generator never does.
 `left_out`: records left out of the last save); the log says `SERVERWORLD on`, after each save how many records were left out
 (`SERVERWORLD save: left out N`), and, each minute it changed, how many were kept out.
 
-## What others build, at once (with `build_received`; not run in a game yet)
+## What others build, at once (with `build_received`; live once, 2026-11-19)
 
 The game asks the server for other players' structures only when it loads an area, and only for some kinds, so in group
 play what another player builds would appear at your next load of that area, or never (a generator). With
