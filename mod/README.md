@@ -968,7 +968,7 @@ objects a game is handed"): a generator never does.
 
 The game asks the server for other players' structures only when it loads an area, and only for some kinds, so in group
 play what another player builds would appear at your next load of that area, or never (a generator). With
-`build_received`, while the game is signed in to the server, the mod reads `…/coop/built` (`../world/README.md`, "What
+`build_received`, with the notice token (whether or not the game's own sign-in holds), the mod reads `…/coop/built` (`../world/README.md`, "What
 others build, at once") with the notice token on a thread of its own, at the server's pace (3 s), and once a second on
 the game thread asks the game's construction queue for each structure it lacks within 2 km of the porter, nearest
 first, four at a time: the Net variant at the server's place and rotation, with the server's online id on the record and

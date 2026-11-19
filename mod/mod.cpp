@@ -1158,7 +1158,9 @@ struct Runtime final:ds::Transport {
     std::function<uint32_t(uint8_t,const mod::puppet::Transform&,const std::string&)> constructServed;bool liveTried=false;
     uint64_t liveStepAt=0,liveBuilt=0,liveRemoved=0;unsigned liveTwice=0;
     void tickLiveBuild(uint64_t now) {
-        if(!config.buildReceived||config.strandToken.empty()||!receivedOn||!sampler)return;
+        // The notice token is all the reads need: the game's own sign-in may come and go (one more game on the same
+        // Steam account ends it), what others build still arrives.
+        if(!config.buildReceived||config.strandToken.empty()||config.onlineServer.empty()||!sampler)return;
         if(!liveReader){
             auto at=serverAt();if(!at)return;
             const std::string target=at->base+"/coop/built",token=config.strandToken;const uint32_t address=at->address;const uint16_t port=at->port;
