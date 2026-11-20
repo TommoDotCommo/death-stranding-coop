@@ -170,6 +170,7 @@ void Client::receive(const uint8_t* data,size_t size,uint64_t now){
     case Type::Status:fightStatus(m.status);return;
     case Type::Deliver:delivered(m.post);return;
     case Type::Marked:marked(m.mark);return;
+    case Type::Signalled:signalled(m.signal);return;
     default:++counters_.malformed;return;   // the player's own message types are not for the player
     }
 }
@@ -394,4 +395,25 @@ void Client::marked(const Mark& k){
     if(marks_.size()>=MarkNewsMax){++counters_.markRefused;return;}
     ++counters_.marked;marks_.push_back({k.player,name,k.mark});}
 std::vector<MarkNews> Client::takeMarks(){auto n=std::move(marks_);marks_.clear();return n;}
+
+// ---- Pings and likes --------------------------------------------------------------------------------------------------
+bool Client::signal(SignalKind kind,uint32_t serial,uint64_t target,const std::array<double,3>& place,uint64_t now){
+    Signal k;k.player=config_.id;k.kind=kind;k.serial=serial;k.target=target;k.place=place;
+    if(!online_||!detail::signalValid(k)){++counters_.signalsHeld;return false;}
+    while(!signalTimes_.empty()&&signalTimes_.front()+SignalMinuteMs<=now)signalTimes_.pop_front();
+#ifndef MUTANT_BCAST_CLIENT_SIGNAL_RATE
+    if(!signalTimes_.empty()&&now<signalTimes_.back()+SignalEveryMs){++counters_.signalsHeld;return false;}
+    if(signalTimes_.size()>=SignalsPerMinute){++counters_.signalsHeld;return false;}
+#endif
+    signalTimes_.push_back(now);sendDatagram(encodeSignal(k));++counters_.signals;return true;}
+// Only from a player in the roster, never this player's own, and a like only when it names this player.
+void Client::signalled(const Signal& k){
+    auto it=near_.find(k.player);
+    if(it==near_.end()||k.player==config_.id){++counters_.signalRefused;return;}
+#ifndef MUTANT_BCAST_CLIENT_SIGNAL_TARGET
+    if(k.kind==SignalKind::Like&&k.target!=config_.id){++counters_.signalRefused;return;}
+#endif
+    if(signals_.size()>=SignalNewsMax){++counters_.signalRefused;return;}
+    ++counters_.signalled;signals_.push_back({k.player,it->second,k.kind,k.serial,k.place});}
+std::vector<SignalNews> Client::takeSignals(){auto n=std::move(signals_);signals_.clear();return n;}
 }

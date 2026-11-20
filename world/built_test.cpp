@@ -173,8 +173,53 @@ static void events(){
     CHECK(off.raw("POST","/s3cret/coop/events",R"({"kind":"level","key":1,"value":2})",{{"x-coop-token",tc}}).status==200);   // levels follow the structures
     CHECK(presetPolicy("solo").enemies=="off"&&presetPolicy("friends").enemies=="on"&&presetPolicy("public").enemies=="on");
 }
+// Orders taken together (world.h eventSay, eventRead: kinds order and unit, kept per party).
+static void orders(){
+    Server s;s.signIn("ann","Ann");s.signIn("bob","Bob");s.signIn("cid","Cid");auto ta=s.token("ann"),tb=s.token("bob"),tc=s.token("cid");
+    auto say=[&](const std::string& t,const std::string& body){return s.raw("POST","/s3cret/coop/events",body,{{"x-coop-token",t}}).status;};
+    auto read=[&](const std::string& t,const std::string& since=""){auto r=s.raw("GET","/s3cret/coop/events"+(since.empty()?std::string():"?since="+since),"",{{"x-coop-token",t}});
+        CHECK(r.status==200);return r.status==200?json::parse(r.body):json::Value();};
+    auto of=[](const json::Value& d,const char* kind){std::vector<json::Value> out;for(auto& e:d.get("events").items())if(e.get("kind").string()==kind)out.push_back(e);return out;};
+    const int64_t order=0x36330,unit1=order|(int64_t(1)<<48);
+    // A party and a value of the order's kind are needed; place is three numbers, data at most three.
+    CHECK(say(ta,R"({"kind":"order","key":222000,"value":1})")==400&&say(ta,R"({"kind":"order","key":222000,"value":1,"party":0})")==400);
+    CHECK(say(ta,R"({"kind":"order","key":222000,"value":4,"party":77})")==400&&say(ta,R"({"kind":"unit","key":222000,"value":2,"party":77})")==400);
+    CHECK(say(ta,R"({"kind":"order","key":222000,"value":1,"party":77,"place":[1,2]})")==400&&say(ta,R"({"kind":"unit","key":222000,"value":1,"party":77,"data":[1,2,3,4]})")==400);
+    CHECK(say(ta,R"({"kind":"order","key":222000,"value":1,"party":77,"place":[1,2,1e9]})")==400&&say(ta,R"({"kind":"order","key":222000,"value":1,"party":9007199254740992})")==400);
+    auto first=read(tb);CHECK(first.get("orders").boolean()&&of(first,"order").empty());
+    // Ann takes the order for party 77 at a terminal; Cid takes the same order elsewhere for party 88: two entries.
+    CHECK(say(ta,"{\"kind\":\"order\",\"key\":"+std::to_string(order)+",\"value\":1,\"party\":77,\"place\":[10,20,30.5]}")==200);
+    CHECK(say(tc,"{\"kind\":\"order\",\"key\":"+std::to_string(order)+",\"value\":1,\"party\":88,\"place\":[900,20,30]}")==200);
+    {auto d=of(read(tb),"order");CHECK(d.size()==2);
+     for(auto& e:d){CHECK(e.get("key").integer()==order&&e.get("value").integer()==1&&e.get("age").integer()==0&&e.get("place").items().size()==3);
+         if(e.get("party").integer()==77)CHECK(e.get("place").items()[2].real()==30.5);
+         else CHECK(e.get("party").integer()==88&&e.get("place").items()[0].real()==900);}}
+    CHECK(of(read(ta),"order").size()==1&&of(read(ta),"order")[0].get("party").integer()==88);   // never his own
+    // Bob, who joined party 77, hands in unit 1: Ann reads it with what the hand-in left in the row.
+    const std::string v1=read(ta).get("version").string();
+    CHECK(say(tb,"{\"kind\":\"unit\",\"key\":"+std::to_string(unit1)+",\"value\":1,\"party\":77,\"data\":[4294967295,0.5,1]}")==200);
+    {auto d=read(ta,v1);auto u=of(d,"unit");CHECK(d.get("events").items().size()==1&&u.size()==1);
+     if(u.size()==1)CHECK(u[0].get("key").integer()==unit1&&u[0].get("party").integer()==77&&u[0].get("data").items().size()==3&&u[0].get("data").items()[0].integer()==4294967295LL&&u[0].get("data").items()[1].real()==0.5);}
+    // Only the leader starts his party again or gives it up for everyone; a member says its success.
+    CHECK(say(tb,"{\"kind\":\"order\",\"key\":"+std::to_string(order)+",\"value\":3,\"party\":77}")==403);
+    CHECK(say(tb,"{\"kind\":\"order\",\"key\":"+std::to_string(order)+",\"value\":1,\"party\":77,\"place\":[0,0,0]}")==403);
+    const std::string v2=read(ta).get("version").string();
+    CHECK(say(tb,"{\"kind\":\"order\",\"key\":"+std::to_string(order)+",\"value\":2,\"party\":77}")==200);
+    {auto d=of(read(ta,v2),"order");CHECK(d.size()==1&&d[0].get("value").integer()==2&&d[0].get("party").integer()==77);}
+    CHECK(say(ta,"{\"kind\":\"order\",\"key\":"+std::to_string(order)+",\"value\":3,\"party\":77}")==200);
+    // Kept a day, past the hour of the other events; the age says how long ago.
+    s.now+=EventKeepSeconds+100;tb=s.token("bob");
+    {auto d=of(read(tb),"order");CHECK(d.size()==2);for(auto& e:d)CHECK(e.get("age").integer()==EventKeepSeconds+100);}
+    s.now+=OrderKeepSeconds;tb=s.token("bob");CHECK(read(tb).get("events").items().empty());
+    // The rule `cargo` decides, not `enemies`.
+    Server off("friends",{"cargo=off"});off.signIn("cid","Cid");auto to=off.token("cid");
+    CHECK(off.raw("POST","/s3cret/coop/events",R"({"kind":"order","key":5,"value":1,"party":3})",{{"x-coop-token",to}}).status==403);
+    {auto r=off.raw("GET","/s3cret/coop/events","",{{"x-coop-token",to}});CHECK(r.status==200&&!json::parse(r.body).get("orders").boolean(true));}
+    Server calm("friends",{"enemies=off"});calm.signIn("cid","Cid");auto tm=calm.token("cid");
+    CHECK(calm.raw("POST","/s3cret/coop/events",R"({"kind":"order","key":5,"value":1,"party":3})",{{"x-coop-token",tm}}).status==200);
+}
 int main(){
-    reads();held();cargo();events();
+    reads();held();cargo();events();orders();
     if(failures){std::fprintf(stderr,"%u built oracle failures\n",failures);return 1;}
     std::puts("built oracles passed");return 0;
 }

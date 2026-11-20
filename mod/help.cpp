@@ -13,7 +13,7 @@ std::u16string body(const Facts& f){
     std::u16string out=keyName(Key)+u" (hold)  This page\n"+keyName(0x71)+u"  Mark a bug for the report";
     auto line=[&out](unsigned key,const char16_t* what){if(key)out+=u"\n"+keyName(key)+u"  "+what;};
     line(f.ping,u"Ping");
-    line(f.like?0x4c:0,u"Like the partner");
+    line(f.like?0x4c:0,f.likeNear?u"Like the nearest player":u"Like the partner");
     line(f.ride,u"Ride along");
     line(f.route,u"Record a route");
 #ifndef MUTANT_HELP_MATERIALS

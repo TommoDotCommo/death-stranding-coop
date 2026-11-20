@@ -177,6 +177,7 @@ static void wire(){
      Post q;q.player=4;q.owner=3;q.fight=1;q.version=1;q.payload=payload.data();q.size=10;
      for(auto x:{encode(g),encode(o),encode(j),encode(st),encodePost(q),encodeDeliver(q)})samples.push_back(x);}
     {Mark k;k.player=5;k.mark=0x12300001;samples.push_back(encodeMark(k));samples.push_back(encodeMarked(k));}
+    {Signal g;g.player=5;g.serial=3;g.place={1,2,3};samples.push_back(encodeSignal(g));g.kind=SignalKind::Like;g.target=6;samples.push_back(encodeSignalled(g));}
     for(auto& s:samples){
         for(size_t n=0;n<s.size();++n){Message m;CHECK(parse(s.data(),n,m)!=WireError::None);}
         auto more=s;more.push_back(0);CHECK(parseBuffer(more)!=WireError::None);
@@ -516,8 +517,58 @@ static void marks(){
         CHECK(t.client.takeMarks().size()==MarkNewsMax);}
 }
 
+// Pings and likes: SIGNAL and SIGNALLED byte for byte and refused when bad; the player's side sends at most one every
+// 500 ms and 20 a minute, nothing offline or invalid, and takes a passed-on signal only from a player in the roster, a
+// like only when it names this player.
+static void signalsTest(){
+    {   Signal g;g.player=0x1122334455667788ull;g.kind=SignalKind::Ping;g.serial=0x01020304;g.place={-1234.56,78.9,99999.99};
+        for(auto b:{encodeSignal(g),encodeSignalled(g)}){
+            CHECK(b.size()==SignalSize&&SignalSize==44&&b[4]==2&&get(b,8,8)==g.player&&b[16]==1&&get(b,17,3)==0&&get(b,20,4)==g.serial&&get(b,24,8)==0);
+            CHECK(int32_t(uint32_t(get(b,32,4)))==-123456&&int32_t(uint32_t(get(b,36,4)))==7890&&int32_t(uint32_t(get(b,40,4)))==9999999);
+            Message m;CHECK(parseBuffer(b,m)==WireError::None&&m.signal.player==g.player&&m.signal.kind==SignalKind::Ping&&m.signal.serial==g.serial&&m.signal.target==0);
+            CHECK(std::fabs(m.signal.place[0]+1234.56)<1e-6&&std::fabs(m.signal.place[2]-99999.99)<1e-6);
+            auto v=b;v[20]=v[21]=v[22]=v[23]=0;CHECK(parseBuffer(v)==WireError::Range);      // serial 0
+            v=b;for(size_t i=8;i<16;++i)v[i]=0;CHECK(parseBuffer(v)==WireError::Range);       // player 0
+            v=b;v[16]=0;CHECK(parseBuffer(v)==WireError::Range);v[16]=3;CHECK(parseBuffer(v)==WireError::Range);   // kind
+            v=b;v[24]=9;CHECK(parseBuffer(v)==WireError::Range);                              // a ping names nobody
+            v=b;v[18]=1;CHECK(parseBuffer(v)==WireError::Reserved);
+            v=b;v[35]=0x7f;CHECK(parseBuffer(v)==WireError::Range);                           // a place beyond 100 km
+            v=b;v.push_back(0);CHECK(parseBuffer(v)==WireError::Length);}
+        g.kind=SignalKind::Like;g.target=0x99;
+        {auto b=encodeSignal(g);Message m;CHECK(parseBuffer(b,m)==WireError::None&&m.signal.kind==SignalKind::Like&&m.signal.target==0x99);
+         auto v=b;for(size_t i=24;i<32;++i)v[i]=0;CHECK(parseBuffer(v)==WireError::Range);       // a like names somebody
+         v=b;for(size_t i=0;i<8;++i)v[24+i]=v[8+i];CHECK(parseBuffer(v)==WireError::Range);}     // not the sender himself
+        CHECK(encodeSignal(g)[6]==uint8_t(Type::Signal)&&encodeSignalled(g)[6]==uint8_t(Type::Signalled)&&uint8_t(Type::Signal)==19&&uint8_t(Type::Signalled)==20);
+        g.serial=0;CHECK(throws([&]{encodeSignal(g);}));g.serial=1;g.target=0;CHECK(throws([&]{encodeSignal(g);}));
+        g.kind=SignalKind::Ping;g.target=4;CHECK(throws([&]{encodeSignal(g);}));g.target=0;g.place[1]=2e5;CHECK(throws([&]{encodeSignal(g);}));}
+    {   // Sending: offline nothing; online one, then none within 500 ms; 20 in a minute; the minute over, again.
+        Bench t;CHECK(!t.client.signal(SignalKind::Ping,1,0,{1,2,3},t.now)&&t.take(Type::Signal).empty());
+        t.online();CHECK(!t.client.signal(SignalKind::Like,1,1,{1,2,3},t.now));   // a like for himself is no signal
+        CHECK(!t.client.signal(SignalKind::Ping,1,7,{1,2,3},t.now)&&t.take(Type::Signal).empty());
+        CHECK(t.client.signal(SignalKind::Ping,1,0,{1,2,3},t.now));
+        auto sent=t.take(Type::Signal);CHECK(sent.size()==1&&sent[0].signal.player==1&&sent[0].signal.serial==1&&sent[0].signal.place[2]==3);
+        CHECK(!t.client.signal(SignalKind::Like,2,9,{1,2,3},t.now+499)&&t.take(Type::Signal).size()==1);
+        uint64_t first=t.now;unsigned taken=1;
+        for(unsigned i=1;i<30;++i){t.now=first+500*i;t.client.tick(t.now);t.answer(1,1,{},0,false);taken+=t.client.signal(SignalKind::Like,10+i,9,{0,0,0},t.now);}
+        CHECK(taken==SignalsPerMinute&&t.take(Type::Signal).size()==SignalsPerMinute&&t.client.counters().signalsHeld>=10);
+        t.now=first+SignalMinuteMs;t.client.tick(t.now);t.answer(1,1,{},0,false);CHECK(t.client.online()&&t.client.signal(SignalKind::Ping,99,0,{0,0,0},t.now));}
+    {   // Receiving: from a player in the roster with his name; a like only for this player; strangers and himself nothing.
+        Bench t;t.online();t.roster({{true,2,"Ann"}});
+        auto signalled=[&](uint64_t source,SignalKind kind,uint64_t target,uint32_t serial){Signal k;k.player=source;k.kind=kind;k.target=target;k.serial=serial;k.place={5,6,7};
+            auto b=encodeSignalled(k);t.client.receive(b.data(),b.size(),t.now);};
+        signalled(2,SignalKind::Ping,0,11);signalled(9,SignalKind::Ping,0,12);signalled(1,SignalKind::Ping,0,13);
+        signalled(2,SignalKind::Like,1,14);signalled(2,SignalKind::Like,3,15);
+        auto got=t.client.takeSignals();
+        CHECK(got.size()==2&&got[0].source==2&&got[0].name=="Ann"&&got[0].kind==SignalKind::Ping&&got[0].serial==11&&got[0].place[1]==6);
+        CHECK(got[1].kind==SignalKind::Like&&got[1].serial==14&&t.client.counters().signalled==2&&t.client.counters().signalRefused==3);
+        // A SIGNAL (the server's type) sent to a player is not his.
+        {Signal k;k.player=2;k.serial=16;auto b=encodeSignal(k);t.client.receive(b.data(),b.size(),t.now);}CHECK(t.client.takeSignals().empty());
+        for(unsigned i=0;i<SignalNewsMax+10;++i)signalled(2,SignalKind::Ping,0,100+i);
+        CHECK(t.client.takeSignals().size()==SignalNewsMax);}
+}
+
 int main(){
-    wire();clockAndRoster();entries();state();publishing();interpolation();fights();marks();
+    wire();clockAndRoster();entries();state();publishing();interpolation();fights();marks();signalsTest();
     if(failures)return 1;
     std::puts("broadcast tests passed");return 0;
 }

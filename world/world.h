@@ -14,6 +14,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 namespace world {
 constexpr int VersionMajor=0,VersionMinor=12;      // what this game build requires of getVersion
@@ -60,6 +61,9 @@ constexpr int64_t MapFreshSeconds=5,MapWaitMinMs=2000,MapWaitMaxMs=30000;constex
 constexpr int64_t BuiltWaitMs=3000;constexpr size_t BuiltGoneMax=4096,BuiltFullMax=2000;
 // Cargo set down for the others (cargoRead, cargoSay): how often to read, how many a world and one player keep, how long.
 constexpr int64_t EventWaitMs=2000,EventKeepSeconds=3600,LevelKeepSeconds=30*24*3600,RainKeepSeconds=60,ReplayKeepSeconds=300;constexpr size_t EventsMax=20000;   // world events (eventSay, eventRead)
+// Orders taken together (README, "Orders taken together"): kinds `order` and `unit` are kept per party (a run of one
+// order that its leader started), a day; a party is a number 1..MaxParty; `place` and `data` hold at most 3 numbers.
+constexpr int64_t OrderKeepSeconds=24*3600,MaxParty=(int64_t(1)<<53)-1;constexpr size_t EventDataMax=3;
 constexpr int64_t CargoWaitMs=3000,CargoKeepSeconds=7*24*3600;constexpr size_t CargoMax=4000,CargoPerPlayer=200,CargoGoneMax=4096;   // who counts as there for the map, how many it lists, how often to ask
 constexpr int64_t SpotFreshSeconds=600,MaxNearMetres=2000,AreaSearchMetres=1500;
 // What may travel between two servers. Text form: "all", "none", or terms separated by ';':
@@ -351,16 +355,17 @@ private:
     std::map<std::string,Crate> crates_;std::deque<std::pair<std::string,uint64_t>> cargoGone_;uint64_t cargoFloor_=0;
     void crateGone(const std::string& id){cargoGone_.emplace_back(id,++stamps_);if(cargoGone_.size()>CargoGoneMax){cargoFloor_=cargoGone_.front().second;cargoGone_.pop_front();}}
     void cargoPrune(int64_t now);
-    struct Event { std::string by;int64_t value=0,at=0;uint64_t stamp=0; };
-    std::map<std::pair<std::string,int64_t>,Event> events_;
-    // A level stays, rain a minute (it is said again while it falls), a boss replay started and a replay boss's life five
-    // minutes (a replay is joined from the private room soon after it starts; a fight's life is said again while it
-    // runs), the rest an hour.
+    // leader: for an order's party, who said its start (only he may say its start or its end in failure again).
+    struct Event { std::string by,leader;int64_t value=0,at=0;uint64_t stamp=0;std::vector<double> place,data; };
+    std::map<std::tuple<std::string,int64_t,int64_t>,Event> events_;   // (kind, key, party: 0 but for orders)
+    static bool orderKind(const std::string& kind){return kind=="order"||kind=="unit";}
+    // A boss replay started and a replay boss's life last five minutes (a replay is joined from the private room soon
+    // after it starts; a fight's life is said again while it runs).
     static int64_t eventKeep(const std::string& kind){
 #ifndef MUTANT_EVENTS_REPLAY_HOUR
         if(kind=="replay"||kind=="bosslife")return ReplayKeepSeconds;
 #endif
-        return kind=="level"?LevelKeepSeconds:kind=="rain"?RainKeepSeconds:EventKeepSeconds;}
+        return kind=="level"?LevelKeepSeconds:kind=="rain"?RainKeepSeconds:orderKind(kind)?OrderKeepSeconds:EventKeepSeconds;}   // a level stays, rain a minute (it is said again while it falls), an order's party a day, the rest an hour
     void dropped(const std::string& id){
 #ifndef MUTANT_BUILT_GONE
         gone_.emplace_back(id,++stamps_);if(gone_.size()>BuiltGoneMax){goneFloor_=gone_.front().second;gone_.pop_front();}

@@ -64,6 +64,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "chat.h"
 #include "mapicons.h"
 #include "hudmarkers.h"
+#include "grouppings.h"
 #include "reptrace.h"
 #include "repguard.h"
 #include "serverworld.h"
@@ -71,6 +72,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "groupcargo.h"
 #include "othervehicles.h"
 #include "groupevents.h"
+#include "grouporders.h"
 #include "roadshare.h"
 #include "freebuild.h"
 #include "strand_notices.h"
@@ -1127,6 +1129,69 @@ struct Runtime final:ds::Transport {
         }
         likeIn.clear();
     }
+    // --- Pings and likes in group play (grouppings.h): opt-in group_pings, over the relay's broadcast mode (SIGNAL). B
+    // pings where this porter stands, for the players near who see him and on his own HUD; L gives the nearest other
+    // player within 25 m a like. The others' pings are HUD marks for 30 s (tickHudMarkers) and a line in the info log
+    // naming the sender; a like for this porter is given the game's way, as the partner's (likes.h).
+    mod::grouppings::Pings groupPings;mod::grouppings::LikeGate groupLikeGate;mod::grouppings::Serials groupSerials{1};
+    mod::marker::KeyEdge groupPingEdge,groupLikeEdge;mod::likes::Sender groupLikeTx;bool groupPingsNoted=false;size_t pingMarksNoted=0;
+    std::vector<std::u16string> pingLines;uint64_t groupPingsSent=0,groupPingsShown=0,groupLikesSent=0,groupLikesGiven=0;
+    bool groupLikesReady(){
+#ifndef MOD_FAKE_NETWORK
+        if(!likesTried){
+            auto* sp=&*sampler;if(!likesJob.ready([sp]{return mod::likes::nativeApi(*sp);}))return false;
+            likesTried=true;
+            try{likesApi=likesJob.job.get();note("LIKE on (group play), key L\n");}
+            catch(const std::exception& e){note((std::string("LIKE unavailable: ")+e.what()+"\n").c_str());}}
+#else
+        if(!likesApi){mod::likes::Api a;a.give=[](uint32_t n){return n==1;};likesApi=a;}   // the fake world: a like is counted
+#endif
+        return likesApi.has_value();
+    }
+    void tickGroupPings(uint64_t now){
+        if(!config.groupPings||!crowd)return;
+        auto& client=crowd->client();
+        if(!groupPingsNoted){groupPingsNoted=true;groupSerials=mod::grouppings::Serials(uint32_t(nonce()));
+            note("PINGS on (group play): B pings where this porter stands, L likes the nearest player within 25 m\n");}
+        const bool play=cache.available&&!cache.gated&&!inEvent;
+        std::optional<std::array<double,3>> here;if(cache.available)here=cache.local.position;   // the core's State axes (y up)
+        auto game=[](const std::array<double,3>& a){return std::array<double,3>{a[0],a[2],a[1]};};   // -> game axes (z up)
+        auto named=[](const ds::broadcast::SignalNews& n){return n.name.empty()?"player "+std::to_string(n.source):n.name;};
+        for(auto& n:client.takeSignals()){
+            const std::string name=named(n);
+            if(n.kind==ds::broadcast::SignalKind::Ping){
+                if(!groupPings.take(n.source,n.serial,game(n.place),now))continue;
+                ++groupPingsShown;double d=-1;
+                if(here){d=0;for(int i=0;i<3;++i)d+=(n.place[i]-(*here)[i])*(n.place[i]-(*here)[i]);d=std::sqrt(d);}
+                std::ostringstream o;o<<"PING from "<<name<<" at "<<n.place[0]<<","<<n.place[1]<<","<<n.place[2]<<" ("<<long(std::lround(d))<<" m)\n";note(o.str().c_str());
+                pingLines.push_back(mod::grouppings::pingLine(name,d));
+                continue;}
+            if(!play||!groupLikesReady()){note(("LIKE from "+name+" dropped: not in play\n").c_str());continue;}
+            if(!groupLikeGate.accept(n.source,n.serial,now)){note(("LIKE from "+name+" dropped: too many\n").c_str());continue;}
+            if(likesApi->give(1)){++groupLikesGiven;note(("LIKE received from "+name+"\n").c_str());if(notices)notices->event(mod::notice::Kind::Liked,name,now);}
+            else note(("LIKE from "+name+" dropped: no likes state\n").c_str());
+        }
+        const bool keys=play&&here.has_value();
+#ifndef MOD_MUTANT_PINGS_GROUP
+        if(groupPingEdge.pressed(keys&&keyFree(mod::grouppings::PingKey)&&modKey(mod::grouppings::PingKey),now)){
+            const uint32_t serial=groupSerials.next();
+            if(client.signal(ds::broadcast::SignalKind::Ping,serial,0,*here,now)){
+                ++groupPingsSent;groupPings.take(config.playerId,serial,game(*here),now);   // on his own HUD too
+                std::ostringstream o;o<<"PING sent at "<<(*here)[0]<<","<<(*here)[1]<<","<<(*here)[2]<<"\n";note(o.str().c_str());}
+            else note(client.online()?"PING not sent: at most one every 500 ms and 20 a minute\n":"PING not sent: offline\n");
+        }
+#endif
+        if(groupLikeEdge.pressed(keys&&keyFree(mod::grouppings::LikeKey)&&modKey(mod::grouppings::LikeKey),now)){
+            std::vector<mod::grouppings::Candidate> candidates;
+            for(auto& s:othersShown)candidates.push_back({s.id,s.render.state.position,s.visible});
+            auto target=mod::grouppings::likeTarget(*here,candidates);
+            if(!target){note("LIKE not sent: nobody within 25 m\n");pingLines.push_back(u"Nobody is near enough to like.");}
+            else if(!groupLikeTx.press(now,true))note("LIKE not sent: at most one every 1.5 s\n");
+            else{std::string name;for(auto& s:othersShown)if(s.id==*target)name=s.name;
+                if(client.signal(ds::broadcast::SignalKind::Like,groupSerials.next(),*target,*here,now)){++groupLikesSent;note(("LIKE sent to "+(name.empty()?"player "+std::to_string(*target):name)+"\n").c_str());}
+                else note(client.online()?"LIKE not sent: at most one signal every 500 ms and 20 a minute\n":"LIKE not sent: offline\n");}
+        }
+    }
     // --- Shout, scan and vitals for the partner (signals.h). Each key covers both directions: what this porter does
     // is sent, and what the partner does is shown. `puppet.ride` "voice N", "pulse" and "vitals" try one piece alone.
     std::vector<ds::CargoEvent> signalIn;mod::signals::EventSender signalTx;mod::signals::EventReceiver signalRx;
@@ -1731,12 +1796,12 @@ struct Runtime final:ds::Transport {
             else if(verb=="at"){helpPage->close();helpPage->place=p;std::ostringstream o;o<<"HELP at "<<p.pivot<<" "<<p.x<<" "<<p.y<<"\n";note(o.str().c_str());}
             else if(verb=="show"||verb=="hide")helpHeld=verb=="show";
         }
-        mod::help::Facts f;f.ping=pingKey;f.like=partnerMode();f.ride=ride?config.passengerKey:0;f.route=config.routeRecordKey;
+        mod::help::Facts f;f.ping=pingKey?pingKey:(config.groupPings&&crowd?mod::grouppings::PingKey:0);f.like=partnerMode()||(config.groupPings&&crowd);f.likeNear=!partnerMode()&&config.groupPings&&crowd;f.ride=ride?config.passengerKey:0;f.route=config.routeRecordKey;
         f.materials=config.testMode.on?config.testMode.materialsKey:0;f.story=config.storyResync!="off"?config.storyKey:0;f.debug=config.testMode.on&&debugMenu?mod::debugmenu::Key:0;f.server=infoScreen&&infoKeyFree()?mod::serverinfo::Key:0;f.chat=chatBox&&chatLink&&chatLink->counters().on&&keyFree(mod::chat::Key)?mod::chat::Key:0;
         helpPage->tick(helpHeld||modKey(mod::help::Key),cache.available&&!cache.gated&&gameEvent&&!gameEvent(),f,now);
     }
     void tickNotices(uint64_t now) {
-        if(!config.notices&&!noticeTest&&!config.strandNotices&&!routeTold&&!config.testMode.on&&!config.chat&&!config.groupReplays)return;
+        if(!config.notices&&!noticeTest&&!config.strandNotices&&!routeTold&&!config.testMode.on&&!config.chat&&!config.groupPings&&!config.groupReplays)return;
 #ifndef MOD_FAKE_NETWORK
         if(!noticeApi&&!noticeTried){
             auto* sp=&*sampler;if(!noticeJob.ready([sp]{return mod::notice::nativeApi(*sp);}))return;   // checked beside the game
@@ -1749,7 +1814,7 @@ struct Runtime final:ds::Transport {
         if(!noticeApi)return;
         if(noticeTest){noticeTest=false;note(noticeApi->show(u"Co-op mod: test notice.",mod::notice::PlainIcon)?"NOTICE test shown\n":"NOTICE test refused: no info log now\n");}
 #ifndef MOD_MUTANT_STRAND_PARTNER
-        if(!config.notices&&!config.strandNotices&&!routeTold&&!config.testMode.on&&!config.chat&&!config.groupReplays)return;
+        if(!config.notices&&!config.strandNotices&&!routeTold&&!config.testMode.on&&!config.chat&&!config.groupPings&&!config.groupOrders&&!config.groupReplays)return;
 #else
         if(!config.notices&&!config.testMode.on)return;   // the mutant: strand lines only beside the partner's notices
 #endif
@@ -1761,6 +1826,10 @@ struct Runtime final:ds::Transport {
         testLines.clear();
         for(auto& line:chatLines)notices->chat(line,now);   // what the players said (tickChat)
         chatLines.clear();
+        for(auto& line:pingLines)notices->ping(line,now);   // the others' pings (tickGroupPings)
+        pingLines.clear();
+        for(auto& line:orderLines)notices->strand(line,now);   // orders taken together (tickGroupOrders), finished like the strand's
+        orderLines.clear();
         if(strandPoller&&config.strandNotices){for(auto& row:strandPoller->logs())note(row.c_str());for(auto& line:strandPoller->lines())notices->strand(line,now);}
 #ifdef MOD_MUTANT_OFFER_LINES
         else if(strandPoller){for(auto& line:strandPoller->lines())notices->strand(line,now);}
@@ -1969,18 +2038,29 @@ struct Runtime final:ds::Transport {
         }
     }
     // Far players on the HUD (hudmarkers.h): the map's players less those drawn here as bodies, published every tick for
-    // the HUD's own job, which adds them to its marker list each frame.
-    bool hudHooked=false;uint64_t hudNotedAt=0,hudNotedFrames=0;
+    // the HUD's own job, which adds them to its marker list each frame. The pings of group play (grouppings.h) are a
+    // second set on the same hook.
+    bool hudHooked=false,hudFailed=false;uint64_t hudNotedAt=0,hudNotedFrames=0;
+    static mod::hudmarkers::Board& pingBoard(){static mod::hudmarkers::Board b;return b;}   // read by the HUD's job for as long as the game runs
     void tickHudMarkers(uint64_t now){
-        if(!config.playerHud||!mapBoard||!sampler)return;
+        const bool distant=config.playerHud&&mapBoard,pings=config.groupPings&&crowd;
+        if((!distant&&!pings)||!sampler||hudFailed)return;
         static mod::hudmarkers::Board board;   // the HUD's job reads it for as long as the game runs
         if(!hudHooked&&inWorldNow()){hudHooked=true;
 #ifndef MOD_FAKE_NETWORK
-            try{mod::hudmarkers::install(*sampler,board);note("HUD markers on\n");}catch(const std::exception& e){note((std::string("HUD markers unavailable: ")+e.what()+"\n").c_str());config.playerHud=false;return;}
+            try{mod::hudmarkers::attach(pingBoard());mod::hudmarkers::install(*sampler,board);note("HUD markers on\n");}
+            catch(const std::exception& e){note((std::string("HUD markers unavailable: ")+e.what()+"\n").c_str());hudFailed=true;return;}
 #else
             note("HUD markers on\n");
 #endif
         }
+        if(pings){auto marks=groupPings.marks(now);
+            if(marks.size()!=pingMarksNoted){pingMarksNoted=marks.size();note(("HUD pings: "+std::to_string(marks.size())+"\n").c_str());}
+            pingBoard().publish(marks);
+            const auto seen=mod::hudmarkers::stats();   // without far players: what the HUD took, as their line says it
+            if(!distant&&seen.frames!=hudNotedFrames&&now>=hudNotedAt+10000){hudNotedFrames=seen.frames;hudNotedAt=now;std::ostringstream o;
+                o<<"HUD markers: "<<marks.size()<<" pings, HUD frames "<<seen.frames<<" records added "<<seen.added<<" kept "<<seen.kept<<"\n";note(o.str().c_str());}}
+        if(!distant)return;
         mod::mapicons::Board::Picture p;mapBoard->read(p);
         std::set<uint64_t> drawn;if(otherBodies)for(auto& s:othersShown)if(otherBodies->entity(s.id))drawn.insert(mod::hudmarkers::iconId(s.id));
         std::optional<std::array<double,3>> here;if(cache.available)here=std::array<double,3>{cache.local.position[0],cache.local.position[2],cache.local.position[1]};
@@ -2615,6 +2695,26 @@ struct Runtime final:ds::Transport {
             }
         }
     }
+    // A unit of an order marked delivered here as the game's own hand-in leaves its row (the packed word and the cargo's
+    // two condition values, then the state; only while the row still says not delivered), and this game's copy of that
+    // cargo lying in the world removed (never one on the porter). For the partner's hand-ins (tickOrders) and a party's
+    // (tickGroupOrders). Returns how many cargo records were removed.
+    unsigned deliverUnitHere(const mod::orders::Unit& u,uint32_t packed,float l0,float l1){
+#ifdef _WIN32
+        uint16_t seen=0;
+        if(sampler->read(u.stateAt,&seen,2)&&seen==mod::orders::NotDelivered){
+            std::memcpy(reinterpret_cast<void*>(u.stateAt+4),&packed,4);std::memcpy(reinterpret_cast<void*>(u.stateAt+0x10),&l0,4);std::memcpy(reinterpret_cast<void*>(u.stateAt+0x14),&l1,4);
+            *reinterpret_cast<uint16_t*>(u.stateAt)=mod::orders::Delivered;
+        }
+#else
+        (void)packed;(void)l0;(void)l1;
+#endif
+        unsigned removed=0;uint64_t manager=0;
+        if(cargoDelete&&cargoManagerSlot&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
+            for(auto& r:mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,mod::cargo::MaxRecords))
+                if(r.mission==u.mission&&r.unit==u.unit&&mod::cargo::location(r)==mod::cargo::InWorld){cargoDelete(r.index);++removed;}
+        return removed;
+    }
     void tickOrders(uint64_t now) {
         if(!core||!sampler||!config.shareOrders){orderIn.clear();return;}
         if(!orderTried){orderTried=true;try{orderRequest=mod::orders::nativeRequest(*sampler);}catch(const std::exception& e){note((std::string("ORDER unavailable: ")+e.what()+"\n").c_str());}}
@@ -2640,19 +2740,9 @@ struct Runtime final:ds::Transport {
                 auto* u=unitSync.wanted(units,e.ref,n);
                 std::ostringstream o;o<<"ORDER partner handed in unit "<<int(n)<<" of "<<std::hex<<e.ref<<std::dec;
                 if(!u){o<<": not waiting here\n";note(o.str().c_str());continue;}
-                unitSync.applied(e.ref,n);uint16_t seen=0;
-#ifdef _WIN32
-                if(sampler->read(u->stateAt,&seen,2)&&seen==mod::orders::NotDelivered){
-                    // as the game's own hand-in leaves the row: the packed word and the cargo's two condition values, then the state
-                    uint32_t packed=(uint32_t(e.position[0])&0xffff)|((e.item>>16)<<16);float l0=float(e.position[1]),l1=float(e.position[2]);
-                    std::memcpy(reinterpret_cast<void*>(u->stateAt+4),&packed,4);std::memcpy(reinterpret_cast<void*>(u->stateAt+0x10),&l0,4);std::memcpy(reinterpret_cast<void*>(u->stateAt+0x14),&l1,4);
-                    *reinterpret_cast<uint16_t*>(u->stateAt)=mod::orders::Delivered;
-                }
-#endif
-                unsigned removed=0;uint64_t manager=0;
-                if(cargoDelete&&cargoManagerSlot&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
-                    for(auto& r:mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,mod::cargo::MaxRecords))
-                        if(r.mission==e.ref&&r.unit==n&&mod::cargo::location(r)==mod::cargo::InWorld){cargoDelete(r.index);++removed;}
+                unitSync.applied(e.ref,n);
+                const uint32_t packed=(uint32_t(e.position[0])&0xffff)|((e.item>>16)<<16);
+                const unsigned removed=deliverUnitHere(*u,packed,float(e.position[1]),float(e.position[2]));
                 o<<": marked delivered, "<<removed<<" cargo record(s) removed\n";note(o.str().c_str());continue;
             }
             mod::orders::Change c{e.ref,uint8_t(e.item)};if(c.what<1||c.what>3)continue;
@@ -3167,8 +3257,8 @@ struct Runtime final:ds::Transport {
         (void)now;
 #endif
     }
-    // Boss Battle replays together (groupreplay.h; `group_replays`, with group_enemies): the events' reads are taken here
-    // before group_enemies drops them in the private room (the porter's double is busy there).
+    // Boss Battle replays together (groupreplay.h; `group_replays`, with group_enemies): its own copy of the events' reads
+    // (groupCourier), taken in the private room too (group_enemies drops its reads there: the porter's double is busy).
     std::unique_ptr<mod::groupreplay::Group> groupReplay;bool replayHooksTried=false;uint64_t replayStepAt=0;std::vector<std::u16string> replayLines;
     void replayStep(const std::vector<mod::groupevents::Answer>& reads,uint64_t now,std::vector<mod::groupevents::Event>& out){
         if(!config.groupReplays||!sampler)return;
@@ -3196,21 +3286,86 @@ struct Runtime final:ds::Transport {
         for(auto& h:act.hurt)if(h.part<catchers.size())btHurt(catchers[h.part],h.percent);
         for(auto& n:act.notices){replayLines.push_back(routeWide(n));if(replayLines.size()>8)replayLines.erase(replayLines.begin());}
     }
-    void tickGroupEnemies(uint64_t now){
-        if(!config.groupEnemies||config.strandToken.empty()||!sampler)return;
-        if(!enemyTried){try{campAlert=mod::enemies::nativeAlert(*sampler);}catch(const std::exception&){}}
-        if(!enemyTried){enemyTried=true;try{enemyDefeat=mod::enemies::nativeDefeat(*sampler);}catch(const std::exception& e){note((std::string("ENEMY unavailable: ")+e.what()+"\n").c_str());}}
-        if(!enemyDefeat)return;
+    void tickGroupReplays(uint64_t now){
+        if(!config.groupReplays||config.strandToken.empty()||!sampler)return;
+        auto* courier=groupCourier();if(!courier)return;
+        std::vector<mod::groupevents::Event> out;replayStep(std::exchange(replayReads,{}),now,out);
+        if(!out.empty())courier->send(std::move(out));
+    }
+    // The server's world events (`…/coop/events`): one courier for every group feature that says or reads them (the
+    // enemies, levels and timefall with group_enemies; orders with group_orders; boss replays with group_replays); each
+    // takes its own copy of the reads.
+    std::vector<mod::groupevents::Answer> enemyReads,orderReads,replayReads;
+    mod::groupevents::Courier* groupCourier(){
         if(!enemyCourier){
-            auto at=serverAt();if(!at)return;
+            auto at=serverAt();if(!at)return nullptr;
             const std::string target=at->base+"/coop/events",token=config.strandToken;const uint32_t address=at->address;const uint16_t port=at->port;
             enemyCourier=std::make_unique<mod::groupevents::Courier>(
                 [=](const std::string& since){auto r=mod::strand::get(address,port,target+(since.empty()?std::string():"?since="+since),token,mod::strand::ConnectMs);return mod::groupevents::Result{r.status,r.body};},
                 [=](const std::string& body){auto r=mod::strand::post(address,port,target,token,body,mod::strand::ConnectMs);return mod::groupevents::Result{r.status,r.body};},
                 [this](const std::string& s){note(s.c_str());});
-            note("ENEMYSRV on: MULEs down and camps alarmed are shared through the server\n");}
-        auto reads=enemyCourier->reads();
-        {std::vector<mod::groupevents::Event> rp;replayStep(reads,now,rp);if(!rp.empty())enemyCourier->send(std::move(rp));}
+            if(config.groupEnemies)note("ENEMYSRV on: MULEs down and camps alarmed are shared through the server\n");
+            if(config.groupOrders)note("GROUPORDER on: standard orders are taken together by the players at one terminal, through the server\n");}
+        for(auto& a:enemyCourier->reads()){
+            if(config.groupOrders)orderReads.push_back(a);
+            if(config.groupReplays)replayReads.push_back(a);
+            if(config.groupEnemies)enemyReads.push_back(std::move(a));}
+        auto cap=[](std::vector<mod::groupevents::Answer>& v){if(v.size()>32)v.erase(v.begin(),v.end()-32);};   // a consumer that cannot take them yet
+        cap(enemyReads);cap(orderReads);cap(replayReads);
+        return enemyCourier.get();
+    }
+    // --- Orders taken together in group play (grouporders.h): with group_orders, a standard order taken at a terminal
+    // is said with a party number and where the porter stands; a game whose porter stands there within two minutes takes
+    // it on too with the game's own start request (orders.h); the party's hand-ins, success and the leader's give-up
+    // reach its other games through the same requests and rows as the partner's (tickOrders). Never writes the save.
+    std::optional<mod::grouporders::Together> together;uint64_t groupOrderAt=0,groupOrderPorter=0;bool groupOrderOffTold=false;
+    std::vector<std::u16string> orderLines;
+    void tickGroupOrders(uint64_t now){
+        if(!config.groupOrders||config.strandToken.empty()||!sampler)return;
+        if(!orderTried){orderTried=true;try{orderRequest=mod::orders::nativeRequest(*sampler);}catch(const std::exception& e){note((std::string("ORDER unavailable: ")+e.what()+"\n").c_str());}}
+        if(!orderRequest)return;
+        auto* courier=groupCourier();if(!courier)return;
+        if(!together)together.emplace(config.playerId^(now*0x9e3779b97f4a7c15ull)^uint64_t(mod::nowUs()));
+        std::vector<mod::groupevents::Event> heard;
+        for(auto& a:std::exchange(orderReads,{})){
+            if(!a.orders&&!groupOrderOffTold){groupOrderOffTold=true;note("GROUPORDER the server keeps orders each player's own (its rule cargo is off): nothing is shared\n");}
+            for(auto& e:a.events)if(e.kind=="order"||e.kind=="unit")heard.push_back(e);}
+        if(!heard.empty())together->hear(heard,now);
+        if(now<groupOrderAt+1000)return;
+        groupOrderAt=now;
+        if(!cache.available||cache.gated||inEvent)return;
+        auto anchor=anchorNow();
+        if(anchor.entity!=groupOrderPorter){if(groupOrderPorter)together->reset();groupOrderPorter=anchor.entity;}   // another world: its parties are left
+        if(!anchor.entity)return;
+        std::optional<mod::grouporders::Place> porter;if(anchor.pose.available)porter=mod::puppet::transform(anchor.pose).position;
+        auto orders=mod::orders::readOrders(*sampler,sampler->base,orderDetails);if(orders.empty())return;
+        auto units=mod::orders::readUnits(*sampler,sampler->base);
+        auto step=together->step(now,orders,units,porter);
+        for(auto& line:step.log)note((line+"\n").c_str());
+        for(auto& r:step.apply){
+            bool ok=false;
+            if(r.what==mod::grouporders::Request::Unit){
+                for(auto& u:units)if(u.mission==r.mission&&u.unit==r.unit&&u.state==mod::orders::NotDelivered){
+                    const unsigned removed=deliverUnitHere(u,r.packed,r.life[0],r.life[1]);ok=true;
+                    std::ostringstream o;o<<"GROUPORDER unit "<<int(r.unit)<<" of "<<std::hex<<r.mission<<std::dec<<" marked delivered, "<<removed<<" cargo record(s) removed\n";note(o.str().c_str());}}
+            else{ok=orderRequest(r.mission,uint8_t(r.what));
+                if(!ok){std::ostringstream o;o<<"GROUPORDER the game refused the request "<<int(r.what)<<" for order "<<std::hex<<r.mission<<std::dec<<"\n";note(o.str().c_str());}}
+            together->done(r,ok);}
+        if(!step.say.empty())courier->send(std::move(step.say));
+        for(auto l:step.lines)switch(l){
+            case mod::grouporders::Line::Joined:orderLines.push_back(u"A porter here took this order: it is under way for you too. Give it up to go alone.");break;
+            case mod::grouporders::Line::UnitByOther:orderLines.push_back(u"A porter on your order handed in part of it.");break;
+            case mod::grouporders::Line::DoneByOther:orderLines.push_back(u"A porter on your order completed it.");break;
+            case mod::grouporders::Line::GivenUpByLeader:orderLines.push_back(u"The porter who took your order gave it up.");break;}
+        if(orderLines.size()>8)orderLines.erase(orderLines.begin(),orderLines.end()-8);
+    }
+    void tickGroupEnemies(uint64_t now){
+        if(!config.groupEnemies||config.strandToken.empty()||!sampler)return;
+        if(!enemyTried){try{campAlert=mod::enemies::nativeAlert(*sampler);}catch(const std::exception&){}}
+        if(!enemyTried){enemyTried=true;try{enemyDefeat=mod::enemies::nativeDefeat(*sampler);}catch(const std::exception& e){note((std::string("ENEMY unavailable: ")+e.what()+"\n").c_str());}}
+        if(!enemyDefeat)return;
+        if(!groupCourier())return;
+        auto reads=std::exchange(enemyReads,{});
         if(!cache.available||cache.gated||inEvent)reads.clear();
         {std::vector<mod::groupevents::Event> lv;levelsStep(reads,now,lv);rainStep(reads,now,lv);enemyCourier->send(std::move(lv));}
         if(reads.empty()&&now-groupEnemyAt<500)return;
@@ -4392,7 +4547,7 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickStructures(now);
             stage="enemies";stages.enter("enemies",mod::nowUs());
             if(twin&&gameContext)tickEnemies(now);
-            if(gameContext){tickGroupEnemies(now);tickGroupRoads(now);}
+            if(gameContext){tickGroupEnemies(now);tickGroupOrders(now);tickGroupReplays(now);tickGroupRoads(now);}
             if(twin&&gameContext)tickEnemyPositions(now);
             if(gameContext)tickMuleGoto(now);
             stage="bts";stages.enter("bts",mod::nowUs());
@@ -4411,6 +4566,7 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickMarkers(now);
             stage="likes";stages.enter("likes",mod::nowUs());
             if(twin&&gameContext)tickLikes(now);
+            if(gameContext)tickGroupPings(now);
             stage="signals";stages.enter("signals",mod::nowUs());
             if(twin&&gameContext)tickSignals(now);
             stage="online";stages.enter("online",mod::nowUs());
@@ -5274,6 +5430,11 @@ unsigned mod_status(char* out,unsigned cap) {
          o<<",\"strand\":{\"on\":"<<(r.strandPoller?"true":"false")<<",\"reads\":"<<k.reads<<",\"answers\":"<<k.answers<<",\"failures\":"<<k.failures<<",\"told\":"<<k.told
           <<",\"known\":"<<k.known<<",\"refused\":"<<(k.refused?"true":"false")<<",\"pending\":"<<(r.notices?r.notices->pending():0)
           <<",\"offer_old\":\""<<(r.strandPoller?r.strandPoller->offerOld():std::string())<<"\"}";}
+        {mod::hudmarkers::Board::Picture hud;r.pingBoard().read(hud);
+         o<<",\"group_pings\":{\"on\":"<<(r.config.groupPings&&r.crowd?"true":"false")<<",\"pings_sent\":"<<r.groupPingsSent<<",\"pings_shown\":"<<r.groupPingsShown
+          <<",\"likes_sent\":"<<r.groupLikesSent<<",\"likes_given\":"<<r.groupLikesGiven<<",\"hud\":[";
+         for(uint32_t i=0;i<hud.count;++i)o<<(i?",":"")<<"{\"id\":"<<hud.marks[i].id<<",\"at\":["<<hud.marks[i].x<<","<<hud.marks[i].y<<","<<hud.marks[i].z<<"]}";
+         o<<"]}";}
         {auto& k=r.offerer.counters();
          o<<",\"offer_strand\":{\"on\":"<<(k.on?"true":"false")<<",\"asked\":"<<k.asked<<",\"uploaded\":"<<k.uploaded<<",\"sent_again\":"<<k.recreated<<",\"refused\":"<<k.refused
           <<",\"no_answer\":"<<k.timedOut<<",\"not_queued\":"<<k.unqueued<<",\"gone\":"<<k.gone<<",\"left_out\":"<<k.left<<",\"stopped\":"<<(k.broken?"true":"false")<<"}";}

@@ -380,6 +380,26 @@ organiser finds every report of a session in this one file, and each player's ow
 
 `RelayStats` counts `marks` (taken and logged), `marksRefused` and `marksSent` (MARKED datagrams).
 
+### Pings and likes
+
+A broadcast player's ping and like (`../mod/README.md`, "Pings and likes in group play"; `group_pings`) are a SIGNAL
+(`../core/CORE.md`, "Pings and likes", types 19 and 20). They go through the relay, not through `…/coop/events`: the relay
+already knows who is near whom and who is shown whom, so a ping reaches exactly the players who can see the porter who
+made it, a player's choice of whom he sees (`show_others`, the cap) holds for pings and likes as for bodies, nothing is
+stored, and it arrives within a datagram's time instead of the next two-second read. No policy setting: a server that
+lets players see each other lets them ping and like.
+
+| Rule | Why |
+|---|---|
+| A signal is from the player whose address sent it (`unknownSource`, `spoofed` as for every broadcast message) | nobody pings or likes in somebody else's name |
+| A ping goes, as SIGNALLED with the server's record of the sender as its source, to the players near who are shown him, and to nobody else (not a player near who is not shown him, a player far away, a pairs player, a linked server) | as a bug mark: a ping reaches the players who can see its porter |
+| A ping's place is at most 300 m from where the server has the sender | a ping marks where a porter is or looks, not a place across the map |
+| A like goes to the one player it names, while he is near the sender, shown him, and within 50 m of where the server has him; it carries that place, not the one the sender gave | a like is for a porter next to you, and the receiving game gives it as a real like |
+| At most one signal every 500 ms and 20 a minute from one player, pings and likes together (`signalsRefused` counts the rest, with the refused reaches and targets) | a held key or a broken game cannot flood the others |
+
+`RelayStats` counts `signals` (taken), `signalsRefused` and `signalsSent` (SIGNALLED datagrams). Tests: `broadcast_test.cpp`
+(`signalsRelay`); mutants `RELAY_SIGNAL_RATE`, `RELAY_SIGNAL_REACH`, `RELAY_SIGNAL_HIDDEN`, `RELAY_SIGNAL_LIKE_ANY`.
+
 ### A swarm of stand-in players (`coop-swarm`)
 
 `mod/swarm.cpp` (built by `make -C mod build/coop-swarm`, or `build/coop-swarm.exe` with the Windows binaries) is K
@@ -976,7 +996,7 @@ BTs; what is shared is who is down:
 
 | Call | Answer |
 |---|---|
-| `POST …/coop/events` `{"kind":"mule\|camp\|gazer\|rain\|replay\|bosslife\|level","key":N,"value":V}` (V 0..1000) with `X-Coop-Token` | `format` 1. 403 when `enemies` is off (except `level`), 429 past 20000 events at once |
+| `POST …/coop/events` `{"kind":"mule\|camp\|gazer\|rain\|replay\|bosslife\|level","key":N,"value":V}` with `X-Coop-Token` | `format` 1. 403 when `enemies` is off (except `level`), 429 past 20000 events at once (every kind together) |
 | `GET …/coop/events[?since=VERSION]` | `format` 1, `on`, `version`, `full`, `wait_ms` (2 s), `events` (others' only: `kind`, `key`, `value`) |
 
 One entry per kind and key (the newest wins), kept an hour; rain a minute; `replay` (a boss replay started: key the
@@ -998,6 +1018,25 @@ about cargo set down, so the mod does, with the notice token:
 The first take wins. A world keeps at most 4000 crates (the oldest goes) and each for a week (a crate delivered or
 destroyed far from every player is never told). The world file keeps them (`cargo`). Tests: `built_test.cpp`; mutants
 `CARGO_FOREVER`, `CARGO_OFF`, `CARGO_UNLIMITED`, `CARGO_TOKEN`, `CARGO_OWN`, `CARGO_SAVE_LOST`.
+
+### Orders taken together
+
+Under the same setting `cargo` (what players carry is shared), the world events carry two more kinds for the mod's
+`group_orders` (`../mod/README.md`, "Orders taken together in group play"): players who stand at one terminal when one
+of them takes a standard order share that run of it, a **party**, numbered by the game that took it.
+
+| Call | Answer |
+|---|---|
+| `POST …/coop/events` `{"kind":"order","key":MISSION,"value":1\|2\|3,"party":P,"place":[x,y,z]}` | 1 a start (with where the porter stands), 2 a success, 3 a give-up. 400 without a party 1..2^53-1 or with another value; 403 when `cargo` is off, and for a start or give-up of a party another player started |
+| `POST …/coop/events` `{"kind":"unit","key":MISSION\|UNIT<<48,"value":1,"party":P,"data":[packed,life,life]}` | a unit handed in, with what the hand-in left in its row (at most three numbers) |
+| `GET …/coop/events[?since=VERSION]` | as above, and `orders` (the rule); an order or unit also lists `party`, `age` (seconds since it was said), `place`, `data` |
+
+One entry per kind, key and party (two players who take the same order apart are two parties), the newest wins, kept a
+day. Only the player who said a party's start says its start again or gives it up for everyone; anyone may say its
+success or a unit (a member's give-up is not said: he leaves alone). Whole numbers in `place` and `data` come back as
+integers, so a unit's packed word is exact. Who stands where is the mod's decision (it is the one that knows its porter);
+the server keeps nothing of an order in the world file. Tests: `built_test.cpp` (`orders`); mutants `EVENTS_PARTY` (one
+entry per order), `EVENTS_LEADER` (a member gives the party up), `EVENTS_ORDERS_RULE` (the rule ignored).
 
 ### Text chat
 
@@ -1534,7 +1573,11 @@ F2 of a player with one player near and shown, one near who is shown nobody and 
 relay id, the name and the UTC time; a MARKED to the first only, with the name his roster gave; none back to the
 sender), a second within 2 s refused, one every 2 s until 30 in the hour, one more an hour after the first, a MARK
 from an address that never said HELLO and two naming another player (nothing logged, nothing sent), a far player's
-mark logged and sent to nobody, and a player the keys refuse whose marks go nowhere. Twenty-five mutants must fail
+mark logged and sent to nobody, and a player the keys refuse whose marks go nowhere; pings and likes: a ping to the
+players near who are shown the sender only, one 400 m from him refused, a like to its player only (with the server's
+place of the sender), none to a player 80 m away, one not shown the sender, one far away or unknown, the rate, and
+nothing from an address that never said HELLO or naming another player. Twenty-nine mutants (with `RELAY_SPOT_YAW` and
+the four `RELAY_SIGNAL_*`) must fail
 it (`RELAY_BCAST_MODE`, `RELAY_BCAST_BUILD`, `RELAY_BCAST_SPOOF`, `RELAY_BCAST_ORDER`,
 `RELAY_BCAST_STAMP`, `RELAY_BCAST_ANIMATION_FAR`, `RELAY_BCAST_TELEPORT`, `RELAY_BCAST_INTEREST`, `RELAY_BCAST_ROSE`,
 `RELAY_BCAST_BUDGET`, `RELAY_BCAST_ENTER_STATE`, `RELAY_BCAST_STATE_OLD`, `RELAY_BCAST_FETCH_FAR`, `RELAY_NEAR_CAP`,
