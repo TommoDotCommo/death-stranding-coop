@@ -165,6 +165,7 @@ std::string config(const Session& s) {
 #endif
 #ifndef MUTANT_GROUP_NO_MAP
                 +",\"player_map\":true"   // the others on the game's map; the server's rules say whether anyone is listed
+                +",\"player_hud\":true"   // and those not drawn as bodies as markers on the HUD
 #endif
 #ifndef MUTANT_GROUP_NO_CHAT
                 +",\"chat\":true"   // Y, through the server; its rules say whether anyone may (../mod/README.md, "Text chat")
