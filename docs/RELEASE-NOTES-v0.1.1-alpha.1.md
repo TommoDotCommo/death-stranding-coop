@@ -31,6 +31,21 @@ In group play on a server (every line is a server rule the server's owner can ch
   rules), **hold F1** for the co-op keys, **F3** for test mode's switches (blood, stamina and the porter's battery now
   really kept full).
 - **Other players' gear and carried cargo** drawn on their bodies.
+- **Vehicles together**: other players' trucks and bikes are drawn under them; J next to one being driven rides along
+  on it. Their floating carriers are drawn too, and J rides on one. **Towing**: J while driving hooks your nearest
+  floating carrier (within 8 m) to the vehicle, J again lets it go.
+- **The world's enemies** (rule `enemies`): a MULE one player takes down is down for the others, camps alarmed by one
+  are alarmed for all, gazers destroyed are gone for everyone; **timefall** where one player has it falls for the
+  others near.
+- **Building together**: upgrading another player's structure raises it for everyone; **roads**: what the others put
+  into a paver counts in full (the game alone took only a share).
+- **Orders together**: players within 30 m who take the same standard order at one terminal deliver it as a party.
+- **Pings and likes**: B pings where you stand for the players near (on their HUD for 30 s); L gives a like to the
+  nearest player within 25 m.
+- **Far players on the HUD**: players too far away to be drawn are markers on the HUD.
+- **Many players**: Settings, "other players drawn" (0 to 32, 15 by default); bodies beyond 30 m drop their shadow and
+  cloth simulation, and bodies no longer slow the game the way they did (32 bodies near: about 80 fps where it was 43
+  on the test PC).
 - A server keeps up to 65536 players' accounts and takes 1024 at once.
 
 Fixed:
@@ -56,8 +71,9 @@ game on one PC unless a line says otherwise.
 - Two players picking up the same crate within the same three seconds each keep one.
 - On a server whose world is its own, cargo you set down there goes into your save (structures do not).
 - What another player builds skips the game's spacing checks; structures may overlap.
-- Upgrades and materials put into another player's structure are not shared through the server yet; nor are vehicles,
-  roads, BTs, rain or orders (those are two-player co-op only).
+- Materials put into another player's structure short of a level are not shared (a level reached is).
+- Riding along: a porter more than 20 m from the vehicle cannot get on; the place on a moving vehicle can lag.
+- Boss Battle replays together are not in this release (built, never run with a game).
 - Only Steam build 13300582. Another mod's `avrt.dll` in the game folder blocks the install.
 - Traffic is not encrypted: play on a LAN, a VPN, or a server you trust.
 - Updating is manual: run the new Setup.
