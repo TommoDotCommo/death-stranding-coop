@@ -16,6 +16,16 @@ int main(){
     CHECK(body(Event{"mule",5,2})==R"({"kind":"mule","key":5,"value":2})");
     CHECK(levelKey("cxnh5KeW9CCpV")==levelKey("cxnh5KeW9CCpV")&&levelKey("cxnh5KeW9CCpV")!=levelKey("cxnh5KeW9CCpW")&&levelKey("x")>=0&&levelKey("x")<(int64_t(1)<<52));
     CHECK(parse(R"({"format":1,"version":"v","events":[{"kind":"level","key":9,"value":3}]})").events.size()==1);
+    // Orders taken together (grouporders.h): a party, where it was taken, what a hand-in left, how long ago.
+    {auto o=parse(R"({"format":1,"version":"v","orders":false,"events":[
+        {"kind":"order","key":222000,"value":1,"party":77,"age":12,"place":[1.5,2,3]},{"kind":"unit","key":5,"value":1,"party":77,"data":[4294967295,0.5,1]},
+        {"kind":"order","key":1,"value":1},{"kind":"order","key":1,"value":1,"party":3,"place":[1,2]},{"kind":"unit","key":1,"value":1,"party":3,"data":[1,2,3,4]}]})");
+     CHECK(o.read&&!o.orders&&o.events.size()==2);
+     if(o.events.size()==2){CHECK(o.events[0]==(Event{"order",222000,1,77,{1.5,2,3},{}})&&o.events[0].age==12);
+         CHECK(o.events[1]==(Event{"unit",5,1,77,{},{4294967295.0,0.5,1}}));}
+     CHECK(parse(R"({"format":1,"version":"v","events":[]})").orders);
+     CHECK(body(Event{"unit",5,1,77,{},{4294967295.0,0.5,1}})==R"({"kind":"unit","key":5,"value":1,"party":77,"data":[4294967295,0.5,1]})");
+     CHECK(body(Event{"order",9,1,77,{1.5,-2,3},{}})==R"({"kind":"order","key":9,"value":1,"party":77,"place":[1.5,-2,3]})");}
     unsigned f=0;Answer bad;CHECK(delayAfter(bad,f)==FailWaitMs&&delayAfter(a,f)==2000&&f==0);
     std::vector<std::string> posted,since;std::mutex m;
     {

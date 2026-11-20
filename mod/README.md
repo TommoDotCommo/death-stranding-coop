@@ -1064,6 +1064,41 @@ the players near, and a game in one joins nobody's: a visitor's copy would be an
 FIGHT_BOSS_OFFERED). Playing a story boss together is designed, not built (both start the same Boss Battle replay, the
 owner's boss life the one that counts).
 
+## Orders taken together in group play (`group_orders`, off by default; the server's rule `cargo`; not run in a game)
+
+Two-player play shares every standard order with the partner (`share_orders`, `share_order_units`). In a group there is
+no partner, so an order is shared by the players who were there when it was taken (`grouporders.h`):
+
+- A standard order (a repeatable delivery or collection; never a main or sub order) this porter takes at a terminal
+  starts a **party**: the start is said to the server (`../world/README.md`, "Orders taken together") with a fresh
+  party number and where the porter stands. An order under way when the game loads starts none.
+- A game whose porter stands within 30 m of that place, within two minutes of the start, with the same order available
+  in his own world, takes it on too with the game's own start request (the one `share_orders` uses) and is in that
+  party; the game makes his own cargo for it. The info log says "A porter here took this order: it is under way for you
+  too. Give it up to go alone." A start the game does not show within 15 s is dropped.
+- A unit anyone of the party hands in is marked delivered in the others' games as `share_order_units` does for the
+  partner (the row's packed word and the cargo's two condition values, then its state; only a row still not delivered),
+  and their copy of that cargo lying in the world is removed (never one on a porter).
+- A success said by anyone of the party completes the order in the others' games (the game's success request); a
+  give-up by the one who took it gives it up in theirs; a member who gives up leaves the party alone, and is not taken
+  back into it.
+- Each game decides about its own world only: a start only for an order available there, a unit only for a row of the
+  party's order under way there, an end only for the party's order under way there. Nothing done for the party is said
+  back. A load leaves every party (they are kept in memory only). Nothing is written to the save but through the game's
+  own requests and the unit rows, as in two-player play.
+
+Requires `online_server`, `strand_token`, `game_thread` and `puppet_probe`, and no `peer`. The launcher does not write it
+yet. It uses the same courier as `group_enemies` (one read of `…/coop/events` every 2 s). A server whose rule `cargo` is
+off refuses the events and the log says so once. Log lines `GROUPORDER`. Tests `grouporders_test.cpp` (leader,
+member, who joins and from where, a refused or stuck start, a load; mutants ECHO, FAR, STALE, NOT_MINE, MEMBER_FAIL,
+UNIT_ANY, REJOIN, OLD_START, STATE in `test_game_thread_mutants.py grouporders`), `groupevents_test.cpp` (the extra
+fields), config mutant CONFIG_GROUP_ORDERS.
+
+What a live run must check: that the start request takes an order on in a second game whose porter stands at the same
+terminal (the request worked live from the partner's game, 2026-11-12); what the joiner's game makes of the cases it
+lays out; a unit handed in by one player marked delivered in the other's game and that copy gone; the success reaching
+the other game; the leader's give-up; and that nothing is told twice.
+
 ## Strand notices (`strand_notices`, off by default; live once, 2026-11-17)
 
 The rule behind it: no surprises. A game builds in its own world whatever the server does, uploads the structure and

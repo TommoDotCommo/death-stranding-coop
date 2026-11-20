@@ -17,8 +17,11 @@ namespace mod::groupevents {
 constexpr uint64_t WaitMinMs=1000,WaitMaxMs=60000,FailWaitMs=10000;
 // A structure's level is said under the hash of its online id (52 bits of FNV-1a: the server's keys are integers).
 int64_t levelKey(const std::string& online);
-struct Event { std::string kind; int64_t key=0, value=0; bool operator==(const Event& o) const {return kind==o.kind&&key==o.key&&value==o.value;} };
-struct Answer { bool read=false,on=true,full=false; std::string version; uint64_t waitMs=2000; std::vector<Event> events; };
+// Kinds `order` and `unit` (grouporders.h) also carry their party, where an order was taken (place, three numbers or
+// none), what a unit's hand-in left in its row (data, at most three numbers) and, as read, how many seconds ago it was said.
+struct Event { std::string kind; int64_t key=0, value=0, party=0; std::vector<double> place{}, data{}; int64_t age=0;
+    bool operator==(const Event& o) const {return kind==o.kind&&key==o.key&&value==o.value&&party==o.party&&place==o.place&&data==o.data;} };
+struct Answer { bool read=false,on=true,orders=true,full=false; std::string version; uint64_t waitMs=2000; std::vector<Event> events; };
 Answer parse(const std::string& body);
 std::string body(const Event&);
 uint64_t delayAfter(const Answer&,unsigned& failures);
