@@ -135,8 +135,10 @@ Config parseConfig(const std::string& s) {
     if(values.count("story_key")){auto k=number("story_key");if(k>0xfe)throw std::runtime_error("story_key must be a virtual-key code 0..254 (0: off)");c.storyKey=unsigned(k);}
     c.shareRoads=boolean("share_roads",false);
     c.shareSavedStructures=boolean("share_saved_structures",false);
-    c.bodyUpdateLink=boolean("body_update_link",true);
     c.bodyRepGuard=boolean("body_rep_guard",true);
+    // With the guard the bodies stay out of this porter's update group (each joined body cost about 0.46 ms a frame:
+    // 32 joined 43 fps, not joined 76-83, live 2026-11-20); without it they are joined, as before.
+    c.bodyUpdateLink=boolean("body_update_link",!c.bodyRepGuard);
     c.partnerPoses=boolean("partner_poses",true);
     c.partnerAnimation=boolean("partner_animation",true);
     c.partnerCart=boolean("partner_cart",false);

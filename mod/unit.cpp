@@ -14,6 +14,10 @@ int main() {
     for(auto p:std::vector<std::vector<int>>{{},{-1,-1},{256},{-2}}) {bool threw=false;try{uniqueSignature({},p);}catch(const std::invalid_argument&){threw=true;}assert(threw);}
     std::string good=R"({"role":"host","peer":"127.0.0.1","slot":0,"peer_slot":1,"nickname":"test","provider":"synthetic","session":123})";
     auto c=mod::parseConfig(good);assert(c.slot==0&&c.peerSlot==1&&c.logging&&c.peerAddress==0x7f000001&&!c.bindAddress);
+    // Bodies: guarded and not joined to this porter's update group by default; joined again without the guard.
+    assert(c.bodyRepGuard&&!c.bodyUpdateLink);
+    {auto b=good;b.pop_back();b+=",\"body_rep_guard\":false}";auto u=mod::parseConfig(b);assert(!u.bodyRepGuard&&u.bodyUpdateLink);}
+    {auto b=good;b.pop_back();b+=",\"body_update_link\":true}";auto u=mod::parseConfig(b);assert(u.bodyRepGuard&&u.bodyUpdateLink);}
     // Peers: loopback or any unicast IPv4 (LAN, VPN, public); never names, 0/8, multicast, reserved or broadcast.
     for(auto a:{"127.0.0.1","192.168.1.20","10.0.0.5","100.101.102.103","8.8.4.4","223.255.255.254"})assert(mod::peerAddress(a));
     assert(*mod::peerAddress("192.168.1.20")==0xc0a80114u);

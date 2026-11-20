@@ -61,7 +61,7 @@ struct Config {
     bool recordAnimation=false;      // lab: every animation sample sent also goes into the presence log (coop-partner --replay-animation)      // the partner's own animation controls on his body (controls.h, core ANIMATION)
     bool partnerPoses=true;          // a downed or caught partner in the game's own collapse and BT-drag poses (double.h DeadPoseBit); false: laid flat
     bool bodyRepGuard=true;          // the mod's bodies never run the inventory display for this porter's cargo (repguard.h); false only to compare
-    bool bodyUpdateLink=true;        // the partner body is joined to this porter's update group (updated in order with him, never beside him: mod.cpp, linkBodyUpdate); false only to compare
+    bool bodyUpdateLink=false;       // bodies joined to this porter's update group (updated in order with him, never beside him: mod.cpp, linkBodyUpdate); on by default only without body_rep_guard; compare
     bool shareSavedStructures=false; // on joining, the structures this player's save already has are built in the partner's world too (structures.h)
     bool shareRoads=false;     // what a player delivers to an auto-paver, and a road it builds, also counts in the partner's game (roads.h)
     bool shareOrders=false;    // a standard order one player takes on, completes or gives up does the same for the partner (orders.h)

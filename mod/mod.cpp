@@ -532,7 +532,7 @@ struct Runtime final:ds::Transport {
         if(crowdBodies)for(size_t i=0;i<crowdBodies->size()&&i<64;++i)if(auto e=crowdBodies->entity(i))es.push_back(e);
         if(ownEntity)es.push_back(ownEntity);
         mod::repguard::bodies(es);
-        if(!repGuardTried&&!es.empty()){repGuardTried=true;
+        if(!repGuardTried){repGuardTried=true;   // before any body's first update
 #if defined(_WIN32) && !defined(MOD_FAKE_NETWORK)
             try{mod::repguard::install(*sampler);note("BODY guard on: bodies never run the inventory display for this porter's cargo\n");}catch(const std::exception& e){note((std::string("BODY guard unavailable: ")+e.what()+"\n").c_str());}
 #endif
@@ -2351,7 +2351,8 @@ struct Runtime final:ds::Transport {
     // function pointers, then the game thread waiting for good; about one run in six of an order taken at a
     // terminal; game_offsets.md, "Deferred rep calls"). Joined to this porter with the game's own link call
     // (0x23f4040(owner+0x208, other, owner, kind 0), what SetParent uses) the body is never updated beside him.
-    // body_update_link=false leaves it out, to compare.
+    // Since 2026-11-20 the writer is named and skipped for the mod's bodies (repguard.h), so by default bodies are no
+    // longer joined (body_update_link=true joins them again; it is the default only with body_rep_guard=false).
     uint64_t linkedBody=0,linkedPlayer=0;
     void linkBodyUpdate(uint64_t body,uint64_t player){
         if(!config.bodyUpdateLink||!sampler||!body||!player||(body==linkedBody&&player==linkedPlayer))return;
