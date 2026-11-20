@@ -1177,6 +1177,9 @@ struct Runtime final:ds::Transport {
         if(!groupPingsNoted){groupPingsNoted=true;groupSerials=mod::grouppings::Serials(uint32_t(nonce()));
             note("PINGS on (group play): B pings where this porter stands, L likes the nearest player within 25 m\n");}
         const bool play=cache.available&&!cache.gated&&!inEvent;
+        // The game's likes are found in the background as soon as this porter is in play, not when the first like
+        // arrives: that like would be dropped while the search runs, and with no other like nothing collected the result.
+        const bool likesReady=play&&groupLikesReady();
         std::optional<std::array<double,3>> here;if(cache.available)here=cache.local.position;   // the core's State axes (y up)
         auto game=[](const std::array<double,3>& a){return std::array<double,3>{a[0],a[2],a[1]};};   // -> game axes (z up)
         auto named=[](const ds::broadcast::SignalNews& n){return n.name.empty()?"player "+std::to_string(n.source):n.name;};
@@ -1189,7 +1192,8 @@ struct Runtime final:ds::Transport {
                 std::ostringstream o;o<<"PING from "<<name<<" at "<<n.place[0]<<","<<n.place[1]<<","<<n.place[2]<<" ("<<long(std::lround(d))<<" m)\n";note(o.str().c_str());
                 pingLines.push_back(mod::grouppings::pingLine(name,d));
                 continue;}
-            if(!play||!groupLikesReady()){note(("LIKE from "+name+" dropped: not in play\n").c_str());continue;}
+            if(!play){note(("LIKE from "+name+" dropped: not in play\n").c_str());continue;}
+            if(!likesReady){note(("LIKE from "+name+(likesTried?" dropped: likes unavailable\n":" dropped: likes not found yet\n")).c_str());continue;}
             if(!groupLikeGate.accept(n.source,n.serial,now)){note(("LIKE from "+name+" dropped: too many\n").c_str());continue;}
             if(likesApi->give(1)){++groupLikesGiven;note(("LIKE received from "+name+"\n").c_str());if(notices)notices->event(mod::notice::Kind::Liked,name,now);}
             else note(("LIKE from "+name+" dropped: no likes state\n").c_str());

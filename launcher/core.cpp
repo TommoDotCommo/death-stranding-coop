@@ -147,6 +147,9 @@ std::string config(const Session& s) {
             +",\"others_vehicles\":true"   // other players' trucks and bikes, and riding along (J)
             +",\"others_carts\":true"      // the floating carriers other players tow
 #endif
+#if !defined(MUTANT_GROUP_NO_PINGS)&&!defined(MUTANT_GROUP_PAIRS)   // pings need the broadcast mode: the mod refuses them over pairs
+            +",\"group_pings\":true"   // B pings where this porter stands, L likes the nearest player, through the relay
+#endif
 #ifndef MUTANT_GROUP_NOTICE_TOKEN
             // With the token: the notices, and the save's older strand offered while the server says his offer_old is
             // yes (../mod/README.md, "Offering your existing strand"); the server's word decides, so it is always on.
@@ -156,6 +159,9 @@ std::string config(const Session& s) {
 #endif
 #ifndef MUTANT_GROUP_NO_ENEMIES
                 +",\"group_enemies\":true"   // MULEs down and camps alarmed through the server; its rule `enemies` decides
+#endif
+#ifndef MUTANT_GROUP_NO_ORDERS
+                +",\"group_orders\":true"   // standard orders taken together by the players at one terminal
 #endif
 #ifndef MUTANT_GROUP_NO_CARGO
                 +",\"group_cargo\":true"   // cargo set down shared through the server; its rule `cargo` decides
