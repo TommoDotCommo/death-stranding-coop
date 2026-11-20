@@ -19,10 +19,12 @@
 #include <vector>
 namespace mod::hudmarkers {
 constexpr size_t MaxMarks=64;
-// Kinds whose detail path takes a record without a marker (0x79: a last known MULE position, 0xbc: an NPC); others
-// read the marker without checking it. Which one looks right is a live question.
-constexpr uint8_t DefaultKind=0xbc;
-inline bool safeKind(uint8_t k){return k==0x79||k==0xbc;}
+// Kinds whose whole path takes a record without a marker. 0x98 (the HUD's MuleLastKnownIcon) is drawn at any
+// distance and pinned to the screen's edge when off screen; 0x79 (MuleMachineGunIcon) and 0xbc (NPCFragileIcon) are
+// dropped off screen and beyond the HUD's marker distance (live 2026-11-20: added, not seen). The others read the
+// marker unchecked, or (0xaf) look up a real user marker by id.
+constexpr uint8_t DefaultKind=0x98;
+inline bool safeKind(uint8_t k){return k==0x98||k==0x79||k==0xbc;}
 struct Mark {float x=0,y=0,z=0;uint64_t id=0;};   // game axes (z up)
 // The map's icon id of a player (mapicons::icons: the player's relay id as text, hashed).
 uint64_t iconId(uint64_t player);

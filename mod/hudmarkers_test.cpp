@@ -19,7 +19,7 @@ int main(){
     CHECK(marks(pic,3,{},&here,2).size()==2&&marks(pic,0,{},&here,99).size()==5);   // the limit; area not known: all
     Board b;b.publish(m);Board::Picture got;b.read(got);CHECK(got.count==3&&got.marks[2].x==300);
     b.publish(std::vector<Mark>(MaxMarks+5));b.read(got);CHECK(got.count==MaxMarks);
-    CHECK(safeKind(0xbc)&&safeKind(0x79)&&!safeKind(0x9e)&&!safeKind(0xb1));
+    CHECK(DefaultKind==0x98&&safeKind(0x98)&&safeKind(0xbc)&&safeKind(0x79)&&!safeKind(0x9e)&&!safeKind(0xb1)&&!safeKind(0xaf)&&!safeKind(0xc2));
     if(failures){std::fprintf(stderr,"%u hudmarkers oracle failures\n",failures);return 1;}
     std::puts("hudmarkers oracles passed");return 0;
 }

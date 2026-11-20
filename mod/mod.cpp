@@ -3006,6 +3006,33 @@ struct Runtime final:ds::Transport {
         if(now>=rainNotedAt+30000&&(rainSaid||rainPlaced)){rainNotedAt=now;std::ostringstream x;
             x<<"RAIN said for this porter's ground "<<rainSaid<<" times, others' rain placed here "<<rainPlaced<<" times; the map here "<<(c?std::to_string(*c):std::string("unread"))<<"\n";note(x.str().c_str());}
     }
+    // Lab (research for boss replays played together): `replay ID` asks the game's mission start for that mission
+    // (0x33b80a0(S = *(image+0x7c0aff8), id, 0, ranking 0); the 17 boss-replay ids, 0x33cb020), and the state is logged
+    // when it changes: fact 12 "a boss replay runs" (0x33acd40(S, 12)) and the game-state bits 13 GameOver, 15 BossBattle,
+    // 16 AfterBeatBoss (*(image+0x7bf6e88)+8).
+    bool replayWatch=false;uint64_t replayCheckAt=0;int replayNoted=-1;
+    bool replayCallsUsable(){
+#ifdef _WIN32
+        static const uint8_t start[19]={0x40,0x53,0x56,0x41,0x56,0x41,0x57,0x48,0x83,0xec,0x48,0x45,0x0f,0xb6,0xf8,0x45,0x0f,0xb6,0xf1};
+        static const uint8_t fact[12]={0x48,0x83,0xec,0x28,0x0f,0xb6,0xc2,0xff,0xc8,0x83,0xf8,0x0c};
+        uint8_t a[19]{},b[12]{};
+        return sampler&&sampler->read(sampler->base+0x33b80a0,a,19)&&!std::memcmp(a,start,19)&&sampler->read(sampler->base+0x33acd40,b,12)&&!std::memcmp(b,fact,12);
+#else
+        return false;
+#endif
+    }
+    void tickReplayWatch(uint64_t now){
+        if(!replayWatch||!sampler||now<replayCheckAt)return;replayCheckAt=now+1000;
+#ifdef _WIN32
+        uint64_t s=0,g=0,flags=0;if(!sampler->read(sampler->base+0x7c0aff8,&s,8)||!s)return;
+        if(sampler->read(sampler->base+0x7bf6e88,&g,8)&&g)sampler->read(g+8,&flags,8);
+        const bool running=reinterpret_cast<bool(*)(uint64_t,uint8_t)>(sampler->base+0x33acd40)(s,12);
+        const int state=int(running)|int((flags>>13)&1)<<1|int((flags>>15)&1)<<2|int((flags>>16)&1)<<3;
+        if(state!=replayNoted){replayNoted=state;std::ostringstream o;o<<"REPLAY boss replay runs "<<running<<", BossBattle "<<((flags>>15)&1)<<", AfterBeatBoss "<<((flags>>16)&1)<<", GameOver "<<((flags>>13)&1)<<"\n";note(o.str().c_str());}
+#else
+        (void)now;
+#endif
+    }
     void tickGroupEnemies(uint64_t now){
         if(!config.groupEnemies||config.strandToken.empty()||!sampler)return;
         if(!enemyTried){try{campAlert=mod::enemies::nativeAlert(*sampler);}catch(const std::exception&){}}
@@ -4235,7 +4262,7 @@ struct Runtime final:ds::Transport {
             stage="server page";stages.enter("server page",mod::nowUs());
             if(gameContext)tickServerInfo(now);
             stage="map";stages.enter("map",mod::nowUs());
-            if(gameContext){tickArea();tickPlayerMap(now);tickHudMarkers(now);tickServerWorld(now);tickTow(now);}
+            if(gameContext){tickArea();tickPlayerMap(now);tickHudMarkers(now);tickServerWorld(now);tickTow(now);tickReplayWatch(now);}
             stage="chat";stages.enter("chat",mod::nowUs());
             if(gameContext)tickChat(now);
             stage="notices";stages.enter("notices",mod::nowUs());
@@ -4255,6 +4282,14 @@ struct Runtime final:ds::Transport {
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfhide"))perfHideMetres=double(*v);
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perffar"))perfFarMetres=double(*v);
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"reptrace"))reptraceWanted=*v!=0;
+                if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"replay")){
+                    if(!replayCallsUsable())note("REPLAY unavailable: the functions differ\n");
+                    else{replayWatch=true;
+#ifdef _WIN32
+                        uint64_t s=0;
+                        if(*v&&sampler->read(sampler->base+0x7c0aff8,&s,8)&&s){reinterpret_cast<void(*)(uint64_t,uint64_t,bool,bool)>(sampler->base+0x33b80a0)(s,uint64_t(*v),false,false);note(("REPLAY asked the game to start mission "+std::to_string(*v)+"\n").c_str());}
+#endif
+                        note("REPLAY watching\n");}}
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfminlod"))perfMinLod=std::min<uint32_t>(*v,99);
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfpbd"))perfPbd=std::min<uint32_t>(*v,999);
                 if(give&&cargoGive){cargoGive(*give);note(("CARGO give id="+std::to_string(*give)+"\n").c_str());}
