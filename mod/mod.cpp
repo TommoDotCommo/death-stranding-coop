@@ -65,6 +65,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "mapicons.h"
 #include "hudmarkers.h"
 #include "reptrace.h"
+#include "repguard.h"
 #include "serverworld.h"
 #include "livebuild.h"
 #include "groupcargo.h"
@@ -521,6 +522,22 @@ struct Runtime final:ds::Transport {
         for(auto& s:all){uint64_t key=0;for(auto a:s.at)key=key*31+a;auto& seen=reptraceSeen[key];if(seen==s.count)continue;seen=s.count;
             std::ostringstream o;o<<"REPTRACE stack x"<<s.count<<(s.porter?" into THIS PORTER's queue":" into another entity's queue")<<":";
             for(auto a:s.at)if(a)o<<" 0x"<<std::hex<<a<<std::dec;o<<"\n";note(o.str().c_str());}
+    }
+    // The mod's bodies never run the inventory display for this porter's cargo (repguard.h): published every tick.
+    bool repGuardTried=false;uint64_t repGuardNotedAt=0;
+    void tickRepGuard(uint64_t now){
+        if(!config.bodyRepGuard||!sampler)return;
+        std::vector<uint64_t> es;
+        if(otherBodies)for(auto& w:othersPlan.wants)if(auto e=otherBodies->entity(w.key))es.push_back(e);
+        if(crowdBodies)for(size_t i=0;i<crowdBodies->size()&&i<64;++i)if(auto e=crowdBodies->entity(i))es.push_back(e);
+        if(ownEntity)es.push_back(ownEntity);
+        mod::repguard::bodies(es);
+        if(!repGuardTried&&!es.empty()){repGuardTried=true;
+#if defined(_WIN32) && !defined(MOD_FAKE_NETWORK)
+            try{mod::repguard::install(*sampler);note("BODY guard on: bodies never run the inventory display for this porter's cargo\n");}catch(const std::exception& e){note((std::string("BODY guard unavailable: ")+e.what()+"\n").c_str());}
+#endif
+        }
+        if(mod::repguard::installed()&&now>=repGuardNotedAt+60000){repGuardNotedAt=now;note(("BODY guard: "+std::to_string(mod::repguard::skipped())+" cargo display updates skipped on "+std::to_string(es.size())+" bodies\n").c_str());}
     }
     void tickOthers(const mod::puppet::Anchor& anchor,bool event,uint64_t now){
         tickRepTrace(anchor,now);
@@ -3967,7 +3984,7 @@ struct Runtime final:ds::Transport {
         stages.enter("crowd",mod::nowUs());
         tickCrowd(anchor,goal,mirrorSample,mirrorFresh,goal?speed:0,goal?actions:0,now);
         stages.enter("others",mod::nowUs());
-        tickOthers(anchor,event,now);
+        tickOthers(anchor,event,now);tickRepGuard(now);
         twin->mirror(nullptr,false);if(ownTwin)ownTwin->mirror(nullptr,false);   // the sample lives only for this tick
         stages.enter("gear",mod::nowUs());
         repWatch=useOwn?ownEntity:0;
