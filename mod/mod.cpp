@@ -512,6 +512,7 @@ struct Runtime final:ds::Transport {
         if(!reptraceWanted||!sampler)return;
         if(!mod::reptrace::installed()){try{mod::reptrace::install(*sampler);note("REPTRACE on\n");}catch(const std::exception& e){note((std::string("REPTRACE unavailable: ")+e.what()+"\n").c_str());reptraceWanted=false;return;}}
         std::vector<uint64_t> es;if(otherBodies)for(auto& w:othersPlan.wants)if(auto e=otherBodies->entity(w.key))es.push_back(e);
+        if(ownEntity)es.push_back(ownEntity);   // the partner's body
         uint64_t r=0;if(anchor.entity)sampler->read(anchor.entity+0x60,&r,8);
         mod::reptrace::watch(es,r);
         if(now<reptraceNotedAt+10000)return;reptraceNotedAt=now;
