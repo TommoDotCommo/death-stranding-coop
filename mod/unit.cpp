@@ -208,6 +208,8 @@ int main() {
       assert(!mod::parseConfig(token).groupCargo&&mod::parseConfig(withKeys(token,"\"group_cargo\":true")).groupCargo);
       assert(refused(withKeys(online,"\"group_cargo\":true"))&&refused(withKeys(game,"\"group_cargo\":true")));
       assert(mod::parseConfig(withKeys(token,"\"group_enemies\":true")).groupEnemies&&refused(withKeys(online,"\"group_enemies\":true")));
+      assert(mod::parseConfig(withKeys(token,"\"group_enemies\":true,\"group_replays\":true")).groupReplays&&!mod::parseConfig(withKeys(token,"\"group_enemies\":true")).groupReplays);
+      assert(refused(withKeys(token,"\"group_replays\":true")));   // without the world events
       assert(mod::parseConfig(withKeys(online,"\"group_roads\":true")).groupRoads&&refused(withKeys(game,"\"group_roads\":true")));
       // Other players' vehicles (othervehicles.h): group play with others drawn.
       assert(!mod::parseConfig(withKeys(game,"\"others\":8")).othersVehicles&&mod::parseConfig(withKeys(game,"\"others\":8,\"others_vehicles\":true")).othersVehicles);

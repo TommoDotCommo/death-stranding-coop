@@ -78,6 +78,8 @@ constexpr int INVALID_SOCKET=-1;
 #include "offer_strand.h"
 #include "weather.h"
 #include "groupweather.h"
+#include "groupreplay.h"
+#include "replayhooks.h"
 #include "environment.h"
 #include "auto_continue.h"
 #include "pad.h"
@@ -112,6 +114,7 @@ constexpr int INVALID_SOCKET=-1;
 #include <cctype>
 #include <chrono>
 #include <mutex>
+#include <random>
 #include <sstream>
 #include <future>
 #include <thread>
@@ -1733,7 +1736,7 @@ struct Runtime final:ds::Transport {
         helpPage->tick(helpHeld||modKey(mod::help::Key),cache.available&&!cache.gated&&gameEvent&&!gameEvent(),f,now);
     }
     void tickNotices(uint64_t now) {
-        if(!config.notices&&!noticeTest&&!config.strandNotices&&!routeTold&&!config.testMode.on&&!config.chat)return;
+        if(!config.notices&&!noticeTest&&!config.strandNotices&&!routeTold&&!config.testMode.on&&!config.chat&&!config.groupReplays)return;
 #ifndef MOD_FAKE_NETWORK
         if(!noticeApi&&!noticeTried){
             auto* sp=&*sampler;if(!noticeJob.ready([sp]{return mod::notice::nativeApi(*sp);}))return;   // checked beside the game
@@ -1746,13 +1749,14 @@ struct Runtime final:ds::Transport {
         if(!noticeApi)return;
         if(noticeTest){noticeTest=false;note(noticeApi->show(u"Co-op mod: test notice.",mod::notice::PlainIcon)?"NOTICE test shown\n":"NOTICE test refused: no info log now\n");}
 #ifndef MOD_MUTANT_STRAND_PARTNER
-        if(!config.notices&&!config.strandNotices&&!routeTold&&!config.testMode.on&&!config.chat)return;
+        if(!config.notices&&!config.strandNotices&&!routeTold&&!config.testMode.on&&!config.chat&&!config.groupReplays)return;
 #else
         if(!config.notices&&!config.testMode.on)return;   // the mutant: strand lines only beside the partner's notices
 #endif
         if(!notices){notices=std::make_unique<mod::notice::Notifier>(*noticeApi,[this](const std::string& row){note(row.c_str());});
             if(config.group||!config.notices)notices->partnerless();}   // nobody is expected: no "No partner yet"
         {for(auto& line:routeLines)notices->route(line,now);routeLines.clear();}   // the route challenge's lines (tickRoute)
+        {for(auto& line:replayLines)notices->route(line,now);replayLines.clear();}   // boss replays together (replayStep), finished lines
         for(auto& line:testLines)notices->test(line,now);   // test mode's lines (tickTestMode), finished like the strand's
         testLines.clear();
         for(auto& line:chatLines)notices->chat(line,now);   // what the players said (tickChat)
@@ -2909,7 +2913,7 @@ struct Runtime final:ds::Transport {
         auto l=fakeBts.local(at,available);
 #else
         mod::fights::Local l;l.fights=mod::bts::readFights(*sampler,sampler->base);l.at=at;l.available=available;l.dead=vitalsSeen.dead;l.caught=vitalsSeen.caught;
-        {auto u=mod::ui::read(*sampler,sampler->base,cache.available);l.boss=u.flagsKnown&&(u.flags&(uint64_t(1)<<15));}   // BossBattle (ui.h)
+        {auto u=mod::ui::read(*sampler,sampler->base,cache.available);l.boss=(u.flagsKnown&&(u.flags&(uint64_t(1)<<15)))||replayRunning;}   // BossBattle (ui.h), or a boss replay (fact 12)
         if(l.fights.active>0)l.catchers=mod::bts::readCatchers(*sampler,sampler->base);
         if(fights->role()!=mod::fights::Role::None)l.gazers=mod::bts::readGazers(*sampler,sampler->base);
 #endif
@@ -3047,9 +3051,9 @@ struct Runtime final:ds::Transport {
     }
     // Lab (research for boss replays played together): `replay ID` asks the game's mission start for that mission
     // (0x33b80a0(S = *(image+0x7c0aff8), id, 0, ranking 0); the 17 boss-replay ids, 0x33cb020), and the state is logged
-    // when it changes: fact 12 "a boss replay runs" (0x33acd40(S, 12)) and the game-state bits 13 GameOver, 15 BossBattle,
-    // 16 AfterBeatBoss (*(image+0x7bf6e88)+8).
-    bool replayWatch=false;uint64_t replayCheckAt=0;int replayNoted=-1;
+    // when it changes: fact 12 "a boss replay runs" (0x33acd40(S, 12)), the game-state bits 13 GameOver, 15 BossBattle,
+    // 16 AfterBeatBoss (*(image+0x7bf6e88)+8), and the private room (the game-flow manager's +0x58 bit 25).
+    bool replayWatch=false;uint64_t replayCheckAt=0;int replayNoted=-1;int replayUsable=-1;bool replayRunning=false;
     bool replayCallsUsable(){
 #ifdef _WIN32
         static const uint8_t start[19]={0x40,0x53,0x56,0x41,0x56,0x41,0x57,0x48,0x83,0xec,0x48,0x45,0x0f,0xb6,0xf8,0x45,0x0f,0xb6,0xf1};
@@ -3060,17 +3064,137 @@ struct Runtime final:ds::Transport {
         return false;
 #endif
     }
-    void tickReplayWatch(uint64_t now){
-        if(!replayWatch||!sampler||now<replayCheckAt)return;replayCheckAt=now+1000;
+    // Fact 12 now (game thread): 1 a boss replay runs, 0 not, -1 unknown.
+    int replayFact(){
 #ifdef _WIN32
-        uint64_t s=0,g=0,flags=0;if(!sampler->read(sampler->base+0x7c0aff8,&s,8)||!s)return;
+        if(!sampler)return -1;
+        if(replayUsable<0)replayUsable=replayCallsUsable()?1:0;
+        uint64_t s=0;if(!replayUsable||!sampler->read(sampler->base+0x7c0aff8,&s,8)||!s)return -1;
+        return reinterpret_cast<bool(*)(uint64_t,uint8_t)>(sampler->base+0x33acd40)(s,12)?1:0;
+#else
+        return -1;
+#endif
+    }
+    // The game-flow manager GF = *(image+0x7c0d6c0): +0x58 bit 25 while the porter is in his private room; +0x80 the
+    // room's blackboard code and +0x8c its flag, which the room's script reads (GetPrivateRoomBlackBoardFromCpp 0x33c9fe0,
+    // only in the room) to start the Boss Battle replay; the private-room logic writes both after the menu (0x27677f4).
+    uint64_t gameFlow(){uint64_t g=0;if(!sampler||!sampler->read(sampler->base+0x7c0d6c0,&g,8))return 0;return g;}
+    int inPrivateRoom(){const uint64_t g=gameFlow();uint32_t f=0;if(!g||!sampler->read(g+0x58,&f,4))return -1;return int((f>>25)&1);}
+    // The code to the blackboard, only in the private room. With `flag`, first the call the game makes there:
+    // 0x273fe10(object, 0x1a, 1, 0); the object is taken to be the porter's entity (inferred: the game passes the
+    // logic's +0x30; the replay log's Blackboard record names it).
+    bool writeReplayCode(int32_t code,bool flag){
+#ifdef _WIN32
+        const uint64_t g=gameFlow();if(!g||inPrivateRoom()!=1)return false;
+        if(flag){static const uint8_t head[8]={0x40,0x53,0x56,0x57,0x48,0x83,0xec,0x20};uint8_t got[8]{};auto anchor=anchorNow();
+            if(!anchor.entity||!sampler->read(sampler->base+0x273fe10,got,8)||std::memcmp(got,head,8))return false;
+            reinterpret_cast<void(*)(uint64_t,int32_t,bool,bool)>(sampler->base+0x273fe10)(anchor.entity,0x1a,true,false);}
+        *reinterpret_cast<volatile int32_t*>(g+0x80)=code;*reinterpret_cast<volatile uint8_t*>(g+0x8c)=1;
+        return true;
+#else
+        (void)code;(void)flag;return false;
+#endif
+    }
+    // Lab: into the private room (enter) or out, with the game's own request 0x3411950(GF, hash, -1, facility): hash
+    // 0x3a1bb216 enters (the room mode is not active), at the facility 0x2c57cf0(*(image+0x7bf4960), handle, 0) with the
+    // handle *(*(image+0x7be7980)+0xfeb4) (0: none), as the game's direct path does (0x2839640); 0x303767f9 leaves.
+    bool requestPrivateRoom(bool enter){
+#ifdef _WIN32
+        static const uint8_t req[16]={0x40,0x53,0x48,0x83,0xec,0x40,0x48,0x8b,0xd9,0x81,0xfa,0xf9,0x67,0x37,0x30,0x74};
+        static const uint8_t look[16]={0x40,0x53,0x48,0x83,0xec,0x20,0x81,0xfa,0xff,0xff,0x1f,0x00,0x74,0x3a,0x8b,0xc2};
+        uint8_t a[16]{},b[16]{};const uint64_t g=gameFlow();const int room=inPrivateRoom();
+        if(!g||room<0||(room==1)==enter){note(room<0?"REPLAY private room: the game flow is not read\n":enter?"REPLAY private room: already in it\n":"REPLAY private room: not in it\n");return false;}
+        if(!sampler->read(sampler->base+0x3411950,a,16)||std::memcmp(a,req,16)||!sampler->read(sampler->base+0x2c57cf0,b,16)||std::memcmp(b,look,16)){note("REPLAY private room: the functions differ\n");return false;}
+        uint64_t facility=0,player=0,table=0;uint32_t handle=0x1fffff;
+        if(enter&&sampler->read(sampler->base+0x7be7980,&player,8)&&player&&sampler->read(player+0xfeb4,&handle,4)&&sampler->read(sampler->base+0x7bf4960,&table,8)&&table)
+            facility=reinterpret_cast<uint64_t(*)(uint64_t,uint32_t,bool)>(sampler->base+0x2c57cf0)(table,handle,false);
+        reinterpret_cast<void(*)(uint64_t,uint32_t,int32_t,uint64_t)>(sampler->base+0x3411950)(g,enter?0x3a1bb216u:0x303767f9u,-1,facility);
+        std::ostringstream o;o<<"REPLAY private room "<<(enter?"entry":"exit")<<" asked (facility handle 0x"<<std::hex<<handle<<", facility "<<(facility?"found":"none")<<")\n";note(o.str().c_str());
+        return true;
+#else
+        (void)enter;return false;
+#endif
+    }
+    // Lab (`replaylog 1`): every record of the replay hooks (replayhooks.h) in the log.
+    bool replayLog=false;
+    void drainReplayHooks(){
+        if(!mod::replayhooks::installed())return;
+        for(auto& r:mod::replayhooks::drain()){
+            if(!replayLog)continue;
+            std::ostringstream o;o<<"REPLAYLOG ";
+            switch(r.kind){
+            case mod::replayhooks::Kind::Accept:o<<"Boss Battle accepted: code 0x"<<std::hex<<r.a<<std::dec<<", row "<<r.b;break;
+            case mod::replayhooks::Kind::Blackboard:o<<"private room hands on code 0x"<<std::hex<<r.a<<" (object 0x"<<r.b<<", index 0x"<<r.c<<")"<<std::dec;
+                {auto anchor=anchorNow();o<<(anchor.entity&&r.b==anchor.entity?"; the object is the porter's entity":"; the object is not the porter's entity");}break;
+            case mod::replayhooks::Kind::Script:o<<"room script asks a mission start: resource 0x"<<std::hex<<r.a<<", record 0x"<<r.b<<std::dec<<", mission "<<r.c;break;
+            case mod::replayhooks::Kind::Start:o<<"mission start "<<r.a<<(r.b?" passed the check":" refused by the check")<<(mod::groupreplay::replayMission(int64_t(r.a))?" (a boss replay)":"");break;}
+            o<<"\n";note(o.str().c_str());}
+    }
+    // Lab (`bosslife 1`): read-only, every 2 s while a boss replay runs: the porter's destructibility (entity+0xc0: the
+    // floats +0x5c, +0x68 (damage, as Entity_ExportedSetHealth 0x2361d10 -> 0x23ec3f0 writes it), +0x6c, and the
+    // resource's +0x24 (full life)), the catchers' lives, and the actor manager's units (their vtables and actor counts)
+    // when they change: where a human boss's life is, before anything is written to it.
+    bool bossLifeSurvey=false;uint64_t bossLifeAt=0;std::string bossUnitsNoted;
+    void tickBossLifeSurvey(uint64_t now){
+        if(!bossLifeSurvey||!sampler||now<bossLifeAt)return;bossLifeAt=now+2000;
+        auto anchor=anchorNow();std::ostringstream o;o<<"BOSSLIFE replay "<<replayFact()<<", BossBattle "<<(replayRunning?1:0);
+        uint64_t d=0,res=0;float f5c=0,f68=0,f6c=0,full=0;
+        if(anchor.entity&&sampler->read(anchor.entity+0xc0,&d,8)&&d&&sampler->read(d+0x5c,&f5c,4)&&sampler->read(d+0x68,&f68,4)&&sampler->read(d+0x6c,&f6c,4)&&sampler->read(d+0x30,&res,8)&&res&&sampler->read(res+0x24,&full,4))
+            o<<"; porter +5c "<<f5c<<" +68 "<<f68<<" +6c "<<f6c<<" full "<<full;
+        else o<<"; porter's destructibility unread";
+        auto fightsNow=mod::bts::readFights(*sampler,sampler->base);
+        if(fightsNow.active>0){o<<"; catchers";for(auto& c:mod::bts::readCatchers(*sampler,sampler->base))o<<" "<<c.percent<<"% (type "<<int(c.type)<<")";}
+        o<<"\n";note(o.str().c_str());
+        uint64_t manager=0,units=0;int32_t count=0;std::ostringstream u;
+        if(sampler->read(sampler->base+0x7bbb8c0,&manager,8)&&manager&&sampler->read(manager+0x440,&count,4)&&sampler->read(manager+0x448,&units,8)&&units&&count>0&&count<=256)
+            for(int32_t i=0;i<count;++i){uint64_t unit=0,vt=0;uint32_t n=0;
+                if(sampler->read(units+8*uint64_t(i),&unit,8)&&unit&&sampler->read(unit,&vt,8)&&sampler->read(unit+0x40,&n,4))u<<" "<<std::hex<<(vt-sampler->base)<<std::dec<<":"<<n;}
+        if(u.str()!=bossUnitsNoted){bossUnitsNoted=u.str();note(("BOSSLIFE actor units (vtable:actors)"+bossUnitsNoted+"\n").c_str());}
+    }
+    void tickReplayWatch(uint64_t now){
+        drainReplayHooks();
+        tickBossLifeSurvey(now);
+        if(!(replayWatch||config.groupReplays||bossLifeSurvey)||!sampler||now<replayCheckAt)return;replayCheckAt=now+1000;
+#ifdef _WIN32
+        uint64_t g=0,flags=0;
         if(sampler->read(sampler->base+0x7bf6e88,&g,8)&&g)sampler->read(g+8,&flags,8);
-        const bool running=reinterpret_cast<bool(*)(uint64_t,uint8_t)>(sampler->base+0x33acd40)(s,12);
-        const int state=int(running)|int((flags>>13)&1)<<1|int((flags>>15)&1)<<2|int((flags>>16)&1)<<3;
-        if(state!=replayNoted){replayNoted=state;std::ostringstream o;o<<"REPLAY boss replay runs "<<running<<", BossBattle "<<((flags>>15)&1)<<", AfterBeatBoss "<<((flags>>16)&1)<<", GameOver "<<((flags>>13)&1)<<"\n";note(o.str().c_str());}
+        const int fact=replayFact();const int room=inPrivateRoom();
+        replayRunning=fact==1;
+        if(!replayWatch)return;
+        const int state=int(fact==1)|int((flags>>13)&1)<<1|int((flags>>15)&1)<<2|int((flags>>16)&1)<<3|int(room==1)<<4;
+        if(state!=replayNoted){replayNoted=state;std::ostringstream o;o<<"REPLAY boss replay runs "<<fact<<", BossBattle "<<((flags>>15)&1)<<", AfterBeatBoss "<<((flags>>16)&1)<<", GameOver "<<((flags>>13)&1)<<", private room "<<room<<"\n";note(o.str().c_str());}
 #else
         (void)now;
 #endif
+    }
+    // Boss Battle replays together (groupreplay.h; `group_replays`, with group_enemies): the events' reads are taken here
+    // before group_enemies drops them in the private room (the porter's double is busy there).
+    std::unique_ptr<mod::groupreplay::Group> groupReplay;bool replayHooksTried=false;uint64_t replayStepAt=0;std::vector<std::u16string> replayLines;
+    void replayStep(const std::vector<mod::groupevents::Answer>& reads,uint64_t now,std::vector<mod::groupevents::Event>& out){
+        if(!config.groupReplays||!sampler)return;
+        if(!groupReplay){
+            if(!replayHooksTried){replayHooksTried=true;try{mod::replayhooks::install(*sampler);note("REPLAY hooks on\n");}catch(const std::exception& e){note((std::string("REPLAY unavailable: ")+e.what()+"\n").c_str());}}
+            if(!mod::replayhooks::installed())return;
+            groupReplay=std::make_unique<mod::groupreplay::Group>(mod::groupreplay::Settings{true},[]{static std::mt19937 r(std::random_device{}());return uint16_t(1+r()%65535);},
+                [this](const std::string& s){note(s.c_str());});
+            note("REPLAY group replays on: a boss replay started here is told to the group; one another player started is joined from the private room\n");}
+        for(auto& a:reads)for(auto& e:a.events)if(e.kind=="replay"||e.kind=="bosslife")groupReplay->heard({e.kind,e.key,e.value},now);
+        if(now<replayStepAt)return;replayStepAt=now+250;
+        if(!btTried){btTried=true;try{btDestroy=mod::bts::nativeDestroy(*sampler);btHurt=mod::bts::nativeHurt(*sampler);btCatcher=mod::bts::nativeCatcher(*sampler);}catch(const std::exception& e){note((std::string("BT unavailable: ")+e.what()+"\n").c_str());}}
+        mod::groupreplay::Local l;
+        auto u=mod::ui::read(*sampler,sampler->base,cache.available);
+        l.available=u.flagsKnown&&!(u.flags&(uint64_t(1)<<22));   // the game runs and is not loading
+        l.boss=u.flagsKnown&&(u.flags&(uint64_t(1)<<15));
+        l.inRoom=inPrivateRoom()==1;l.running=replayFact()==1;replayRunning=l.running;
+        l.mission=mod::replayhooks::lastMission();l.code=mod::replayhooks::lastCode();
+        // The boss's life: the catchers of a BT boss (whale, titans). A human boss's life is not read yet (`bosslife`).
+        std::vector<mod::bts::Catcher> catchers;
+        if(l.running&&btHurt&&mod::bts::readFights(*sampler,sampler->base).active>0){catchers=mod::bts::readCatchers(*sampler,sampler->base);for(auto& c:catchers)l.lives.push_back(c.percent);}
+        auto act=groupReplay->tick(l,now);
+        for(auto& e:act.say)out.push_back({e.kind,e.key,e.value});
+        if(act.start&&!writeReplayCode(*act.start,false))note("REPLAY the code could not be written (not in the private room)\n");
+        for(auto& h:act.hurt)if(h.part<catchers.size())btHurt(catchers[h.part],h.percent);
+        for(auto& n:act.notices){replayLines.push_back(routeWide(n));if(replayLines.size()>8)replayLines.erase(replayLines.begin());}
     }
     void tickGroupEnemies(uint64_t now){
         if(!config.groupEnemies||config.strandToken.empty()||!sampler)return;
@@ -3086,6 +3210,7 @@ struct Runtime final:ds::Transport {
                 [this](const std::string& s){note(s.c_str());});
             note("ENEMYSRV on: MULEs down and camps alarmed are shared through the server\n");}
         auto reads=enemyCourier->reads();
+        {std::vector<mod::groupevents::Event> rp;replayStep(reads,now,rp);if(!rp.empty())enemyCourier->send(std::move(rp));}
         if(!cache.available||cache.gated||inEvent)reads.clear();
         {std::vector<mod::groupevents::Event> lv;levelsStep(reads,now,lv);rainStep(reads,now,lv);enemyCourier->send(std::move(lv));}
         if(reads.empty()&&now-groupEnemyAt<500)return;
@@ -4329,6 +4454,15 @@ struct Runtime final:ds::Transport {
                         if(*v&&sampler->read(sampler->base+0x7c0aff8,&s,8)&&s){reinterpret_cast<void(*)(uint64_t,uint64_t,bool,bool)>(sampler->base+0x33b80a0)(s,uint64_t(*v),false,false);note(("REPLAY asked the game to start mission "+std::to_string(*v)+"\n").c_str());}
 #endif
                         note("REPLAY watching\n");}}
+                if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"replaylog")){
+                    replayLog=*v!=0;replayWatch=replayWatch||replayLog;
+                    if(replayLog&&!mod::replayhooks::installed()){try{mod::replayhooks::install(*sampler);note("REPLAYLOG hooks on\n");}catch(const std::exception& e){note((std::string("REPLAYLOG unavailable: ")+e.what()+"\n").c_str());}}}
+                if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"privateroom")){replayWatch=true;requestPrivateRoom(*v!=0);}
+                if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"replaycode")){
+                    // CODE (0x1f + row; ranking 0x24..0x2b), plus 256 for the game's flag call first (writeReplayCode).
+                    replayWatch=true;const int32_t code=int32_t(*v&0xff);
+                    note(writeReplayCode(code,(*v&0x100)!=0)?("REPLAY code "+std::to_string(code)+" written to the private room's blackboard\n").c_str():"REPLAY code not written: not in the private room, or the flag call's function differs\n");}
+                if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"bosslife")){bossLifeSurvey=*v!=0;note(bossLifeSurvey?"BOSSLIFE survey on\n":"BOSSLIFE survey off\n");}
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfminlod"))perfMinLod=std::min<uint32_t>(*v,99);
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfpbd"))perfPbd=std::min<uint32_t>(*v,999);
                 if(give&&cargoGive){cargoGive(*give);note(("CARGO give id="+std::to_string(*give)+"\n").c_str());}

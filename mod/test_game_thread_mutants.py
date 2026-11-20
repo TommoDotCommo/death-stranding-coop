@@ -29,6 +29,7 @@ families=[('dispatch',['ABI','THREAD','CALLER','DEPTH','NETWORK','STACK','SIGNAT
           ('freebuild',['NOCHECK','ROLLBACK'],['freebuild_test.cpp','freebuild.cpp']),
           ('roadshare',['BUILT','TWICE','PAST_NEED'],['roadshare_test.cpp','roadshare.cpp','discovery.cpp']),
           ('groupweather',['ECHO','ANY_DISTANCE'],['groupweather_test.cpp','groupweather.cpp']),
+          ('groupreplay',['JOIN_ANYWHERE','JOIN_IN_FIGHT','REJOIN','STALE','UP','ZERO','OTHER_FIGHT','SAY_JOINED','WRONG_MISSION'],['groupreplay_test.cpp','groupreplay.cpp']),
           ('hudmarkers',['DRAWN','FARTHEST'],['hudmarkers_test.cpp','hudmarkers.cpp','mapicons.cpp','serverinfo.cpp','dialog.cpp','discovery.cpp']),
           ('othervehicles',['UNCAPPED','NO_REUSE','KEEP_GONE','ANY_DISTANCE'],['othervehicles_test.cpp','othervehicles.cpp','ride.cpp','providers.cpp','pose.cpp','discovery.cpp','../core/core.cpp']),
           ('groupcargo',['LOSE_EARLY_TAKE','KEEP_TAKEN','FAR'],['groupcargo_test.cpp','groupcargo.cpp']),
