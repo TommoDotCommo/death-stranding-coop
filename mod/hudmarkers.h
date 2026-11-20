@@ -39,7 +39,7 @@ private:
     static constexpr unsigned Slots=8;
     std::array<Picture,Slots> slots_{};std::atomic<unsigned> current_{0};
 };
-struct Stats {uint64_t frames=0,added=0;};
+struct Stats {uint64_t frames=0,added=0,kept=0;};   // kept: records the HUD's list took (the adder drops one beyond its kind's distance)
 // Windows: the HUD's sort call through the mod (every byte checked first, nothing changed on a mismatch). Throws when
 // it cannot. board lives as long as the process. Game thread.
 void install(discovery::Sampler&,const Board&);

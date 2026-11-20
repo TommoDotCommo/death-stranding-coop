@@ -42,13 +42,15 @@ namespace {
 constexpr uint64_t CallSite=0x3096571,Sort=0x30934b0,Add=0x308ea00,Stub=0x309694c;
 using SortFn=void(*)(void*);using AddFn=void(*)(void*,uint8_t,const float*,void*,uint64_t,uint8_t);
 std::atomic<const Board*> board{nullptr};std::atomic<uint8_t> kind{DefaultKind};SortFn sort=nullptr;AddFn add=nullptr;
-std::atomic<uint64_t> frames{0},added{0};
+std::atomic<uint64_t> frames{0},added{0},kept{0};
 // The HUD's sort, after the game has added its own records: the mod's first. No allocation of the mod's, no lock.
 void hook(void* list){
     if(auto* b=board.load(std::memory_order_acquire)){
         Board::Picture p;b->read(p);const uint8_t k=kind.load(std::memory_order_relaxed);
+        const int32_t before=*reinterpret_cast<const int32_t*>(static_cast<uint8_t*>(list)+8);   // the list's count
         for(uint32_t i=0;i<p.count&&i<MaxMarks;++i){alignas(16) const float at[4]={p.marks[i].x,p.marks[i].y,p.marks[i].z,0};add(list,k,at,nullptr,p.marks[i].id,0);}
-        frames.fetch_add(1,std::memory_order_relaxed);added.fetch_add(p.count,std::memory_order_relaxed);
+        const int32_t after=*reinterpret_cast<const int32_t*>(static_cast<uint8_t*>(list)+8);
+        frames.fetch_add(1,std::memory_order_relaxed);added.fetch_add(p.count,std::memory_order_relaxed);if(after>before)kept.fetch_add(uint64_t(after-before),std::memory_order_relaxed);
     }
     sort(list);
 }
@@ -72,7 +74,7 @@ void install(discovery::Sampler& s,const Board& b){
     const int32_t rel=int32_t(int64_t(Stub)-int64_t(CallSite+5));writeCode(s.base+CallSite+1,&rel,4);
 }
 void setKind(uint8_t k){if(safeKind(k))kind.store(k,std::memory_order_relaxed);}
-Stats stats(){return {frames.load(std::memory_order_relaxed),added.load(std::memory_order_relaxed)};}
+Stats stats(){return {frames.load(std::memory_order_relaxed),added.load(std::memory_order_relaxed),kept.load(std::memory_order_relaxed)};}
 #else
 void install(discovery::Sampler&,const Board&){throw std::runtime_error("the HUD needs the game");}
 void setKind(uint8_t){}

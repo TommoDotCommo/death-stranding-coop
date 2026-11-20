@@ -1942,7 +1942,7 @@ struct Runtime final:ds::Transport {
         auto marks=mod::hudmarkers::marks(p,gameArea,drawn,here?&*here:nullptr,mod::hudmarkers::MaxMarks);board.publish(marks);
         const auto seen=mod::hudmarkers::stats();
         if(seen.frames!=hudNotedFrames&&now>=hudNotedAt+10000){hudNotedFrames=seen.frames;hudNotedAt=now;std::ostringstream o;
-            o<<"HUD markers: "<<marks.size()<<" far players ("<<drawn.size()<<" drawn as bodies), HUD frames "<<seen.frames<<" records added "<<seen.added<<"\n";note(o.str().c_str());}
+            o<<"HUD markers: "<<marks.size()<<" far players ("<<drawn.size()<<" drawn as bodies), HUD frames "<<seen.frames<<" records added "<<seen.added<<" kept "<<seen.kept<<"\n";note(o.str().c_str());}
     }
     void tickServerInfo(uint64_t now){
         if(!config.serverInfo||!sampler||!dialogReady())return;
