@@ -1592,7 +1592,8 @@ player on the server, which would have needed a target, a sender and a place it 
 every player on the server where someone stands.
 
 Log lines: `PINGS on (group play): ...`, `PING sent at X,Y,Z`, `PING from NAME at X,Y,Z (D m)`, `PING not sent: ...`,
-`HUD pings: N`, `LIKE sent to NAME`, `LIKE received from NAME`, `LIKE from NAME dropped: not in play|too many|no likes
+`HUD pings: N`, `HUD markers: N pings, HUD frames F records added A kept K` (every 10 s without `player_hud`: kept
+counts the records the HUD's list took), `LIKE sent to NAME`, `LIKE received from NAME`, `LIKE from NAME dropped: not in play|too many|no likes
 state`, `LIKE not sent: nobody within 25 m|...`. Places are in the core's axes (x, y up, z). The fake world's status has
 `group_pings` (`on`, `pings_sent`, `pings_shown`, `likes_sent`, `likes_given`, `hud`: the ping markers published).
 

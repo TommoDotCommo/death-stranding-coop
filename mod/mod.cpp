@@ -2029,7 +2029,10 @@ struct Runtime final:ds::Transport {
         }
         if(pings){auto marks=groupPings.marks(now);
             if(marks.size()!=pingMarksNoted){pingMarksNoted=marks.size();note(("HUD pings: "+std::to_string(marks.size())+"\n").c_str());}
-            pingBoard().publish(marks);}
+            pingBoard().publish(marks);
+            const auto seen=mod::hudmarkers::stats();   // without far players: what the HUD took, as their line says it
+            if(!distant&&seen.frames!=hudNotedFrames&&now>=hudNotedAt+10000){hudNotedFrames=seen.frames;hudNotedAt=now;std::ostringstream o;
+                o<<"HUD markers: "<<marks.size()<<" pings, HUD frames "<<seen.frames<<" records added "<<seen.added<<" kept "<<seen.kept<<"\n";note(o.str().c_str());}}
         if(!distant)return;
         mod::mapicons::Board::Picture p;mapBoard->read(p);
         std::set<uint64_t> drawn;if(otherBodies)for(auto& s:othersShown)if(otherBodies->entity(s.id))drawn.insert(mod::hudmarkers::iconId(s.id));
