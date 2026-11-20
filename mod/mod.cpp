@@ -64,6 +64,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "chat.h"
 #include "mapicons.h"
 #include "hudmarkers.h"
+#include "reptrace.h"
 #include "serverworld.h"
 #include "livebuild.h"
 #include "groupcargo.h"
@@ -504,7 +505,23 @@ struct Runtime final:ds::Transport {
         (void)anchor;(void)now;
 #endif
     }
+    // Lab: who writes into other entities' rep queues from a body's update (reptrace.h; `reptrace 1`).
+    bool reptraceWanted=false;uint64_t reptraceNotedAt=0;std::map<uint64_t,uint64_t> reptraceSeen;
+    void tickRepTrace(const mod::puppet::Anchor& anchor,uint64_t now){
+        if(!reptraceWanted||!sampler)return;
+        if(!mod::reptrace::installed()){try{mod::reptrace::install(*sampler);note("REPTRACE on\n");}catch(const std::exception& e){note((std::string("REPTRACE unavailable: ")+e.what()+"\n").c_str());reptraceWanted=false;return;}}
+        std::vector<uint64_t> es;if(otherBodies)for(auto& w:othersPlan.wants)if(auto e=otherBodies->entity(w.key))es.push_back(e);
+        uint64_t r=0;if(anchor.entity)sampler->read(anchor.entity+0x60,&r,8);
+        mod::reptrace::watch(es,r);
+        if(now<reptraceNotedAt+10000)return;reptraceNotedAt=now;
+        auto all=mod::reptrace::stacks();uint64_t sum=0;for(auto& s:all)sum+=s.count;
+        note(("REPTRACE appends "+std::to_string(mod::reptrace::appends())+", from bodies into others' queues "+std::to_string(sum)+" ("+std::to_string(all.size())+" stacks, "+std::to_string(es.size())+" bodies)\n").c_str());
+        for(auto& s:all){uint64_t key=0;for(auto a:s.at)key=key*31+a;auto& seen=reptraceSeen[key];if(seen==s.count)continue;seen=s.count;
+            std::ostringstream o;o<<"REPTRACE stack x"<<s.count<<(s.porter?" into THIS PORTER's queue":" into another entity's queue")<<":";
+            for(auto a:s.at)if(a)o<<" 0x"<<std::hex<<a<<std::dec;o<<"\n";note(o.str().c_str());}
+    }
     void tickOthers(const mod::puppet::Anchor& anchor,bool event,uint64_t now){
+        tickRepTrace(anchor,now);
         othersShown.clear();
         if(!otherBodies||(!others&&!otherBodies->size()))return;
         if(others)othersShown=others->frame(now);
@@ -4216,6 +4233,7 @@ struct Runtime final:ds::Transport {
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfshadow"))perfShadow=uint8_t(std::min<uint32_t>(*v,9));
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfhide"))perfHideMetres=double(*v);
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perffar"))perfFarMetres=double(*v);
+                if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"reptrace"))reptraceWanted=*v!=0;
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfminlod"))perfMinLod=std::min<uint32_t>(*v,99);
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfpbd"))perfPbd=std::min<uint32_t>(*v,999);
                 if(give&&cargoGive){cargoGive(*give);note(("CARGO give id="+std::to_string(*give)+"\n").c_str());}
