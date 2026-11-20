@@ -778,6 +778,7 @@ struct Runtime final:ds::Transport {
     mod::passenger::Rider rider;mod::passenger::Api passengerApi;bool passengerTried=false;mod::marker::KeyEdge passengerEdge;std::optional<std::array<float,3>> seatTest;std::optional<mod::passenger::Seat> heldSeat;uint64_t seatedAt=0;   // heldSeat: a `place` seat being ridden (moved every frame)uint64_t seatedAt=0;
     // A rider held at a place (the bike): the place follows the display vehicle. Every tick and every frame between.
     uint64_t heldPorter=0;
+    std::array<double,3> seatTarget{};bool seatMoved=false;   // where the held rider was last put, and whether the game took it
     void movePassenger(){
         if(!heldSeat||!rider.riding()||!heldPorter||!passengerApi.move||!sampler)return;
         // Where the ridden thing is now: a cart by its carrier record, another player's vehicle by where the mod last
@@ -788,7 +789,7 @@ struct Runtime final:ds::Transport {
             for(auto& d:otherCarts)if(auto p=d.second.placed(c.id)){t.position=p->position;t.rotation=p->rotation;}   // where the mod put it last (the pose lags)
             at=t;}
         if(!at){auto p=mod::puppet::readEntityPose(*sampler,rider.truck());if(p.available)at=mod::puppet::transform(p);}
-        if(at)passengerApi.move(heldPorter,mod::passenger::seatPlace(*at,*heldSeat));
+        if(at){const auto seat=mod::passenger::seatPlace(*at,*heldSeat);seatTarget=seat.position;seatMoved=passengerApi.move(heldPorter,seat);}
     }
     void tickPassenger(const mod::puppet::Anchor& anchor,bool connected,uint64_t now){
         // In group play the rider is tickGroupPassenger's: this partner path, with no partner, would let him go.
@@ -1487,7 +1488,8 @@ struct Runtime final:ds::Transport {
             default:break;
         }
         if(!rider.riding())heldSeat.reset();
-        if(rider.riding()&&here&&now>=riderNotedAt+2000){riderNotedAt=now;std::ostringstream o;o<<"PASSENGER riding at "<<here->position[0]<<","<<here->position[1]<<","<<here->position[2]<<"\n";note(o.str().c_str());}
+        if(rider.riding()&&here&&now>=riderNotedAt+2000){riderNotedAt=now;std::ostringstream o;o<<"PASSENGER riding at "<<here->position[0]<<","<<here->position[1]<<","<<here->position[2];
+            if(heldSeat)o<<" seat at "<<seatTarget[0]<<","<<seatTarget[1]<<","<<seatTarget[2]<<(seatMoved?" (held there)":" (not held: the game's hold is off)");o<<"\n";note(o.str().c_str());}
         movePassenger();
     }
     // --- Offering the existing strand (offer_strand.h): opt-in `offer_strand`. While the game is signed in to the server

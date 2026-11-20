@@ -67,7 +67,7 @@ struct Api {
     std::function<void(uint64_t porter)> release;
     // `place` seats: hold the porter at a world transform, and move that place (every frame while he is held).
     std::function<bool(uint64_t porter,const Transform& at)> hold;
-    std::function<void(uint64_t porter,const Transform& at)> move;
+    std::function<bool(uint64_t porter,const Transform& at)> move;   // false: the game does not hold him at a place (state, fixed)
     std::function<uint8_t(uint64_t porter)> state;
 };
 Api nativeApi(discovery::Sampler&);

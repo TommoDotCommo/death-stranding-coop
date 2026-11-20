@@ -94,11 +94,12 @@ Api nativeApi(discovery::Sampler& s){
         reinterpret_cast<void(*)(uint64_t,uint32_t,const World*,const float*,float)>(base+0x26bd130)(m,0xffffffffu,&w,local,0.25f);
         return true;
     };
-    a.move=[&s,mover](uint64_t porter,const Transform& at){
+    a.move=[&s,mover](uint64_t porter,const Transform& at)->bool{
         uint64_t m=mover(porter);uint8_t state=0,fixed=0;
-        if(!m||!s.read(m+0x720,&state,1)||!state||!s.read(m+0x7b8,&fixed,1)||!fixed)return;   // only while the game holds him at a place
+        if(!m||!s.read(m+0x720,&state,1)||!state||!s.read(m+0x7b8,&fixed,1)||!fixed)return false;   // only while the game holds him at a place
         World w{};for(int k=0;k<3;++k)w.position[k]=at.position[size_t(k)];for(int k=0;k<9;++k)w.rotation[k]=at.rotation[size_t(k)];
         std::memcpy(reinterpret_cast<void*>(m+0x7c0),w.position,sizeof(w.position));std::memcpy(reinterpret_cast<void*>(m+0x7d8),w.rotation,sizeof(w.rotation));
+        return true;
     };
     a.release=[base,mover](uint64_t porter){uint64_t m=mover(porter);if(m)reinterpret_cast<void(*)(uint64_t,float)>(base+0x2696c50)(m,0.0f);};
     return a;
