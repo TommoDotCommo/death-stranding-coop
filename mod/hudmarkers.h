@@ -45,6 +45,9 @@ struct Stats {uint64_t frames=0,added=0,kept=0;};   // kept: records the HUD's l
 // Windows: the HUD's sort call through the mod (every byte checked first, nothing changed on a mismatch). Throws when
 // it cannot. board lives as long as the process. Game thread.
 void install(discovery::Sampler&,const Board&);
+// A second set (grouppings.h: the pings of the players near, each for a short time), added after the first with the same
+// kind; its ids carry a tag of their own. May be given before or after install. pings lives as long as the process.
+void attach(const Board& pings);
 void setKind(uint8_t);   // only a safe kind is taken
 Stats stats();
 }

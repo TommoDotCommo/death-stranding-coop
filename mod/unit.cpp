@@ -124,7 +124,13 @@ int main() {
      assert(refused(withKeys(o,"\"others_gear\":true,\"others_carry\":9")));assert(refused(withKeys(o,"\"others_carry\":4")));
      assert(refused(withKeys(o,"\"others_gear\":true,\"others_carry\":true")));assert(refused(withKeys(o,"\"others_gear\":1")));
      assert(refused(withKeys(porter,"\"others_gear\":true")));                            // no other players
-     assert(mod::parseConfig(withKeys(o,"\"others_gear\":false,\"others_carry\":0")).othersCarry==0);}
+     assert(mod::parseConfig(withKeys(o,"\"others_gear\":false,\"others_carry\":0")).othersCarry==0);
+     // Pings and likes (grouppings.h): off by default; group play over the broadcast relay with others shown.
+     auto relayed=withKeys(o,"\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":7,\"relay_mode\":\"broadcast\"");
+     assert(!mod::parseConfig(relayed).groupPings&&mod::parseConfig(withKeys(relayed,"\"group_pings\":true")).groupPings);
+     assert(refused(withKeys(o,"\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":7,\"group_pings\":true")));   // pairs
+     assert(refused(withKeys(o,"\"group_pings\":true"))&&refused(withKeys(relayed,"\"group_pings\":1")));                          // no relay; not a bool
+     assert(refused(withKeys(porter,"\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"k\",\"player_id\":7,\"relay_mode\":\"broadcast\",\"group_pings\":true")));}   // no others
     // The relay for other players: numeric address on loopback (or the partner's), a key, an id, and others on.
     {auto o=withKeys(probe,"\"others\":4");auto r=[&](const char* more){return withKeys(o,more);};
      auto c=mod::parseConfig(r("\"relay\":\"127.0.0.1:8090\",\"relay_key\":\"group-1\",\"player_id\":77"));
