@@ -996,7 +996,7 @@ BTs; what is shared is who is down:
 
 | Call | Answer |
 |---|---|
-| `POST …/coop/events` `{"kind":"mule\|camp\|gazer","key":N,"value":V}` with `X-Coop-Token` | `format` 1. 403 when `enemies` is off, 429 past 20000 events at once |
+| `POST …/coop/events` `{"kind":"mule\|camp\|gazer","key":N,"value":V}` with `X-Coop-Token` | `format` 1. 403 when `enemies` is off, 429 past 20000 events at once (every kind together) |
 | `GET …/coop/events[?since=VERSION]` | `format` 1, `on`, `version`, `full`, `wait_ms` (2 s), `events` (others' only: `kind`, `key`, `value`) |
 
 One entry per kind and key (the newest wins), kept an hour. Tests: `built_test.cpp`; mutants `EVENTS_OFF`,
@@ -1016,6 +1016,25 @@ about cargo set down, so the mod does, with the notice token:
 The first take wins. A world keeps at most 4000 crates (the oldest goes) and each for a week (a crate delivered or
 destroyed far from every player is never told). The world file keeps them (`cargo`). Tests: `built_test.cpp`; mutants
 `CARGO_FOREVER`, `CARGO_OFF`, `CARGO_UNLIMITED`, `CARGO_TOKEN`, `CARGO_OWN`, `CARGO_SAVE_LOST`.
+
+### Orders taken together
+
+Under the same setting `cargo` (what players carry is shared), the world events carry two more kinds for the mod's
+`group_orders` (`../mod/README.md`, "Orders taken together in group play"): players who stand at one terminal when one
+of them takes a standard order share that run of it, a **party**, numbered by the game that took it.
+
+| Call | Answer |
+|---|---|
+| `POST …/coop/events` `{"kind":"order","key":MISSION,"value":1\|2\|3,"party":P,"place":[x,y,z]}` | 1 a start (with where the porter stands), 2 a success, 3 a give-up. 400 without a party 1..2^53-1 or with another value; 403 when `cargo` is off, and for a start or give-up of a party another player started |
+| `POST …/coop/events` `{"kind":"unit","key":MISSION\|UNIT<<48,"value":1,"party":P,"data":[packed,life,life]}` | a unit handed in, with what the hand-in left in its row (at most three numbers) |
+| `GET …/coop/events[?since=VERSION]` | as above, and `orders` (the rule); an order or unit also lists `party`, `age` (seconds since it was said), `place`, `data` |
+
+One entry per kind, key and party (two players who take the same order apart are two parties), the newest wins, kept a
+day. Only the player who said a party's start says its start again or gives it up for everyone; anyone may say its
+success or a unit (a member's give-up is not said: he leaves alone). Whole numbers in `place` and `data` come back as
+integers, so a unit's packed word is exact. Who stands where is the mod's decision (it is the one that knows its porter);
+the server keeps nothing of an order in the world file. Tests: `built_test.cpp` (`orders`); mutants `EVENTS_PARTY` (one
+entry per order), `EVENTS_LEADER` (a member gives the party up), `EVENTS_ORDERS_RULE` (the rule ignored).
 
 ### Text chat
 

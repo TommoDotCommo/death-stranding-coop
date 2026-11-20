@@ -72,6 +72,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "groupcargo.h"
 #include "othervehicles.h"
 #include "groupevents.h"
+#include "grouporders.h"
 #include "roadshare.h"
 #include "freebuild.h"
 #include "strand_notices.h"
@@ -1810,7 +1811,7 @@ struct Runtime final:ds::Transport {
         if(!noticeApi)return;
         if(noticeTest){noticeTest=false;note(noticeApi->show(u"Co-op mod: test notice.",mod::notice::PlainIcon)?"NOTICE test shown\n":"NOTICE test refused: no info log now\n");}
 #ifndef MOD_MUTANT_STRAND_PARTNER
-        if(!config.notices&&!config.strandNotices&&!routeTold&&!config.testMode.on&&!config.chat&&!config.groupPings)return;
+        if(!config.notices&&!config.strandNotices&&!routeTold&&!config.testMode.on&&!config.chat&&!config.groupPings&&!config.groupOrders)return;
 #else
         if(!config.notices&&!config.testMode.on)return;   // the mutant: strand lines only beside the partner's notices
 #endif
@@ -1823,6 +1824,8 @@ struct Runtime final:ds::Transport {
         chatLines.clear();
         for(auto& line:pingLines)notices->ping(line,now);   // the others' pings (tickGroupPings)
         pingLines.clear();
+        for(auto& line:orderLines)notices->strand(line,now);   // orders taken together (tickGroupOrders), finished like the strand's
+        orderLines.clear();
         if(strandPoller&&config.strandNotices){for(auto& row:strandPoller->logs())note(row.c_str());for(auto& line:strandPoller->lines())notices->strand(line,now);}
 #ifdef MOD_MUTANT_OFFER_LINES
         else if(strandPoller){for(auto& line:strandPoller->lines())notices->strand(line,now);}
@@ -2688,6 +2691,26 @@ struct Runtime final:ds::Transport {
             }
         }
     }
+    // A unit of an order marked delivered here as the game's own hand-in leaves its row (the packed word and the cargo's
+    // two condition values, then the state; only while the row still says not delivered), and this game's copy of that
+    // cargo lying in the world removed (never one on the porter). For the partner's hand-ins (tickOrders) and a party's
+    // (tickGroupOrders). Returns how many cargo records were removed.
+    unsigned deliverUnitHere(const mod::orders::Unit& u,uint32_t packed,float l0,float l1){
+#ifdef _WIN32
+        uint16_t seen=0;
+        if(sampler->read(u.stateAt,&seen,2)&&seen==mod::orders::NotDelivered){
+            std::memcpy(reinterpret_cast<void*>(u.stateAt+4),&packed,4);std::memcpy(reinterpret_cast<void*>(u.stateAt+0x10),&l0,4);std::memcpy(reinterpret_cast<void*>(u.stateAt+0x14),&l1,4);
+            *reinterpret_cast<uint16_t*>(u.stateAt)=mod::orders::Delivered;
+        }
+#else
+        (void)packed;(void)l0;(void)l1;
+#endif
+        unsigned removed=0;uint64_t manager=0;
+        if(cargoDelete&&cargoManagerSlot&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
+            for(auto& r:mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,mod::cargo::MaxRecords))
+                if(r.mission==u.mission&&r.unit==u.unit&&mod::cargo::location(r)==mod::cargo::InWorld){cargoDelete(r.index);++removed;}
+        return removed;
+    }
     void tickOrders(uint64_t now) {
         if(!core||!sampler||!config.shareOrders){orderIn.clear();return;}
         if(!orderTried){orderTried=true;try{orderRequest=mod::orders::nativeRequest(*sampler);}catch(const std::exception& e){note((std::string("ORDER unavailable: ")+e.what()+"\n").c_str());}}
@@ -2713,19 +2736,9 @@ struct Runtime final:ds::Transport {
                 auto* u=unitSync.wanted(units,e.ref,n);
                 std::ostringstream o;o<<"ORDER partner handed in unit "<<int(n)<<" of "<<std::hex<<e.ref<<std::dec;
                 if(!u){o<<": not waiting here\n";note(o.str().c_str());continue;}
-                unitSync.applied(e.ref,n);uint16_t seen=0;
-#ifdef _WIN32
-                if(sampler->read(u->stateAt,&seen,2)&&seen==mod::orders::NotDelivered){
-                    // as the game's own hand-in leaves the row: the packed word and the cargo's two condition values, then the state
-                    uint32_t packed=(uint32_t(e.position[0])&0xffff)|((e.item>>16)<<16);float l0=float(e.position[1]),l1=float(e.position[2]);
-                    std::memcpy(reinterpret_cast<void*>(u->stateAt+4),&packed,4);std::memcpy(reinterpret_cast<void*>(u->stateAt+0x10),&l0,4);std::memcpy(reinterpret_cast<void*>(u->stateAt+0x14),&l1,4);
-                    *reinterpret_cast<uint16_t*>(u->stateAt)=mod::orders::Delivered;
-                }
-#endif
-                unsigned removed=0;uint64_t manager=0;
-                if(cargoDelete&&cargoManagerSlot&&sampler->read(cargoManagerSlot,&manager,8)&&manager)
-                    for(auto& r:mod::cargo::readRecords(*sampler,manager,cargoManagerVtable,mod::cargo::MaxRecords))
-                        if(r.mission==e.ref&&r.unit==n&&mod::cargo::location(r)==mod::cargo::InWorld){cargoDelete(r.index);++removed;}
+                unitSync.applied(e.ref,n);
+                const uint32_t packed=(uint32_t(e.position[0])&0xffff)|((e.item>>16)<<16);
+                const unsigned removed=deliverUnitHere(*u,packed,float(e.position[1]),float(e.position[2]));
                 o<<": marked delivered, "<<removed<<" cargo record(s) removed\n";note(o.str().c_str());continue;
             }
             mod::orders::Change c{e.ref,uint8_t(e.item)};if(c.what<1||c.what>3)continue;
@@ -3149,20 +3162,78 @@ struct Runtime final:ds::Transport {
         (void)now;
 #endif
     }
-    void tickGroupEnemies(uint64_t now){
-        if(!config.groupEnemies||config.strandToken.empty()||!sampler)return;
-        if(!enemyTried){try{campAlert=mod::enemies::nativeAlert(*sampler);}catch(const std::exception&){}}
-        if(!enemyTried){enemyTried=true;try{enemyDefeat=mod::enemies::nativeDefeat(*sampler);}catch(const std::exception& e){note((std::string("ENEMY unavailable: ")+e.what()+"\n").c_str());}}
-        if(!enemyDefeat)return;
+    // The server's world events (`…/coop/events`): one courier for every group feature that says or reads them (the
+    // enemies, levels and timefall with group_enemies; orders with group_orders); each takes its own copy of the reads.
+    std::vector<mod::groupevents::Answer> enemyReads,orderReads;
+    mod::groupevents::Courier* groupCourier(){
         if(!enemyCourier){
-            auto at=serverAt();if(!at)return;
+            auto at=serverAt();if(!at)return nullptr;
             const std::string target=at->base+"/coop/events",token=config.strandToken;const uint32_t address=at->address;const uint16_t port=at->port;
             enemyCourier=std::make_unique<mod::groupevents::Courier>(
                 [=](const std::string& since){auto r=mod::strand::get(address,port,target+(since.empty()?std::string():"?since="+since),token,mod::strand::ConnectMs);return mod::groupevents::Result{r.status,r.body};},
                 [=](const std::string& body){auto r=mod::strand::post(address,port,target,token,body,mod::strand::ConnectMs);return mod::groupevents::Result{r.status,r.body};},
                 [this](const std::string& s){note(s.c_str());});
-            note("ENEMYSRV on: MULEs down and camps alarmed are shared through the server\n");}
-        auto reads=enemyCourier->reads();
+            if(config.groupEnemies)note("ENEMYSRV on: MULEs down and camps alarmed are shared through the server\n");
+            if(config.groupOrders)note("GROUPORDER on: standard orders are taken together by the players at one terminal, through the server\n");}
+        for(auto& a:enemyCourier->reads()){
+            if(config.groupOrders)orderReads.push_back(a);
+            if(config.groupEnemies)enemyReads.push_back(std::move(a));}
+        auto cap=[](std::vector<mod::groupevents::Answer>& v){if(v.size()>32)v.erase(v.begin(),v.end()-32);};   // a consumer that cannot take them yet
+        cap(enemyReads);cap(orderReads);
+        return enemyCourier.get();
+    }
+    // --- Orders taken together in group play (grouporders.h): with group_orders, a standard order taken at a terminal
+    // is said with a party number and where the porter stands; a game whose porter stands there within two minutes takes
+    // it on too with the game's own start request (orders.h); the party's hand-ins, success and the leader's give-up
+    // reach its other games through the same requests and rows as the partner's (tickOrders). Never writes the save.
+    std::optional<mod::grouporders::Together> together;uint64_t groupOrderAt=0,groupOrderPorter=0;bool groupOrderOffTold=false;
+    std::vector<std::u16string> orderLines;
+    void tickGroupOrders(uint64_t now){
+        if(!config.groupOrders||config.strandToken.empty()||!sampler)return;
+        if(!orderTried){orderTried=true;try{orderRequest=mod::orders::nativeRequest(*sampler);}catch(const std::exception& e){note((std::string("ORDER unavailable: ")+e.what()+"\n").c_str());}}
+        if(!orderRequest)return;
+        auto* courier=groupCourier();if(!courier)return;
+        if(!together)together.emplace(config.playerId^(now*0x9e3779b97f4a7c15ull)^uint64_t(mod::nowUs()));
+        std::vector<mod::groupevents::Event> heard;
+        for(auto& a:std::exchange(orderReads,{})){
+            if(!a.orders&&!groupOrderOffTold){groupOrderOffTold=true;note("GROUPORDER the server keeps orders each player's own (its rule cargo is off): nothing is shared\n");}
+            for(auto& e:a.events)if(e.kind=="order"||e.kind=="unit")heard.push_back(e);}
+        if(!heard.empty())together->hear(heard,now);
+        if(now<groupOrderAt+1000)return;
+        groupOrderAt=now;
+        if(!cache.available||cache.gated||inEvent)return;
+        auto anchor=anchorNow();
+        if(anchor.entity!=groupOrderPorter){if(groupOrderPorter)together->reset();groupOrderPorter=anchor.entity;}   // another world: its parties are left
+        if(!anchor.entity)return;
+        std::optional<mod::grouporders::Place> porter;if(anchor.pose.available)porter=mod::puppet::transform(anchor.pose).position;
+        auto orders=mod::orders::readOrders(*sampler,sampler->base,orderDetails);if(orders.empty())return;
+        auto units=mod::orders::readUnits(*sampler,sampler->base);
+        auto step=together->step(now,orders,units,porter);
+        for(auto& line:step.log)note((line+"\n").c_str());
+        for(auto& r:step.apply){
+            bool ok=false;
+            if(r.what==mod::grouporders::Request::Unit){
+                for(auto& u:units)if(u.mission==r.mission&&u.unit==r.unit&&u.state==mod::orders::NotDelivered){
+                    const unsigned removed=deliverUnitHere(u,r.packed,r.life[0],r.life[1]);ok=true;
+                    std::ostringstream o;o<<"GROUPORDER unit "<<int(r.unit)<<" of "<<std::hex<<r.mission<<std::dec<<" marked delivered, "<<removed<<" cargo record(s) removed\n";note(o.str().c_str());}}
+            else{ok=orderRequest(r.mission,uint8_t(r.what));
+                if(!ok){std::ostringstream o;o<<"GROUPORDER the game refused the request "<<int(r.what)<<" for order "<<std::hex<<r.mission<<std::dec<<"\n";note(o.str().c_str());}}
+            together->done(r,ok);}
+        if(!step.say.empty())courier->send(std::move(step.say));
+        for(auto l:step.lines)switch(l){
+            case mod::grouporders::Line::Joined:orderLines.push_back(u"A porter here took this order: it is under way for you too. Give it up to go alone.");break;
+            case mod::grouporders::Line::UnitByOther:orderLines.push_back(u"A porter on your order handed in part of it.");break;
+            case mod::grouporders::Line::DoneByOther:orderLines.push_back(u"A porter on your order completed it.");break;
+            case mod::grouporders::Line::GivenUpByLeader:orderLines.push_back(u"The porter who took your order gave it up.");break;}
+        if(orderLines.size()>8)orderLines.erase(orderLines.begin(),orderLines.end()-8);
+    }
+    void tickGroupEnemies(uint64_t now){
+        if(!config.groupEnemies||config.strandToken.empty()||!sampler)return;
+        if(!enemyTried){try{campAlert=mod::enemies::nativeAlert(*sampler);}catch(const std::exception&){}}
+        if(!enemyTried){enemyTried=true;try{enemyDefeat=mod::enemies::nativeDefeat(*sampler);}catch(const std::exception& e){note((std::string("ENEMY unavailable: ")+e.what()+"\n").c_str());}}
+        if(!enemyDefeat)return;
+        if(!groupCourier())return;
+        auto reads=std::exchange(enemyReads,{});
         if(!cache.available||cache.gated||inEvent)reads.clear();
         {std::vector<mod::groupevents::Event> lv;levelsStep(reads,now,lv);rainStep(reads,now,lv);enemyCourier->send(std::move(lv));}
         if(reads.empty()&&now-groupEnemyAt<500)return;
@@ -4344,7 +4415,7 @@ struct Runtime final:ds::Transport {
             if(twin&&gameContext)tickStructures(now);
             stage="enemies";stages.enter("enemies",mod::nowUs());
             if(twin&&gameContext)tickEnemies(now);
-            if(gameContext){tickGroupEnemies(now);tickGroupRoads(now);}
+            if(gameContext){tickGroupEnemies(now);tickGroupOrders(now);tickGroupRoads(now);}
             if(twin&&gameContext)tickEnemyPositions(now);
             if(gameContext)tickMuleGoto(now);
             stage="bts";stages.enter("bts",mod::nowUs());

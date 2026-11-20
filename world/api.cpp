@@ -307,17 +307,48 @@ Reply World::eventSay(const std::string& token,const std::string& body,int64_t n
     if(!me)return noticeTokenRefused();
     Value d;try{d=json::parse(body);}catch(const std::exception&){return refuse(400,"event","not JSON");}
     const std::string kind=d.get("kind").string();
-    if(!oneOf(kind,{"mule","camp","gazer","level","rain"})||!d.get("key").isInt()||!d.get("value").isInt()||d.get("value").integer()<0||d.get("value").integer()>1000)
-        return refuse(400,"event","kind mule, camp, gazer, level or rain, an integer key, a value 0..1000");
+    if(!oneOf(kind,{"mule","camp","gazer","level","rain","order","unit"})||!d.get("key").isInt()||!d.get("value").isInt()||d.get("value").integer()<0||d.get("value").integer()>1000)
+        return refuse(400,"event","kind mule, camp, gazer, level, rain, order or unit, an integer key, a value 0..1000");
+    const int64_t key=d.get("key").integer(),value=d.get("value").integer();
+    // An order taken together (README, "Orders taken together"): kept per party, with where it was taken and what a
+    // unit's hand-in left in its row; the rule `cargo` decides.
+    int64_t party=0;std::vector<double> place,data;
+    if(orderKind(kind)){
+#ifndef MUTANT_EVENTS_ORDERS_RULE
+        if(policy_.cargo!="on")return refuse(403,"orders-off","orders are each player's own on this server");
+#endif
+        party=d.get("party").integer();
+        if(!d.get("party").isInt()||party<1||party>MaxParty||(kind=="order"&&(value<1||value>3))||(kind=="unit"&&value!=1))
+            return refuse(400,"event","an order needs a party 1..2^53-1 and a value 1 (start), 2 (success) or 3 (fail); a unit the value 1");
+        auto numbers=[&](const char* k,std::vector<double>& out,size_t most,double bound){
+            const Value& v=d.get(k);if(v.kind()==json::Value::Null)return true;
+            if(v.kind()!=json::Value::Array||v.items().size()>most)return false;
+            for(auto& x:v.items()){if(!x.isInt()&&x.kind()!=json::Value::Real)return false;const double n=x.real();if(!std::isfinite(n)||std::fabs(n)>bound)return false;out.push_back(n);}
+            return true;};
+        if(!numbers("place",place,3,1e7)||(!place.empty()&&place.size()!=3)||!numbers("data",data,EventDataMax,1e10))
+            return refuse(400,"event","place is three numbers, data at most three");
+    }
 #ifndef MUTANT_EVENTS_OFF
-    // A structure's level follows the structure (shared as the policy shares it); the others are the enemies' rule.
-    if(kind!="level"&&policy_.enemies!="on")return refuse(403,"enemies-off","enemies are each player's own on this server");
+    // A structure's level follows the structure (shared as the policy shares it); orders the cargo rule; the others are the enemies' rule.
+    if(kind!="level"&&!orderKind(kind)&&policy_.enemies!="on")return refuse(403,"enemies-off","enemies are each player's own on this server");
 #endif
-    for(auto it=events_.begin();it!=events_.end();){if(now-it->second.at>eventKeep(it->first.first))it=events_.erase(it);else ++it;}
+    for(auto it=events_.begin();it!=events_.end();){if(now-it->second.at>eventKeep(std::get<0>(it->first)))it=events_.erase(it);else ++it;}
+#ifdef MUTANT_EVENTS_PARTY
+    party=0;   // the mutant: one entry per order, whoever's run it was
+#endif
+    const auto at=std::make_tuple(kind,key,party);
 #ifndef MUTANT_EVENTS_UNLIMITED
-    if(events_.size()>=EventsMax&&!events_.count({kind,d.get("key").integer()}))return refuse(429,"event-limit","too many world events now");
+    if(events_.size()>=EventsMax&&!events_.count(at))return refuse(429,"event-limit","too many world events now");
 #endif
-    auto& e=events_[{kind,d.get("key").integer()}];e.by=me->id;e.value=d.get("value").integer();e.at=now;e.stamp=++stamps_;
+    auto found=events_.find(at);
+#ifndef MUTANT_EVENTS_LEADER
+    // Only who started a party says its start again or gives it up for everyone in it; the others say a success or a unit.
+    if(kind=="order"&&found!=events_.end()&&!found->second.leader.empty()&&found->second.leader!=me->id&&(value==1||value==3))
+        return refuse(403,"order-party","only the player who took this order for his party starts or gives it up");
+#endif
+    auto& e=events_[at];e.by=me->id;e.value=value;e.at=now;e.stamp=++stamps_;
+    if(kind=="order"&&value==1&&e.leader.empty())e.leader=me->id;
+    if(orderKind(kind)){e.place=place;e.data=data;}
     Value out=Value::object();out.set("format",1);return ok(out);
 }
 Reply World::eventRead(const std::string& token,const std::string& since,int64_t now){
@@ -331,19 +362,33 @@ Reply World::eventRead(const std::string& token,const std::string& since,int64_t
     if(since.size()>mark.size()&&since.size()<=mark.size()+19&&since.compare(0,mark.size(),mark)==0){
         uint64_t n=0;bool digits=true;for(size_t i=mark.size();i<since.size();++i){digits=digits&&since[i]>='0'&&since[i]<='9';if(digits)n=n*10+uint64_t(since[i]-'0');}
         if(digits&&n<=stamps_){after=n;full=false;}}
-    const bool on=policy_.enemies=="on";Value list=Value::array();
+    const bool on=policy_.enemies=="on";
+#ifndef MUTANT_EVENTS_ORDERS_RULE
+    const bool orders=policy_.cargo=="on";
+#else
+    const bool orders=true;
+#endif
+    // A whole number goes out as an integer (a unit's packed word is exact), anything else as a real.
+    auto exact=[](double x){return std::floor(x)==x&&std::fabs(x)<9e15?Value(int64_t(x)):Value(x);};
+    Value list=Value::array();
     for(auto& e:events_){
-        if(!on&&e.first.first!="level")continue;
+        const std::string& kind=std::get<0>(e.first);
+        if(orderKind(kind)?!orders:(!on&&kind!="level"))continue;
 #ifndef MUTANT_EVENTS_OWN
         if(e.second.by==myId)continue;
 #endif
 #ifndef MUTANT_EVENTS_FOREVER
-        if(now-e.second.at>eventKeep(e.first.first))continue;
+        if(now-e.second.at>eventKeep(kind))continue;
 #endif
         if(!full&&e.second.stamp<=after)continue;
         if(list.items().size()>=BuiltFullMax)break;
-        Value v=Value::object();v.set("kind",e.first.first);v.set("key",e.first.second);v.set("value",e.second.value);list.push(v);}
-    Value out=Value::object();out.set("format",1);out.set("on",on);out.set("version",epoch_+"-"+std::to_string(stamps_));out.set("full",full);out.set("wait_ms",EventWaitMs);out.set("events",list);
+        Value v=Value::object();v.set("kind",kind);v.set("key",std::get<1>(e.first));v.set("value",e.second.value);
+        if(orderKind(kind)){
+            v.set("party",std::get<2>(e.first));v.set("age",std::max<int64_t>(0,now-e.second.at));
+            if(!e.second.place.empty()){Value p=Value::array();for(double x:e.second.place)p.push(exact(x));v.set("place",p);}
+            if(!e.second.data.empty()){Value p=Value::array();for(double x:e.second.data)p.push(exact(x));v.set("data",p);}}
+        list.push(v);}
+    Value out=Value::object();out.set("format",1);out.set("on",on);out.set("orders",orders);out.set("version",epoch_+"-"+std::to_string(stamps_));out.set("full",full);out.set("wait_ms",EventWaitMs);out.set("events",list);
     return ok(out);
 }
 Reply World::cargoRead(const std::string& token,const std::string& since,int64_t now){
