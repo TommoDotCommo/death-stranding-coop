@@ -7,7 +7,7 @@
 #endif
 namespace mod::reptrace {
 namespace {
-std::array<std::atomic<uint64_t>,MaxBodies> bodies{};std::atomic<uint64_t> porterRep{0},imageBase{0},total{0};
+std::array<std::atomic<uint64_t>,MaxBodies> bodies{};std::atomic<uint64_t> porterRep{0},imageBase{0},total{0},fromBodies{0},bodyUpdates{0};
 std::atomic<bool> on{false};
 struct Slot {std::atomic<uint64_t> hash{0},count{0};std::atomic<bool> porter{false};std::array<uint64_t,Frames> at{};std::atomic<bool> filled{false};};
 std::array<Slot,MaxStacks> slots;
@@ -35,10 +35,10 @@ void append(uint8_t* rep,uint8_t* call){
     volatile uint32_t* flags=reinterpret_cast<volatile uint32_t*>(rep+0x1a4);uint32_t f=*flags;f&=~(1u<<28);f|=1u<<27;*flags=f;
     total.fetch_add(1,std::memory_order_relaxed);
     const uint64_t current=uint64_t(TlsGetValue(tls));
-    if(current&&isBody(current)){uint64_t own=0;std::memcpy(&own,reinterpret_cast<void*>(current+0x60),8);if(uint64_t(rep)!=own)record(uint64_t(rep));}
+    if(current&&isBody(current)){fromBodies.fetch_add(1,std::memory_order_relaxed);uint64_t own=0;std::memcpy(&own,reinterpret_cast<void*>(current+0x60),8);if(uint64_t(rep)!=own)record(uint64_t(rep));}
 }
 void updating(uint64_t entity){
-    void* before=TlsGetValue(tls);TlsSetValue(tls,reinterpret_cast<void*>(entity));
+    void* before=TlsGetValue(tls);TlsSetValue(tls,reinterpret_cast<void*>(entity));if(isBody(entity))bodyUpdates.fetch_add(1,std::memory_order_relaxed);
     update(entity);
     TlsSetValue(tls,before);
 }
@@ -57,6 +57,8 @@ void watch(const std::vector<uint64_t>& b,uint64_t rep){
 }
 bool installed(){return on.load();}
 uint64_t appends(){return total.load(std::memory_order_relaxed);}
+uint64_t appendsFromBodies(){return fromBodies.load(std::memory_order_relaxed);}
+uint64_t bodyUpdateCalls(){return bodyUpdates.load(std::memory_order_relaxed);}
 std::vector<Stack> stacks(){
     std::vector<Stack> out;
     for(auto& s:slots)if(s.filled.load(std::memory_order_acquire)){Stack k;k.count=s.count.load();k.porter=s.porter.load();k.at=s.at;out.push_back(k);}

@@ -24,4 +24,6 @@ void install(discovery::Sampler&);   // throws when it cannot; game thread, betw
 bool installed();
 std::vector<Stack> stacks();         // what was recorded so far
 uint64_t appends();                  // every append through the mod's copy (it is on)
+uint64_t appendsFromBodies();        // of those, made while a body was being updated on that thread (its own queue too)
+uint64_t bodyUpdateCalls();          // body updates that went through the mod's stub
 }

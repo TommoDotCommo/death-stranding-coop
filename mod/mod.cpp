@@ -515,7 +515,7 @@ struct Runtime final:ds::Transport {
         mod::reptrace::watch(es,r);
         if(now<reptraceNotedAt+10000)return;reptraceNotedAt=now;
         auto all=mod::reptrace::stacks();uint64_t sum=0;for(auto& s:all)sum+=s.count;
-        note(("REPTRACE appends "+std::to_string(mod::reptrace::appends())+", from bodies into others' queues "+std::to_string(sum)+" ("+std::to_string(all.size())+" stacks, "+std::to_string(es.size())+" bodies)\n").c_str());
+        note(("REPTRACE body updates seen "+std::to_string(mod::reptrace::bodyUpdateCalls())+", appends during them "+std::to_string(mod::reptrace::appendsFromBodies())+"; appends "+std::to_string(mod::reptrace::appends())+", from bodies into others' queues "+std::to_string(sum)+" ("+std::to_string(all.size())+" stacks, "+std::to_string(es.size())+" bodies)\n").c_str());
         for(auto& s:all){uint64_t key=0;for(auto a:s.at)key=key*31+a;auto& seen=reptraceSeen[key];if(seen==s.count)continue;seen=s.count;
             std::ostringstream o;o<<"REPTRACE stack x"<<s.count<<(s.porter?" into THIS PORTER's queue":" into another entity's queue")<<":";
             for(auto a:s.at)if(a)o<<" 0x"<<std::hex<<a<<std::dec;o<<"\n";note(o.str().c_str());}
