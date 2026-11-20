@@ -23,6 +23,9 @@
 //
 // Bug marks (F2): mark() sends this player's mark to the server, at most one every MarkEveryMs and MarksPerHour in an
 // hour; takeMarks() gives the marks the server passed on from players in the roster (anyone else's are dropped).
+//
+// Pings and likes: signal() sends one, at most one every SignalEveryMs and SignalsPerMinute in a minute; takeSignals()
+// gives the ones the server passed on from players in the roster, a like only when it names this player.
 #include "broadcast.h"
 #include "core.h"
 #include <deque>
@@ -58,10 +61,17 @@ struct Counters {
     // Bug marks.
     uint64_t marks=0,marksHeld=0;    // MARK sent; marks not sent for the rate (one every 2 s, 30 an hour) or offline
     uint64_t marked=0,markRefused=0; // MARKED taken; refused (a source not in the roster, or this player himself)
+    // Pings and likes.
+    uint64_t signals=0,signalsHeld=0;        // SIGNAL sent; not sent for the rate or offline
+    uint64_t signalled=0,signalRefused=0;    // SIGNALLED taken; refused (a stranger, himself, a like for another)
 };
 // A bug mark the server passed on: who it came from (the server's record, and his name as the roster gave it).
 struct MarkNews { uint64_t source=0; std::string name; uint32_t mark=0; };
 constexpr size_t MarkNewsMax=64;   // marks kept for the adapter at most (the server sends at most one per source in 2 s)
+// A ping or a like the server passed on: who sent it (the server's record, his name as the roster gave it), its kind,
+// his serial, and the place (the core's State axes, metres).
+struct SignalNews { uint64_t source=0; std::string name; SignalKind kind=SignalKind::Ping; uint32_t serial=0; std::array<double,3> place{}; };
+constexpr size_t SignalNewsMax=64;
 // The fight channel's timing on the player's side.
 constexpr uint64_t FightKeepMs=1000,FightJoinEveryMs=500,FightOfferMs=3000;
 // What the fight channel brought: a STATUS for this player's fight, or a DELIVER taken (a visitor: the owner's state;
@@ -132,6 +142,9 @@ public:
     // Bug marks: true when sent (online, and within the rate); the adapter writes its own log line either way.
     bool mark(uint32_t mark,uint64_t now);
     std::vector<MarkNews> takeMarks();
+    // Pings and likes: true when sent (online, a valid signal, within the rate). target: a like's player, 0 for a ping.
+    bool signal(SignalKind,uint32_t serial,uint64_t target,const std::array<double,3>& place,uint64_t now);
+    std::vector<SignalNews> takeSignals();
 private:
     struct Blob {std::vector<uint8_t> bytes;uint32_t version=0;uint16_t generation=0;bool have=false;uint64_t revision=0;};
     struct AnimationSample {Animation animation;uint64_t time=0;uint32_t sequence=0;};
@@ -178,5 +191,7 @@ private:
     // Bug marks: when this player's were sent (the last hour), and the ones passed on to him.
     void marked(const Mark&);
     std::deque<uint64_t> markTimes_;std::vector<MarkNews> marks_;
+    void signalled(const Signal&);
+    std::deque<uint64_t> signalTimes_;std::vector<SignalNews> signals_;
 };
 }

@@ -46,6 +46,11 @@
 // not to a player near who is not shown him, not to a linked server. At most one mark every 2 s and 30 in an hour from
 // one player (core/broadcast.h MarkEveryMs, MarksPerHour); more are dropped and counted.
 //
+// Pings and likes (README.md, "Pings and likes"; core/broadcast.h types 19, 20): a broadcast player's ping (SIGNAL) is
+// passed on (SIGNALLED, the relay's record of the sender as its source) to the players near who are shown him, when its
+// place is within PingReachMetres of where the relay has him; a like only to the player it names, while that player is
+// near, shown the sender and within LikeReachMetres. At most one signal every 500 ms and 20 a minute from one player.
+//
 // Linked servers' presence (README.md, "Presence across linked servers"; the envelope is presence.h): the relays of two
 // linked servers tell each other where their broadcast players are (cells of 8 m), and each sends the other the players
 // of its own that are near one of the other's, with their updates and shown state, within a byte budget a second. A
@@ -148,6 +153,8 @@ struct RelayStats {
     uint64_t fightRefused=0;     // a POST from somebody who is neither the fight's owner nor one of its joined visitors, or older
     // Bug marks.
     uint64_t marks=0,marksRefused=0,marksSent=0;   // taken and logged; dropped for the rate; MARKED datagrams sent
+    // Pings and likes.
+    uint64_t signals=0,signalsRefused=0,signalsSent=0;   // taken; refused (rate, reach, a like's target); SIGNALLED sent
 };
 class Relay {
 public:
@@ -203,6 +210,7 @@ private:
             uint32_t version=0; ds::relay::Buffer state; std::map<uint64_t,uint32_t> reports; std::map<uint64_t,uint64_t> offeredAt;};
         Hosted fight; uint64_t visits=0;
         std::deque<uint64_t> marks;   // when his bug marks were taken (the last hour)
+        std::deque<uint64_t> signals; // when his pings and likes were taken (the last minute)
     };
     // How much of a source a receiver at some distance is sent (squared metres).
     struct Reach {double full2=0,animation2=0;uint32_t intervalMs=0;};
@@ -264,6 +272,7 @@ private:
     void deliver(const Player& to,uint64_t source,uint64_t owner,uint32_t fight,uint32_t version,const uint8_t*,size_t);
     void fightTick(uint64_t now);
     void mark(Player&,const ds::broadcast::Mark&,uint64_t now);
+    void signal(Player&,const ds::broadcast::Signal&,uint64_t now);
     void fetch(Player&,uint64_t source,uint64_t now);
     void share(Player& to,const Player& from,size_t kind);
     void enqueue(Player&,const ds::broadcast::Update&,uint64_t now);

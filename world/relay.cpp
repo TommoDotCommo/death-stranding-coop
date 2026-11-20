@@ -433,6 +433,7 @@ void Relay::receiveBroadcast(const RelayAddress& from,Player* sender,const uint8
 #endif
         if(auto* p=from2(m.mark.player))mark(*p,m.mark,now);
         return;
+    case bc::Type::Signal:if(auto* p=from2(m.signal.player))signal(*p,m.signal,now);return;
     case bc::Type::Bye:
         if(sender&&sender->id==m.bye.id&&rightToken(m.bye.token,m.bye.id))remove(sender->id,"left");
         return;
@@ -605,6 +606,46 @@ void Relay::mark(Player& s,const bc::Mark& k,uint64_t now){
 #else
     for(auto& [id,r]:players_)if(id!=s.id&&r.mode==bc::Version&&!r.link){send_(r.address,b.data(),b.size());++stats_.marksSent;}
 #endif
+}
+
+// ---- Pings and likes (README.md, "Pings and likes") ------------------------------------------------------------------
+// A ping to the players near who are shown the sender; a like to the one player it names, while he is near, shown the
+// sender and within LikeReachMetres of where the server has him. The rate is per player, pings and likes together.
+void Relay::signal(Player& s,const bc::Signal& k,uint64_t now){
+    if(s.link)return;
+    auto refuse=[&]{++stats_.signalsRefused;};
+    if(!s.have&&!s.haveAt)return refuse();
+    while(!s.signals.empty()&&s.signals.front()+bc::SignalMinuteMs<=now)s.signals.pop_front();
+#ifndef MUTANT_RELAY_SIGNAL_RATE
+    if((!s.signals.empty()&&now<s.signals.back()+bc::SignalEveryMs)||s.signals.size()>=bc::SignalsPerMinute)return refuse();
+#endif
+    const auto here=where(s);
+    auto apart=[](const std::array<double,3>& a,const std::array<double,3>& b){double d=0;for(int i=0;i<3;++i)d+=(a[i]-b[i])*(a[i]-b[i]);return std::sqrt(d);};
+    bc::Signal out=k;out.player=s.id;
+    if(k.kind==bc::SignalKind::Ping){
+#ifndef MUTANT_RELAY_SIGNAL_REACH
+        if(apart(k.place,here)>bc::PingReachMetres)return refuse();   // a ping is where its porter is, or looks
+#endif
+        s.signals.push_back(now);++stats_.signals;
+        Buffer b=bc::encodeSignalled(out);
+        for(auto id:s.nearby){
+            auto it=players_.find(id);if(it==players_.end())continue;
+            Player& r=it->second;if(r.mode!=bc::Version||r.link)continue;
+#ifndef MUTANT_RELAY_SIGNAL_HIDDEN
+            if(!r.shown.count(s.id))continue;   // near, but not shown him
+#endif
+            send_(r.address,b.data(),b.size());++stats_.signalsSent;}
+        return;}
+    // A like.
+    auto it=players_.find(k.target);
+#ifndef MUTANT_RELAY_SIGNAL_LIKE_ANY
+    if(it==players_.end()||it->second.mode!=bc::Version||it->second.link||!s.nearby.count(k.target)||!it->second.shown.count(s.id))return refuse();
+    if(apart(where(it->second),here)>bc::LikeReachMetres)return refuse();
+#else
+    if(it==players_.end())return refuse();
+#endif
+    s.signals.push_back(now);++stats_.signals;
+    out.place=here;Buffer b=bc::encodeSignalled(out);send_(it->second.address,b.data(),b.size());++stats_.signalsSent;
 }
 
 // ---- Fights with visitors (README.md, "The fight channel") ------------------------------------------------------------
