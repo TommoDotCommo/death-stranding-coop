@@ -44,8 +44,8 @@ In group play on a server (every line is a server rule the server's owner can ch
   nearest player within 25 m.
 - **Far players on the HUD**: players too far away to be drawn are markers on the HUD.
 - **Many players**: Settings, "other players drawn" (0 to 32, 15 by default); bodies beyond 30 m drop their shadow and
-  cloth simulation, and bodies no longer slow the game the way they did (32 bodies near: about 80 fps where it was 43
-  on the test PC).
+  cloth simulation, and bodies no longer slow the game the way they did (32 bodies within 12 m: 59 to 78 fps where it
+  was 43, on the test PC).
 - A server keeps up to 65536 players' accounts and takes 1024 at once.
 
 Fixed:
@@ -60,11 +60,20 @@ Fixed:
 What has run, and how; the details and dates are in [STATUS.md](../STATUS.md). Live results are from two copies of the
 game on one PC unless a line says otherwise.
 
-- (filled in at release)
+- Game-free: the mod's, server's and launcher's tests with their mutants (every mutant must fail).
+- Live, two games on one server (2026-11-19 and 2026-11-20): others' builds at once, only the server's world, cargo
+  set down, free build, the world's enemies (MULEs, camps), timefall, structure levels, roads, vehicles shown and
+  riding along, floating carriers shown and ridden, towing, orders together, pings and likes, far players on the HUD,
+  chat, the map, the server page.
+- Live on the release code (2026-11-20): pings and likes (the like arrives, the ping is on the HUD), both games
+  started from the configuration the launcher writes for a group (host and joiner, each shows the other), 32 bodies
+  near with the new defaults.
 
 ## Not verified
 
-- (filled in at release)
+- Two PCs over the internet with this build (the two games ran on one PC).
+- More than two real games at once (more players were stand-ins).
+- Gazers destroyed and orders together with the launcher's own join (each ran with a test configuration).
 
 ## Known issues
 
