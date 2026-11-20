@@ -60,7 +60,7 @@ constexpr int64_t MapFreshSeconds=5,MapWaitMinMs=2000,MapWaitMaxMs=30000;constex
 // remembered (an older version reads everything again), and how many objects one full read lists.
 constexpr int64_t BuiltWaitMs=3000;constexpr size_t BuiltGoneMax=4096,BuiltFullMax=2000;
 // Cargo set down for the others (cargoRead, cargoSay): how often to read, how many a world and one player keep, how long.
-constexpr int64_t EventWaitMs=2000,EventKeepSeconds=3600,LevelKeepSeconds=30*24*3600,RainKeepSeconds=60;constexpr size_t EventsMax=20000;   // world events (eventSay, eventRead)
+constexpr int64_t EventWaitMs=2000,EventKeepSeconds=3600,LevelKeepSeconds=30*24*3600,RainKeepSeconds=60,ReplayKeepSeconds=300;constexpr size_t EventsMax=20000;   // world events (eventSay, eventRead)
 // Orders taken together (README, "Orders taken together"): kinds `order` and `unit` are kept per party (a run of one
 // order that its leader started), a day; a party is a number 1..MaxParty; `place` and `data` hold at most 3 numbers.
 constexpr int64_t OrderKeepSeconds=24*3600,MaxParty=(int64_t(1)<<53)-1;constexpr size_t EventDataMax=3;
@@ -359,7 +359,13 @@ private:
     struct Event { std::string by,leader;int64_t value=0,at=0;uint64_t stamp=0;std::vector<double> place,data; };
     std::map<std::tuple<std::string,int64_t,int64_t>,Event> events_;   // (kind, key, party: 0 but for orders)
     static bool orderKind(const std::string& kind){return kind=="order"||kind=="unit";}
-    static int64_t eventKeep(const std::string& kind){return kind=="level"?LevelKeepSeconds:kind=="rain"?RainKeepSeconds:orderKind(kind)?OrderKeepSeconds:EventKeepSeconds;}   // a level stays, rain a minute (it is said again while it falls), an order's party a day, the rest an hour
+    // A boss replay started and a replay boss's life last five minutes (a replay is joined from the private room soon
+    // after it starts; a fight's life is said again while it runs).
+    static int64_t eventKeep(const std::string& kind){
+#ifndef MUTANT_EVENTS_REPLAY_HOUR
+        if(kind=="replay"||kind=="bosslife")return ReplayKeepSeconds;
+#endif
+        return kind=="level"?LevelKeepSeconds:kind=="rain"?RainKeepSeconds:orderKind(kind)?OrderKeepSeconds:EventKeepSeconds;}   // a level stays, rain a minute (it is said again while it falls), an order's party a day, the rest an hour
     void dropped(const std::string& id){
 #ifndef MUTANT_BUILT_GONE
         gone_.emplace_back(id,++stamps_);if(gone_.size()>BuiltGoneMax){goneFloor_=gone_.front().second;gone_.pop_front();}

@@ -996,11 +996,13 @@ BTs; what is shared is who is down:
 
 | Call | Answer |
 |---|---|
-| `POST …/coop/events` `{"kind":"mule\|camp\|gazer","key":N,"value":V}` with `X-Coop-Token` | `format` 1. 403 when `enemies` is off, 429 past 20000 events at once (every kind together) |
+| `POST …/coop/events` `{"kind":"mule\|camp\|gazer\|rain\|replay\|bosslife\|level","key":N,"value":V}` with `X-Coop-Token` | `format` 1. 403 when `enemies` is off (except `level`), 429 past 20000 events at once (every kind together) |
 | `GET …/coop/events[?since=VERSION]` | `format` 1, `on`, `version`, `full`, `wait_ms` (2 s), `events` (others' only: `kind`, `key`, `value`) |
 
-One entry per kind and key (the newest wins), kept an hour. Tests: `built_test.cpp`; mutants `EVENTS_OFF`,
-`EVENTS_UNLIMITED`, `EVENTS_TOKEN`, `EVENTS_OWN`, `EVENTS_FOREVER`.
+One entry per kind and key (the newest wins), kept an hour; rain a minute; `replay` (a boss replay started: key the
+mission and fight, value the Boss Battle menu code) and `bosslife` (that fight's boss's life in permille, key the
+mission, fight and part) five minutes (`../mod/groupreplay.h`). Tests: `built_test.cpp`; mutants `EVENTS_OFF`,
+`EVENTS_UNLIMITED`, `EVENTS_TOKEN`, `EVENTS_OWN`, `EVENTS_FOREVER`, `EVENTS_REPLAY_HOUR`.
 
 ### Cargo set down for the others
 

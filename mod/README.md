@@ -1087,10 +1087,42 @@ player's rise raises the structure with the same id here with the game's own rou
 materials given, the level-up queued). What was raised for another player is not said back; a structure first seen at
 some level is not said. Live once (2026-11-20). Materials short of a level are not shared.
 
-**Story bosses:** a fight that runs while the game's BossBattle state is set (a whale, a titan) is never offered to
-the players near, and a game in one joins nobody's: a visitor's copy would be an ordinary catcher (fights.h, mutant
-FIGHT_BOSS_OFFERED). Playing a story boss together is designed, not built (both start the same Boss Battle replay, the
-owner's boss life the one that counts).
+**Story bosses:** a fight that runs while the game's BossBattle state is set (a whale, a titan), or while a Boss Battle
+replay runs (fact 12), is never offered to the players near, and a game in one joins nobody's: a visitor's copy would
+be an ordinary catcher (fights.h, mutant FIGHT_BOSS_OFFERED). Replays are played together instead (next section).
+
+## Boss Battle replays together (`group_replays`, with `group_enemies`; built without a game, 2026-11-20)
+
+The Director's Cut replays story bosses from the private room's Boss Battle menu (`game_offsets.md`, "Boss replays").
+With `"group_replays": true` each player still fights in his own game, and the mod shares two things through the
+server's world events (`../world/README.md`, kinds `replay` and `bosslife`, kept five minutes):
+
+- **The start.** When a player starts a replay himself (fact 12 rises and the start the game checked last was one of
+  the 17 replay missions), the mission, a fight number his game picks and the menu code are said once. Another player
+  with the option on is told (the info log); when he is in his own private room and fights nothing, the mod writes the
+  same code to the room's blackboard, as the room's own logic does after the menu, and the room's script starts the
+  replay. Once per heard start, within five minutes, not within 10 s after a fight of his own; a start that has not
+  begun after 30 s is given up. A replay the mod started is never said again.
+- **The boss's life,** for a fight shared that way: each game says its boss's life per part in permille, when it
+  changes and every 4 s, and takes its own parts down to the lowest life heard for the same fight: never up, never
+  below 0.05 % (the game lets a boss die only on its own hit), never from another fight. Built for BT bosses (whale,
+  titans: their catchers, `bts.h`); a human boss's life is not read yet.
+
+If the game started another mission than the group's (a menu row can mean another boss in another player's game), the
+fight is fought alone. The mod learns the started mission and the accepted code from four call sites it goes through
+(`replayhooks.h`; every byte checked first). `groupreplay.h`; tests `groupreplay_test.cpp` (three players and a server
+without a game; mutants JOIN_ANYWHERE, JOIN_IN_FIGHT, REJOIN, STALE, UP, ZERO, OTHER_FIGHT, SAY_JOINED, WRONG_MISSION);
+config mutant CONFIG_GROUP_REPLAYS. Log lines `REPLAY ...`. Not run with a game.
+
+Test commands in `puppet.cargo` (lab only, each `VERB N <stamp>`): `replay ID` (the game's mission start with that id;
+also starts the watcher, which logs fact 12, BossBattle, AfterBeatBoss, GameOver and the private room when they
+change), `replaylog 1` (installs the four hooks and logs each record: `REPLAYLOG Boss Battle accepted: code ..., row
+...`, `private room hands on code ...` with the object the game passes and whether it is the porter's entity, `room
+script asks a mission start ...`, `mission start ID passed the check`), `privateroom 1` / `privateroom 0` (asks the
+game-flow manager to enter or leave the private room, `0x3411950`), `replaycode CODE` (in the private room only: the
+code to the blackboard, `GF+0x80` and `+0x8c`; CODE+256 first makes the game's own call `0x273fe10(porter, 0x1a, 1,
+0)`), `bosslife 1` (read-only, every 2 s: the porter's destructibility floats, the catchers' lives, and the actor
+manager's units when they change).
 
 ## Orders taken together in group play (`group_orders`, off by default; the server's rule `cargo`; not run in a game)
 

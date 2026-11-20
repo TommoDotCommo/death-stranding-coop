@@ -6947,3 +6947,43 @@ double.cpp), `SetVisible`/`SetSleeping`, the fixed-position mover and the join t
 (0x23f4040, kind 0, several bodies on one porter). No pool limit was met at 81 bodies besides the resident double.
 Removal through the game's queued removal worked for all of them while the game ran on. Cost on the mod's side:
 about 170 microseconds per body per game-thread tick (what takes the time inside a tick was not measured).
+
+## Boss replays (Director's Cut Boss Battle; static, 2026-11-20)
+
+RVAs of build 13300582. **Established** means read in the disassembly; **inferred** is marked; nothing here was run
+live when it was written.
+
+- **The replays are missions.** `0x33cb020(id)` is true for 17 ids: 320, 500, 615, 630, 20130, 20430, 20610, 20615,
+  20640, 25130, 25320, 25430, 25500, 25610, 25615, 25630, 25640. Fact 12 (`0x33acd40(S = *(image+0x7c0aff8), 12)`)
+  is "a boss replay runs". `0x33b80a0(S, id, 0, ranking)` is the mission start; its first act is the check
+  `0x33b0bc0(S, id, 0)` (call at `0x33b80bc`), and nothing starts when it fails. Asked from the open world with a
+  replay id (lab `replay ID`), it started nothing (live, 2026-11-20).
+- **The Boss Battle menu** writes its code into the menu data D = `*(*(image+0x7c00128)+0x318)` (the getter
+  `0x30d6a10`): accept (`0x30ee860`) sets `D+0x20 = D+0x30 (row) + 0x1f` and calls `0x307a4f0` (call at `0x30ee879`,
+  rcx = D); cancel sets `0x63`. Ranking rows use codes `0x24..0x2b` with `D+0x2c = 3`, `D+0x30 = row`,
+  `D+0x38[row] =` difficulty. Rows shown depend on facts `0x33ad060(S, 7..11)`, so a row number may mean another boss
+  in another player's game (inferred).
+- **The private room hands it on.** The game-flow manager GF = `*(image+0x7c0d6c0)` has 17 modes at `*(GF+0x10)+8*i`
+  (each with an active bit `+0x14 & 1`); mode 1 is the private room (its vtable `0x3ed5140`; its enter `0x341eeb0`
+  sets game state `PrivateRoom` and `GF+0x58` bit 25). In the room's player logic (`0x27672c0`, state `+0x138 == 3`),
+  after the menu: code = `D+0x20`; unless `0x63`, `0x273fe10(*(logic+0x30), 0x1a, 1, 0)` (call at `0x27677ef`; it sets
+  entry 0x1a of a table under `obj+0x58` through `0x284a990`), then `GF+0x80 = code`, `GF+0x8c = 1` (`0x27677f4`).
+  The room's script reads them with `GetPrivateRoomBlackBoardFromCpp` (`0x33c9fe0`: `GF+0x78`, `+0x7c`, `+0x80`,
+  `+0x8c`, only while bit 25 is set) and calls `RequestMissionStart` (`0x33c9c30`): `0x333b890(S+0xa8, resource)`
+  (call at `0x33c9c45`) finds the mission record, whose `+0x38` id goes to `0x33b80a0(S, id, 0, 0)`. That the object
+  `*(logic+0x30)` is the porter's entity is **inferred** (the same pattern at a dozen other callers).
+- **Entering the private room.** `0x3411950(GF, hash, id, facility)`: hash `0x3a1bb216` queues a start of mode 1 when
+  it is not active (request bytes: type 1, priority 0x80, start; `+4` id, `+8` the facility's `+0x30` or -1); hash
+  `0x303767f9` queues its stop when it is. The mode accepts a start unless the game state has GameOver, PlayerDied or
+  PlayerFainted (TerminalOperation or DirectIntoPrivateRoom set always pass; `0x34090a0`). The direct path
+  (`0x2839640`, a vtable method) passes id -1 and the facility `0x2c57cf0(*(image+0x7bf4960), *(*(image+0x7be7980)+
+  0xfeb4), 0)` (the facility table, 0x710 bytes per row, `+0x80`; handle `0x1fffff` is none). The terminal's own path
+  (`0x27919e9`) passes the facility of `+0xfeb0` through `0x2c57350`. What `+0xfeb4` holds outside that path, and
+  whether the room opens from anywhere, is **unknown**.
+- **A human boss's life (inferred, unverified).** `Entity_ExportedGetHealth` is `entity->vtable[0x78]`, GetMaxHealth
+  `[0x80]`; `Entity_ExportedSetHealth` (`0x2361d10`) goes to the destructibility D = `entity+0xc0` (`0x23ec3f0`): it
+  writes the damage `D+0x68 = full + D+0x6c - health`, full being `*(D+0x30)+0x24`, then `0x23ec970`. Where Higgs's or
+  Cliff's entity is found is unknown (lab `bosslife 1` logs the porter's D and the actor manager's units).
+
+The mod: `replayhooks.h` (the four call sites, through padding at `0x30ee89f`, `0x27679fe`, `0x33c9c6e`,
+`0x33b8710`), lab commands in `puppet.cargo` (README "Boss Battle replays together"), `groupreplay.h`.

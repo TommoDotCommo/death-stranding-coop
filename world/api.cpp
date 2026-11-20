@@ -307,8 +307,8 @@ Reply World::eventSay(const std::string& token,const std::string& body,int64_t n
     if(!me)return noticeTokenRefused();
     Value d;try{d=json::parse(body);}catch(const std::exception&){return refuse(400,"event","not JSON");}
     const std::string kind=d.get("kind").string();
-    if(!oneOf(kind,{"mule","camp","gazer","level","rain","order","unit"})||!d.get("key").isInt()||!d.get("value").isInt()||d.get("value").integer()<0||d.get("value").integer()>1000)
-        return refuse(400,"event","kind mule, camp, gazer, level, rain, order or unit, an integer key, a value 0..1000");
+    if(!oneOf(kind,{"mule","camp","gazer","level","rain","order","unit","replay","bosslife"})||!d.get("key").isInt()||!d.get("value").isInt()||d.get("value").integer()<0||d.get("value").integer()>1000)
+        return refuse(400,"event","kind mule, camp, gazer, level, rain, order, unit, replay or bosslife, an integer key, a value 0..1000");
     const int64_t key=d.get("key").integer(),value=d.get("value").integer();
     // An order taken together (README, "Orders taken together"): kept per party, with where it was taken and what a
     // unit's hand-in left in its row; the rule `cargo` decides.
