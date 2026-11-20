@@ -111,6 +111,7 @@ config names the server instead:
 | `test_mode` | the launcher writes `{}` when the server's rules say `test_mode` on ("Test mode", below): material crates on U; blood, stamina and battery kept full, switched with F3 |
 | `relay_mode` | `"pairs"` (default) or `"broadcast"`: how other players travel through the relay ("Other players", below); requires `relay`. Every player of a group uses the same mode: the server never puts players of different modes near each other |
 | `show_others` | `"everyone"` (default), `"friends"` or `"nobody"`: who of the players near this player the server shows him (broadcast only, sent in every HELLO; `world/README.md`, "How many players one player sees"). The server's own record of his choice, set from the launcher, comes first; `friends` needs a server with player keys. Requires `relay_mode` `"broadcast"`. A server from before this refuses a HELLO with anything but everyone |
+| `group_pings` | B pings where this porter stands, L likes the nearest other player within 25 m, through the broadcast relay ("Pings and likes in group play", below); requires `relay_mode` `"broadcast"`, `others`, `game_thread` and `puppet_probe`. Off by default; the launcher does not write it yet |
 | `slot` | still required (0..15), but no port is bound from it |
 | refused without `peer` | `role` other than `none`, `peer_slot`, `bind`, `partner` other than `off`, `join_at_host` and every `share_*` setting that is on: they need the partner and would silently do nothing |
 
@@ -1562,6 +1563,53 @@ arrives. These are the game's real likes: they are saved and count toward the po
 which is why the feature is off unless asked for. Log lines start with `LIKE` (`sent to the partner`, `received from the
 partner`, `dropped: ...`). Tests: `likes_test.cpp` (mutants GAP and CAP); live, two copies: one L press raised the
 other porter's likes by one with the counter popup.
+
+## Pings and likes in group play (`group_pings`, off by default; built 2026-11-20, not run in a game)
+
+The partner's pings (map pins, "The partner on the map, and pings") and likes ("Likes for the partner") for many
+players. With `"group_pings": true` in a group config over the broadcast relay (`grouppings.h`):
+
+- **B** pings where this porter stands. The ping goes to the server as a SIGNAL (`../core/CORE.md`, "Pings and
+  likes"), which passes it to the players near who are shown him (`../world/README.md`, "Pings and likes"). In each of
+  their games it is a HUD marker at that place for 30 s, with the kind the far players' markers use (0x98: drawn at any
+  distance and pinned to the screen's edge; `hudmarkers.h`, a second set on the same hook with ids of its own), and a
+  line in the info log: "Ann pinged a place 120 m away." ("here" within 5 m). His own game shows his ping on his HUD
+  too. A player's newer ping replaces his older one; at most 16 are shown, each (sender, serial) once.
+- **L** gives the nearest other player shown here within 25 m a like. The server passes it only to that player, while
+  he is near the sender, is shown him and is within 50 m of him; his game gives his porter the like the game's own way,
+  as the partner's (`likes.h`, the like counter popup; real, saved likes), and the info log says "Ann sent you a like.".
+  At most one like every 1.5 s is sent; a game gives each (sender, serial) once, at most 3 a minute from one sender and
+  10 a minute in all. With nobody near: "Nobody is near enough to like." and nothing is sent.
+- Both keys work only in the world, outside a game event, and not while typing a chat line. At most one signal every
+  500 ms and 20 a minute leave a game, which the server holds to as well. F1 lists both keys.
+
+**Why the relay and not the server's events (`…/coop/events`).** The relay already knows who is near whom and who is
+shown whom: a ping reaches exactly the players who can see its porter, a player's choice of whom he sees (`show_others`,
+the server's cap) holds for pings and likes as for bodies, a like can be held to the players next to each other by the
+server's own record of where they are, nothing is stored, no policy setting is added, and it arrives within a datagram's
+time instead of the next two-second read. The events table keeps one value per kind and key and hands it to every
+player on the server, which would have needed a target, a sender and a place it does not have, and would have told
+every player on the server where someone stands.
+
+Log lines: `PINGS on (group play): ...`, `PING sent at X,Y,Z`, `PING from NAME at X,Y,Z (D m)`, `PING not sent: ...`,
+`HUD pings: N`, `LIKE sent to NAME`, `LIKE received from NAME`, `LIKE from NAME dropped: not in play|too many|no likes
+state`, `LIKE not sent: nobody within 25 m|...`. Places are in the core's axes (x, y up, z). The fake world's status has
+`group_pings` (`on`, `pings_sent`, `pings_shown`, `likes_sent`, `likes_given`, `hud`: the ping markers published).
+
+Tests: `grouppings_test.cpp` (pings once each, one per sender, for 30 s, at most 16, their ids; the like's target; the
+likes given; the line), six mutants (`GROUPPINGS_IDS`, `_LIFE`, `_DEDUPE`, `_RANGE`, `_NEAREST`, `_GATE`); the config
+rule in `unit.cpp` (`CONFIG_GROUP_PINGS`); the ping notice in `notice_test.cpp`; the F1 line in `help_test.cpp`; the wire
+and the relay in `core/` and `world/`; and `test_pings_group.py`: four fake-world games through the real `coop-world`:
+Ann's ping in her own HUD, in the HUD and info log of the two players near her and not of the far one, her like given to
+the nearest (Bob) and not to Cee, the far player's like sent to nobody; the mutant build `fake-pings-group.so` (B sends
+nothing) fails it.
+
+Not run in a game. A live run must check: that the ping's marker shows at the place (the kind is the far players'
+placeholder icon), that the info-log line and the like popup show, that B and L do nothing else in the game's default
+keys (both were the partner path's keys, and L is live there), and that a ping from 300 m shows at the screen's edge.
+Not built: a ping where the porter looks (the server allows 300 m for it), and gestures. Others' bodies mirror their
+porters' animation controls in broadcast mode too, so a gesture the game plays on a porter may already show on his body
+here; whether it does is unknown until a live run looks, and nothing plays one on a key.
 
 ## Shout, scan and vitals for the partner (`partner_shout`, `partner_scan`, `partner_vitals`, off by default)
 
