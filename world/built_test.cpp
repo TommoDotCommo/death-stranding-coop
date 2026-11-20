@@ -145,7 +145,19 @@ static void events(){
     {const std::string v3=read(tb).get("version").string();
      CHECK(say(ta,R"({"kind":"rain","key":123,"value":500})")==200);auto w=read(tb,v3).get("events").items();CHECK(w.size()==1&&w[0].get("kind").string()=="rain");
      s.now+=RainKeepSeconds+1;tb=s.token("bob");ta=s.token("ann");
-     bool gone=true;for(auto& e:read(tb).get("events").items())if(e.get("kind").string()=="rain")gone=false;CHECK(gone);}
+     auto left=read(tb);bool gone=true;for(auto& e:left.get("events").items())if(e.get("kind").string()=="rain")gone=false;CHECK(gone);}
+    // A boss replay started (key: mission and fight, value: the menu code) and its boss's life (permille) last five
+    // minutes; under the enemies rule like the rest.
+    {const std::string v4=read(tb).get("version").string();
+     CHECK(say(ta,R"({"kind":"replay","key":1310785,"value":31})")==200&&say(ta,R"({"kind":"bosslife","key":335561216,"value":640})")==200);
+     auto w=read(tb,v4).get("events").items();CHECK(w.size()==2);
+     bool both=w.size()==2&&w[0].get("kind").string()!=w[1].get("kind").string();for(auto& e:w)both=both&&(e.get("kind").string()=="replay"||e.get("kind").string()=="bosslife");CHECK(both);
+     CHECK(say(ta,R"({"kind":"bosslife","key":1,"value":1001})")==400);
+     s.now+=ReplayKeepSeconds-10;tb=s.token("bob");ta=s.token("ann");CHECK(read(tb).get("events").items().size()==4);   // mule, camp, replay, bosslife
+     s.now+=11;tb=s.token("bob");ta=s.token("ann");
+     auto left=read(tb);bool gone=true;for(auto& e:left.get("events").items())if(e.get("kind").string()=="replay"||e.get("kind").string()=="bosslife")gone=false;CHECK(gone);
+     Server off("friends",{"enemies=off"});off.signIn("cid","Cid");auto tc=off.token("cid");
+     CHECK(off.raw("POST","/s3cret/coop/events",R"({"kind":"replay","key":1,"value":31})",{{"x-coop-token",tc}}).status==403);}
     // A structure's level (key: its online id's hash) stays a month; the rest go after an hour.
     CHECK(say(ta,R"({"kind":"level","key":123456789,"value":3})")==200);
     s.now+=EventKeepSeconds+1;tb=s.token("bob");ta=s.token("ann");

@@ -307,8 +307,8 @@ Reply World::eventSay(const std::string& token,const std::string& body,int64_t n
     if(!me)return noticeTokenRefused();
     Value d;try{d=json::parse(body);}catch(const std::exception&){return refuse(400,"event","not JSON");}
     const std::string kind=d.get("kind").string();
-    if(!oneOf(kind,{"mule","camp","gazer","level","rain"})||!d.get("key").isInt()||!d.get("value").isInt()||d.get("value").integer()<0||d.get("value").integer()>1000)
-        return refuse(400,"event","kind mule, camp, gazer, level or rain, an integer key, a value 0..1000");
+    if(!oneOf(kind,{"mule","camp","gazer","level","rain","replay","bosslife"})||!d.get("key").isInt()||!d.get("value").isInt()||d.get("value").integer()<0||d.get("value").integer()>1000)
+        return refuse(400,"event","kind mule, camp, gazer, level, rain, replay or bosslife, an integer key, a value 0..1000");
 #ifndef MUTANT_EVENTS_OFF
     // A structure's level follows the structure (shared as the policy shares it); the others are the enemies' rule.
     if(kind!="level"&&policy_.enemies!="on")return refuse(403,"enemies-off","enemies are each player's own on this server");
