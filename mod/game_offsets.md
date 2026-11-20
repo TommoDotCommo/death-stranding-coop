@@ -1498,6 +1498,15 @@ looked at.
   part `+0xd0` (live), because the pooled creation skips the physics setup `0x2f73170`. Nothing to switch on.
 - The motorbike has only `HLP_C_Driver` of these (live: `HLP_Enemy` and `HLP_C_SitDown` are not on its model, the hold
   ends at once); held there, the porter stands where the driver sits. A pillion seat needs an offset (the local 4x4).
+- Hold at a fixed place (2026-11-20, static): `0x26bd130(mover, u32 joint, const World*, float local[16], float blend)`
+  copies the place to `+0x7c0` (3 doubles) and `+0x7d8` (3x3 floats), the local to `+0x770`, the blend to `+0x72c` and
+  `+0x73c`, sets state `+0x720` = 1 and `+0x7b8` = 1 (place, not helper), zeroes `+0x734`/`+0x738` and the joint
+  `+0x760` (0xffffffff: none). The mover's update `0x26ca560` takes `+0x7c0` (or the helper's transform when `+0x7b8` is
+  0) times `+0x770` as the target `+0x800` (x, y) / `+0x810` (z); `+0x734` > 0 would blend the height towards a ground
+  probe, 0 keeps it. `0x268a688` steers the velocity `+0x410` towards the target while the blend `+0x740` is above 0
+  and, once it reaches 1, hands the target over as the position. So the held place carries its height; live a porter
+  held from a roof stayed 9.5 m above the place, so something after this (most likely his collision) stops him going
+  down: unknown. The mod moves such a porter to the vehicle with the teleport first (passenger.h `board`).
 
 ### Carried cargo: where the game puts each case (2026-11-13, static, the reads confirmed live)
 

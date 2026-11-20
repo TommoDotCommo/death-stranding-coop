@@ -1019,6 +1019,15 @@ the partner's is in two-player play (`ride.h`): one per player, each with a pool
 stays parked where he got off and goes with him when he leaves. **Riding along:** next to another player's truck or
 bike while he drives, J (`passenger_key`) holds this porter on it, as on the partner's truck; the nearest one being
 driven within 4.5 m; he is let go when the driver gets out or leaves. Log lines `VEHICLES`, `PASSENGER`.
+**Height:** the vehicle is chosen across the ground, and the game's hold does not bring a porter down from a roof
+(live: held 9.5 m above a carrier's seat). Within 1.5 m of the seat's height he is held as before; up to 20 m above or
+below he is first moved to the vehicle with the game's teleport and its ground placement (onto a place seat, or beside
+a truck), then held (`PASSENGER moved to the vehicle first`); further, or with the teleport unavailable, the key is
+refused (`PASSENGER key: not now (... m above the seat ...)`). **Set down:** a rider let go by the key, a game event,
+the driver getting out or the vehicle going is put beside the vehicle's place, or its last known place when the event
+or the fleet took it in the same tick, at the vehicle's height plus 1 m with the ground placement, never at the height
+he hung (`PASSENGER set down beside the vehicle`). Tests: `passenger_test.cpp` (mutants HIGH, CLIMB, DROP, FORGET).
+The partner's truck and bike in two-player play keep their own rules (their reach is measured in 3D).
 `othervehicles.h`; tests `othervehicles_test.cpp` (mutants UNCAPPED, NO_REUSE, KEEP_GONE, ANY_DISTANCE), config
 mutant CONFIG_OTHERS_VEHICLES, launcher mutant GROUP_NO_VEHICLES. Live: the host's truck was shown in the visitor's
 game and followed the real one (2026-11-20); riding along live the same day: held on the host's truck with J and

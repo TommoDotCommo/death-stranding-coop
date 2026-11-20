@@ -63,6 +63,56 @@ std::optional<std::array<double,3>> pushOut(const Transform& t,const std::array<
     for(int k=0;k<3;++k)out[size_t(k)]+=moveR*t.rotation[size_t(k)]+moveF*t.rotation[size_t(3+k)];
     return out;
 }
+Board board(double porter,double seat,bool canMove){
+    const double gap=std::fabs(porter-seat);
+    if(!std::isfinite(gap))return Board::Refuse;
+#ifndef MUTANT_PASSENGER_HIGH
+    if(gap<=SeatStep)return Board::Hold;
+#else
+    return Board::Hold;
+#endif
+#ifndef MUTANT_PASSENGER_CLIMB
+    if(gap>SeatClimb)return Board::Refuse;
+#endif
+    return canMove?Board::MoveFirst:Board::Refuse;
+}
+namespace {
+// Upright rows (right, forward, up) facing along `from`'s forward flattened; `fallback` when that is vertical.
+std::array<float,9> upright(const std::array<float,9>& from,const std::array<float,9>& fallback){
+    for(auto* r:{&from,&fallback}){
+        double fx=(*r)[3],fy=(*r)[4],n=std::hypot(fx,fy);
+        if(n>1e-3){fx/=n;fy/=n;return {float(fy),float(-fx),0, float(fx),float(fy),0, 0,0,1};}
+    }
+    return {1,0,0, 0,1,0, 0,0,1};
+}
+}
+Transform beside(const Transform& v,uint8_t kind,const std::optional<Transform>& porter){
+    // The vehicle's right axis across the ground, and the side the porter is on (its right when he is not read).
+    double rx=v.rotation[0],ry=v.rotation[1],n=std::hypot(rx,ry);
+    if(n<1e-3){rx=1;ry=0;}else{rx/=n;ry/=n;}
+    double side=1;
+    if(porter){const double along=(porter->position[0]-v.position[0])*rx+(porter->position[1]-v.position[1])*ry;if(along<0)side=-1;}
+    const auto b=box(kind);const double out=(b?b->halfRight:0.5)+SetDownOut;
+    Transform t;
+    t.position={v.position[0]+side*rx*out,v.position[1]+side*ry*out,v.position[2]+SetDownLift};
+#ifdef MUTANT_PASSENGER_DROP
+    if(porter)t.position[2]=porter->position[2]+SetDownLift;   // the old set-down: at his own height
+#endif
+    t.rotation=upright(porter?porter->rotation:v.rotation,v.rotation);
+    return t;
+}
+Transform boardPlace(const Transform& v,uint8_t kind,const Seat& s,const std::optional<Transform>& porter){
+    if(!s.place)return beside(v,kind,porter);
+    Transform t=seatPlace(v,s);t.rotation=upright(v.rotation,v.rotation);
+    return t;
+}
+std::optional<Transform> Ridden::setDown(const std::optional<Transform>& now,const std::optional<Transform>& porter) const {
+    if(now)return beside(*now,kind_,porter);
+#ifndef MUTANT_PASSENGER_FORGET
+    if(at_)return beside(*at_,kind_,porter);
+#endif
+    return std::nullopt;
+}
 Api nativeApi(discovery::Sampler& s){
 #ifdef _WIN32
     auto same=[&s](uint64_t rva,std::initializer_list<uint8_t> want){std::vector<uint8_t> got(want.size());return s.read(s.base+rva,got.data(),got.size())&&std::equal(want.begin(),want.end(),got.begin());};

@@ -61,6 +61,36 @@ constexpr double BikeBehind=0.62,BikeUp=0.06;
 constexpr double BikeDriverBehind=0.55;
 // truck: its transform (rows right, forward, up); porter: a position. The position to move him to, or nothing.
 std::optional<std::array<double,3>> pushOut(const Transform& truck,const std::array<double,3>& porter,const Box& box={});
+// Group play: getting on from above or below the seat. Another player's vehicle is chosen by ground distance, so a
+// porter on a roof or a ledge over it can press the key. The game's hold does not bring him down (live: held 9.5 m above
+// a carrier's seat on a roof): the hold writes the whole place, height too, into the mover's target (0x26ca560 copies
+// +0x7c0 into +0x800, 0x268a688 makes it the position once blended in), so what keeps him up comes later (most likely
+// his own collision under the roof; unknown). Within SeatStep of the seat's height he is held as before; up to
+// SeatClimb above or below he is first moved to the vehicle with the game's teleport (its ground placement looks 2 m
+// above and below the target, so he lands on the ground there, not on the roof), then held; further than that (a
+// bridge over a road, a cliff) the key is refused, as is any gap over SeatStep when the teleport is unavailable.
+constexpr double SeatStep=1.5,SeatClimb=20;
+enum class Board { Hold, MoveFirst, Refuse };
+Board board(double porterHeight,double seatHeight,bool canMove);
+// Where a porter is put beside a vehicle (getting on a truck from above, set down after a ride): out of the vehicle's
+// box (1.5 m out for a kind with none) on the side he is on, at the vehicle's own height plus SetDownLift (the ground
+// placement then finds the ground within 2 m), never at his own height. Upright, facing as he does (or as the vehicle,
+// when he is not read).
+constexpr double SetDownLift=1.0,SetDownOut=1.0;
+Transform beside(const Transform& vehicle,uint8_t kind,const std::optional<Transform>& porter);
+// Where a porter who gets on from above or below is moved first: a place seat's own place (upright), else beside.
+Transform boardPlace(const Transform& vehicle,uint8_t kind,const Seat&,const std::optional<Transform>& porter);
+// Group play: the vehicle being ridden, as last seen. A game event or the fleet dropping the vehicle can end the ride
+// in the same tick the vehicle goes; the rider is then set down beside where it last was, not let go where he is.
+class Ridden {
+public:
+    void see(const Transform& vehicle,uint8_t kind){at_=vehicle;kind_=kind;}
+    void clear(){at_.reset();kind_=0;}
+    // The vehicle's place now when it is read, else its last known one; nothing when it was never seen.
+    std::optional<Transform> setDown(const std::optional<Transform>& now,const std::optional<Transform>& porter) const;
+private:
+    std::optional<Transform> at_;uint8_t kind_=0;
+};
 // The game's routines (Windows only): hold `porter` on `helper` of `vehicle`, let it go, read the follow state.
 struct Api {
     std::function<bool(uint64_t porter,uint64_t vehicle,const Seat& seat)> attach;

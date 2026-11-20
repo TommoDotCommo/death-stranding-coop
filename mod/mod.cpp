@@ -1372,6 +1372,7 @@ struct Runtime final:ds::Transport {
     // --- Other players' vehicles in group play (othervehicles.h): with others_vehicles, each other player drawn here
     // who rides has his truck or bike under him; the passenger key gets on and off the nearest one being driven.
     std::unique_ptr<mod::othervehicles::Fleet> fleet;uint64_t fleetPorter=0,groupRideId=0,riderNotedAt=0;bool fleetNoted=false;
+    mod::passenger::Ridden ridden;   // the vehicle ridden in group play, as last seen: where a rider let go is set down
     void tickOtherVehicles(const mod::puppet::Anchor& anchor,bool event,uint64_t now){
         if(!config.othersVehicles||!sampler)return;
         if(!fleet){
@@ -1480,33 +1481,52 @@ struct Runtime final:ds::Transport {
         l.partnerInTruck=chosen&&seat;l.truck=l.partnerInTruck?chosen->entity:0;
         std::optional<mod::puppet::Transform> at;
         if(chosen){if(placed.count(chosen->entity))at=placed[chosen->entity];else{auto p=mod::puppet::readEntityPose(*sampler,chosen->entity);if(p.available)at=mod::puppet::transform(p);}}
-        if(here&&at){double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1];l.distance=std::sqrt(dx*dx+dy*dy);}   // across the ground, as the choice is: the hold brings a porter above down onto it
+        if(here&&at){double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1];l.distance=std::sqrt(dx*dx+dy*dy);}   // across the ground, as the choice is; the height is board's (below)
         l.key=passengerEdge.pressed(modKey(config.passengerKey),now);
         if(l.key&&localVehicle.riding)l.key=false;   // driving: the key tows (tickTow)
         l.mover=passengerApi.state(anchor.entity);
+        // From above or below the seat (a roof, a ledge): moved to the vehicle first, or refused (passenger.h board).
+        auto boarding=mod::passenger::Board::Hold;std::optional<mod::puppet::Transform> boardTo;
+        if(l.key&&!rider.riding()&&seat&&at&&here){
+            const auto s=mod::passenger::seatPlace(*at,*seat);
+            boarding=mod::passenger::board(here->position[2],s.position[2],bool(rideTeleport));
+            if(boarding==mod::passenger::Board::Refuse&&l.permitted&&l.distance<=mod::passenger::Reach&&l.mover==mod::passenger::Free){l.key=false;
+                std::ostringstream o;o<<"PASSENGER key: not now ("<<std::fixed<<std::setprecision(1)<<here->position[2]-s.position[2]<<" m above the seat: "
+                    <<(rideTeleport?"further than "+std::to_string(int(mod::passenger::SeatClimb))+" m":std::string("the move to it is unavailable"))<<")\n";note(o.str().c_str());}
+            if(boarding==mod::passenger::Board::MoveFirst)boardTo=mod::passenger::boardPlace(*at,chosen->kind,*seat,here);}
         if(l.key&&!rider.riding()&&!(l.permitted&&l.partnerInTruck&&l.distance<=mod::passenger::Reach&&l.mover==mod::passenger::Free)){
             std::ostringstream o;o<<"PASSENGER key: not now (permitted "<<l.permitted<<", a driven truck or bike near "<<l.partnerInTruck<<", distance "<<l.distance<<" m, mover "<<int(l.mover)<<"; "<<cs.size()<<" candidates";
             for(auto& c:cs)o<<" | "<<c.id<<" kind "<<int(c.kind)<<" driven "<<c.driven<<" at "<<int(c.at[0])<<","<<int(c.at[1])<<","<<int(c.at[2]);
             if(here)o<<"; porter at "<<int(here->position[0])<<","<<int(here->position[1])<<","<<int(here->position[2]);else o<<"; porter not read";
             o<<")\n";note(o.str().c_str());}
         switch(rider.tick(l)){
-            case mod::passenger::Do::GetOn:
+            case mod::passenger::Do::GetOn:{
+                if(boardTo&&rideTeleport){   // the game's teleport with its ground placement (a dismount first), then the hold
+                    auto porter=mod::join::readPorter(*sampler);
+                    try{if(porter.readable){rideTeleport(porter.player,*boardTo);std::ostringstream o;o<<"PASSENGER moved to the vehicle first ("<<std::fixed<<std::setprecision(1)
+                        <<here->position[2]-mod::passenger::seatPlace(*at,*seat).position[2]<<" m above the seat) to "<<boardTo->position[0]<<","<<boardTo->position[1]<<","<<boardTo->position[2]<<"\n";note(o.str().c_str());}}
+                    catch(const std::exception& e){note((std::string("PASSENGER move to the vehicle failed: ")+e.what()+"\n").c_str());}}
                 if(seat&&(seat->place?(at&&passengerApi.hold(anchor.entity,mod::passenger::seatPlace(*at,*seat))):passengerApi.attach(anchor.entity,rider.truck(),*seat))){if(seat->place)heldSeat=*seat;}
-                if(seat&&passengerApi.state(anchor.entity)!=mod::passenger::Free){groupRideId=chosen->id;note(("PASSENGER on player "+std::to_string(chosen->id/16)+(chosen->kind==ds::Truck?"'s truck\n":chosen->kind==mod::passenger::CartKind?"'s floating carrier\n":"'s bike\n")).c_str());}
-                else{rider.forget();note("PASSENGER refused by the game\n");}
-                break;
+                if(seat&&passengerApi.state(anchor.entity)!=mod::passenger::Free){groupRideId=chosen->id;if(at)ridden.see(*at,chosen->kind);note(("PASSENGER on player "+std::to_string(chosen->id/16)+(chosen->kind==ds::Truck?"'s truck\n":chosen->kind==mod::passenger::CartKind?"'s floating carrier\n":"'s bike\n")).c_str());}
+                else{rider.forget();ridden.clear();note("PASSENGER refused by the game\n");}
+                break;}
             case mod::passenger::Do::GetOff:{
                 heldSeat.reset();passengerApi.release(anchor.entity);groupRideId=0;
-                if(here&&at&&rideTeleport){
-                    double dx=here->position[0]-at->position[0],dy=here->position[1]-at->position[1],n=std::sqrt(dx*dx+dy*dy);
-                    if(n>0.1){mod::puppet::Transform t=*here;t.position[0]+=dx/n*1.5;t.position[1]+=dy/n*1.5;t.position[2]+=1.0;
-                        auto porter=mod::join::readPorter(*sampler);
-                        try{if(porter.readable)rideTeleport(porter.player,t);}catch(const std::exception& e){note((std::string("PASSENGER set-down failed: ")+e.what()+"\n").c_str());}}
-                }
+                // Set down beside the vehicle (where it is now, else where it last was: a game event or the fleet may
+                // have taken it this tick) at its height, never where he hung: held up high he would fall from there.
+                if(auto t=ridden.setDown(at,here);t&&rideTeleport){
+                    auto porter=mod::join::readPorter(*sampler);
+                    try{if(porter.readable){rideTeleport(porter.player,*t);std::ostringstream o;o<<"PASSENGER set down beside the vehicle"<<(at?"":"'s last place")<<" at "<<std::fixed<<std::setprecision(1)<<t->position[0]<<","<<t->position[1]<<","<<t->position[2];
+                        if(here){o<<" (he was at "<<here->position[2]<<")";}
+                        o<<"\n";note(o.str().c_str());}}
+                    catch(const std::exception& e){note((std::string("PASSENGER set-down failed: ")+e.what()+"\n").c_str());}}
+                else note(rideTeleport?"PASSENGER set-down: no place of the vehicle known\n":"PASSENGER set-down unavailable: no teleport\n");
+                ridden.clear();
                 note(("PASSENGER off: "+rider.why()+"\n").c_str());break;}
             default:break;
         }
-        if(!rider.riding())heldSeat.reset();
+        if(rider.riding()&&at)ridden.see(*at,chosen->kind);
+        if(!rider.riding()){heldSeat.reset();ridden.clear();}
         if(rider.riding()&&here&&now>=riderNotedAt+2000){riderNotedAt=now;std::ostringstream o;o<<"PASSENGER riding at "<<here->position[0]<<","<<here->position[1]<<","<<here->position[2];
             if(heldSeat)o<<" seat at "<<seatTarget[0]<<","<<seatTarget[1]<<","<<seatTarget[2]<<(seatMoved?" (held there)":" (not held: the game's hold is off)");o<<"\n";note(o.str().c_str());}
         movePassenger();
