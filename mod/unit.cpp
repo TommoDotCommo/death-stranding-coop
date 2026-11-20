@@ -40,6 +40,12 @@ int main() {
     auto refused=[&](const std::string& config){bool threw=false;try{mod::parseConfig(config);}catch(const std::exception&){threw=true;}return threw;};
     auto withKeys=[&](std::string base,const std::string& extra){base.pop_back();return base+","+extra+"}";};
     std::string pin="\"discovery_sha256\":\""+std::string(mod::discovery::PinnedHash)+"\"";
+    // Cheaper bodies far away (bodylod.h): shadow and cloth off beyond 30 m and nothing hidden by default; 0..10000 m,
+    // 0 turns either off; integers only.
+    assert(c.bodyDetailMetres==30&&c.bodyHideMetres==0);
+    {auto u=mod::parseConfig(withKeys(good,"\"body_detail_metres\":0,\"body_hide_metres\":120"));assert(u.bodyDetailMetres==0&&u.bodyHideMetres==120);}
+    {auto u=mod::parseConfig(withKeys(good,"\"body_detail_metres\":10000,\"body_hide_metres\":10000"));assert(u.bodyDetailMetres==10000&&u.bodyHideMetres==10000);}
+    for(auto bad:{"\"body_detail_metres\":10001","\"body_hide_metres\":10001","\"body_detail_metres\":-1","\"body_hide_metres\":2.5","\"body_detail_metres\":\"30\"","\"body_hide_metres\":true"})assert(refused(withKeys(good,bad)));
     auto gameBase=good;gameBase.replace(gameBase.find("synthetic"),9,"game");
     auto game=withKeys(gameBase,"\"self_tick\":true,"+pin);
     auto parsed=mod::parseConfig(game);assert(parsed.selfTick&&!parsed.discovery&&parsed.presenceLogMaxMiB==8&&parsed.provider=="game");
