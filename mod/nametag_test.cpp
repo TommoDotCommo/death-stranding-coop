@@ -65,7 +65,7 @@ int main(){
                   [&](const std::string& m){rows.push_back(m);});
         auto at=[&](uint64_t key){return hud.live.at(tags.record(key));};
         bodies[0xa0]={1,1,3};bodies[0xb0]={2,2,3};
-        std::vector<Named> named{{0,0xa0,u"Fragile"},{7,0xb0,u"Sam 7"},{9,0,u"Sam 9"}};   // player 9 has no body yet
+        std::vector<Named> named{{0,0xa0,u"Fragile",{}},{7,0xb0,u"Sam 7",{}},{9,0,u"Sam 9",{}}};   // player 9 has no body yet
         tags.tick(true,named);
         CHECK(hud.live.size()==2&&tags.size()==3&&tags.shown()==2&&!tags.record(9));
         CHECK(at(0).first==u"Fragile"&&at(0).second==bodies[0xa0]&&at(7).first==u"Sam 7"&&at(7).second==bodies[0xb0]);
@@ -101,7 +101,7 @@ int main(){
         api.create=[&,create](const std::u16string& n,const std::array<double,3>& at){auto r=create(n,at);most=std::max<unsigned>(most,unsigned(hud.live.size()));return r;};
         Tags tags(api,[&](uint64_t body)->std::optional<std::array<double,3>>{auto it=bodies.find(body);if(it==bodies.end())return std::nullopt;return it->second;},{},3);
         std::array<double,3> viewer{0,0,0};
-        std::vector<Named> named{{5,0x50,u"five"},{6,0x60,u"six"},{7,0x70,u"seven"},{8,0x80,u"eight"},{0,0x10,u"partner"}};
+        std::vector<Named> named{{5,0x50,u"five",{}},{6,0x60,u"six",{}},{7,0x70,u"seven",{}},{8,0x80,u"eight",{}},{0,0x10,u"partner",{}}};
         bodies[0x50]={10,0,0};bodies[0x60]={20,0,0};bodies[0x70]={30,0,0};bodies[0x80]={40,0,0};bodies[0x10]={500,0,0};
         auto has=[&](uint64_t key){return tags.record(key)!=0;};
         tags.tick(true,named,&viewer);
@@ -121,6 +121,22 @@ int main(){
         // Without a viewer the order listed decides (the partner still first).
         tags.limit(2);tags.tick(true,named,nullptr);CHECK(hud.live.size()==2&&has(0)&&has(5));
         Tags usual(hud.api(),{},{});(void)usual;CHECK(LabelsAtOnce==4);
+    }
+    // A player without a body (one not drawn here) gets his label at the point given, which moves it; a body's label goes
+    // where the body is even with a point given, and none while the body is hidden; without a point, none. The limit
+    // counts them with the bodies, nearest first.
+    {
+        Hud hud;std::map<uint64_t,std::array<double,3>> bodies;
+        Tags tags(hud.api(),[&](uint64_t body)->std::optional<std::array<double,3>>{auto it=bodies.find(body);if(it==bodies.end())return std::nullopt;return it->second;},{},2);
+        auto has=[&](uint64_t key){return tags.record(key)!=0;};
+        bodies[0x50]={10,0,2};std::array<double,3> viewer{0,0,0};
+        std::vector<Named> named{{5,0x50,u"five",std::array<double,3>{99,99,99}},{0x4855000000000001ull,0,u"far",std::array<double,3>{300,0,2}},{0x4855000000000002ull,0,u"none",std::nullopt}};
+        tags.tick(true,named,&viewer);
+        CHECK(hud.live.size()==2&&hud.live.at(tags.record(5)).second==bodies[0x50]&&hud.live.at(tags.record(0x4855000000000001ull)).second==*named[1].at&&!has(0x4855000000000002ull));
+        named[1].at=std::array<double,3>{310,0,2};tags.tick(true,named,&viewer);CHECK(hud.live.at(tags.record(0x4855000000000001ull)).second==*named[1].at);
+        bodies.erase(0x50);tags.tick(true,named,&viewer);CHECK(!has(5)&&has(0x4855000000000001ull));
+        bodies[0x50]={10,0,2};named.push_back({0x4855000000000003ull,0,u"nearer",std::array<double,3>{50,0,2}});tags.tick(true,named,&viewer);
+        CHECK(hud.live.size()==2&&has(5)&&has(0x4855000000000003ull)&&!has(0x4855000000000001ull));
     }
     if(failures)return 1;
     std::puts("nametag tests passed");return 0;

@@ -1957,6 +1957,13 @@ struct Runtime final:ds::Transport {
             if(w.size()<2||w.back()!=mod::runStamp())note("MAP ignored command for another process\n");
             else if(w[0]=="kind"&&w.size()==3){mod::mapicons::setKind(uint8_t(std::strtoul(w[1].c_str(),nullptr,0)));note(("MAP kind "+w[1]+"\n").c_str());}
             else if(w[0]=="hudkind"&&w.size()==3){const auto k=uint8_t(std::strtoul(w[1].c_str(),nullptr,0));mod::hudmarkers::setKind(k);note(("HUD markers kind "+w[1]+(mod::hudmarkers::safeKind(k)?"":" refused")+"\n").c_str());}
+            // hudicon KIND|off: the far players' markers drawn with another kind's icon (hudmarkers.h); hudicons: the
+            // game's icon items, once, read only; hudnames N: names over the nearest N far players (0: none).
+            else if(w[0]=="hudicon"&&w.size()==3){const bool off=w[1]=="off";const unsigned long v=off?0:std::strtoul(w[1].c_str(),nullptr,0);
+                const bool taken=(off||(v>0&&v<=0xff))&&mod::hudmarkers::setIconSource(uint8_t(v));
+                note(("HUD markers icon "+w[1]+(taken?"":" refused")+"\n").c_str());}
+            else if(w[0]=="hudicons"&&w.size()==2){for(auto& row:mod::hudmarkers::iconTableNow(*sampler))note(row.c_str());}
+            else if(w[0]=="hudnames"&&w.size()==3){hudNames=std::min<size_t>(std::strtoul(w[1].c_str(),nullptr,10),mod::hudmarkers::MaxFarNames);note(("HUD names over "+std::to_string(hudNames)+" far players\n").c_str());}
             else if(w[0]=="clear")mapLink->setExtra({});
             else if(w[0]=="ring"&&w.size()==4&&cache.available){
                 const double r=std::atof(w[1].c_str());const int n=std::min(std::atoi(w[2].c_str()),int(mod::mapicons::MaxIcons));std::vector<mod::mapicons::Icon> v;
@@ -1966,9 +1973,10 @@ struct Runtime final:ds::Transport {
     }
     // Far players on the HUD (hudmarkers.h): the map's players less those drawn here as bodies, published every tick for
     // the HUD's own job, which adds them to its marker list each frame.
-    bool hudHooked=false;uint64_t hudNotedAt=0,hudNotedFrames=0;
+    // hudNames (lab `puppet.map hudnames N`): the nearest far players that get a name label (tickTag), 0 by default.
+    bool hudHooked=false;uint64_t hudNotedAt=0,hudNotedFrames=0;size_t hudNames=0;std::vector<mod::hudmarkers::FarName> farNamesNow;
     void tickHudMarkers(uint64_t now){
-        if(!config.playerHud||!mapBoard||!sampler)return;
+        if(!config.playerHud||!mapBoard||!sampler){farNamesNow.clear();return;}
         static mod::hudmarkers::Board board;   // the HUD's job reads it for as long as the game runs
         if(!hudHooked&&inWorldNow()){hudHooked=true;
 #ifndef MOD_FAKE_NETWORK
@@ -1981,9 +1989,11 @@ struct Runtime final:ds::Transport {
         std::set<uint64_t> drawn;if(otherBodies)for(auto& s:othersShown)if(otherBodies->entity(s.id))drawn.insert(mod::hudmarkers::iconId(s.id));
         std::optional<std::array<double,3>> here;if(cache.available)here=std::array<double,3>{cache.local.position[0],cache.local.position[2],cache.local.position[1]};
         auto marks=mod::hudmarkers::marks(p,gameArea,drawn,here?&*here:nullptr,mod::hudmarkers::MaxMarks);board.publish(marks);
+        if(hudNames)farNamesNow=mod::hudmarkers::farNames(p,marks,hudNames);else farNamesNow.clear();
         const auto seen=mod::hudmarkers::stats();
         if(seen.frames!=hudNotedFrames&&now>=hudNotedAt+10000){hudNotedFrames=seen.frames;hudNotedAt=now;std::ostringstream o;
-            o<<"HUD markers: "<<marks.size()<<" far players ("<<drawn.size()<<" drawn as bodies), HUD frames "<<seen.frames<<" records added "<<seen.added<<" kept "<<seen.kept<<"\n";note(o.str().c_str());}
+            o<<"HUD markers: "<<marks.size()<<" far players ("<<drawn.size()<<" drawn as bodies), HUD frames "<<seen.frames<<" records added "<<seen.added<<" kept "<<seen.kept
+             <<" icon "<<unsigned(mod::hudmarkers::iconSource())<<" restyled "<<seen.restyled<<" names "<<farNamesNow.size()<<"\n";note(o.str().c_str());}
     }
     void tickServerInfo(uint64_t now){
         if(!config.serverInfo||!sampler||!dialogReady())return;
@@ -2032,7 +2042,8 @@ struct Runtime final:ds::Transport {
     void tickTag(uint64_t body,const mod::puppet::Anchor& anchor) {
         // This player's name goes to the partner on every connection (both ends send; each shows the other's).
         if(core)for(auto& e:nameTx.tick(config.nickname,core->connected()&&partnerMode()))core->queueCargo(e);
-        if(!tagTest&&!config.partnerTag){if(nameTags)nameTags->tick(false,{});return;}
+        const bool bodyTags=tagTest||config.partnerTag;   // far players' names (farNamesNow) are a lab test of their own
+        if(!bodyTags&&farNamesNow.empty()){if(nameTags)nameTags->tick(false,{});return;}
 #ifndef MOD_FAKE_NETWORK
         if(!nameTags&&!tagTried){auto* sp=&*sampler;if(!tagJob.ready([sp]{return mod::nametag::nativeApi(*sp);}))return;
             tagTried=true;
@@ -2050,14 +2061,17 @@ struct Runtime final:ds::Transport {
         if(anchor.entity!=tagPorter){if(tagPorter)nameTags->forget("world changed");tagPorter=anchor.entity;}
         std::vector<mod::nametag::Named> named;
         // The partner (key 0), while his body is there and shown.
-        if(body&&!inEvent&&labelPoint(body)){
+        if(bodyTags&&body&&!inEvent&&labelPoint(body)){
             auto name=mod::nametag::fromUtf8(partnerName);if(name.empty())name=u"Partner";
             // With partner_vitals: his blood, stamina and state after the name (signals.h), a new text at most every 2 s.
             if(config.partnerVitals)name=tagPacer.text(mod::nowMs(),name,vitalsRx.current(core&&core->connected()));
-            named.push_back({0,body,std::move(name)});
+            named.push_back({0,body,std::move(name),std::nullopt});
         }
         // Every other player whose body exists (key: the player's id), with the name that player sent.
-        if(otherBodies)for(auto& n:mod::others::labels(othersShown,*otherBodies))named.push_back(std::move(n));
+        if(bodyTags&&otherBodies)for(auto& n:mod::others::labels(othersShown,*otherBodies))named.push_back(std::move(n));
+        // The nearest far players (not drawn here) at their place on the map, after the bodies in the limit's choice
+        // since they are farther (hudmarkers::farNames; key: the mark's id).
+        for(auto& f:farNamesNow)named.push_back({f.key,0,f.name,f.at});
         nameTags->limit(tagLimit);
         nameTags->tick(!inEvent,named,anchor.pose.available&&anchor.pose.coherent?&anchor.pose.position:nullptr);
     }

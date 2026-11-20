@@ -96,7 +96,12 @@ void Tags::tick(bool permitted,const std::vector<Named>& named,const std::array<
         uint64_t body=named.front().body;
 #endif
 #ifndef MUTANT_NAMETAG_TAGS_BODY
-        if(body&&where_)at[i]=where_(body);
+#ifndef MUTANT_NAMETAG_TAGS_POINT
+        if(body){if(where_)at[i]=where_(body);}
+        else at[i]=named[i].at;   // no body: the point given (none: no label)
+#else
+        if(named[i].at)at[i]=named[i].at;else if(body&&where_)at[i]=where_(body);
+#endif
 #else
         if(where_)at[i]=where_(body?body:named.front().body);
 #endif

@@ -6585,6 +6585,49 @@ The label under the cursor comes from the call at `0x319c5e6` to `0x31c5fd0(item
 to set the title of its own icons (id top byte `0x4d`). `mapicons.cpp` retargets both calls through stubs in the padding at
 `0x31ba24b` and `0x31b9cfb`. No marker is made, so none of this is saved.
 
+## HUD markers: the icon a slot shows, and names over far players (static, 2026-11-20)
+
+The marker HUD logic `L` (vtable `0x3e53b50`) rebuilds its record list `P = L+0x1a3c0` every frame in `0x30941b0` (called
+from the update `0x3096960`), adds records with `0x308ea00(P, kind, pos, marker, id, flag)` and sorts with `0x30934b0`
+(the mod's hook is that sort call at `0x3096571`). A record is `0x40` bytes: position `+0`, kind `+0x10`, marker `+0x20`,
+id `+0x28` (the marker's own id when there is one).
+
+- **Icon items.** `L+0x1a358` and `P+0x58` (= `L+0x1a418`, copied at `0x308dbc5`) are raw pointers (no reference held) to
+  the `DSUIMarkerHUDIconResource` (`0x4cf0680`, 0x638 bytes, 193 reflected members). Kind `k` has its item at `+0x20+8*k`:
+  `0x01` DeliveryBotIcon at `+0x28`, ..., `0x98` MuleLastKnownIcon at `+0x4e0`, `0xb1` LikeIcon at `+0x5a8`, `0xb4`
+  BossCliffIcon at `+0x5c0`, `0xbc` NPCFragileIcon at `+0x600`, `0xc2` HackingIcon at `+0x630`. Kinds 0, `0xb2` and `0xb3`
+  have no reflected member (no item). The item (`DSUIMarkerHUDIconItemResource`) has the Icon at `+0x20` and a
+  ScaleDownCurve at `+0x28`; the Icon (`DSUIMarkerIconResource`) has UITextures (count `+0x20`, data `+0x28`), HUDIconHeight
+  `+0x38` (`0x30897f0` lifts the record by it), TextureScale `+0x40`. A `UITexture` has TextureName (a counted string)
+  at `+0x40` and its size (two int32) at `+0x48`; whether the names are filled in this build is to be seen live (`hudicons`).
+- **Slots.** 256 of `0x130` bytes from `L+0x80`: layer count `+0x10`, layer elements `+0x18`, root element `+0x20`, kind
+  `+0xac`, id `+0xb0`, record index `+0xbc`, seen this frame `+0xc4`, state `+0xca`. `0x30898a0(L, kind, id)` finds the slot
+  of (kind, id) or a free one (state 0, kind and id cleared by `0x3086770(…, 0)`). At `0x30974e2..0x30976f8` the update
+  calls `0x3086770(L, slot, 2)` when the record's kind, id or index differ from the slot's, or the slot is not in state 2;
+  only that path calls `0x3091090(L, slot, 1)`, which sets each layer's texture from the item of the slot's kind
+  (`0x3006c60(icon, i)`, `0x3646da0(layer, texture)`; a layer without a texture is hidden). Its per-frame call
+  (`0x309d0df`, flag 0) does nothing but for the user-marker kind `0xaf`. So a slot keeps its textures until the game
+  assigns it again. The per-frame scale `0x309ca50` reads the slot kind's TextureScale and curve and sizes each layer
+  from the texture it holds (`0x1dde990(layer+0x158)`, a reference taken and given back).
+- **Scale alias.** `0x3089aa0(icons, kind, …)` reads the item of the kind and, for kinds 9..`0x2d` (table `0x3089bf8`),
+  the item of a second kind without a null check (`0x2b` reads `0x64`'s; `0x1a` none).
+- **Distance and pinning per kind.** In the adder's distance `0x3089ce0` kinds `0x98` and `0xb3` take the same branch
+  (`0x3089d58`, any distance); `0xb2` and 0 take the default. `0xb3` is the marker of `EDSMarkerType` 12 (MuleOdradek,
+  the producer's switch at `0x30944c2`), drawn by its own logic. So no free kind has `0x98`'s placement.
+- **What the mod does** (`hudmarkers.h`, lab only for now): its records keep kind `0x98`; on the frame after the game
+  assigned one of their slots, the hook calls `0x3091090(L, slot, 1)` itself with the slot's kind byte set to the source
+  kind for that call. The game's own markers and the resource are never written; a real MULE marker keeps its icon. One
+  frame of the `0x98` icon is shown after each assignment. Rejected: swapping `0x98`'s item pointer in the resource (every
+  real MULE marker assigned meanwhile changes, and the resource's references are held wrong if it is unloaded meanwhile);
+  pointing `L+0x1a358` at a copy of the resource on frames without a real `0x98` record (no flash, but a game pointer is
+  written every frame and `L+0x1a418` follows it a frame late).
+- **Names over far players.** The hologram-name records (above, "Finding the marker HUD and a custom label", live
+  2026-11-09) have no distance limit in the HUD's presentation: `0x307cab0` takes the first three of its list after sorting
+  by squared distance, mode-0 records unconditionally, and projects each with `0x329dd60` (no visibility test). The mod
+  gives the nearest far players such a record at the place the server gave (lab `hudnames N`). Cloning the Bridges ID
+  subtree instead (the recipe above) mutates the menu graph from a HUD task that runs beside another (`0x37016a0` submits two
+  payloads), which nothing here shows to be safe; not done.
+
 ## Keeping structures out of the world (static 2026-11-19; live the same day)
 
 Manager `M = [image+0x7bf4960]`; objects: count `M+0x56a258`, pointers `M+0x56a260`. In an object: id `+0x30`, type `+0x34`, state

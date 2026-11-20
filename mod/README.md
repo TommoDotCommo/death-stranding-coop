@@ -936,6 +936,23 @@ differs from what is expected the mod logs `MAP unavailable` and the map stays a
 `area`, `updates`, `taken`, `refused`, `shown_area`, `mode`). The lab's `puppet.map` takes `kind N`, `ring METRES COUNT` and
 `clear`, each with the run stamp. The mod also tells the relay which map its porter is on, which is what lets a server filter.
 
+## Far players on the HUD (`player_hud`, off by default; needs `player_map`; the launcher turns it on for group play)
+
+The players on the map who are not drawn here as bodies get a marker in the game's own HUD marker list, added every frame
+through the list's sort call (`hudmarkers.h`; `game_offsets.md`, "HUD markers"). They use the HUD's "last known MULE" kind
+(`0x98`), the one drawn at any distance and pinned to the screen's edge. Lab-only options, all off by default, each through
+`puppet.map` with the run stamp:
+
+- `hudicon KIND` / `hudicon off`: the markers keep kind `0x98`'s placement but show the icon of another kind. After the game
+  assigns a slot to one of the mod's markers, the mod has the game's own slot assignment run once more with that kind; the
+  game's markers, its icon resource and real MULE markers are left alone. A slot the game assigns anew shows the MULE icon
+  for one frame. `0xaf` (the user marker) and kinds without an item are refused.
+- `hudicons`: logs every kind's icon item once (address, height, scale, each texture's size and name), read only.
+- `hudnames N` (at most 3): the nearest N far players get a name label (the hologram-name records of "Names over heads")
+  at the place the server gave, counted in the same limit as the bodies' labels, after them.
+
+The periodic `HUD markers:` log line gives the icon source, the slots restyled and the far names shown.
+
 ## A world that is the server's (`server_world`, off by default; the server's rule `world` sets it)
 
 The structures a save holds, the player's and other players', stay out of the world while the game is on such a server. Nothing

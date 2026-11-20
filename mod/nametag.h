@@ -40,7 +40,9 @@ private:
 constexpr size_t LabelsAtOnce=4;constexpr double KeepMetres=2;
 // Where a body's label goes (above its head); nothing while the body is hidden, gone or unreadable.
 using Where=std::function<std::optional<std::array<double,3>>(uint64_t body)>;
-struct Named {uint64_t key=0,body=0;std::u16string name;};
+// at: where the label goes for one without a body (a player not drawn here, at his place on the map); a body's label
+// always goes where its body is.
+struct Named {uint64_t key=0,body=0;std::u16string name;std::optional<std::array<double,3>> at;};
 class Tags {
 public:
     Tags(Api api,Where where,std::function<void(const std::string&)> log,size_t limit=LabelsAtOnce):api_(std::move(api)),where_(std::move(where)),log_(std::move(log)),limit_(limit){}
