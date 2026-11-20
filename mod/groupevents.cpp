@@ -13,7 +13,7 @@ Answer parse(const std::string& text){
         a.waitMs=uint64_t(std::clamp<int64_t>(d.get("wait_ms").integer(),int64_t(WaitMinMs),int64_t(WaitMaxMs)));
         for(auto& e:d.get("events").items()){
             Event v;v.kind=e.get("kind").string();
-            if((v.kind!="mule"&&v.kind!="camp"&&v.kind!="gazer"&&v.kind!="level")||!e.get("key").isInt()||!e.get("value").isInt())continue;
+            if((v.kind!="mule"&&v.kind!="camp"&&v.kind!="gazer"&&v.kind!="level"&&v.kind!="rain")||!e.get("key").isInt()||!e.get("value").isInt())continue;
             v.key=e.get("key").integer();v.value=e.get("value").integer();a.events.push_back(v);}
         a.read=true;
     }catch(const std::exception&){a=Answer{};}

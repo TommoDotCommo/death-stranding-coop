@@ -141,6 +141,11 @@ static void events(){
     CHECK(say(ta,R"({"kind":"mule","key":4503599627370495,"value":2})")==200);
     auto again=read(tb,v2);CHECK(again.get("events").items().size()==1&&again.get("events").items()[0].get("value").integer()==2);
     CHECK(read(tb).get("events").items().size()==2);
+    // Timefall said for a cell lasts a minute (it is said again while it falls).
+    {const std::string v3=read(tb).get("version").string();
+     CHECK(say(ta,R"({"kind":"rain","key":123,"value":500})")==200);auto w=read(tb,v3).get("events").items();CHECK(w.size()==1&&w[0].get("kind").string()=="rain");
+     s.now+=RainKeepSeconds+1;tb=s.token("bob");ta=s.token("ann");
+     bool gone=true;for(auto& e:read(tb).get("events").items())if(e.get("kind").string()=="rain")gone=false;CHECK(gone);}
     // A structure's level (key: its online id's hash) stays a month; the rest go after an hour.
     CHECK(say(ta,R"({"kind":"level","key":123456789,"value":3})")==200);
     s.now+=EventKeepSeconds+1;tb=s.token("bob");ta=s.token("ann");

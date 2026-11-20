@@ -17,7 +17,8 @@ struct Api {
     // The local map condition at a game-axis position (nothing when unreadable).
     std::function<std::optional<float>(const std::array<double,3>&)> conditionAt;
     // Place or renew the mod's influence (rain or clear) there; false when the game's weather state is missing.
-    std::function<bool(Mode,const std::array<double,3>&,float radius,float lifetime)> influence;
+    // slot: which of the mod's influences (each its own owner key, 0..15; partner play uses 0).
+    std::function<bool(Mode,const std::array<double,3>&,float radius,float lifetime,unsigned slot)> influence;
 };
 // The host's class: wet below Wet, dry above Dry, between them nothing is forced.
 constexpr float Wet=-0.5f, Dry=0.5f, Margin=0.5f;

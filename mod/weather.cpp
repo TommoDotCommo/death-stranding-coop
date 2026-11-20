@@ -44,7 +44,7 @@ void Share::tick(uint64_t now,bool permitted,std::optional<float> host,const std
 #ifndef MUTANT_WEATHER_RENEW
     if(lastPlaced_&&now>=lastPlaced_&&now-lastPlaced_<RenewMs)return;
 #endif
-    if(api_.influence(mode_,*at,Radius,Lifetime)){lastPlaced_=now?now:1;++placed_;}
+    if(api_.influence(mode_,*at,Radius,Lifetime,0)){lastPlaced_=now?now:1;++placed_;}
     else{log_("WEATHER influence refused (no weather state)\n");mode_=Mode::None;}
 }
 #ifdef _WIN32
@@ -74,14 +74,15 @@ Api nativeApi(discovery::Sampler& s){
     for(auto n:counts)require(n==1,"weather function signature missing/ambiguous");
     using InfluenceFn=void(*)(uint64_t,const double*,float,float,void*,bool);
     auto rain=reinterpret_cast<InfluenceFn>(s.base+entries[0].rva),clear=reinterpret_cast<InfluenceFn>(s.base+entries[1].rva);
-    static char owner;   // the identity key of the mod's one influence; non-null, so the game's save writer skips it
+    static char owners[16];   // the identity keys of the mod's influences; non-null, so the game's save writer skips them
     const uint64_t slot=s.base+0x7bf83b8;auto* sp=&s;
     Api api;
-    api.influence=[rain,clear,slot,sp](Mode m,const std::array<double,3>& at,float radius,float lifetime){
+    api.influence=[rain,clear,slot,sp](Mode m,const std::array<double,3>& at,float radius,float lifetime,unsigned which){
+        if(which>=16)return false;
         uint64_t w=0;if(!q(*sp,slot,w)||!w||m==Mode::None)return false;
         for(double x:at)if(!std::isfinite(x))return false;
         alignas(16) double position[4]={at[0],at[1],at[2],0};
-        (m==Mode::Rain?rain:clear)(w,position,radius,lifetime,&owner,false);return true;};
+        (m==Mode::Rain?rain:clear)(w,position,radius,lifetime,&owners[which],false);return true;};
     return api;
 #endif
 }

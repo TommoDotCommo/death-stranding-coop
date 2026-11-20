@@ -14,7 +14,7 @@ struct Map {
     float base=1.f;Mode placedMode=Mode::None;unsigned places=0;bool refuse=false;std::vector<std::array<double,3>> at;
     Api api(){Api a;
         a.conditionAt=[this](const std::array<double,3>&)->std::optional<float>{return placedMode==Mode::Rain?-1.f:placedMode==Mode::Clear?1.f:base;};
-        a.influence=[this](Mode m,const std::array<double,3>& p,float r,float l){if(refuse)return false;check(r>0&&l>0,"radius/lifetime");placedMode=m;++places;at.push_back(p);return true;};
+        a.influence=[this](Mode m,const std::array<double,3>& p,float r,float l,unsigned){if(refuse)return false;check(r>0&&l>0,"radius/lifetime");placedMode=m;++places;at.push_back(p);return true;};
         return a;}
 };
 const std::array<double,3> Here{100,200,30};

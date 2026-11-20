@@ -76,6 +76,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "received.h"
 #include "offer_strand.h"
 #include "weather.h"
+#include "groupweather.h"
 #include "environment.h"
 #include "auto_continue.h"
 #include "pad.h"
@@ -2987,6 +2988,24 @@ struct Runtime final:ds::Transport {
         levelPrimed=true;
     }
     std::unique_ptr<mod::groupevents::Courier> enemyCourier;uint64_t groupEnemyAt=0,groupEnemyPorter=0,groupEnemySettled=0;bool groupEnemyTell=false;
+    // Timefall shared in group play (groupweather.h): where this porter's own map says rain, it is said for his cell;
+    // where others said rain, the game's own rain influence is placed here (never clear; never during an event).
+    mod::groupweather::Rain groupRain;std::optional<mod::weather::Api> rainApi;bool rainTried=false;uint64_t rainCheckAt=0,rainNotedAt=0;unsigned rainSaid=0,rainPlaced=0;
+    void rainStep(const std::vector<mod::groupevents::Answer>& reads,uint64_t now,std::vector<mod::groupevents::Event>& out){
+        for(auto& a:reads)for(auto& e:a.events)if(e.kind=="rain")groupRain.heard(e.key,e.value,now);
+        if(now<rainCheckAt)return;rainCheckAt=now+2000;
+        if(!cache.available||cache.gated||inEvent||!environmentReader)return;
+        auto anchor=anchorNow();if(!anchor.entity||!anchor.pose.available)return;
+        const auto here=mod::puppet::transform(anchor.pose).position;
+        auto o=environmentReader->read(here);std::optional<float> c;if(o.weatherAvailable&&std::isfinite(o.rainFromMap))c=o.rainFromMap;
+        if(auto s=groupRain.report(now,here,c)){out.push_back({"rain",s->first,s->second});++rainSaid;}
+#if defined(_WIN32) && !defined(MOD_FAKE_NETWORK)
+        if(!rainTried){rainTried=true;try{rainApi=mod::weather::nativeApi(*sampler);}catch(const std::exception& e){note((std::string("RAIN unavailable: ")+e.what()+"\n").c_str());}}
+        if(rainApi)for(auto& p:groupRain.apply(now,here))if(rainApi->influence(mod::weather::Mode::Rain,p.at,mod::groupweather::Radius,mod::groupweather::Lifetime,1+unsigned(p.slot)))++rainPlaced;
+#endif
+        if(now>=rainNotedAt+30000&&(rainSaid||rainPlaced)){rainNotedAt=now;std::ostringstream x;
+            x<<"RAIN said for this porter's ground "<<rainSaid<<" times, others' rain placed here "<<rainPlaced<<" times; the map here "<<(c?std::to_string(*c):std::string("unread"))<<"\n";note(x.str().c_str());}
+    }
     void tickGroupEnemies(uint64_t now){
         if(!config.groupEnemies||config.strandToken.empty()||!sampler)return;
         if(!enemyTried){try{campAlert=mod::enemies::nativeAlert(*sampler);}catch(const std::exception&){}}
@@ -3002,7 +3021,7 @@ struct Runtime final:ds::Transport {
             note("ENEMYSRV on: MULEs down and camps alarmed are shared through the server\n");}
         auto reads=enemyCourier->reads();
         if(!cache.available||cache.gated||inEvent)reads.clear();
-        {std::vector<mod::groupevents::Event> lv;levelsStep(reads,now,lv);enemyCourier->send(std::move(lv));}
+        {std::vector<mod::groupevents::Event> lv;levelsStep(reads,now,lv);rainStep(reads,now,lv);enemyCourier->send(std::move(lv));}
         if(reads.empty()&&now-groupEnemyAt<500)return;
         groupEnemyAt=now;
         if(!cache.available||cache.gated||inEvent)return;
@@ -4488,7 +4507,7 @@ struct Runtime final:ds::Transport {
                     // rain uses), so a host can have timefall on demand.
                     try{
                         auto api=mod::weather::nativeApi(*sampler);auto at=mod::puppet::transform(anchor.pose).position;
-                        bool ok=api.influence(mod::weather::Mode::Rain,at,250.f,float(std::min<uint32_t>(*rain,900)));
+                        bool ok=api.influence(mod::weather::Mode::Rain,at,250.f,float(std::min<uint32_t>(*rain,900)),0);
                         std::ostringstream o;o<<"WEATHER test: rain for "<<*rain<<" s at "<<at[0]<<","<<at[1]<<","<<at[2]<<(ok?" placed":" refused")<<"\n";note(o.str().c_str());
                     }catch(const std::exception& e){note((std::string("WEATHER test unavailable: ")+e.what()+"\n").c_str());}
                 }
