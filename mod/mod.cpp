@@ -64,6 +64,7 @@ constexpr int INVALID_SOCKET=-1;
 #include "chat.h"
 #include "mapicons.h"
 #include "hudmarkers.h"
+#include "bodylod.h"
 #include "grouppings.h"
 #include "reptrace.h"
 #include "repguard.h"
@@ -456,17 +457,24 @@ struct Runtime final:ds::Transport {
     // The other players' bodies (game thread, after the partner's): each goes to its own player's interpolated pose with
     // that player's animation sample; hidden while the player is stale, away or in a private room and during a local
     // game event; removed when the player has left.
-    // Cheaper bodies (lab, puppet.cargo `perfrate R` 0..6 = 10/15/30/60/120/144/240 Hz and 9 = the game's own, `perfshadow
-    // 0|1` and 9 = the game's own, `perfhide M` metres and 0 = none, `perffar M` metres: rate and shadow only beyond it,
-    // 0 = every body): the game's per-entity update rate (0x235f5a0, entity+0x204) and shadow casting (0x234cfa0,
-    // Entity_ExportedSetShadowCastingEnabled, children included), and bodies beyond M hidden and asleep (Want without a goal).
-    // `perfminlod N` (99: the game's own): the body's lowest detail level, as ForceMinimumLodComponent sets it
-    // (0x237c930(rep, N), rep = entity+0x60, rep+0x80 the entity); `perfpbd P` (percent, 999: the game's own): the
-    // distance multiplier of its cloth simulation (SkinnedModel_ExportedSetPBDMaxDistanceMultiplier 0x239f5a0, the
-    // skinned model at entity+0xb8, the value at +0x384).
+    // Cheaper bodies far away (bodylod.h; config body_detail_metres, default 30, and body_hide_metres, default 0 = off):
+    // beyond the detail distance a body casts no shadow (Entity_ExportedSetShadowCastingEnabled 0x234cfa0, children
+    // included) and runs no cloth simulation (SkinnedModel_ExportedSetPBDMaxDistanceMultiplier 0x239f5a0 with 0, the
+    // skinned model at entity+0xb8, the value at +0x384); when it comes near again the shadow is on again and the cloth
+    // value is the game's own, read from the body before anything was set. Beyond the hide distance it is hidden and
+    // asleep (a Want without a goal) and is a far player for the HUD markers. Only the mod's bodies of other players are
+    // touched (the partner's and the lab's crowd are not), only after the calls' code was checked once (perfCallsUsable).
+    // Lab switches, to measure, over the policy (puppet.cargo): `perfrate R` 0..6 = 10/15/30/60/120/144/240 Hz and 9 =
+    // the game's own (the per-entity update rate, 0x235f5a0, entity+0x204), `perfshadow 0|1` and 9 = the policy's,
+    // `perfhide M` metres instead of body_hide_metres (0: the config's), `perffar M` metres: the lab's rate, shadow,
+    // detail level and cloth only beyond it, 0 = every body; `perfminlod N` (99: the game's own): the body's lowest detail
+    // level, as ForceMinimumLodComponent sets it (0x237c930(rep, N), rep = entity+0x60, rep+0x80 the entity); `perfpbd P`
+    // (percent, 999: the policy's): the cloth simulation's distance multiplier.
     uint32_t perfMinLod=99,perfPbd=999;
     uint8_t perfRate=9,perfShadow=9;double perfHideMetres=0,perfFarMetres=0;
-    struct PerfApplied{uint8_t rate=9,shadow=9,ownRate=0;uint32_t minLod=0,pbd=999;float ownPbd=-1;};std::map<uint64_t,PerfApplied> perfApplied;size_t perfHidden=0;uint64_t perfNotedAt=0;
+    mod::bodylod::Policy bodyLod;
+    struct PerfApplied{uint8_t rate=9,ownRate=0;uint32_t minLod=0;mod::bodylod::Applied look;};std::map<uint64_t,PerfApplied> perfApplied;size_t perfHidden=0;uint64_t perfNotedAt=0;
+    std::array<size_t,3> perfNoted{};
     bool perfChecked=false,perfUsable=false;
     bool perfCallsUsable(){
         if(perfChecked)return perfUsable;perfChecked=true;
@@ -479,32 +487,50 @@ struct Runtime final:ds::Transport {
         perfUsable=sampler&&sampler->read(sampler->base+0x235f5a0,a,13)&&sampler->read(sampler->base+0x234cfa0,b,9)&&!std::memcmp(a,rate,13)&&!std::memcmp(b,shadow,9)
             &&sampler->read(sampler->base+0x237c930,c,14)&&sampler->read(sampler->base+0x239f5a0,d,9)&&!std::memcmp(c,minLod,14)&&!std::memcmp(d,pbd,9);
 #endif
-        if(!perfUsable)note("PERF body rate and shadow calls unavailable: the functions differ\n");
+        if(!perfUsable)note("PERF body rate, shadow and cloth calls unavailable: the functions differ (far bodies keep their shadows and cloth)\n");
         return perfUsable;}
+    // Before the bodies are driven: each body's state from its distance (bodylod.h); one hidden for it gets no goal.
+    void bodyLodTick(const mod::puppet::Anchor& anchor){
+        std::vector<mod::bodylod::Body> bodies;bodies.reserve(othersPlan.wants.size());
+        for(auto& w:othersPlan.wants){mod::bodylod::Body b;b.key=w.key;if(w.goal)b.at=w.goal->position;bodies.push_back(b);}
+        std::optional<std::array<double,3>> here;if(anchor.pose.available)here=mod::puppet::transform(anchor.pose).position;
+        mod::bodylod::Settings s;s.detailMetres=config.bodyDetailMetres;s.hideMetres=perfHideMetres>0?perfHideMetres:double(config.bodyHideMetres);
+        bodyLod.tick(bodies,here?&*here:nullptr,s);
+        perfHidden=0;
+        for(auto& w:othersPlan.wants)if(w.goal&&bodyLod.hidden(w.key)){w.goal=nullptr;w.sample=nullptr;++perfHidden;}
+    }
+    // After the bodies are driven: the game's calls for each of the mod's bodies of other players that is shown.
     void perfBodies(const mod::puppet::Anchor& anchor,uint64_t now){
-        const bool any=perfRate!=9||perfShadow!=9||perfMinLod!=99||perfPbd!=999||!perfApplied.empty();if(!any||!otherBodies||!perfCallsUsable())return;
+        const bool lab=perfRate!=9||perfShadow!=9||perfMinLod!=99||perfPbd!=999;
+        if((!lab&&!config.bodyDetailMetres&&perfApplied.empty())||!otherBodies||!perfCallsUsable())return;
 #ifdef _WIN32
         std::optional<std::array<double,3>> here;if(anchor.pose.available)here=mod::puppet::transform(anchor.pose).position;
         std::set<uint64_t> seen;size_t slowed=0;
         for(auto& w:othersPlan.wants){
-            const uint64_t e=otherBodies->entity(w.key);if(!e)continue;seen.insert(e);if(!w.goal)continue;   // hidden: kept as it is, own rate remembered
+            const uint64_t e=otherBodies->entity(w.key);if(!e)continue;seen.insert(e);if(!w.goal)continue;   // hidden: kept as it is, own values remembered
             bool distant=perfFarMetres<=0;if(!distant&&here){double dx=w.goal->position[0]-(*here)[0],dy=w.goal->position[1]-(*here)[1],dz=w.goal->position[2]-(*here)[2];distant=dx*dx+dy*dy+dz*dz>perfFarMetres*perfFarMetres;}
             auto [it,fresh]=perfApplied.try_emplace(e);auto& a=it->second;
             if(fresh){uint8_t r=0;if(!sampler->read(e+0x204,&r,1)||r>6){perfApplied.erase(it);continue;}a.ownRate=r;}
-            const uint8_t rate=distant&&perfRate<=6?perfRate:a.ownRate,shadow=distant&&perfShadow<=1?perfShadow:1;
+            const uint8_t rate=distant&&perfRate<=6?perfRate:a.ownRate;
             if(rate!=a.rate){reinterpret_cast<void(*)(uint64_t,uint8_t)>(sampler->base+0x235f5a0)(e,rate);a.rate=rate;}
-            if(shadow!=a.shadow&&!(fresh&&shadow==1)){reinterpret_cast<void(*)(uint64_t,bool,bool)>(sampler->base+0x234cfa0)(e,shadow!=0,true);}
-            a.shadow=shadow;if(rate!=a.ownRate)++slowed;
+            if(rate!=a.ownRate)++slowed;
             {const uint32_t want=distant&&perfMinLod<99?perfMinLod:0;uint64_t r=0,back=0;
              if(want!=a.minLod&&sampler->read(e+0x60,&r,8)&&r&&sampler->read(r+0x80,&back,8)&&back==e){reinterpret_cast<void(*)(uint64_t,uint32_t)>(sampler->base+0x237c930)(r,want);a.minLod=want;}}
-            {uint64_t m=0;if(sampler->read(e+0xb8,&m,8)&&m){
-                if(a.ownPbd<0){float v=0;if(sampler->read(m+0x384,&v,4)&&std::isfinite(v)&&v>=0&&v<100)a.ownPbd=v;}
-                const uint32_t want=distant&&perfPbd<999?perfPbd:999;
-                if(want!=a.pbd&&a.ownPbd>=0){const float v=want<999?float(want)/100.0f:a.ownPbd;reinterpret_cast<void(*)(uint64_t,float)>(sampler->base+0x239f5a0)(m,v);a.pbd=want;}}}}
+            // Shadow and cloth: the policy's, the lab's switches over it.
+            const auto look=mod::bodylod::look(bodyLod.state(w.key),mod::bodylod::Lab{perfShadow,perfPbd},distant);
+            uint64_t m=0;std::optional<float> cloth;
+            if(sampler->read(e+0xb8,&m,8)&&m){float v=0;if(sampler->read(m+0x384,&v,4))cloth=v;}
+            const auto change=a.look.step(look,cloth);
+            if(change.shadow)reinterpret_cast<void(*)(uint64_t,bool,bool)>(sampler->base+0x234cfa0)(e,*change.shadow,true);
+            if(change.cloth&&m)reinterpret_cast<void(*)(uint64_t,float)>(sampler->base+0x239f5a0)(m,*change.cloth);
+        }
         for(auto it=perfApplied.begin();it!=perfApplied.end();)if(seen.count(it->first))++it;else it=perfApplied.erase(it);
-        if(now-perfNotedAt>=10000){perfNotedAt=now;std::ostringstream o;o<<"PERF bodies "<<seen.size()<<" slowed "<<slowed<<" rate "<<int(perfRate)<<" shadow "<<int(perfShadow)
-            <<" far "<<perfFarMetres<<" m hidden beyond "<<perfHideMetres<<" m: "<<perfHidden<<" min lod "<<perfMinLod<<" cloth "<<perfPbd<<"%";
-            if(!perfApplied.empty())o<<" (first body's cloth multiplier was "<<perfApplied.begin()->second.ownPbd<<")";o<<"\n";note(o.str().c_str());}
+        const std::array<size_t,3> counts{{seen.size(),bodyLod.reduced(),perfHidden}};
+        if(lab?now-perfNotedAt>=10000:(counts!=perfNoted&&now-perfNotedAt>=10000)){perfNotedAt=now;perfNoted=counts;std::ostringstream o;
+            o<<"BODIES "<<counts[0]<<", beyond "<<config.bodyDetailMetres<<" m without shadow and cloth "<<counts[1]<<", hidden beyond "<<(perfHideMetres>0?perfHideMetres:double(config.bodyHideMetres))<<" m "<<counts[2];
+            if(lab){o<<"; lab: slowed "<<slowed<<" rate "<<int(perfRate)<<" shadow "<<int(perfShadow)<<" far "<<perfFarMetres<<" m min lod "<<perfMinLod<<" cloth "<<perfPbd<<"%";
+                if(!perfApplied.empty()&&perfApplied.begin()->second.look.ownCloth())o<<" (first body's cloth multiplier was "<<*perfApplied.begin()->second.look.ownCloth()<<")";}
+            o<<"\n";note(o.str().c_str());}
 #else
         (void)anchor;(void)now;
 #endif
@@ -552,10 +578,7 @@ struct Runtime final:ds::Transport {
 #ifndef MOD_MUTANT_OTHERS_UNDRESSED
         if(gears)for(auto key:mod::others::undress(shown,gears->keys(),othersPlan))gears->remove(key,anchor.entity);
 #endif
-        perfHidden=0;
-        if(perfHideMetres>0&&anchor.pose.available){const auto here=mod::puppet::transform(anchor.pose).position;
-            for(auto& w:othersPlan.wants)if(w.goal){double dx=w.goal->position[0]-here[0],dy=w.goal->position[1]-here[1],dz=w.goal->position[2]-here[2];
-                if(dx*dx+dy*dy+dz*dz>perfHideMetres*perfHideMetres){w.goal=nullptr;w.sample=nullptr;++perfHidden;}}}
+        bodyLodTick(anchor);
         otherBodies->drive(othersPlan.wants,anchor,now);
         perfBodies(anchor,now);
         tickOtherVehicles(anchor,event,now);
@@ -2067,7 +2090,10 @@ struct Runtime final:ds::Transport {
                 o<<"HUD markers: "<<marks.size()<<" pings, HUD frames "<<seen.frames<<" records added "<<seen.added<<" kept "<<seen.kept<<" icon "<<unsigned(mod::hudmarkers::iconSource())<<" restyled "<<seen.restyled<<"\n";note(o.str().c_str());}}
         if(!distant)return;
         mod::mapicons::Board::Picture p;mapBoard->read(p);
-        std::set<uint64_t> drawn;if(otherBodies)for(auto& s:othersShown)if(otherBodies->entity(s.id))drawn.insert(mod::hudmarkers::iconId(s.id));
+        // Drawn here: the players with a body, less those hidden for their distance (bodylod.h), which are far players.
+        std::set<uint64_t> drawn;
+        if(otherBodies){std::vector<std::pair<uint64_t,uint64_t>> bodies;for(auto& s:othersShown)bodies.push_back({s.id,otherBodies->entity(s.id)});
+            for(auto id:mod::bodylod::drawn(bodies,bodyLod))drawn.insert(mod::hudmarkers::iconId(id));}
         std::optional<std::array<double,3>> here;if(cache.available)here=std::array<double,3>{cache.local.position[0],cache.local.position[2],cache.local.position[1]};
         auto marks=mod::hudmarkers::marks(p,gameArea,drawn,here?&*here:nullptr,mod::hudmarkers::MaxMarks);board.publish(marks);
         if(hudNames)farNamesNow=mod::hudmarkers::farNames(p,marks,hudNames);else farNamesNow.clear();

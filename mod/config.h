@@ -6,6 +6,7 @@
 namespace mod {
 constexpr unsigned OthersMax=32;   // others.h MaxOthers
 constexpr unsigned OthersCarryMax=8;   // others.h MaxCarriers
+constexpr unsigned BodyMetresMax=10000;   // bodylod.h MetresMax
 // Test mode for alpha testers (testmode.h, README "Test mode"): the config's one nested object,
 // "test_mode":{"materials":85,"stamina":true,"blood":true,"battery":true}. Absent: off. Present (even {}): on, every
 // switch at its default. materials: the virtual-key code of the key that drops a set of material crates (0: none).
@@ -62,6 +63,8 @@ struct Config {
     bool partnerPoses=true;          // a downed or caught partner in the game's own collapse and BT-drag poses (double.h DeadPoseBit); false: laid flat
     bool bodyRepGuard=true;          // the mod's bodies never run the inventory display for this porter's cargo (repguard.h); false only to compare
     bool bodyUpdateLink=false;       // bodies joined to this porter's update group (updated in order with him, never beside him: mod.cpp, linkBodyUpdate); on by default only without body_rep_guard; compare
+    unsigned bodyDetailMetres=30;    // the other players' bodies beyond this many metres cast no shadow and run no cloth simulation (bodylod.h); 0: never
+    unsigned bodyHideMetres=0;       // the other players' bodies beyond this many metres are hidden and shown as far players on the HUD (bodylod.h); 0: never
     bool shareSavedStructures=false; // on joining, the structures this player's save already has are built in the partner's world too (structures.h)
     bool shareRoads=false;     // what a player delivers to an auto-paver, and a road it builds, also counts in the partner's game (roads.h)
     bool shareOrders=false;    // a standard order one player takes on, completes or gives up does the same for the partner (orders.h)

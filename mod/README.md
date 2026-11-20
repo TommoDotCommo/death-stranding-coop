@@ -1947,6 +1947,35 @@ still wears gear copies). `mod_status` now has
 `"others": {on, near, connected, bodies, shown, sent, received, accepted, refused, unknown, malformed}` and
 `"labels_shown"` in every build.
 
+### Bodies far away (`body_detail_metres`, default 30; `body_hide_metres`, default 0 = off; built 2026-11-20, not run in a game)
+
+A body far away is small on screen, so what it costs is not worth it: with 32 bodies within 12 m, shadows off gave
+4..8 fps and the cloth simulation off 2..4; hidden bodies are nearly free (STATUS.md, "What many players cost").
+Each other player's body (not the partner's, not the lab's crowd) is therefore drawn without its shadow and without
+its cloth simulation beyond `body_detail_metres` from this porter, and hidden (asleep, as a stale player's) beyond
+`body_hide_metres` when that is set (`bodylod.h`). Each changes back only 5 m inside its distance (half the distance
+when that is under 10 m), so a body walking along the boundary does not flip every tick. When this porter's place is
+not known (loading) every body keeps what it has. A body that comes near again casts its shadow again and gets the
+game's own cloth value back, read from that body before anything was set (no read that makes sense, 0..100: its
+cloth is left alone). The calls are the game's own: `Entity_ExportedSetShadowCastingEnabled` (0x234cfa0, the body
+and its children) and `SkinnedModel_ExportedSetPBDMaxDistanceMultiplier` (0x239f5a0 with 0, on the skinned model at
+entity+0xb8; the value at +0x384), used only after their first bytes matched once per image; otherwise the log says
+`PERF body rate, shadow and cloth calls unavailable` and far bodies keep both. A body hidden for its distance is a far
+player on the HUD (`player_hud`): only the bodies that are drawn keep the HUD's marker away. Hiding is off by default
+because the HUD markers already show far players and a hidden body's player still costs his session. 0 turns either
+off; both are 0..10000. The log says `BODIES N, beyond 30 m without shadow and cloth R, hidden beyond 0 m H` when the
+numbers change (at most every 10 s).
+
+The lab's switches (`puppet.cargo` commands, described in `mod.cpp` above `perfBodies`) stay for experiments and come first: `perfshadow 0|1` and
+`perfpbd P` (percent) for the bodies beyond `perffar M` (0: every body; 9 and 999 give the policy back), `perfhide M`
+instead of `body_hide_metres`, and `perfrate R`, `perfminlod N`, which the policy does not use (they changed nothing).
+
+Tests: `bodylod_test.cpp` (the margins, a body walking out and back, hiding, this porter not known, a player who
+left and came back, the HUD's drawn set without the hidden, the lab's switches first, the calls for one entity: none
+for a fresh near body, the game's own cloth value put back, an unreadable or senseless one never set) with 9 mutants
+(BODYLOD_FLAP, _MARGIN, _FORGET, _UNKNOWN, _DRAWN, _LAB, _SHADOW_FRESH, _OWN, _RESTORE); `unit.cpp` for the keys with
+CONFIG_BODY_METRES.
+
 ## Fights with visitors (`host_fights`, `join_fights`; live once, 2026-11-17)
 
 The owner's decision: each player plays his own save and story, and in a boss fight **one game owns the fight** while
