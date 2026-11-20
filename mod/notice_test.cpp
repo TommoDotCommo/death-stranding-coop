@@ -180,6 +180,12 @@ int main(){
         // With a partner expected (two-player play), the hint is still given.
         Hud g;auto m=g.make();for(uint64_t u=0;u<Notifier::AloneMs+5000;u+=100)m.tick(u,true,false,"");CHECK(g.shown.size()==1);
     }
+    {   // Group play's pings (grouppings.h): finished lines, the chat's short gap, the plain icon.
+        Hud h;auto n=h.make();n.partnerless();uint64_t t=1000;n.tick(t,true,false,"");
+        n.ping(u"Ann pinged a place here.",t);n.ping(u"Bob pinged a place 40 m away.",t);
+        n.tick(t+=100,true,false,"");CHECK(h.shown.size()==1&&h.shown[0]==u"Ann pinged a place here."&&h.icons[0]==PlainIcon&&h.log.back()=="NOTICE shown: ping\n");
+        n.tick(t+=Notifier::ChatGapMs,true,false,"");CHECK(h.shown.size()==2&&h.shown[1]==u"Bob pinged a place 40 m away.");
+    }
     if(!failures)std::puts("notice checks passed");
     return failures?1:0;
 }

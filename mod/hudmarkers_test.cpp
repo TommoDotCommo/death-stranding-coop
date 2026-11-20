@@ -26,6 +26,7 @@ int main(){
     CHECK(safeSource(0x01)&&safeSource(0xbc)&&safeSource(0xb1)&&safeSource(0x2b)&&safeSource(LastKind));
     CHECK(!safeSource(0xaf)&&!safeSource(DefaultKind)&&!safeSource(NoIcon)&&!safeSource(LastKind+1)&&!safeSource(0xff));
     CHECK(scaleAlias(0x2b)==0x64&&scaleAlias(0x09)==0x33&&scaleAlias(0x1a)==0x1a&&scaleAlias(0x2d)==0x67&&scaleAlias(0x98)==0x98&&scaleAlias(0x08)==0x08);
+    CHECK(ownId(0x4855000000000001ull)&&ownId(0x5047000000000001ull)&&!ownId(0x4d50000000000001ull)&&!ownId(0x1234));   // far players and pings; not the map's ids, not the game's
     CHECK(iconSource()==NoIcon&&DefaultIconSource==NoIcon);   // no change unless asked
     CHECK(!setIconSource(0xaf)&&iconSource()==NoIcon&&setIconSource(0x01)&&iconSource()==0x01&&setIconSource(NoIcon)&&iconSource()==NoIcon);
     // Which slots are restyled. The mod's slot (kind 0x98, an id of the mod's) once after the game assigned it; never a

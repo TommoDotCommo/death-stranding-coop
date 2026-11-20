@@ -64,6 +64,17 @@
 // At most one mark every MarkEveryMs and MarksPerHour in an hour from one player: his game sends no more, the server
 // takes no more. An older server refuses both as unknown types; players near each other share one build.
 //
+// Pings and likes between players (mod/README.md "Pings and likes in group play"): a player's signal goes to the
+// server, which passes a ping to the players near who are shown him and a like to the one player it names, only while
+// that player is near, shown the sender and within LikeReachMetres of him.
+//   SIGNAL    19  player -> server, 44 bytes: 8 u64 player id | 16 u8 kind (1 ping, 2 like) | 17 reserved[3]
+//             | 20 u32 serial (not 0) | 24 u64 target (a like: the player liked, not the sender; a ping: 0)
+//             | 32 i32 x3 place (cm, within 100 km; the core's State axes): a ping's place, a like's sender
+//   SIGNALLED 20  server -> player, 44 bytes: as SIGNAL with the source (the server's record of the sender) in place of
+//             the player id
+// At most one signal every SignalEveryMs and SignalsPerMinute in a minute from one player; a ping's place at most
+// PingReachMetres from where the server last had the sender. An older server refuses both as unknown types.
+//
 // presence[52] is the core's PRESENCE frame (core.cpp) bytes 60..63 (flags, action, phase) and 72..119 (position,
 // velocity, yaw, health, stamina, the BYE reason and reserved byte, the vehicle block): the receiver rebuilds the
 // 128-byte frame around it and the core's own decoder checks every value. The animation payload is the core's
@@ -89,10 +100,16 @@ constexpr size_t FightSize=44,OfferSize=44,JoinSize=32,StatusSize=24,PostHeader=
 constexpr size_t MarkSize=24;
 constexpr uint64_t MarkEveryMs=2000,MarkHourMs=3600000;
 constexpr size_t MarksPerHour=30;
+constexpr size_t SignalSize=44;
+constexpr uint64_t SignalEveryMs=500,SignalMinuteMs=60000;
+constexpr size_t SignalsPerMinute=20;
+constexpr double PingReachMetres=300,LikeReachMetres=50;
 constexpr uint16_t FightRadiusMax=1000;
 constexpr uint8_t FightVisitorsMax=32;
-enum class Type : uint8_t { Hello=1, Welcome, Refused, Roster, Publish, Frame, State, Share, Fetch, Bye, Fight, Offer, Join, Status, Post, Deliver, Mark, Marked };
-constexpr uint8_t TypeLast=uint8_t(Type::Marked);
+enum class Type : uint8_t { Hello=1, Welcome, Refused, Roster, Publish, Frame, State, Share, Fetch, Bye, Fight, Offer, Join, Status, Post, Deliver, Mark, Marked, Signal, Signalled };
+constexpr uint8_t TypeLast=uint8_t(Type::Signalled);
+enum class SignalKind : uint8_t { Ping=1, Like=2 };
+constexpr uint8_t SignalKindLast=uint8_t(SignalKind::Like);
 enum class FightOp : uint8_t { Open=1, Close=2 };
 enum class JoinOp : uint8_t { Join=1, Leave=2 };
 // What the server says of a fight (STATUS): to the owner Open (it holds the fight; how many visitors) or Off (this
@@ -132,10 +149,13 @@ struct Status { uint64_t owner=0; uint32_t fight=0; FightStatus status=FightStat
 struct Post { uint64_t player=0,owner=0; uint32_t fight=0,version=0; const uint8_t* payload=nullptr; size_t size=0; };
 // A bug mark: MARK up (player: the sender's own id) and MARKED down (player: the source).
 struct Mark { uint64_t player=0; uint32_t mark=0; };
+// A ping or a like: SIGNAL up (player: the sender's own id) and SIGNALLED down (player: the source). place in the axes
+// of the core's State (metres).
+struct Signal { uint64_t player=0; SignalKind kind=SignalKind::Ping; uint32_t serial=0; uint64_t target=0; std::array<double,3> place{}; };
 struct Message {
     Type type=Type::Hello; Hello hello; Welcome welcome; Refused refused; relay::Roster roster; Update publish; Frame frame;
     StatePost state; Share share; Fetch fetch; relay::Bye bye;
-    Fight fight; Offer offer; Join join; Status status; Post post; Mark mark;
+    Fight fight; Offer offer; Join join; Status status; Post post; Mark mark; Signal signal;
 };
 // The version of a datagram's envelope (0 when it is no envelope at all): the server's dispatch.
 inline uint16_t versionOf(const uint8_t* b,size_t n){
@@ -252,6 +272,19 @@ inline Buffer markBody(Type t,const Mark& k){
 }
 inline Buffer encodeMark(const Mark& k){return detail::markBody(Type::Mark,k);}
 inline Buffer encodeMarked(const Mark& k){return detail::markBody(Type::Marked,k);}
+namespace detail {
+inline bool signalValid(const Signal& s){
+    if(!s.player||!s.serial||!relay::positionValid(s.place))return false;
+    if(s.kind==SignalKind::Ping)return s.target==0;
+    return s.kind==SignalKind::Like&&s.target!=0&&s.target!=s.player;}
+inline Buffer signalBody(Type t,const Signal& s){
+    need(s.player!=0,"broadcast: player id 0");need(signalValid(s),"broadcast: signal");
+    auto b=start(t,SignalSize);put(b,s.player,8);b.push_back(uint8_t(s.kind));put(b,0,3);put(b,s.serial,4);put(b,s.target,8);
+    for(double x:s.place){put(b,uint32_t(int32_t(std::llround(x*100))),4);}
+    return b;}
+}
+inline Buffer encodeSignal(const Signal& s){return detail::signalBody(Type::Signal,s);}
+inline Buffer encodeSignalled(const Signal& s){return detail::signalBody(Type::Signalled,s);}
 
 // Refused whole: another magic or version, an unknown type, a nonzero reserved byte, a size that is not the type's, a
 // player id 0, a part, kind, count or length out of range, entries that do not fill a FRAME exactly.
@@ -406,6 +439,17 @@ inline Error parse(const uint8_t* b,size_t n,Message& m){
         auto& k=m.mark;k.player=get(b+8,8);k.mark=uint32_t(get(b+16,4));
 #ifndef MUTANT_BCAST_WIRE_MARK
         if(!k.player||!k.mark)return Error::Range;
+#endif
+        return Error::None;}
+    case Type::Signal:case Type::Signalled:{
+        if(!exact(SignalSize))return Error::Length;
+        if(get(b+17,3))return Error::Reserved;
+        auto& s=m.signal;s.player=get(b+8,8);s.serial=uint32_t(get(b+20,4));s.target=get(b+24,8);
+        for(unsigned i=0;i<3;++i)s.place[i]=int32_t(uint32_t(get(b+32+4*i,4)))/100.;
+        if(b[16]<1||b[16]>SignalKindLast)return Error::Range;
+        s.kind=SignalKind(b[16]);
+#ifndef MUTANT_BCAST_WIRE_SIGNAL
+        if(!signalValid(s))return Error::Range;
 #endif
         return Error::None;}
     }

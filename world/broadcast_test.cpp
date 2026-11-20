@@ -466,8 +466,53 @@ static void spots(){
     if(!got[2].empty()){auto& [at,haveYaw,yaw,when]=got[2].back();(void)yaw;(void)when;CHECK(!haveYaw&&distance(at,{60,0,-20})<0.02);}
     for(auto& [id,list]:got)for(size_t i=1;i<list.size();++i)CHECK(std::get<3>(list[i])>=std::get<3>(list[i-1])+1000);
 }
+static Buffer signalRaw(uint64_t player,bc::SignalKind kind,uint32_t serial,uint64_t target,std::array<double,3> place){
+    bc::Signal k;k.player=player;k.kind=kind;k.serial=serial;k.target=target;k.place=place;return bc::encodeSignal(k);}
+// Pings and likes: a ping to the players near who are shown the sender, only near where the server has him; a like to
+// the one player it names, while he is near, shown the sender and within reach; one every 500 ms and 20 a minute;
+// nothing from an address that never said HELLO or in another's name.
+static void signalsRelay(){
+    Sim s;
+    // Bob near and shown Ann; Cy near but shown nobody; Di far away; Ed near and shown, but 80 m from Ann.
+    auto& a=s.add(1,"Ann",{0,0,0});auto& b=s.add(2,"Bob",{10,0,0});auto& c=s.add(3,"Cy",{20,0,0},buildOf(1),ds::GameBuild,bc::Show::Nobody);
+    auto& d=s.add(4,"Di",{1000,0,0});auto& e=s.add(5,"Ed",{0,0,80});
+    s.run(1000);CHECK(b.sees(1)&&e.sees(1)&&s.relay->shows(2,1)&&s.relay->shows(5,1)&&s.relay->areNear(3,1)&&!s.relay->shows(3,1)&&!s.relay->areNear(4,1));
+    s.clear();
+    auto got=[&](Sim::Peer& p){return p.count(bc::Type::Signalled);};
+    const uint64_t first=s.now;
+    // A ping: to Bob and Ed, with Ann as its source and her place; not to Cy (not shown her), Di (far) or Ann herself.
+    CHECK(a.client->signal(bc::SignalKind::Ping,1,0,{3,1,4},a.clock(s.now)));s.step(10);
+    CHECK(got(b)==1&&got(e)==1&&got(a)==0&&got(c)==0&&got(d)==0&&s.relay->stats().signals==1&&s.relay->stats().signalsSent==2);
+    {auto n=b.client->takeSignals();CHECK(n.size()==1&&n[0].source==1&&n[0].name=="Ann"&&n[0].kind==bc::SignalKind::Ping&&n[0].serial==1&&n[0].place[0]==3&&n[0].place[2]==4);}
+    CHECK(e.client->takeSignals().size()==1);
+    // A ping 400 m from where the server has her is refused.
+    s.step(600);s.raw(a.address,signalRaw(1,bc::SignalKind::Ping,2,0,{400,0,0}));
+    CHECK(got(b)==1&&s.relay->stats().signalsRefused==1);
+    // A like for Bob: to Bob only, with the server's place of Ann.
+    s.step(600);s.raw(a.address,signalRaw(1,bc::SignalKind::Like,3,2,{9,9,9}));
+    CHECK(got(b)==2&&got(e)==1&&got(c)==0);
+    {auto n=b.client->takeSignals();CHECK(n.size()==1&&n[0].kind==bc::SignalKind::Like&&n[0].serial==3&&n[0].place[0]==0&&n[0].place[2]==0);}
+    // Not for Ed (80 m away), Cy (not shown her), Di (far), an unknown player, or a pairs player.
+    auto refused=s.relay->stats().signalsRefused;
+    for(uint64_t target:{5ull,3ull,4ull,77ull}){s.step(600);s.raw(a.address,signalRaw(1,bc::SignalKind::Like,uint32_t(10+target),target,{0,0,0}));}
+    CHECK(s.relay->stats().signalsRefused==refused+4&&got(e)==1&&got(c)==0&&got(d)==0&&got(b)==2);
+    // The rate: within 500 ms of the last one taken, refused; then one every 500 ms until 20 in the minute.
+    s.step(600);CHECK(a.client->signal(bc::SignalKind::Ping,30,0,{0,0,0},a.clock(s.now)));s.step(10);
+    s.now+=100;s.raw(a.address,signalRaw(1,bc::SignalKind::Ping,31,0,{0,0,0}));
+    CHECK(got(b)==3&&s.relay->stats().signals==3);
+    for(unsigned i=0;i<30;++i){s.step(500);s.raw(a.address,signalRaw(1,bc::SignalKind::Ping,40+i,0,{0,0,0}));}
+    CHECK(s.relay->stats().signals==bc::SignalsPerMinute&&got(b)==bc::SignalsPerMinute);
+    while(s.now<first+bc::SignalMinuteMs+20000)s.step(1000);
+    s.raw(a.address,signalRaw(1,bc::SignalKind::Ping,90,0,{0,0,0}));CHECK(s.relay->stats().signals==bc::SignalsPerMinute+1);
+    // Not from an address that never said HELLO, and not in another player's name.
+    auto unknown=s.relay->stats().unknownSource,spoofed=s.relay->stats().spoofed;size_t toBob=got(b);
+    s.step(600);s.raw(Stranger,signalRaw(1,bc::SignalKind::Ping,91,0,{0,0,0}));s.raw(c.address,signalRaw(1,bc::SignalKind::Ping,92,0,{0,0,0}));
+    s.raw(d.address,signalRaw(2,bc::SignalKind::Like,93,1,{0,0,0}));
+    CHECK(s.relay->stats().unknownSource==unknown+1&&s.relay->stats().spoofed==spoofed+2&&got(b)==toBob&&got(a)==0);
+}
+
 int main(){
-    marks();spots();
+    marks();signalsRelay();spots();
     interest();teleport();shownState();senders();orderAndStamp();modesAndBuilds();batching();crowd();
     nearCap();nearHysteresis();showChoice();hundred();
     if(failures)return 1;

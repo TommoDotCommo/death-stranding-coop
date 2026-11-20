@@ -14,7 +14,7 @@ struct Api {
     // true: queued in the game's info log; false: no HUD now. icon: PlainIcon or LikeIcon (the game's own icon numbers).
     std::function<bool(const std::u16string& text,uint8_t icon)> show;
 };
-enum class Kind : uint8_t {Joined,Left,Alone,Away,Back,Liked,Down,Up,Caught,Free,Call,Slow,Steady,Episode,Scan,StoryOffer,StoryLoaded,StoryFailed,Strand,Route,Test,Chat};
+enum class Kind : uint8_t {Joined,Left,Alone,Away,Back,Liked,Down,Up,Caught,Free,Call,Slow,Steady,Episode,Scan,StoryOffer,StoryLoaded,StoryFailed,Strand,Route,Test,Chat,Ping};
 constexpr uint8_t PlainIcon=0,LikeIcon=3;   // "20 minutes have passed." / "{1} Like(s) received from {0}."
 uint8_t icon(Kind);
 // The partner's name is cleaned like the name tag's (printable, no markup characters); "Your partner" without one.
@@ -61,6 +61,8 @@ public:
     void test(const std::u16string& line,uint64_t nowMs){add(Kind::Test,{},nowMs);pending_.back().line=line;}
     // A finished line of text chat (chat.h), with a shorter gap than the other notices.
     void chat(const std::u16string& line,uint64_t nowMs){add(Kind::Chat,{},nowMs);pending_.back().line=line;}
+    // A finished line about another player's ping (grouppings.h), with the chat's gap.
+    void ping(const std::u16string& line,uint64_t nowMs){add(Kind::Ping,{},nowMs);pending_.back().line=line;}
     // Something the partner did that is worth a line of its own (Liked: his like has just been given to this porter).
     void event(Kind kind,const std::string& partnerName,uint64_t nowMs){add(kind,partnerName.empty()?lastName_:partnerName,nowMs);}
     size_t pending() const {return pending_.size();}

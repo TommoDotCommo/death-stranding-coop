@@ -722,6 +722,26 @@ a log. **Compatibility:** a server from before this refuses both types as unknow
 stays in the player's own log, as before; players near each other share one build, so a game from before this is
 never sent a MARKED. The types 1..16 are unchanged.
 
+### Pings and likes (types 19, 20)
+
+Group play's pings and likes (`mod/README.md`, "Pings and likes in group play"): a player's signal goes to the server,
+which passes a ping to the players near who are shown him and a like to the one player it names (`world/README.md`,
+"Pings and likes"). Same header and rules.
+
+| Type | Direction | Size | After the 8 bytes |
+|---|---|---:|---|
+| SIGNAL 19 | player to server | 44 | u64 player id; u8 kind (1 ping, 2 like); reserved[3]; u32 serial (not 0); u64 target (a like: the player liked, never the sender; a ping: 0); i32 x3 place (cm, within 100 km, the axes of the core's State) |
+| SIGNALLED 20 | server to player | 44 | as SIGNAL, with the source (the server's record of the sender) in place of the player id; a like's place is where the server has the sender |
+
+At most one signal every `SignalEveryMs` (500 ms) and `SignalsPerMinute` (20) a minute from one player, pings and likes
+together: the player's side sends no more (`signal(...)` returns false, counted in `signalsHeld`), and the server takes no
+more. A ping's place is at most `PingReachMetres` (300) from where the server has the sender; a like reaches its player
+only within `LikeReachMetres` (50). `takeSignals()` gives the SIGNALLED messages from a source in the roster, with the
+roster's name (`SignalNews`: source, name, kind, serial, place), a like only when it names this player, at most
+`SignalNewsMax` (64) kept; anything else is counted (`signalRefused`). A signal carries no state: a lost one is a ping
+not shown or a like not given. **Compatibility:** a server from before this refuses both types as unknown (counted as
+malformed); players near each other share one build, so a game from before this is never sent a SIGNALLED.
+
 ### Tests
 
 `make -C core broadcast-test` (part of `make test`): `tests/broadcast.cpp` pins the layout byte for byte, sends every
@@ -740,11 +760,16 @@ bad field refused (a status above 11 among them), and an owner and a visitor dri
 version, another fight's state, another visitor's report and an older version not taken by a visitor, a visit ended by
 the owner, by a refusal and by silence); bug marks: MARK and MARKED byte for byte, mark 0, player 0, a reserved byte
 and a longer datagram refused, the player's side sending nothing offline, one in 2 s and 30 an hour, then one more an
-hour after the first, and taking a MARKED only from a player in the roster, with his name, at most 64 kept.
-Twenty-four mutants must fail it: `BCAST_WIRE_VERSION`, `BCAST_WIRE_LENGTH`, `BCAST_WIRE_RANGE`, `BCAST_WIRE_FRAME`,
+hour after the first, and taking a MARKED only from a player in the roster, with his name, at most 64 kept; pings and
+likes: SIGNAL and SIGNALLED byte for byte, serial 0, player 0, kind 0 and 3, a ping naming somebody, a like naming nobody
+or its sender, a reserved byte, a place beyond 100 km and a longer datagram refused, the player's side sending nothing
+offline or invalid, one in 500 ms and 20 a minute, then one more a minute after the first, and taking a SIGNALLED only
+from a player in the roster, a like only for this player, at most 64 kept.
+Twenty-seven mutants must fail it: `BCAST_WIRE_VERSION`, `BCAST_WIRE_LENGTH`, `BCAST_WIRE_RANGE`, `BCAST_WIRE_FRAME`,
 `BCAST_CLIENT_STRANGER`, `BCAST_CLIENT_ORDER`, `BCAST_CLIENT_CLOCK`, `BCAST_CLIENT_GAP`, `BCAST_CLIENT_STALE_STATE`,
 `BCAST_CLIENT_TELEPORT`, `BCAST_CLIENT_SPEED`, `BCAST_CLIENT_REBASE`, `BCAST_CLIENT_RESEND`, `BCAST_CLIENT_DELAY` (it
 fails the 200 ms case without loss: p95 0.06 m, shown past the newest sample 81 % of the time), `BCAST_CLIENT_ROSE`,
 `BCAST_CLIENT_STREAM`, `BCAST_CLIENT_JUMP`, `BCAST_WIRE_SHOW`, `BCAST_WIRE_FIGHT`, `BCAST_CLIENT_FIGHT_SOURCE`,
-`BCAST_CLIENT_FIGHT_ORDER`, `BCAST_WIRE_MARK`, `BCAST_CLIENT_MARK_RATE`, `BCAST_CLIENT_MARK_STRANGER`. The server's side and both sides together are tested in `world/` (README
+`BCAST_CLIENT_FIGHT_ORDER`, `BCAST_WIRE_MARK`, `BCAST_CLIENT_MARK_RATE`, `BCAST_CLIENT_MARK_STRANGER`, `BCAST_WIRE_SIGNAL`,
+`BCAST_CLIENT_SIGNAL_RATE`, `BCAST_CLIENT_SIGNAL_TARGET`. The server's side and both sides together are tested in `world/` (README
 there, "Broadcast mode").

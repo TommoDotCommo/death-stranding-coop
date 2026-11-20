@@ -95,6 +95,8 @@ struct Config {
     bool othersVehicles=false;
     bool othersCarts=false;
     bool groupEnemies=false;
+    bool groupPings=false;       // group_pings: B pings where this porter stands, L likes the nearest other player (grouppings.h)
+    bool groupOrders=false;      // group_orders: standard orders taken together by the players at one terminal, through the server (grouporders.h)
     bool groupRoads=false;       // group_roads: the others' paver materials the server names given into this game's pavers (roadshare.h)     // group_enemies: MULEs down and camps alarmed shared through the server (groupevents.h)      // others_carts: the floating carriers other players tow, sent and shown (carts.h)   // others_vehicles: other players' trucks and bikes shown, and ridden along (othervehicles.h)   // group_cargo: cargo set down shared through the server (groupcargo.h)
     // With online_server and strand_token: the structures this player's save already holds are offered to that server,
     // one at a time, through the game's own upload, while the server says his older strand may be (offer_strand.h).

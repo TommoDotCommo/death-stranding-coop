@@ -159,7 +159,7 @@ constexpr uint64_t ListInLogic=0x1a3c0,IconsInLogic=0x1a358,FirstSlot=0x80,SlotS
                    SlotKind=0xac,SlotId=0xb0,SlotIndex=0xbc,SlotStateAt=0xca,LayerTexture=0x158;
 using SortFn=void(*)(void*);using AddFn=void(*)(void*,uint8_t,const float*,void*,uint64_t,uint8_t);
 using AssignFn=void(*)(void*,void*,uint8_t);using ShownFn=void*(*)(void*);
-std::atomic<const Board*> board{nullptr};std::atomic<uint8_t> kind{DefaultKind};SortFn sort=nullptr;AddFn add=nullptr;
+std::atomic<const Board*> board{nullptr},pings{nullptr};std::atomic<uint8_t> kind{DefaultKind};SortFn sort=nullptr;AddFn add=nullptr;
 AssignFn assign=nullptr;ShownFn shown=nullptr;uint64_t imageBase=0;
 std::atomic<uint64_t> frames{0},added{0},kept{0},restyled{0},lastLogic{0};
 Restyle restyle;   // the HUD job's own
@@ -190,17 +190,23 @@ void restyleSlots(uint8_t* logic,uint8_t mark,uint64_t frame){
     }
 }
 // The HUD's sort, after the game has added its own records: the mod's first. No allocation of the mod's, no lock.
+void addAll(void* list,const Board* b,uint8_t k){
+    Board::Picture p;b->read(p);
+    const int32_t before=*reinterpret_cast<const int32_t*>(static_cast<uint8_t*>(list)+8);   // the list's count
+    for(uint32_t i=0;i<p.count&&i<MaxMarks;++i){alignas(16) const float to[4]={p.marks[i].x,p.marks[i].y,p.marks[i].z,0};add(list,k,to,nullptr,p.marks[i].id,0);}
+    const int32_t after=*reinterpret_cast<const int32_t*>(static_cast<uint8_t*>(list)+8);
+    added.fetch_add(p.count,std::memory_order_relaxed);if(after>before)kept.fetch_add(uint64_t(after-before),std::memory_order_relaxed);
+}
 void hook(void* list){
     if(auto* b=board.load(std::memory_order_acquire)){
-        Board::Picture p;b->read(p);const uint8_t k=kind.load(std::memory_order_relaxed);
-        const int32_t before=*reinterpret_cast<const int32_t*>(static_cast<uint8_t*>(list)+8);   // the list's count
-        for(uint32_t i=0;i<p.count&&i<MaxMarks;++i){alignas(16) const float to[4]={p.marks[i].x,p.marks[i].y,p.marks[i].z,0};add(list,k,to,nullptr,p.marks[i].id,0);}
-        const int32_t after=*reinterpret_cast<const int32_t*>(static_cast<uint8_t*>(list)+8);
-        const uint64_t frame=frames.fetch_add(1,std::memory_order_relaxed);added.fetch_add(p.count,std::memory_order_relaxed);if(after>before)kept.fetch_add(uint64_t(after-before),std::memory_order_relaxed);
+        const uint8_t k=kind.load(std::memory_order_relaxed);
+        addAll(list,b,k);
+        if(auto* q=pings.load(std::memory_order_acquire))addAll(list,q,k);
+        const uint64_t frame=frames.fetch_add(1,std::memory_order_relaxed);
         auto* logic=static_cast<uint8_t*>(list)-ListInLogic;
         if(at<uint64_t>(logic,0)==imageBase+LogicVtable){
             lastLogic.store(reinterpret_cast<uint64_t>(logic),std::memory_order_relaxed);
-            if(styled.load(std::memory_order_relaxed))restyleSlots(logic,k,frame);   // never before a source was set
+            if(styled.load(std::memory_order_relaxed))restyleSlots(logic,k,frame);   // never before a source was set (far players and pings alike)
         }
     }
     sort(list);
@@ -230,6 +236,7 @@ void install(discovery::Sampler& s,const Board& b){
     uint8_t stub[12]={0x48,0xb8,0,0,0,0,0,0,0,0,0xff,0xe0};void* target=reinterpret_cast<void*>(hook);std::memcpy(stub+2,&target,8);writeCode(s.base+Stub,stub,12);
     const int32_t rel=int32_t(int64_t(Stub)-int64_t(CallSite+5));writeCode(s.base+CallSite+1,&rel,4);
 }
+void attach(const Board& b){pings.store(&b,std::memory_order_release);}
 void setKind(uint8_t k){if(safeKind(k))kind.store(k,std::memory_order_relaxed);}
 std::vector<std::string> iconTableNow(discovery::Sampler& s){
     const uint64_t logic=lastLogic.load(std::memory_order_relaxed);uint64_t vtable=0,icons=0;
@@ -240,6 +247,7 @@ std::vector<std::string> iconTableNow(discovery::Sampler& s){
 Stats stats(){return {frames.load(std::memory_order_relaxed),added.load(std::memory_order_relaxed),kept.load(std::memory_order_relaxed),restyled.load(std::memory_order_relaxed)};}
 #else
 void install(discovery::Sampler&,const Board&){throw std::runtime_error("the HUD needs the game");}
+void attach(const Board&){}
 void setKind(uint8_t){}
 std::vector<std::string> iconTableNow(discovery::Sampler&){return {"HUD icons: the HUD needs the game\n"};}
 Stats stats(){return {};}

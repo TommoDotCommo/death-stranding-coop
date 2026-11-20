@@ -61,7 +61,9 @@ private:
 // the default distance, 0xb3 is the MULE odradek's marker.)
 constexpr uint8_t NoIcon=0,DefaultIconSource=NoIcon,LastKind=0xc2;
 constexpr size_t HudSlots=256,MaxLayers=16;constexpr uint8_t SlotAssigned=2;
-inline bool ownId(uint64_t id){return (id>>48)==0x4855;}   // a record of the mod's (marks() ids)
+// A record of the mod's: a far player's mark (marks() ids, 0x4855...) or a ping (grouppings::markId, 0x5047...). Both
+// sets use the same kind, so a ping is restyled like a far player (one look for the mod's markers).
+inline bool ownId(uint64_t id){const uint64_t tag=id>>48;return tag==0x4855||tag==0x5047;}
 // The kind whose item the HUD's scale reads as well for a slot of this kind (0x3089aa0: kinds 9..0x2d, unchecked);
 // the kind itself for the others.
 uint8_t scaleAlias(uint8_t kind);
@@ -97,6 +99,9 @@ struct Stats {uint64_t frames=0,added=0,kept=0,restyled=0;};   // kept: records 
 // Windows: the HUD's sort call through the mod (every byte checked first, nothing changed on a mismatch). Throws when
 // it cannot. board lives as long as the process. Game thread.
 void install(discovery::Sampler&,const Board&);
+// A second set (grouppings.h: the pings of the players near, each for a short time), added after the first with the same
+// kind; its ids carry a tag of their own. May be given before or after install. pings lives as long as the process.
+void attach(const Board& pings);
 void setKind(uint8_t);   // only a safe kind is taken
 bool setIconSource(uint8_t);   // NoIcon or a safe source; anything else is refused (false)
 uint8_t iconSource();

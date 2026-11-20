@@ -37,6 +37,7 @@ std::u16string text(Kind kind,const std::string& partnerName){
     case Kind::Route:return {};    // its line comes finished (Notifier::route)
     case Kind::Test:return {};     // its line comes finished (Notifier::test)
     case Kind::Chat:return {};     // its line comes finished (Notifier::chat)
+    case Kind::Ping:return {};     // its line comes finished (Notifier::ping)
     }
     return {};
 }
@@ -172,11 +173,11 @@ void Notifier::tick(uint64_t now,bool inWorld,bool connected,const std::string& 
 #endif
     if(now<e.nextTry)return;
 #ifndef MUTANT_NOTICE_GAP
-    if(shown_&&now-lastShown_<(e.kind==Kind::Chat?ChatGapMs:GapMs))return;
+    if(shown_&&now-lastShown_<((e.kind==Kind::Chat||e.kind==Kind::Ping)?ChatGapMs:GapMs))return;
 #endif
-    if(api_.show&&api_.show((e.kind==Kind::Strand||e.kind==Kind::Route||e.kind==Kind::Test||e.kind==Kind::Chat)?e.line:text(e.kind,e.name),icon(e.kind))){
+    if(api_.show&&api_.show((e.kind==Kind::Strand||e.kind==Kind::Route||e.kind==Kind::Test||e.kind==Kind::Chat||e.kind==Kind::Ping)?e.line:text(e.kind,e.name),icon(e.kind))){
         ++shown_;lastShown_=now;if(e.kind==Kind::Joined)joining_=false;
-        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call","slow","steady","episode","scan","story offer","story loaded","story failed","strand","route","test mode","chat"};static_assert(sizeof(names)/sizeof(names[0])==size_t(Kind::Chat)+1,"a name for every notice");
+        static const char* const names[]={"joined","left","alone","away","back","liked","down","up","caught","free","call","slow","steady","episode","scan","story offer","story loaded","story failed","strand","route","test mode","chat","ping"};static_assert(sizeof(names)/sizeof(names[0])==size_t(Kind::Ping)+1,"a name for every notice");
         log_(std::string("NOTICE shown: ")+names[unsigned(e.kind)]+"\n");
         pending_.pop_front();return;
     }
