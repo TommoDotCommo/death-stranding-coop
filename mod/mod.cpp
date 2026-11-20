@@ -455,21 +455,29 @@ struct Runtime final:ds::Transport {
     // 0|1` and 9 = the game's own, `perfhide M` metres and 0 = none, `perffar M` metres: rate and shadow only beyond it,
     // 0 = every body): the game's per-entity update rate (0x235f5a0, entity+0x204) and shadow casting (0x234cfa0,
     // Entity_ExportedSetShadowCastingEnabled, children included), and bodies beyond M hidden and asleep (Want without a goal).
+    // `perfminlod N` (99: the game's own): the body's lowest detail level, as ForceMinimumLodComponent sets it
+    // (0x237c930(rep, N), rep = entity+0x60, rep+0x80 the entity); `perfpbd P` (percent, 999: the game's own): the
+    // distance multiplier of its cloth simulation (SkinnedModel_ExportedSetPBDMaxDistanceMultiplier 0x239f5a0, the
+    // skinned model at entity+0xb8, the value at +0x384).
+    uint32_t perfMinLod=99,perfPbd=999;
     uint8_t perfRate=9,perfShadow=9;double perfHideMetres=0,perfFarMetres=0;
-    struct PerfApplied{uint8_t rate=9,shadow=9,ownRate=0;};std::map<uint64_t,PerfApplied> perfApplied;size_t perfHidden=0;uint64_t perfNotedAt=0;
+    struct PerfApplied{uint8_t rate=9,shadow=9,ownRate=0;uint32_t minLod=0,pbd=999;float ownPbd=-1;};std::map<uint64_t,PerfApplied> perfApplied;size_t perfHidden=0;uint64_t perfNotedAt=0;
     bool perfChecked=false,perfUsable=false;
     bool perfCallsUsable(){
         if(perfChecked)return perfUsable;perfChecked=true;
 #ifdef _WIN32
         static const uint8_t rate[13]={0x48,0x89,0x5c,0x24,0x08,0x57,0x48,0x83,0xec,0x20,0x0f,0xb6,0xfa};
         static const uint8_t shadow[9]={0x48,0x85,0xc9,0x0f,0x84,0x91,0x00,0x00,0x00};
-        uint8_t a[13]{},b[9]{};
-        perfUsable=sampler&&sampler->read(sampler->base+0x235f5a0,a,13)&&sampler->read(sampler->base+0x234cfa0,b,9)&&!std::memcmp(a,rate,13)&&!std::memcmp(b,shadow,9);
+        static const uint8_t minLod[14]={0x3b,0x91,0xa0,0x01,0,0,0x74,0x10,0x89,0x91,0xa0,0x01,0,0};
+        static const uint8_t pbd[9]={0x48,0x85,0xc9,0x74,0x10,0xc5,0xf8,0x57,0xc0};
+        uint8_t a[13]{},b[9]{},c[14]{},d[9]{};
+        perfUsable=sampler&&sampler->read(sampler->base+0x235f5a0,a,13)&&sampler->read(sampler->base+0x234cfa0,b,9)&&!std::memcmp(a,rate,13)&&!std::memcmp(b,shadow,9)
+            &&sampler->read(sampler->base+0x237c930,c,14)&&sampler->read(sampler->base+0x239f5a0,d,9)&&!std::memcmp(c,minLod,14)&&!std::memcmp(d,pbd,9);
 #endif
         if(!perfUsable)note("PERF body rate and shadow calls unavailable: the functions differ\n");
         return perfUsable;}
     void perfBodies(const mod::puppet::Anchor& anchor,uint64_t now){
-        const bool any=perfRate!=9||perfShadow!=9||!perfApplied.empty();if(!any||!otherBodies||!perfCallsUsable())return;
+        const bool any=perfRate!=9||perfShadow!=9||perfMinLod!=99||perfPbd!=999||!perfApplied.empty();if(!any||!otherBodies||!perfCallsUsable())return;
 #ifdef _WIN32
         std::optional<std::array<double,3>> here;if(anchor.pose.available)here=mod::puppet::transform(anchor.pose).position;
         std::set<uint64_t> seen;size_t slowed=0;
@@ -481,10 +489,17 @@ struct Runtime final:ds::Transport {
             const uint8_t rate=distant&&perfRate<=6?perfRate:a.ownRate,shadow=distant&&perfShadow<=1?perfShadow:1;
             if(rate!=a.rate){reinterpret_cast<void(*)(uint64_t,uint8_t)>(sampler->base+0x235f5a0)(e,rate);a.rate=rate;}
             if(shadow!=a.shadow&&!(fresh&&shadow==1)){reinterpret_cast<void(*)(uint64_t,bool,bool)>(sampler->base+0x234cfa0)(e,shadow!=0,true);}
-            a.shadow=shadow;if(rate!=a.ownRate)++slowed;}
+            a.shadow=shadow;if(rate!=a.ownRate)++slowed;
+            {const uint32_t want=distant&&perfMinLod<99?perfMinLod:0;uint64_t r=0,back=0;
+             if(want!=a.minLod&&sampler->read(e+0x60,&r,8)&&r&&sampler->read(r+0x80,&back,8)&&back==e){reinterpret_cast<void(*)(uint64_t,uint32_t)>(sampler->base+0x237c930)(r,want);a.minLod=want;}}
+            {uint64_t m=0;if(sampler->read(e+0xb8,&m,8)&&m){
+                if(a.ownPbd<0){float v=0;if(sampler->read(m+0x384,&v,4)&&std::isfinite(v)&&v>=0&&v<100)a.ownPbd=v;}
+                const uint32_t want=distant&&perfPbd<999?perfPbd:999;
+                if(want!=a.pbd&&a.ownPbd>=0){const float v=want<999?float(want)/100.0f:a.ownPbd;reinterpret_cast<void(*)(uint64_t,float)>(sampler->base+0x239f5a0)(m,v);a.pbd=want;}}}}
         for(auto it=perfApplied.begin();it!=perfApplied.end();)if(seen.count(it->first))++it;else it=perfApplied.erase(it);
         if(now-perfNotedAt>=10000){perfNotedAt=now;std::ostringstream o;o<<"PERF bodies "<<seen.size()<<" slowed "<<slowed<<" rate "<<int(perfRate)<<" shadow "<<int(perfShadow)
-            <<" far "<<perfFarMetres<<" m hidden beyond "<<perfHideMetres<<" m: "<<perfHidden<<"\n";note(o.str().c_str());}
+            <<" far "<<perfFarMetres<<" m hidden beyond "<<perfHideMetres<<" m: "<<perfHidden<<" min lod "<<perfMinLod<<" cloth "<<perfPbd<<"%";
+            if(!perfApplied.empty())o<<" (first body's cloth multiplier was "<<perfApplied.begin()->second.ownPbd<<")";o<<"\n";note(o.str().c_str());}
 #else
         (void)anchor;(void)now;
 #endif
@@ -4201,6 +4216,8 @@ struct Runtime final:ds::Transport {
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfshadow"))perfShadow=uint8_t(std::min<uint32_t>(*v,9));
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfhide"))perfHideMetres=double(*v);
                 if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perffar"))perfFarMetres=double(*v);
+                if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfminlod"))perfMinLod=std::min<uint32_t>(*v,99);
+                if(auto v=mod::puppet::parseCargoCommand(text,mod::runStamp(),"perfpbd"))perfPbd=std::min<uint32_t>(*v,999);
                 if(give&&cargoGive){cargoGive(*give);note(("CARGO give id="+std::to_string(*give)+"\n").c_str());}
                 else if(auto hand=mod::puppet::parseCargoCommand(text,mod::runStamp(),"hand");hand&&(*hand==6||*hand==7)&&anchor.entity) {
                     // Lab: the top case of the porter's back into a hand slot (6 left, 7 right) with the game's own calls,
